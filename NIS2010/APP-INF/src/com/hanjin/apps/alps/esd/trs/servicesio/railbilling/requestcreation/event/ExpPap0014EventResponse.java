@@ -1,0 +1,81 @@
+/*=========================================================
+*Copyright(c) 2006 CyberLogitec
+*@FileName : ExpPap0014EventResponse.java
+*@FileTitle : Rail Billing Request Creation Verify 조회 (Full)
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2006-12-20
+*@LastModifier : leebh
+*@LastVersion : 1.0
+* 2006-12-20 leebh
+* 1.0 최초 생성
+=========================================================*/
+package com.hanjin.apps.alps.esd.trs.servicesio.railbilling.requestcreation.event;
+
+import com.hanjin.framework.core.layer.event.GeneralEventResponse;
+
+
+/**
+ * RDTO(Data Transfer Object including DB ResultSet)<br>
+ * - EXP_PAP_014 요청을 처리한 서버 실행 정보(DB ResultSet)를 담은 Data Transfer Object<br>
+ *
+ * @author leebh
+ * @see RailBillingReqCreateRSC 참조
+ * @since J2EE 1.4
+ */
+public class ExpPap0014EventResponse extends GeneralEventResponse {
+	
+	private BookingDetail[] bookingDetailList;
+	
+    // Success Flag
+    private String successFlag;
+    
+     /**
+     * ExpPap0014EventResponse 객체를 생성
+     */
+    public ExpPap0014EventResponse() {
+    }
+
+    /**
+     * EXP_PAP_014 요청을 처리한 서버 실행 결과(DB ResultSet)와 성공여부(successFlag)를 담아 ExpPap0014EventResponse 객체를 생성
+     * @param bookingDetailList
+     * @param successFlag
+     */
+    public ExpPap0014EventResponse(BookingDetail[] bookingDetailList,
+    		                        String successFlag) {
+    	this.bookingDetailList = bookingDetailList;
+        this.successFlag=successFlag;
+    }
+    /**
+     * 
+     * @return
+     */
+	public BookingDetail[] getBookingDetailList() {
+		return bookingDetailList;
+	}
+
+	/**
+     * @return SuccessFlg
+     */
+    public String getSuccessFlag() {
+        return this.successFlag ;
+    }
+    
+    /**
+     * 객체 표현 문자열(ExpPap0014EventResponse)을 반환
+     * 
+     * @return String ExpPap0014EventResponse
+     */
+    public String toString() {
+        return "ExpPap0014EventResponse";
+    }
+
+    /**
+     * 이벤트 명(ExpPap0014EventResponse)을 반환
+     * 
+     * @return String ExpPap0014EventResponse
+     */
+    public String getEventName() {
+        return "ExpPap0014EventResponse";
+    }
+}

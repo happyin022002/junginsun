@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="StatusInquiryDBDAOSearchActivityByConfirmedTPBRSQL">
+			<desc><![CDATA[해당점소의 조회기간내에 Confirm된 TPB를 조회한다]]></desc>
+			<sql><![CDATA[
+SELECT   *
+FROM     (
+           SELECT   B.N3PTY_NO
+                  , ROWNUM AS N3PTY_NO_DP_SEQ
+                  , ( SELECT RHQ_CD FROM TPB_HNDL_OFC WHERE OFC_CD = A.CFM_OFC_CD AND DELT_FLG = 'N' AND N3PTY_OFC_TP_CD = 'T') AS RHQ
+                  , A.CFM_OFC_CD
+                  , A.N3PTY_SRC_SUB_SYS_CD
+                  , B.N3PTY_INV_NO
+                  , NVL2( B.N3PTY_INV_NO, (
+                                            SELECT   TO_CHAR(TPB_GET_LCL_DATE_FNC(R.INV_UPD_GDT, @[s_user_ofc_cd]), 'YYYY-MM-DD') AS UPD_DT
+                                            FROM     TPB_INVOICE V
+                                                   , TPB_INV_RVIS R
+                                            WHERE    1 = 1
+                                            AND      V.N3PTY_INV_NO = R.N3PTY_INV_NO
+                                            AND      V.LST_N3PTY_INV_RVIS_SEQ = R.N3PTY_INV_RVIS_SEQ
+                                            AND      V.N3PTY_INV_NO=B.N3PTY_INV_NO
+                                            AND      ROWNUM = 1
+                                          )
+                                        , NULL
+                    ) AS INV_ISS_DT
+                  , A.N3PTY_SRC_NO
+                  , A.BKG_NO AS BKG_NO_ALL
+                  , A.BL_NO AS BL_NO_ALL
+                  , DECODE(B.N3PTY_BIL_TP_CD, 'JO', A.VVD_CD, B.VSL_CD || B.SKD_VOY_NO || SUBSTR(A.FINC_DIR_CD, 1, 1)) AS VVD
+                  , A.EQ_NO
+                  , TPB_GET_N3PTY_BIL_TP_NM_FNC(A.N3PTY_BIL_TP_CD) AS N3PTY_BIL_TP_NM
+                  , CASE B.VNDR_CUST_DIV_CD WHEN 'V' THEN LPAD(TO_CHAR(B.VNDR_SEQ), 6, '0') WHEN 'C' THEN B.CUST_CNT_CD || LPAD(B.CUST_SEQ, 6, '0') WHEN 'S' THEN B.N3PTY_OFC_CD END AS TRD_PARTY_CODE
+                  , CASE B.VNDR_CUST_DIV_CD WHEN 'V' THEN A.VNDR_LGL_ENG_NM WHEN 'C' THEN A.CUST_LGL_ENG_NM WHEN 'S' THEN B.N3PTY_OFC_CD END AS TRD_PARTY_NAME
+                  , (
+                      SELECT   COUNT(1)
+                      FROM     TPB_OTS_GRP_RCVR_ACT
+                      WHERE    1 = 1
+                      AND      N3PTY_NO = B.N3PTY_NO
+                      AND      N3PTY_CLT_RMK_TP_CD = 'M'
+                      AND      ROWNUM = 1
+                    ) AS CLT_ACT_YN
+                  , CASE WHEN C.OTS_STS_CD IN ('R','T','J') THEN COMMCODE_PKG.GET_COMDTL_NAME_FNC('CD02799',B.OTS_STS_DTL_CD)
+                         ELSE COMMCODE_PKG.GET_COMDTL_NAME_FNC('CD00588',C.OTS_STS_CD)
+                    END AS OTS_STS_NM
+                  , (
+                      SELECT   CASE WHEN COUNT(1) = 0 THEN TRUNC(SYSDATE - B.CFM_DT) ELSE TRUNC(SYSDATE - MAX(CRE_DT)) END
+                      FROM     TPB_OTS_GRP_STS
+                      WHERE    1 = 1
+                      AND      OTS_STS_CD = 'T'
+                      AND      N3PTY_NO = B.N3PTY_NO
+                    ) AS OVERDUE
+#if (${s_curr_cd_tp} == 'U')
+                  , TPB_GET_USD_AMT_FNC(B.OTS_AMT,B.CURR_CD,TPB_GET_LCL_DATE_FNC(B.CFM_DT,B.OFC_CD)) AS OTS_AMT
+                  , TPB_GET_USD_AMT_FNC(B.INV_AMT,B.CURR_CD,TPB_GET_LCL_DATE_FNC(B.CFM_DT,B.OFC_CD)) AS INV_AMT
+                  , TPB_GET_USD_AMT_FNC(B.CLT_AMT,B.CURR_CD,TPB_GET_LCL_DATE_FNC(B.CFM_DT,B.OFC_CD)) AS CLT_AMT
+                  , TPB_GET_USD_AMT_FNC(B.ADJ_AMT,B.CURR_CD,TPB_GET_LCL_DATE_FNC(B.CFM_DT,B.OFC_CD)) AS STL_AMT
+                  , TPB_GET_USD_AMT_FNC(B.BAL_AMT,B.CURR_CD,TPB_GET_LCL_DATE_FNC(B.CFM_DT,B.OFC_CD)) AS BAL_AMT
+#else
+                  , NVL(DECODE(B.CURR_CD,'USD',ROUND(B.OTS_AMT * TPB_GET_USD_XCH_RT_FNC('KRW',TPB_GET_LCL_DATE_FNC(B.CFM_DT,B.OFC_CD)) / (SELECT LOCL_KRW_XCH_RT FROM GL_MON_XCH_RT WHERE ACCT_XCH_RT_YRMON = TO_CHAR(SYSDATE,'YYYYMM') AND CURR_CD = (SELECT BIL_CURR_CD FROM MDM_ORGANIZATION WHERE OFC_CD = B.OFC_CD) AND ACCT_XCH_RT_LVL = '1'),2),B.OTS_AMT),0.0) AS OTS_AMT
+                  , NVL(DECODE(B.CURR_CD,'USD',ROUND(B.INV_AMT * TPB_GET_USD_XCH_RT_FNC('KRW',TPB_GET_LCL_DATE_FNC(B.CFM_DT,B.OFC_CD)) / (SELECT LOCL_KRW_XCH_RT FROM GL_MON_XCH_RT WHERE ACCT_XCH_RT_YRMON = TO_CHAR(SYSDATE,'YYYYMM') AND CURR_CD = (SELECT BIL_CURR_CD FROM MDM_ORGANIZATION WHERE OFC_CD = B.OFC_CD) AND ACCT_XCH_RT_LVL = '1'),2),B.INV_AMT),0.0) AS INV_AMT
+                  , NVL(DECODE(B.CURR_CD,'USD',ROUND(B.CLT_AMT * TPB_GET_USD_XCH_RT_FNC('KRW',TPB_GET_LCL_DATE_FNC(B.CFM_DT,B.OFC_CD)) / (SELECT LOCL_KRW_XCH_RT FROM GL_MON_XCH_RT WHERE ACCT_XCH_RT_YRMON = TO_CHAR(SYSDATE,'YYYYMM') AND CURR_CD = (SELECT BIL_CURR_CD FROM MDM_ORGANIZATION WHERE OFC_CD = B.OFC_CD) AND ACCT_XCH_RT_LVL = '1'),2),B.CLT_AMT),0.0) AS CLT_AMT
+                  , NVL(DECODE(B.CURR_CD,'USD',ROUND(B.ADJ_AMT * TPB_GET_USD_XCH_RT_FNC('KRW',TPB_GET_LCL_DATE_FNC(B.CFM_DT,B.OFC_CD)) / (SELECT LOCL_KRW_XCH_RT FROM GL_MON_XCH_RT WHERE ACCT_XCH_RT_YRMON = TO_CHAR(SYSDATE,'YYYYMM') AND CURR_CD = (SELECT BIL_CURR_CD FROM MDM_ORGANIZATION WHERE OFC_CD = B.OFC_CD) AND ACCT_XCH_RT_LVL = '1'),2),B.ADJ_AMT),0.0) AS STL_AMT
+                  , NVL(DECODE(B.CURR_CD,'USD',ROUND(B.BAL_AMT * TPB_GET_USD_XCH_RT_FNC('KRW',TPB_GET_LCL_DATE_FNC(B.CFM_DT,B.OFC_CD)) / (SELECT LOCL_KRW_XCH_RT FROM GL_MON_XCH_RT WHERE ACCT_XCH_RT_YRMON = TO_CHAR(SYSDATE,'YYYYMM') AND CURR_CD = (SELECT BIL_CURR_CD FROM MDM_ORGANIZATION WHERE OFC_CD = B.OFC_CD) AND ACCT_XCH_RT_LVL = '1'),2),B.BAL_AMT),0.0) AS BAL_AMT
+#end
+
+                  , B.CRE_USR_ID AS IF_USR_ID
+                  , A.IF_OFC_CD AS IF_OFC_CD
+                  , (
+                      SELECT   COMMCODE_PKG.GET_COMDTL_NAME_FNC('CD00589', N3PTY_STL_TP_CD)
+                      FROM     TPB_ADJ_STS E
+                      WHERE    1 = 1
+                      AND      E.N3PTY_NO=A.N3PTY_NO
+                      AND      E.STL_STS_LST_FLG = 'Y'
+                    ) AS N3PTY_STL_TP_CD
+                  , (
+                      SELECT   STL_RQST_OFC_CD
+                      FROM     TPB_ADJ_STS E
+                      WHERE    1 = 1
+                      AND      E.N3PTY_NO=A.N3PTY_NO
+                      AND      E.STL_STS_LST_FLG = 'Y'
+                      AND      E.N3PTY_STL_TP_CD = 'O'
+                    ) AS STL_RQST_OFC_CD
+                  , (
+                      SELECT   STL_TO_CLT_CNG_OFC_CD
+                      FROM     TPB_ADJ_STS E
+                      WHERE    1 = 1
+                      AND      E.N3PTY_NO=A.N3PTY_NO
+                      AND      E.STL_STS_LST_FLG = 'Y'
+                      AND      E.N3PTY_STL_TP_CD = 'O'
+                    ) AS STL_TO_CLT_CNG_OFC_CD
+                  , A.FM_CLT_CNG_OFC_N3PTY_NO
+                  , COMMCODE_PKG.GET_COMDTL_NAME_FNC('CD00587', A.EAC_TP_CD) AS EDN_TP_NM
+                  , CASE WHEN A.N3PTY_BIL_TP_CD = 'JO' THEN A.CSR_NO ELSE NULL END AS CSR_NO
+                  , C.OTS_STS_CD
+                  , B.VNDR_CUST_DIV_CD
+                  ----조회 기준 통화 : 조회office의 Local통화 와 USD  
+                  , CASE WHEN @[s_curr_cd_tp] = 'U' THEN 'USD'
+                         ELSE (
+                                SELECT  NVL(MAX(O.BIL_CURR_CD), B.CURR_CD)
+                                FROM    MDM_ORGANIZATION O
+                                WHERE   1 = 1
+                                AND     O.OFC_CD = B.OFC_CD
+                              )
+                    END AS CURR_CD
+                  , A.N3PTY_BIL_TP_CD
+                  , TO_CHAR(TPB_GET_LCL_DATE_FNC(B.CFM_DT, @[s_user_ofc_cd]), 'YYYY-MM-DD') AS CFM_DT
+                  , TO_CHAR(TO_DATE(SUBSTR(B.N3PTY_NO,7,4),'YYMM'),'YY-MM') AS CFM_MON
+                  , 0 AS SO_IF_SEQ
+                  , TO_CHAR(B.CRE_DT, 'YYYY-MM-DD HH24:MI') AS CRE_DT
+           FROM     TPB_OTS_GRP B
+                  , TPB_OTS_DTL A
+                  , TPB_OTS_GRP_STS C
+           WHERE    1 = 1
+--[Inquiry Option Start]----------------------------------------------------------------------------------------------------------------
+--1.RHQ/C.OFFICE/OFFICE: <Default:로그인 Office> 
+----RHQ --- All(회사전체)/HAMUR/NYCNA/SHAAS/SINWA
+----Control Office --- TPB에서 구성한 Hierarchy 기준의 산하 office(All포함)
+----Office --- Candidate를 confirm한 office (주의-responsible office가 아님)
+           AND      A.CFM_OFC_CD IN
+                    (
+                      SELECT   OFC_CD
+                      FROM     TPB_HNDL_OFC
+                      WHERE    1 = 1
+                      AND      N3PTY_OFC_TP_CD = 'T'
+                      AND      DELT_FLG = 'N'
+                #if (${s_if_rhq_cd} != '')
+                      AND      RHQ_CD = @[s_if_rhq_cd]
+                #end
+				#if (${s_if_ctrl_cd} != '')
+                      AND      OFC_CD IN
+                               (
+                                 SELECT   OFC_CD
+                                 FROM     TPB_HNDL_OFC
+                                 WHERE    N3PTY_CTRL_OFC_CD = @[s_if_ctrl_cd]
+                               )
+				#end 
+				#if (${s_if_ofc_cd} != '')
+                      AND      OFC_CD = @[s_if_ofc_cd] 
+				#end
+                    )
+--2.Confirmed Date <Default: 1달, 최장 1년>
+--  AND TO_CHAR(TPB_GET_LCL_DATE_FNC(A.CFM_DT, 'HAMBB'), 'YYYY-MM-DD') BETWEEN  '2010-01-01' AND '2010-12-31'  
+--[Inquiry Option End]------------------------------------------------------------------------------------------------------------------  
+#if (${s_if_type} == 'S')
+           AND      A.N3PTY_BIL_TP_CD IN ( SELECT N3PTY_BIL_TP_CD FROM TPB_N3RD_PTY_BIL_TP WHERE N3PTY_IF_TP_CD IN ('S','M') )
+#else
+           AND      A.N3PTY_BIL_TP_CD IN ( SELECT N3PTY_BIL_TP_CD FROM TPB_N3RD_PTY_BIL_TP WHERE N3PTY_IF_TP_CD = 'R' )
+#end
+           AND      A.N3PTY_BIL_TP_CD NOT IN ('JO')
+           AND      A.N3PTY_DELT_TP_CD = 'N'
+           AND      A.N3PTY_NO_DP_SEQ = 1
+           AND      TO_DATE(SUBSTR(B.N3PTY_NO,7,4),'YYMM') BETWEEN TO_DATE(@[s_sdate],'YYMM') AND TO_DATE(@[s_edate],'YYMM')
+           AND      B.N3PTY_NO = A.N3PTY_NO
+           AND      B.N3PTY_DELT_TP_CD IN ('N','C','S')
+           AND      C.N3PTY_NO = B.N3PTY_NO
+           AND      C.OTS_STS_LST_FLG = 'Y'            
+         ) D
+ORDER BY D.N3PTY_NO_DP_SEQ
+       , D.N3PTY_NO			]]></sql>
+			<params>
+				<param name="s_user_ofc_cd" type="12" value="" out="N"/>
+				<param name="s_curr_cd_tp" type="12" value="" out="N"/>
+				<param name="s_if_rhq_cd" type="12" value="" out="N"/>
+				<param name="s_if_ctrl_cd" type="12" value="" out="N"/>
+				<param name="s_if_ofc_cd" type="12" value="" out="N"/>
+				<param name="s_sdate" type="12" value="" out="N"/>
+				<param name="s_edate" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,647 @@
+/*=========================================================
+*Copyright(c) 2010 CyberLogitec
+*@FileName : ChassisMgsetInvoiceDBDAOAddMGSChargeCreatePDMDataCSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2010.05.06
+*@LastModifier : 이용태
+*@LastVersion : 1.0
+* 2010.05.06 이용태
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.ees.cgm.chassismgsetagreementinvoice.chassismgsetinvoice.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author LEE YONG-TAE
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class ChassisMgsetInvoiceDBDAOAddMGSChargeCreatePDMDataCSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * ChassisMgsetInvoiceDB.AddMGSChargeCreatePDMData
+	  * </pre>
+	  */
+	public ChassisMgsetInvoiceDBDAOAddMGSChargeCreatePDMDataCSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("upd_usr_id",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("agmt_ofc_cty_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.NUMERIC + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("agmt_seq",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cre_usr_id",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cost_yrmon",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.ees.cgm.chassismgsetagreementinvoice.chassismgsetinvoice.integration").append("\n"); 
+		query.append("FileName : ChassisMgsetInvoiceDBDAOAddMGSChargeCreatePDMDataCSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("INSERT INTO CGM_LSE_CHG_DTL" ).append("\n"); 
+		query.append("(" ).append("\n"); 
+		query.append("    AGMT_OFC_CTY_CD," ).append("\n"); 
+		query.append("    AGMT_SEQ," ).append("\n"); 
+		query.append("    AGMT_VER_NO," ).append("\n"); 
+		query.append("    COST_YRMON," ).append("\n"); 
+		query.append("    EQ_NO," ).append("\n"); 
+		query.append("    CHG_CD," ).append("\n"); 
+		query.append("    CHG_SEQ," ).append("\n"); 
+		query.append("    EQ_KND_CD," ).append("\n"); 
+		query.append("    LSE_CHG_AUD_STS_CD," ).append("\n"); 
+		query.append("    LSE_USE_DYS," ).append("\n"); 
+		query.append("    LSE_RT_AMT," ).append("\n"); 
+		query.append("    LSE_CHG_AMT," ).append("\n"); 
+		query.append("    EQ_ONH_DT," ).append("\n"); 
+		query.append("    EQ_ONH_LOC_CD," ).append("\n"); 
+		query.append("    EQ_OFFH_DT," ).append("\n"); 
+		query.append("    EQ_OFFH_LOC_CD," ).append("\n"); 
+		query.append("    EQ_BIL_ST_DT," ).append("\n"); 
+		query.append("    EQ_BIL_END_DT," ).append("\n"); 
+		query.append("	PAY_LSE_CHG_STS_CD," ).append("\n"); 
+		query.append("	COST_CD," ).append("\n"); 
+		query.append("	ACCT_CD," ).append("\n"); 
+		query.append("    CRE_USR_ID," ).append("\n"); 
+		query.append("    CRE_DT," ).append("\n"); 
+		query.append("    UPD_USR_ID," ).append("\n"); 
+		query.append("    UPD_DT" ).append("\n"); 
+		query.append(")" ).append("\n"); 
+		query.append("SELECT" ).append("\n"); 
+		query.append("    T1.AGMT_OFC_CTY_CD," ).append("\n"); 
+		query.append("    T1.AGMT_SEQ," ).append("\n"); 
+		query.append("    MAX(T1.AGMT_VER_NO) AS AGMT_VER_NO," ).append("\n"); 
+		query.append("    MIN(T1.COST_YRMON) AS COST_YRMON," ).append("\n"); 
+		query.append("    T1.EQ_NO," ).append("\n"); 
+		query.append("    MIN(T1.CHG_CD) AS CHG_CD," ).append("\n"); 
+		query.append("--    MIN(T1.CHG_SEQ) AS CHG_SEQ," ).append("\n"); 
+		query.append("    ROW_NUMBER() OVER ( PARTITION BY T1.EQ_NO ORDER BY MIN(EQ_BIL_ST_DT)  ) AS CHG_SEQ," ).append("\n"); 
+		query.append("    MIN(T1.EQ_KND_CD) AS EQ_KND_CD," ).append("\n"); 
+		query.append("    MIN(T1.LSE_CHG_AUD_STS_CD) AS LSE_CHG_AUD_STS_CD," ).append("\n"); 
+		query.append("    NVL(SUM(T1.LSE_USE_DAYS),0) AS LSE_USE_DAYS," ).append("\n"); 
+		query.append("    T1.LSE_RT_AMT  AS LSE_RT_AMT," ).append("\n"); 
+		query.append("    NVL(SUM(T1.LSE_USE_DAYS * T1.LSE_RT_AMT),0) AS LSE_CHG_AMT," ).append("\n"); 
+		query.append("    MIN(T1.EQ_ONH_DT) AS EQ_ONH_DT," ).append("\n"); 
+		query.append("    MIN(T1.EQ_ONH_LOC_CD) AS EQ_ONH_LOC_CD," ).append("\n"); 
+		query.append("    MIN(T1.EQ_OFFH_DT) AS EQ_OFFH_DT," ).append("\n"); 
+		query.append("    MIN(T1.EQ_OFFH_LOC_CD) AS EQ_OFFH_LOC_CD," ).append("\n"); 
+		query.append("    TO_DATE( TO_CHAR( MIN(T1.EQ_BIL_ST_DT), 'YYYYMMDD') ,'YYYYMMDD')     AS EQ_BIL_ST_DT," ).append("\n"); 
+		query.append("    MAX(T1.EQ_BIL_END_DT) AS EQ_BIL_END_DT," ).append("\n"); 
+		query.append("	MIN(T1.PAY_LSE_CHG_STS_CD) AS PAY_LSE_CHG_STS_CD," ).append("\n"); 
+		query.append("	MIN(T1.COST_CD) AS COST_CD," ).append("\n"); 
+		query.append("	MIN(T1.ACCT_CD) AS ACCT_CD," ).append("\n"); 
+		query.append("	  @[cre_usr_id]," ).append("\n"); 
+		query.append("    SYSDATE," ).append("\n"); 
+		query.append("    @[upd_usr_id]," ).append("\n"); 
+		query.append("    SYSDATE    " ).append("\n"); 
+		query.append("FROM" ).append("\n"); 
+		query.append("(" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("    SELECT" ).append("\n"); 
+		query.append("        A.AGMT_OFC_CTY_CD," ).append("\n"); 
+		query.append("        A.AGMT_SEQ," ).append("\n"); 
+		query.append("        MAX(A.AGMT_VER_NO) over ( PARTITION BY  A.AGMT_OFC_CTY_CD, A.AGMT_SEQ, A.EQ_NO) AS AGMT_VER_NO," ).append("\n"); 
+		query.append("        A.COST_YRMON," ).append("\n"); 
+		query.append("        A.EQ_NO," ).append("\n"); 
+		query.append("        A.CHG_CD," ).append("\n"); 
+		query.append("--        A.CHG_SEQ," ).append("\n"); 
+		query.append("        A.EQ_KND_CD," ).append("\n"); 
+		query.append("        A.LSE_CHG_AUD_STS_CD," ).append("\n"); 
+		query.append("		A.PAY_LSE_CHG_STS_CD," ).append("\n"); 
+		query.append("        B.LSE_USE_DAYS," ).append("\n"); 
+		query.append("        A.LSE_RT_AMT," ).append("\n"); 
+		query.append("--        MAX(A.LSE_RT_AMT) KEEP " ).append("\n"); 
+		query.append("--            (DENSE_RANK LAST ORDER BY A.AGMT_OFC_CTY_CD, A.AGMT_SEQ,A.EQ_NO,A.AGMT_VER_NO) " ).append("\n"); 
+		query.append("--                over (partition by A.AGMT_OFC_CTY_CD, A.AGMT_SEQ, A.EQ_NO) AS LSE_RT_AMT2," ).append("\n"); 
+		query.append("                " ).append("\n"); 
+		query.append("        B.LSE_USE_DAYS * A.LSE_RT_AMT AS LSE_CHG_AMT," ).append("\n"); 
+		query.append("        C.STS_EVNT_DT AS EQ_ONH_DT," ).append("\n"); 
+		query.append("        C.STS_EVNT_LOC_CD AS EQ_ONH_LOC_CD," ).append("\n"); 
+		query.append("        GREATEST ( B.EFF_DT,B.STS_EVNT_DT_FR ) EQ_BIL_ST_DT," ).append("\n"); 
+		query.append("        LEAST ( B.EXP_DT,B.STS_EVNT_DT_TO ) EQ_BIL_END_DT," ).append("\n"); 
+		query.append("        B.EQ_ASET_STS_CD," ).append("\n"); 
+		query.append("        DECODE(  SUBSTR(B.EQ_ASET_STS_CD,1,3), 'LSO',   LAST_VALUE( B.STS_EVNT_DT) over (PARTITION BY  B.AGMT_OFC_CTY_CD, B.AGMT_SEQ, B.EQ_NO,B.EQ_ASET_STS_CD ORDER BY B.STS_EVNT_DT ))  as EQ_OFFH_DT," ).append("\n"); 
+		query.append("	DECODE(  SUBSTR(B.EQ_ASET_STS_CD,1,3), 'LSO',   LAST_VALUE( B.STS_EVNT_LOC_CD) over (PARTITION BY  B.AGMT_OFC_CTY_CD, B.AGMT_SEQ, B.EQ_NO,B.EQ_ASET_STS_CD ORDER BY B.STS_EVNT_DT ))  as EQ_OFFH_LOC_CD," ).append("\n"); 
+		query.append("        A.COST_CD," ).append("\n"); 
+		query.append("        A.ACCT_CD" ).append("\n"); 
+		query.append("    FROM" ).append("\n"); 
+		query.append("    (" ).append("\n"); 
+		query.append("        SELECT  " ).append("\n"); 
+		query.append("                T1.AGMT_OFC_CTY_CD," ).append("\n"); 
+		query.append("                T1.AGMT_SEQ," ).append("\n"); 
+		query.append("                T1.AGMT_VER_NO," ).append("\n"); 
+		query.append("                T1.EFF_DT," ).append("\n"); 
+		query.append("                T1.EXP_DT," ).append("\n"); 
+		query.append("                @[cost_yrmon] AS COST_YRMON," ).append("\n"); 
+		query.append("                T2.EQ_NO," ).append("\n"); 
+		query.append("                'PDM' AS CHG_CD," ).append("\n"); 
+		query.append("--              ROW_NUMBER() OVER ( PARTITION BY T2.EQ_NO ORDER BY T1.AGMT_VER_NO ) AS CHG_SEQ," ).append("\n"); 
+		query.append("                'G' AS EQ_KND_CD," ).append("\n"); 
+		query.append("                'H' AS LSE_CHG_AUD_STS_CD," ).append("\n"); 
+		query.append("				'H' AS PAY_LSE_CHG_STS_CD," ).append("\n"); 
+		query.append("				CASE " ).append("\n"); 
+		query.append("				    WHEN T1.AGMT_LSTM_CD = 'ST' THEN 'EQCZLT'" ).append("\n"); 
+		query.append("				    WHEN T1.AGMT_LSTM_CD = 'LT' THEN 'EQCZLT'" ).append("\n"); 
+		query.append("				    WHEN T1.AGMT_LSTM_CD = 'LP' THEN 'EQCZLP'" ).append("\n"); 
+		query.append("				    ELSE 'EQCZLT'" ).append("\n"); 
+		query.append("				END AS COST_CD," ).append("\n"); 
+		query.append("				CASE " ).append("\n"); 
+		query.append("				    WHEN T1.AGMT_LSTM_CD = 'ST' THEN '510831'" ).append("\n"); 
+		query.append("				    WHEN T1.AGMT_LSTM_CD = 'LT' THEN '510831'" ).append("\n"); 
+		query.append("				    WHEN T1.AGMT_LSTM_CD = 'LP' THEN '510831'" ).append("\n"); 
+		query.append("				    ELSE '510831'" ).append("\n"); 
+		query.append("				END AS ACCT_CD," ).append("\n"); 
+		query.append("                NVL((SELECT MGST_LSE_FX_RT_AMT" ).append("\n"); 
+		query.append("                     FROM CGM_AGMT_LSE_RT" ).append("\n"); 
+		query.append("                     WHERE AGMT_OFC_CTY_CD = T1.AGMT_OFC_CTY_CD" ).append("\n"); 
+		query.append("                           AND AGMT_SEQ = T1.AGMT_SEQ" ).append("\n"); 
+		query.append("                           AND AGMT_VER_NO = T1.AGMT_VER_NO" ).append("\n"); 
+		query.append("                           AND EQ_TPSZ_CD = (SELECT EQ_TPSZ_CD FROM CGM_EQUIPMENT WHERE EQ_NO = T2.EQ_NO ))" ).append("\n"); 
+		query.append("                    ,0) AS LSE_RT_AMT" ).append("\n"); 
+		query.append("        FROM    CGM_AGREEMENT T1, CGM_EQ_STS_HIS T2" ).append("\n"); 
+		query.append("        WHERE   T1.AGMT_OFC_CTY_CD = T2.AGMT_OFC_CTY_CD" ).append("\n"); 
+		query.append("                AND T1.AGMT_SEQ = T2.AGMT_SEQ" ).append("\n"); 
+		query.append("                AND T1.EQ_KND_CD = 'G'" ).append("\n"); 
+		query.append("                AND T2.EQ_KND_CD = 'G'" ).append("\n"); 
+		query.append("                AND T1.AGMT_OFC_CTY_CD = @[agmt_ofc_cty_cd]" ).append("\n"); 
+		query.append("                AND T1.AGMT_SEQ = @[agmt_seq]" ).append("\n"); 
+		query.append("                AND T2.ROWID = " ).append("\n"); 
+		query.append("    		        (" ).append("\n"); 
+		query.append("    		         SELECT /*+ INDEX(H XPKCGM_EQ_STS_HIS)  */" ).append("\n"); 
+		query.append("    		                ROWID" ).append("\n"); 
+		query.append("    		         FROM   CGM_EQ_STS_HIS H" ).append("\n"); 
+		query.append("    		         WHERE  EQ_NO        = T2.EQ_NO" ).append("\n"); 
+		query.append("    		         		AND EQ_KND_CD = 'G'" ).append("\n"); 
+		query.append("					 		AND AGMT_OFC_CTY_CD = @[agmt_ofc_cty_cd]" ).append("\n"); 
+		query.append("    		         		AND AGMT_SEQ = @[agmt_seq]" ).append("\n"); 
+		query.append("    		         		AND ROWNUM = 1" ).append("\n"); 
+		query.append("    		        )                    " ).append("\n"); 
+		query.append("                " ).append("\n"); 
+		query.append("    ) A, -- A 에서 해당 AGMT 에 속한 EQ_NO 별 AGMT RATE 를 가져온다." ).append("\n"); 
+		query.append("    (" ).append("\n"); 
+		query.append("                SELECT" ).append("\n"); 
+		query.append("            T2.AGMT_OFC_CTY_CD," ).append("\n"); 
+		query.append("            T2.AGMT_SEQ," ).append("\n"); 
+		query.append("            T2.AGMT_VER_NO," ).append("\n"); 
+		query.append("            T1.EQ_NO," ).append("\n"); 
+		query.append("            T1.EQ_ASET_STS_CD," ).append("\n"); 
+		query.append("            T1.TERM_CNG_SEQ," ).append("\n"); 
+		query.append("            T1.STS_EVNT_DT_FR," ).append("\n"); 
+		query.append("            T1.STS_EVNT_DT_TO," ).append("\n"); 
+		query.append("            T1.STS_EVNT_LOC_CD," ).append("\n"); 
+		query.append("            T2.EFF_DT," ).append("\n"); 
+		query.append("            T2.EXP_DT," ).append("\n"); 
+		query.append("            CASE " ).append("\n"); 
+		query.append("                WHEN /*+ STS_EVNT_DT_TO 가 해당월보다 작을 경우는 제외 (잘못된 복제데이터 0) " ).append("\n"); 
+		query.append("                         또는 STS_EVNT_DT_TO < EFF_DT 또는 STS_EVNT_DT_FR > EXP_DT 일 경우도 0 */" ).append("\n"); 
+		query.append("                     STS_EVNT_DT_TO < TO_DATE(@[cost_yrmon], 'YYYYMM')    " ).append("\n"); 
+		query.append("                     OR TO_CHAR(STS_EVNT_DT_TO,'YYYYMMDD') < TO_CHAR(T2.EFF_DT,'YYYYMMDD') " ).append("\n"); 
+		query.append("                     OR TO_CHAR(STS_EVNT_DT_FR,'YYYYMMDD') > TO_CHAR(T2.EXP_DT,'YYYYMMDD') " ).append("\n"); 
+		query.append("                THEN 0" ).append("\n"); 
+		query.append("                ELSE" ).append("\n"); 
+		query.append("                    CASE " ).append("\n"); 
+		query.append("                        WHEN TO_CHAR(STS_EVNT_DT_FR,'YYYYMMDD') <= TO_CHAR(T2.EFF_DT,'YYYYMMDD')  " ).append("\n"); 
+		query.append("                            AND TO_CHAR(STS_EVNT_DT_TO,'YYYYMMDD') >= TO_CHAR(T2.EXP_DT,'YYYYMMDD') " ).append("\n"); 
+		query.append("                        THEN" ).append("\n"); 
+		query.append("                            CASE " ).append("\n"); 
+		query.append("                                /*+ Term Change 일 경우 */" ).append("\n"); 
+		query.append("                                WHEN TERM_CNG_SEQ IS NOT NULL THEN " ).append("\n"); 
+		query.append("                                    CASE WHEN EQ_ASET_STS_CD = 'LSO' THEN" ).append("\n"); 
+		query.append("                                            EXTRACT(DAY FROM T2.EXP_DT) - EXTRACT(DAY FROM T2.EFF_DT) + 1" ).append("\n"); 
+		query.append("                                         ELSE" ).append("\n"); 
+		query.append("                                            EXTRACT(DAY FROM T2.EXP_DT) - EXTRACT(DAY FROM T2.EFF_DT) + 1" ).append("\n"); 
+		query.append("                                    END" ).append("\n"); 
+		query.append("                                /*+ Term Change 가 아닐 경우 */" ).append("\n"); 
+		query.append("                                ELSE " ).append("\n"); 
+		query.append("                                    CASE" ).append("\n"); 
+		query.append("                                         WHEN T1.ON_OFF_HIRE = 0 THEN           " ).append("\n"); 
+		query.append("                                            CASE " ).append("\n"); 
+		query.append("                                                /*+ 동일한 날짜의 On-Hire 또는 Off-Hire 일 경우 */ " ).append("\n"); 
+		query.append("                                                WHEN (STS_EVNT_DT_PRE IS NULL OR TO_CHAR(STS_EVNT_DT,'YYYYMMDD') != TO_CHAR(STS_EVNT_DT_PRE,'YYYYMMDD'))" ).append("\n"); 
+		query.append("                                                      AND TERM_CNG_SEQ_PRE IS NULL" ).append("\n"); 
+		query.append("                                                THEN" ).append("\n"); 
+		query.append("                                                    EXTRACT(DAY FROM T2.EXP_DT) - EXTRACT(DAY FROM T2.EFF_DT) + 1" ).append("\n"); 
+		query.append("                                                ELSE" ).append("\n"); 
+		query.append("                                                    EXTRACT(DAY FROM T2.EXP_DT) - EXTRACT(DAY FROM T2.EFF_DT)" ).append("\n"); 
+		query.append("                                            END" ).append("\n"); 
+		query.append("                                         ELSE " ).append("\n"); 
+		query.append("                                            EXTRACT(DAY FROM T2.EXP_DT) - EXTRACT(DAY FROM T2.EFF_DT) + 1       " ).append("\n"); 
+		query.append("                                    END" ).append("\n"); 
+		query.append("                            END" ).append("\n"); 
+		query.append("                        WHEN TO_CHAR(STS_EVNT_DT_FR,'YYYYMMDD') <= TO_CHAR(T2.EFF_DT,'YYYYMMDD')  " ).append("\n"); 
+		query.append("                            AND TO_CHAR(STS_EVNT_DT_TO,'YYYYMMDD') <= TO_CHAR(T2.EXP_DT,'YYYYMMDD') " ).append("\n"); 
+		query.append("                        THEN" ).append("\n"); 
+		query.append("                            CASE " ).append("\n"); 
+		query.append("                                /*+ Term Change 일 경우 */" ).append("\n"); 
+		query.append("                                WHEN TERM_CNG_SEQ IS NOT NULL THEN " ).append("\n"); 
+		query.append("                                    CASE WHEN EQ_ASET_STS_CD = 'LSO' THEN" ).append("\n"); 
+		query.append("                                            EXTRACT(DAY FROM STS_EVNT_DT_TO) - EXTRACT(DAY FROM T2.EFF_DT) + 1" ).append("\n"); 
+		query.append("                                         ELSE" ).append("\n"); 
+		query.append("                                            EXTRACT(DAY FROM STS_EVNT_DT_TO) - EXTRACT(DAY FROM T2.EFF_DT) + 1" ).append("\n"); 
+		query.append("                                    END" ).append("\n"); 
+		query.append("                                /*+ Term Change 가 아닐 경우 */" ).append("\n"); 
+		query.append("                                ELSE " ).append("\n"); 
+		query.append("                                    CASE" ).append("\n"); 
+		query.append("                                         /*+ 동일한 날짜의 On-Hire 또는 Off-Hire 일 경우 */ " ).append("\n"); 
+		query.append("                                         WHEN T1.ON_OFF_HIRE = 0 THEN           " ).append("\n"); 
+		query.append("                                            CASE " ).append("\n"); 
+		query.append("                                                WHEN (STS_EVNT_DT_PRE IS NULL OR TO_CHAR(STS_EVNT_DT,'YYYYMMDD') != TO_CHAR(STS_EVNT_DT_PRE,'YYYYMMDD'))" ).append("\n"); 
+		query.append("                                                      AND TERM_CNG_SEQ_PRE IS NULL " ).append("\n"); 
+		query.append("                                                THEN" ).append("\n"); 
+		query.append("                                                    EXTRACT(DAY FROM STS_EVNT_DT_TO) - EXTRACT(DAY FROM T2.EFF_DT) + 1" ).append("\n"); 
+		query.append("                                                ELSE" ).append("\n"); 
+		query.append("                                                    EXTRACT(DAY FROM STS_EVNT_DT_TO) - EXTRACT(DAY FROM T2.EFF_DT)" ).append("\n"); 
+		query.append("                                            END" ).append("\n"); 
+		query.append("                                         ELSE" ).append("\n"); 
+		query.append("                                            EXTRACT(DAY FROM STS_EVNT_DT_TO) - EXTRACT(DAY FROM T2.EFF_DT) + 1       " ).append("\n"); 
+		query.append("                                    END" ).append("\n"); 
+		query.append("                            END" ).append("\n"); 
+		query.append("                        WHEN TO_CHAR(STS_EVNT_DT_FR,'YYYYMMDD') >= TO_CHAR(T2.EFF_DT,'YYYYMMDD') " ).append("\n"); 
+		query.append("                            AND TO_CHAR(STS_EVNT_DT_TO,'YYYYMMDD') >= TO_CHAR(T2.EXP_DT,'YYYYMMDD')" ).append("\n"); 
+		query.append("                        THEN" ).append("\n"); 
+		query.append("                            CASE " ).append("\n"); 
+		query.append("                                /*+ Term Change 일 경우 */" ).append("\n"); 
+		query.append("                                WHEN TERM_CNG_SEQ IS NOT NULL THEN " ).append("\n"); 
+		query.append("                                    CASE WHEN EQ_ASET_STS_CD = 'LSO' THEN" ).append("\n"); 
+		query.append("                                            EXTRACT(DAY FROM T2.EXP_DT) - EXTRACT(DAY FROM STS_EVNT_DT_FR) + 1" ).append("\n"); 
+		query.append("                                         ELSE" ).append("\n"); 
+		query.append("                                            EXTRACT(DAY FROM T2.EXP_DT) - EXTRACT(DAY FROM STS_EVNT_DT_FR) + 1" ).append("\n"); 
+		query.append("                                    END" ).append("\n"); 
+		query.append("                                /*+ Term Change 가 아닐 경우 */" ).append("\n"); 
+		query.append("                                ELSE " ).append("\n"); 
+		query.append("                                    CASE" ).append("\n"); 
+		query.append("                                         /*+ 동일한 날짜의 On-Hire 또는 Off-Hire 일 경우 */ " ).append("\n"); 
+		query.append("                                         WHEN T1.ON_OFF_HIRE = 0 THEN           " ).append("\n"); 
+		query.append("                                            CASE " ).append("\n"); 
+		query.append("                                                WHEN (STS_EVNT_DT_PRE IS NULL OR TO_CHAR(STS_EVNT_DT,'YYYYMMDD') != TO_CHAR(STS_EVNT_DT_PRE,'YYYYMMDD'))" ).append("\n"); 
+		query.append("                                                      AND TERM_CNG_SEQ_PRE IS NULL " ).append("\n"); 
+		query.append("                                                THEN" ).append("\n"); 
+		query.append("                                                    EXTRACT(DAY FROM T2.EXP_DT) - EXTRACT(DAY FROM STS_EVNT_DT_FR) + 1" ).append("\n"); 
+		query.append("                                                ELSE" ).append("\n"); 
+		query.append("                                                    EXTRACT(DAY FROM T2.EXP_DT) - EXTRACT(DAY FROM STS_EVNT_DT_FR)" ).append("\n"); 
+		query.append("                                            END" ).append("\n"); 
+		query.append("                                         ELSE" ).append("\n"); 
+		query.append("                                            EXTRACT(DAY FROM T2.EXP_DT) - EXTRACT(DAY FROM STS_EVNT_DT_FR) + 1       " ).append("\n"); 
+		query.append("                                    END" ).append("\n"); 
+		query.append("                            END" ).append("\n"); 
+		query.append("                        WHEN TO_CHAR(STS_EVNT_DT_FR,'YYYYMMDD') >= TO_CHAR(T2.EFF_DT,'YYYYMMDD') " ).append("\n"); 
+		query.append("                             AND TO_CHAR(STS_EVNT_DT_TO,'YYYYMMDD') <= TO_CHAR(T2.EXP_DT,'YYYYMMDD')" ).append("\n"); 
+		query.append("                        THEN" ).append("\n"); 
+		query.append("                            CASE" ).append("\n"); 
+		query.append("                                /*+ Term Change 일 경우 */" ).append("\n"); 
+		query.append("                                WHEN TERM_CNG_SEQ IS NOT NULL THEN " ).append("\n"); 
+		query.append("                                    CASE WHEN EQ_ASET_STS_CD = 'LSO' THEN" ).append("\n"); 
+		query.append("                                            EXTRACT(DAY FROM STS_EVNT_DT_TO) - EXTRACT(DAY FROM STS_EVNT_DT_FR) + 1" ).append("\n"); 
+		query.append("                                         ELSE" ).append("\n"); 
+		query.append("                                            EXTRACT(DAY FROM STS_EVNT_DT_TO) - EXTRACT(DAY FROM STS_EVNT_DT_FR) + 1 " ).append("\n"); 
+		query.append("                                    END" ).append("\n"); 
+		query.append("                                /*+ Term Change 가 아닐 경우 */" ).append("\n"); 
+		query.append("                                ELSE " ).append("\n"); 
+		query.append("                                    CASE" ).append("\n"); 
+		query.append("                                         /*+ 동일한 날짜의 On-Hire 또는 Off-Hire 일 경우 */ " ).append("\n"); 
+		query.append("                                         WHEN T1.ON_OFF_HIRE = 0 THEN           " ).append("\n"); 
+		query.append("                                            CASE " ).append("\n"); 
+		query.append("                                                WHEN (STS_EVNT_DT_PRE IS NULL OR TO_CHAR(STS_EVNT_DT,'YYYYMMDD') != TO_CHAR(STS_EVNT_DT_PRE,'YYYYMMDD'))" ).append("\n"); 
+		query.append("                                                      AND TERM_CNG_SEQ_PRE IS NULL " ).append("\n"); 
+		query.append("                                                THEN" ).append("\n"); 
+		query.append("                                                    EXTRACT(DAY FROM STS_EVNT_DT_TO) - EXTRACT(DAY FROM STS_EVNT_DT_FR) + 1" ).append("\n"); 
+		query.append("                                                ELSE" ).append("\n"); 
+		query.append("                                                    EXTRACT(DAY FROM STS_EVNT_DT_TO) - EXTRACT(DAY FROM STS_EVNT_DT_FR)" ).append("\n"); 
+		query.append("                                            END" ).append("\n"); 
+		query.append("                                         ELSE" ).append("\n"); 
+		query.append("                                            EXTRACT(DAY FROM STS_EVNT_DT_TO) - EXTRACT(DAY FROM STS_EVNT_DT_FR) + 1       " ).append("\n"); 
+		query.append("                                    END" ).append("\n"); 
+		query.append("                            END" ).append("\n"); 
+		query.append("                    END   " ).append("\n"); 
+		query.append("            END AS LSE_USE_DAYS," ).append("\n"); 
+		query.append("            T1.STS_EVNT_DT," ).append("\n"); 
+		query.append("            T1.GRNO," ).append("\n"); 
+		query.append("            T1.ON_OFF_HIRE" ).append("\n"); 
+		query.append("        FROM" ).append("\n"); 
+		query.append("        (" ).append("\n"); 
+		query.append("    	    SELECT /*+ 1. EQ 별 Row의 복제하기 " ).append("\n"); 
+		query.append("                   2. Event Form Date, To Date 구하기" ).append("\n"); 
+		query.append("                   3. EQ 별 이전 Row 의 Event 상태 및 날짜 구하기" ).append("\n"); 
+		query.append("                   4. Term Change 여부 " ).append("\n"); 
+		query.append("               */  " ).append("\n"); 
+		query.append("    	       AGMT_OFC_CTY_CD," ).append("\n"); 
+		query.append("    	       AGMT_SEQ," ).append("\n"); 
+		query.append("    	       AGMT_VER_NO," ).append("\n"); 
+		query.append("    	       EQ_NO," ).append("\n"); 
+		query.append("    	       EQ_STS_SEQ," ).append("\n"); 
+		query.append("    	       /*+ 복제한 Row를 dummy 로 표시 */" ).append("\n"); 
+		query.append("    	       DECODE (Y.C2, 1, " ).append("\n"); 
+		query.append("    	                  EQ_ASET_STS_CD || 'dummy', " ).append("\n"); 
+		query.append("    	                  EQ_ASET_STS_CD) AS EQ_ASET_STS_CD, " ).append("\n"); 
+		query.append("    	       /*+ 시작일자 설정" ).append("\n"); 
+		query.append("    	           복제한 Row 의 시작일자를 무조건 1일로 설정 " ).append("\n"); 
+		query.append("    	           복제한 Row가 아닐 경우는 해당날자가 시작일자로 설정*/" ).append("\n"); 
+		query.append("    	       DECODE (Y.C2, 1," ).append("\n"); 
+		query.append("    	                TO_DATE (TO_CHAR (X.STS_EVNT_DT, 'YYYYMM') || '01', 'YYYYMMDD'), " ).append("\n"); 
+		query.append("    	                X.STS_EVNT_DT) AS STS_EVNT_DT_FR," ).append("\n"); 
+		query.append("    	       /*+ 종료일자 설정" ).append("\n"); 
+		query.append("    	           GRNO 가  0이면 해당월의 마지막 일자로 설정 (30,31)" ).append("\n"); 
+		query.append("    	           GRNO 가 -1이면 복제Row일 경우 해당날짜를 아니면 해당월의 마지막 일자를 설정" ).append("\n"); 
+		query.append("    	           GRNO 가 0이나 -1이 아닌 경우는 다음 Row의 Event 날짜에서 1일을 뺀 날자를 지정" ).append("\n"); 
+		query.append("    	                   (단, 현재월보다 Event 날자가 작을 경우는 1일을 빼지 않음)" ).append("\n"); 
+		query.append("    	           */" ).append("\n"); 
+		query.append("    	       DECODE(GRNO, 0, " ).append("\n"); 
+		query.append("    	                LAST_DAY(TO_DATE(@[cost_yrmon], 'YYYYMM'))," ).append("\n"); 
+		query.append("    	                -1," ).append("\n"); 
+		query.append("    	                DECODE(Y.C2, 1, STS_EVNT_DT, LAST_DAY(TO_DATE(@[cost_yrmon], 'YYYYMM')))," ).append("\n"); 
+		query.append("    	                CASE WHEN EQ_ASET_STS_CD IN ('LSO','TLL')  " ).append("\n"); 
+		query.append("    	                THEN" ).append("\n"); 
+		query.append("    	                   DECODE(Y.C2, 1, " ).append("\n"); 
+		query.append("            	                       CASE" ).append("\n"); 
+		query.append("            	                           WHEN LEAD(ON_OFF_HIRE) OVER(PARTITION BY EQ_NO ORDER BY  EQ_STS_SEQ) = 0" ).append("\n"); 
+		query.append("            	                           THEN DECODE(TERM_CNG_SEQ, NULL, STS_EVNT_DT , STS_EVNT_DT-1)            	                           " ).append("\n"); 
+		query.append("            	                           ELSE STS_EVNT_DT-1" ).append("\n"); 
+		query.append("            	                       END," ).append("\n"); 
+		query.append("																		 DECODE(TERM_CNG_SEQ, NULL, STS_EVNT_DT , STS_EVNT_DT-1) )" ).append("\n"); 
+		query.append("    	                ELSE" ).append("\n"); 
+		query.append("    	                   CASE " ).append("\n"); 
+		query.append("        	                   WHEN ON_OFF_HIRE = 0" ).append("\n"); 
+		query.append("        	                   THEN LEAD(STS_EVNT_DT) OVER(PARTITION BY EQ_NO ORDER BY  EQ_STS_SEQ)  " ).append("\n"); 
+		query.append("        	                   WHEN TO_CHAR(STS_EVNT_DT,'YYYYMMDD') = TO_CHAR(LEAD(STS_EVNT_DT) OVER(PARTITION BY EQ_NO ORDER BY EQ_STS_SEQ, Y.C2),'YYYYMMDD')" ).append("\n"); 
+		query.append("        	                       THEN LEAD(STS_EVNT_DT) OVER(PARTITION BY EQ_NO ORDER BY  EQ_STS_SEQ)  " ).append("\n"); 
+		query.append("        	                   ELSE LEAD(STS_EVNT_DT) OVER(PARTITION BY EQ_NO ORDER BY  EQ_STS_SEQ) - 1" ).append("\n"); 
+		query.append("    	                   END" ).append("\n"); 
+		query.append("    	                END" ).append("\n"); 
+		query.append("    	       ) AS STS_EVNT_DT_TO," ).append("\n"); 
+		query.append("    	       TERM_CNG_SEQ," ).append("\n"); 
+		query.append("    	       STS_EVNT_DT," ).append("\n"); 
+		query.append("    	       LAG(EQ_ASET_STS_CD) OVER(PARTITION BY EQ_NO ORDER BY EQ_STS_SEQ, Y.C2) AS EQ_ASET_STS_CD_PRE," ).append("\n"); 
+		query.append("    	       LAG(STS_EVNT_DT) OVER(PARTITION BY EQ_NO ORDER BY EQ_STS_SEQ, Y.C2) AS STS_EVNT_DT_PRE," ).append("\n"); 
+		query.append("    	       LAG(TERM_CNG_SEQ) OVER(PARTITION BY EQ_NO ORDER BY EQ_STS_SEQ, Y.C2) AS TERM_CNG_SEQ_PRE," ).append("\n"); 
+		query.append("    	       STS_EVNT_LOC_CD," ).append("\n"); 
+		query.append("    	       GRNO," ).append("\n"); 
+		query.append("    	       ON_OFF_HIRE" ).append("\n"); 
+		query.append("    	   FROM   " ).append("\n"); 
+		query.append("    	    (" ).append("\n"); 
+		query.append("    	       /*+ Start ==> use day계산을 위한 eq 별 grouping */" ).append("\n"); 
+		query.append("    	       SELECT  " ).append("\n"); 
+		query.append("    	           B.AGMT_OFC_CTY_CD," ).append("\n"); 
+		query.append("    	           B.AGMT_SEQ," ).append("\n"); 
+		query.append("    	           B.AGMT_VER_NO," ).append("\n"); 
+		query.append("    	           B.EQ_NO," ).append("\n"); 
+		query.append("                   B.EQ_STS_SEQ," ).append("\n"); 
+		query.append("    	           B.EQ_ASET_STS_CD," ).append("\n"); 
+		query.append("    	           B.STS_EVNT_DT," ).append("\n"); 
+		query.append("    	           B.TERM_CNG_SEQ," ).append("\n"); 
+		query.append("    	           B.STS_EVNT_LOC_CD," ).append("\n"); 
+		query.append("    	           CASE" ).append("\n"); 
+		query.append("    	               /*+ LSO, TLL 이면 EQ별 Numbering (1,2,3..) " ).append("\n"); 
+		query.append("    	                   만약 LSI,LST,FND 일 경우 EQ 별 Row가 1개이면 -1 값을 아니면 0으로 설정한다." ).append("\n"); 
+		query.append("    	                   -1 값은 끝일자(30,31) 이면서 dummy 값을 생성하기 위한 값으로 사용한다.." ).append("\n"); 
+		query.append("    	                   0 값은 끝일자(30,31) 를 사용하기 위해 설정된 값이다." ).append("\n"); 
+		query.append("    	                   단, -1값과 0 값은 EQ별로 맨 마지막에 해당하는 Row일때만 적용되는 값이다." ).append("\n"); 
+		query.append("    	               */ " ).append("\n"); 
+		query.append("    	               WHEN DECODE (" ).append("\n"); 
+		query.append("    	                   ROW_NUMBER () OVER (PARTITION BY EQ_NO ORDER BY EQ_STS_SEQ) / COUNT (*) OVER (PARTITION BY EQ_NO)," ).append("\n"); 
+		query.append("    	                   1," ).append("\n"); 
+		query.append("    	                   DECODE (EQ_ASET_STS_CD," ).append("\n"); 
+		query.append("    	                                'LSO', 'Y', " ).append("\n"); 
+		query.append("    	                                'TLL', 'Y'," ).append("\n"); 
+		query.append("    	                                'Calc')," ).append("\n"); 
+		query.append("    	                   'N'" ).append("\n"); 
+		query.append("    	                   ) = 'Calc'" ).append("\n"); 
+		query.append("    	               THEN" ).append("\n"); 
+		query.append("    	                   /*+ EQ별로 맨 마지막에 해당하는 Row일때만 적용되는 값을 설정한다.  */" ).append("\n"); 
+		query.append("    	                   DECODE(COUNT (*) OVER (PARTITION BY EQ_NO),1,-1, 0) " ).append("\n"); 
+		query.append("    	               ELSE" ).append("\n"); 
+		query.append("    	                   /*+ 1,2,3.. Numbering " ).append("\n"); 
+		query.append("    	                       LSO, TLL 와 LSI, LST, FND (마지막 Row가 아닌 값)일 Numbering" ).append("\n"); 
+		query.append("    	                       Numbering 된 1값은 이후 Dummy Row를 생성하기 사용되어진다." ).append("\n"); 
+		query.append("    	                   */" ).append("\n"); 
+		query.append("    	                   ROW_NUMBER () OVER (PARTITION BY EQ_NO ORDER BY EQ_STS_SEQ) " ).append("\n"); 
+		query.append("    	           END AS GRNO," ).append("\n"); 
+		query.append("    	           CASE " ).append("\n"); 
+		query.append("    	               /*+ Term Change 가 아니면서 동일한 날짜에 LSO, LSI 를 설정한 On-Off Hire 인 데이터는 0 으로 한다.*/" ).append("\n"); 
+		query.append("    	               WHEN TO_CHAR(STS_EVNT_DT,'YYYYMMDD') = TO_CHAR(LEAD(STS_EVNT_DT) OVER (PARTITION BY EQ_NO ORDER BY EQ_STS_SEQ),'YYYYMMDD')" ).append("\n"); 
+		query.append("    	                    AND TERM_CNG_SEQ IS NULL" ).append("\n"); 
+		query.append("    	                    AND ((EQ_ASET_STS_CD = 'LSI' AND  LEAD(EQ_ASET_STS_CD) OVER (PARTITION BY EQ_NO ORDER BY EQ_STS_SEQ) = 'LSO')" ).append("\n"); 
+		query.append("    	                      OR (EQ_ASET_STS_CD = 'LSO' AND  LEAD(EQ_ASET_STS_CD) OVER (PARTITION BY EQ_NO ORDER BY EQ_STS_SEQ) = 'LSI'))" ).append("\n"); 
+		query.append("    	               THEN 0  " ).append("\n"); 
+		query.append("    	               WHEN TO_CHAR(STS_EVNT_DT,'YYYYMMDD') = TO_CHAR(LAG(STS_EVNT_DT) OVER (PARTITION BY EQ_NO ORDER BY EQ_STS_SEQ),'YYYYMMDD')" ).append("\n"); 
+		query.append("    	                    AND TERM_CNG_SEQ IS NULL" ).append("\n"); 
+		query.append("    	                    AND ((EQ_ASET_STS_CD = 'LSI' AND  LAG(EQ_ASET_STS_CD) OVER (PARTITION BY EQ_NO ORDER BY EQ_STS_SEQ) = 'LSO')" ).append("\n"); 
+		query.append("    	                      OR (EQ_ASET_STS_CD = 'LSO' AND  LAG(EQ_ASET_STS_CD) OVER (PARTITION BY EQ_NO ORDER BY EQ_STS_SEQ) = 'LSI'))" ).append("\n"); 
+		query.append("    	               THEN 0" ).append("\n"); 
+		query.append("    	           END AS ON_OFF_HIRE" ).append("\n"); 
+		query.append("    	       FROM    " ).append("\n"); 
+		query.append("    	           CGM_EQ_STS_HIS B" ).append("\n"); 
+		query.append("    	       WHERE  " ).append("\n"); 
+		query.append("    	           B.EQ_KND_CD = 'G'" ).append("\n"); 
+		query.append("    	           AND B.STS_EVNT_DT >= TO_DATE (@[cost_yrmon] || '01', 'YYYYMMDD')" ).append("\n"); 
+		query.append("    	           AND B.STS_EVNT_DT < ADD_MONTHS (TO_DATE (@[cost_yrmon], 'YYYYMM'), 1)" ).append("\n"); 
+		query.append("    	           AND B.AGMT_OFC_CTY_CD = @[agmt_ofc_cty_cd]" ).append("\n"); 
+		query.append("    	           AND B.AGMT_SEQ = @[agmt_seq]  " ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("                   AND B.EQ_ASET_STS_CD IN ('LSI','LSO','TLL','SCR','SLD','DII')" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("    	       ) x," ).append("\n"); 
+		query.append("    	       (" ).append("\n"); 
+		query.append("    	           /*+ dummy 데이터를 만들기 위한 SQL (데이터를 복제하기 위해)" ).append("\n"); 
+		query.append("    	               LSO, TLL, LST, FND 에 대해서는 하나의 Row를 더 복제한다." ).append("\n"); 
+		query.append("    	               (단, GRNO 가 1이거나 -1 인 것)" ).append("\n"); 
+		query.append("    	            */" ).append("\n"); 
+		query.append("        	       SELECT   -1 ky, 'LSO' c1, '1' c2 FROM DUAL" ).append("\n"); 
+		query.append("        	       UNION ALL" ).append("\n"); 
+		query.append("        	       SELECT   -1 ky, 'TLL' c1, '1' c2 FROM DUAL" ).append("\n"); 
+		query.append("        	       UNION ALL" ).append("\n"); 
+		query.append("--        	       SELECT   -1 ky, 'LST' c1, '1' c2 FROM DUAL" ).append("\n"); 
+		query.append("--        	       UNION ALL" ).append("\n"); 
+		query.append("--        	       SELECT   -1 ky, 'FND' c1, '1' c2 FROM DUAL" ).append("\n"); 
+		query.append("--        	       UNION ALL" ).append("\n"); 
+		query.append("        	       SELECT   -1 ky, 'LSO' c1, '2' c2 FROM DUAL" ).append("\n"); 
+		query.append("        	       UNION ALL" ).append("\n"); 
+		query.append("        	       SELECT   -1 ky, 'TLL' c1, '2' c2 FROM DUAL" ).append("\n"); 
+		query.append("        	       UNION ALL" ).append("\n"); 
+		query.append("--        	       SELECT   -1 ky, 'LST' c1, '2' c2 FROM DUAL" ).append("\n"); 
+		query.append("--        	       UNION ALL" ).append("\n"); 
+		query.append("--        	       SELECT   -1 ky, 'FND' c1, '2' c2 FROM DUAL" ).append("\n"); 
+		query.append("--        	       UNION ALL      " ).append("\n"); 
+		query.append("        	       SELECT   1 ky, 'LSO' c1, '1' c2 FROM DUAL" ).append("\n"); 
+		query.append("        	       UNION ALL" ).append("\n"); 
+		query.append("        	       SELECT   1 ky, 'TLL' c1, '1' c2 FROM DUAL" ).append("\n"); 
+		query.append("        	       UNION ALL" ).append("\n"); 
+		query.append("--        	       SELECT   1 ky, 'LST' c1, '1' c2 FROM DUAL" ).append("\n"); 
+		query.append("--        	       UNION ALL" ).append("\n"); 
+		query.append("--        	       SELECT   1 ky, 'FND' c1, '1' c2 FROM DUAL" ).append("\n"); 
+		query.append("--        	       UNION ALL" ).append("\n"); 
+		query.append("        	       SELECT   1 ky, 'LSO' c1, '2' c2 FROM DUAL" ).append("\n"); 
+		query.append("        	       UNION ALL" ).append("\n"); 
+		query.append("        	       SELECT   1 ky, 'TLL' c1, '2' c2 FROM DUAL" ).append("\n"); 
+		query.append("--        	       UNION ALL" ).append("\n"); 
+		query.append("--        	       SELECT   1 ky, 'LST' c1, '2' c2 FROM DUAL" ).append("\n"); 
+		query.append("--        	       UNION ALL" ).append("\n"); 
+		query.append("--        	       SELECT   1 ky, 'FND' c1, '2' c2 FROM DUAL" ).append("\n"); 
+		query.append("    	       ) y" ).append("\n"); 
+		query.append("    	   WHERE   x.GRNO = y.ky(+) AND x.EQ_ASET_STS_CD = y.c1(+)" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("           -- 위에는 COST_YRMON 에 발생한 Status 처리" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("    	   UNION ALL" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("           -- 아래는 COST_YRMON 이전 발생한 Status 처리" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("    	   SELECT " ).append("\n"); 
+		query.append("    	       A.AGMT_OFC_CTY_CD," ).append("\n"); 
+		query.append("    	       A.AGMT_SEQ," ).append("\n"); 
+		query.append("    	       A.AGMT_VER_NO," ).append("\n"); 
+		query.append("    	       A.EQ_NO," ).append("\n"); 
+		query.append("    	       A.EQ_STS_SEQ," ).append("\n"); 
+		query.append("    	       A.EQ_ASET_STS_CD," ).append("\n"); 
+		query.append("    	       TO_DATE(@[cost_yrmon] || '01','YYYYMMDD') AS STS_EVNT_DT_FR," ).append("\n"); 
+		query.append("    	       LAST_DAY(TO_DATE(@[cost_yrmon], 'YYYYMM' )) AS STS_EVNT_DT_TO," ).append("\n"); 
+		query.append("    	       A.TERM_CNG_SEQ," ).append("\n"); 
+		query.append("    	       A.STS_EVNT_DT," ).append("\n"); 
+		query.append("    	       '' AS EQ_ASET_STS_CD_PRE," ).append("\n"); 
+		query.append("    	       SYSDATE AS STS_EVNT_DT_PRE," ).append("\n"); 
+		query.append("    	       0 AS TERM_CNG_SEQ_PRE," ).append("\n"); 
+		query.append("    	       A.STS_EVNT_LOC_CD," ).append("\n"); 
+		query.append("    	       1 AS GRNO," ).append("\n"); 
+		query.append("    	       NULL AS ON_OFF_HIRE" ).append("\n"); 
+		query.append("        	        FROM CGM_EQ_STS_HIS A" ).append("\n"); 
+		query.append("        	        WHERE EQ_KND_CD = 'G'" ).append("\n"); 
+		query.append("     		              AND STS_EVNT_DT < TO_DATE(@[cost_yrmon] || '01', 'YYYYMMDD')" ).append("\n"); 
+		query.append("        	              AND AGMT_OFC_CTY_CD = @[agmt_ofc_cty_cd]" ).append("\n"); 
+		query.append("        	              AND AGMT_SEQ = @[agmt_seq]" ).append("\n"); 
+		query.append("        	              AND A.ROWID = " ).append("\n"); 
+		query.append("            		        (" ).append("\n"); 
+		query.append("            		         SELECT /*+ INDEX_DESC(H XPKCGM_EQ_STS_HIS)  */" ).append("\n"); 
+		query.append("            		                ROWID" ).append("\n"); 
+		query.append("            		         FROM   CGM_EQ_STS_HIS H" ).append("\n"); 
+		query.append("            		         WHERE  EQ_NO = A.EQ_NO" ).append("\n"); 
+		query.append("		                        AND STS_EVNT_DT < TO_DATE(@[cost_yrmon] || '01', 'YYYYMMDD')" ).append("\n"); 
+		query.append("            		                AND EQ_KND_CD = 'G'" ).append("\n"); 
+		query.append("					AND AGMT_OFC_CTY_CD = @[agmt_ofc_cty_cd]" ).append("\n"); 
+		query.append("    		         		AND AGMT_SEQ = @[agmt_seq]" ).append("\n"); 
+		query.append("        		                AND EQ_ASET_STS_CD IN ('LSI','LSO','TLL','SCR','SLD','DII')   -- COST_YRMON 이전에 (LSI,DII), (LSO,TLL,SCR,SLD) 중 최종 발생 내역이 (LSI,DII) 이면 CHG 대상 선정" ).append("\n"); 
+		query.append("            		                AND ROWNUM = 1" ).append("\n"); 
+		query.append("            		        )" ).append("\n"); 
+		query.append("            AND A.EQ_ASET_STS_CD IN ('LSI','DII' )" ).append("\n"); 
+		query.append("    	    AND NOT EXISTS" ).append("\n"); 
+		query.append("        	       (" ).append("\n"); 
+		query.append("        	           SELECT EQ_NO" ).append("\n"); 
+		query.append("        	           FROM CGM_EQ_STS_HIS" ).append("\n"); 
+		query.append("        	           WHERE EQ_KND_CD = 'G'" ).append("\n"); 
+		query.append("        	                 AND STS_EVNT_DT >= TO_DATE (@[cost_yrmon] || '01', 'YYYYMMDD')" ).append("\n"); 
+		query.append("                    	     AND STS_EVNT_DT < ADD_MONTHS (TO_DATE (@[cost_yrmon], 'YYYYMM'), 1)" ).append("\n"); 
+		query.append("							 AND AGMT_OFC_CTY_CD = @[agmt_ofc_cty_cd]" ).append("\n"); 
+		query.append("            		         AND AGMT_SEQ = @[agmt_seq]" ).append("\n"); 
+		query.append("                    	     AND EQ_NO = A.EQ_NO" ).append("\n"); 
+		query.append("                               AND EQ_ASET_STS_CD IN ('LSI','LSO','TLL','SCR','SLD','DII')" ).append("\n"); 
+		query.append("        	       )" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("            ) T1," ).append("\n"); 
+		query.append("            CGM_AGREEMENT T2" ).append("\n"); 
+		query.append("        WHERE " ).append("\n"); 
+		query.append("            T1.AGMT_OFC_CTY_CD = T2.AGMT_OFC_CTY_CD" ).append("\n"); 
+		query.append("            AND T1.AGMT_SEQ = T2.AGMT_SEQ" ).append("\n"); 
+		query.append("            -- DIO 발생 이전의 LSI,DII Agmt 와 생성 대상 Agmt 가 같고,Eventdt 가 같으면(이후 재LSI 될 경우도 있기때문) CHG 대상에서 제외." ).append("\n"); 
+		query.append("            AND NOT EXISTS ( SELECT 'X' FROM CGM_EQ_STS_HIS K" ).append("\n"); 
+		query.append("                             WHERE T1.EQ_NO= K.EQ_NO" ).append("\n"); 
+		query.append("                             AND K.STS_EVNT_DT < (SELECT " ).append("\n"); 
+		query.append("                                                MAX(STS_EVNT_DT) FROM CGM_EQ_STS_HIS L " ).append("\n"); 
+		query.append("                                                WHERE L.EQ_NO = K.EQ_NO" ).append("\n"); 
+		query.append("                                                AND L.EQ_ASET_STS_CD = 'DIO'" ).append("\n"); 
+		query.append("                                                )" ).append("\n"); 
+		query.append("                             AND K.STS_EVNT_DT = T1.STS_EVNT_DT " ).append("\n"); 
+		query.append("                             AND K.EQ_ASET_STS_CD IN( 'LSI','DII')" ).append("\n"); 
+		query.append("                             AND K.AGMT_OFC_CTY_CD = T1.AGMT_OFC_CTY_CD" ).append("\n"); 
+		query.append("                             AND K.AGMT_SEQ = T1.AGMT_SEQ" ).append("\n"); 
+		query.append("                             )" ).append("\n"); 
+		query.append("                                 " ).append("\n"); 
+		query.append("        ) B, -- B 에서 CHG 생성 대상 EQ_NO 리스트를 가져온다." ).append("\n"); 
+		query.append("        CGM_EQ_STS_HIS C" ).append("\n"); 
+		query.append("    WHERE " ).append("\n"); 
+		query.append("        A.AGMT_SEQ = B.AGMT_SEQ" ).append("\n"); 
+		query.append("        AND A.EQ_NO = B.EQ_NO" ).append("\n"); 
+		query.append("        AND A.EFF_DT = B.EFF_DT " ).append("\n"); 
+		query.append("        AND A.EXP_DT = B.EXP_DT" ).append("\n"); 
+		query.append("        AND B.LSE_USE_DAYS >= 0" ).append("\n"); 
+		query.append("        AND A.AGMT_SEQ = C.AGMT_SEQ" ).append("\n"); 
+		query.append("        AND A.EQ_NO = C.EQ_NO" ).append("\n"); 
+		query.append("        AND C.EQ_STS_SEQ = " ).append("\n"); 
+		query.append("                    (" ).append("\n"); 
+		query.append("    		         SELECT /*+ INDEX(H XPKCGM_EQ_STS_HIS)  */" ).append("\n"); 
+		query.append("    		                EQ_STS_SEQ" ).append("\n"); 
+		query.append("    		         FROM   CGM_EQ_STS_HIS H" ).append("\n"); 
+		query.append("    		         WHERE  EQ_NO        = A.EQ_NO" ).append("\n"); 
+		query.append("    		         		AND EQ_KND_CD = 'G'" ).append("\n"); 
+		query.append("    		                AND EQ_ASET_STS_CD IN( 'LSI','DII')" ).append("\n"); 
+		query.append("							AND AGMT_OFC_CTY_CD = @[agmt_ofc_cty_cd]" ).append("\n"); 
+		query.append("    		         		AND AGMT_SEQ = @[agmt_seq]" ).append("\n"); 
+		query.append("    		         		AND ROWNUM = 1" ).append("\n"); 
+		query.append("    		        )" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append(") T1" ).append("\n"); 
+		query.append("WHERE " ).append("\n"); 
+		query.append("T1.LSE_USE_DAYS>0" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("GROUP BY " ).append("\n"); 
+		query.append("    T1.AGMT_OFC_CTY_CD," ).append("\n"); 
+		query.append("    T1.AGMT_SEQ," ).append("\n"); 
+		query.append("    T1.LSE_RT_AMT," ).append("\n"); 
+		query.append("    T1.EQ_NO" ).append("\n"); 
+
+	}
+}

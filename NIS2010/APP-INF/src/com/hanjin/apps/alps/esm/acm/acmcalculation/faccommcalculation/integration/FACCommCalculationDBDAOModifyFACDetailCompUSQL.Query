@@ -1,0 +1,295 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="FACCommCalculationDBDAOModifyFACDetailCompUSQL">
+			<desc><![CDATA[FACCommCalculationDBDAOModifyFACDetailCompUSQL]]></desc>
+			<sql><![CDATA[
+MERGE
+ INTO ACM_FAC_COMM_DTL TBL
+USING
+    (
+          SELECT
+            CASE
+            WHEN TOB.BKG_NO IS NULL
+            THEN AIS.BKG_NO
+            ELSE TOB.BKG_NO
+             END                                                            AS BKG_NO,
+            CASE
+            WHEN TOB.SLS_OFC_CD IS NULL
+            THEN AIS.SLS_OFC_CD
+            ELSE TOB.SLS_OFC_CD
+             END                                                            AS SLS_OFC_CD,
+            CASE
+            WHEN TOB.FAC_SEQ IS NULL
+            THEN AIS.FAC_SEQ
+            ELSE TOB.FAC_SEQ
+             END                                                            AS FAC_SEQ,
+            CASE
+            WHEN TOB.CNTR_TPSZ_CD IS NULL
+            THEN AIS.CNTR_TPSZ_CD
+            ELSE TOB.CNTR_TPSZ_CD
+             END                                                            AS CNTR_TPSZ_CD,
+                 TOB.BKG_VOL_QTY                                            AS BKG_VOL_QTY,
+                       CASE
+           WHEN TOB.QTY_RATIO = 1
+           THEN TOB.IF_AMT
+           WHEN TOB.RNUM = TOB.MNUM
+           THEN TOB.IF_AMT
+              + ROUND (TOB.IF_AMT * TOB.QTY_RATIO, 2)
+              - SUM (ROUND (TOB.IF_AMT * TOB.QTY_RATIO, 2))
+                OVER
+              (
+      PARTITION
+             BY TOB.BKG_NO,
+                TOB.SLS_OFC_CD
+       ORDER BY TOB.CNTR_TPSZ_CD DESC
+              )
+           ELSE ROUND (TOB.IF_AMT * TOB.QTY_RATIO, 2)
+            END                                                             AS IF_DTRB_AMT,
+           TOB.CURR_CD                                                      AS CURR_CD,
+           CASE
+           WHEN TOB.RNUM = TOB.MNUM
+           THEN TOB.CRNT_AMT
+              + ROUND (TOB.CRNT_AMT * TOB.QTY_RATIO, 2)
+              - SUM (ROUND (TOB.CRNT_AMT * TOB.QTY_RATIO, 2))
+                OVER
+              (
+      PARTITION
+             BY TOB.BKG_NO,
+                TOB.SLS_OFC_CD
+       ORDER BY TOB.CNTR_TPSZ_CD DESC
+              )
+           ELSE ROUND (TOB.CRNT_AMT * TOB.QTY_RATIO, 2)
+            END                                                             AS PAY_IF_DTRB_AMT,
+                'COMMISSION'                                                AS UPD_USR_ID,
+                SYSDATE                                                     AS UPD_DT,
+                'COMMISSION'                                                AS CRE_USR_ID,
+                SYSDATE                                                     AS CRE_DT
+           FROM
+              (
+                    SELECT
+                           FAD.BKG_NO,
+                           FAC.SLS_OFC_CD,
+                           FAD.FAC_SEQ,
+                           FAD.CNTR_TPSZ_CD,
+                           FAD.BKG_VOL_QTY,
+                           FAD.IF_DTRB_AMT,
+                           FAD.CURR_CD,
+                           FAD.PAY_IF_DTRB_AMT,
+                           FAD.UPD_USR_ID,
+                           FAD.UPD_DT,
+                           FAD.CRE_USR_ID,
+                           FAD.CRE_DT
+                      FROM ACM_FAC_COMM_DTL FAD,
+                         (
+                               SELECT
+                                      FAC.BKG_NO,
+                                      FAC.SLS_OFC_CD,
+                                      MAX (FAC.FAC_SEQ)      AS FAC_SEQ
+                                 FROM ACM_FAC_COMM FAC
+                                WHERE BKG_NO         = @[bkg_no]--'DUS101173700'
+                                  AND FAC_STS_CD
+                                   IN
+                                    (
+                                      'RS', 'RM', 'AS', 'IF', 'CS'
+                                    )
+                             GROUP BY FAC.BKG_NO,
+                                      FAC.SLS_OFC_CD
+                               HAVING EXISTS
+                                    (
+                                          SELECT
+                                                 1
+                                            FROM ACM_FAC_COMM FA2
+                                           WHERE FA2.BKG_NO           = FAC.BKG_NO
+                                             AND FA2.SLS_OFC_CD       = FAC.SLS_OFC_CD
+                                             AND FA2.FAC_STS_CD = 'CS'
+                                             AND FA2.FAC_SEQ          = MAX (FAC.FAC_SEQ)
+                                    )
+                         ) FAC
+                     WHERE FAD.BKG_NO     = FAC.BKG_NO
+                       AND FAD.FAC_SEQ    = FAC.FAC_SEQ
+              ) AIS
+     FULL OUTER
+           JOIN
+              (
+                    SELECT
+                           RANK() OVER(ORDER BY QTY.CNTR_TPSZ_CD DESC) AS RNUM,
+                         (
+                               SELECT
+                                      COUNT (DISTINCT QTY.CNTR_TPSZ_CD)
+                                FROM BKG_BL_DOC     DOC,
+                                     BKG_BOOKING    BKG,
+                                     BKG_BOOKING    BK2,
+                                     BKG_QUANTITY   QTY
+                               WHERE
+                                   (
+                                     BKG.BKG_NO       = DOC.BKG_NO
+                                  OR
+                                     BKG.BL_NO        = DOC.MST_CVRD_BL_NO
+                                   )
+                                 AND BK2.BKG_NO       = DOC.BKG_NO
+                                 AND BK2.BL_NO_TP
+                                  IN
+                                   (
+                                CASE
+                                WHEN BKG.BL_NO_TP = '9'
+                                THEN '0'
+                                ELSE BK2.BL_NO_TP
+                                 END
+                                   )
+                                 AND BK2.BKG_STS_CD
+                              NOT IN
+                                   (
+                                CASE
+                                WHEN BKG.BKG_STS_CD <> 'X'
+                                THEN 'X'
+                                ELSE ' '
+                                 END
+                                   )
+                                 AND BK2.BKG_NO       = QTY.BKG_NO
+                                 AND QTY.CNTR_TPSZ_CD NOT LIKE 'Q%'
+                                 AND BKG.BKG_NO       = FAC.BKG_NO
+                         )                                             AS MNUM,
+                           FAC.BKG_NO                                  AS BKG_NO,
+                           MAX (FAC.SLS_OFC_CD)                        AS SLS_OFC_CD,
+                           MAX (FAC.FAC_SEQ)                           AS FAC_SEQ,
+                           MAX (FAC.IF_AMT)                            AS IF_AMT,
+                           MAX (FAC.CRNT_AMT)                          AS CRNT_AMT,
+                           MAX (FAC.CURR_CD)                           AS CURR_CD,
+                           QTY.CNTR_TPSZ_CD,
+                           SUM (QTY.OP_CNTR_QTY)                       AS BKG_VOL_QTY,
+                           RATIO_TO_REPORT (SUM (QTY.OP_CNTR_QTY))
+                           OVER
+                         (
+              PARTITION BY FAC.BKG_NO,
+                           FAC.SLS_OFC_CD
+                         )                                             AS QTY_RATIO
+                      FROM BKG_QUANTITY QTY,
+                         (
+                               SELECT
+                                      FAC.BKG_NO,
+                                      FAC.SLS_OFC_CD,
+                                      FAC.FAC_SEQ,
+                                      FAC.IF_AMT,
+                                      FAC.CRNT_AMT,
+                                      FAC.CURR_CD
+                                 FROM ACM_FAC_COMM FAC
+                                WHERE FAC.BKG_NO    = @[bkg_no]--'DUS101173700'
+                                  AND FAC.FAC_STS_CD = 'CS'
+                                  AND FAC.FAC_SEQ
+                                    =
+                                    (
+                                          SELECT
+                                                 MAX (FA2.FAC_SEQ)
+                                            FROM ACM_FAC_COMM FA2
+                                           WHERE FA2.BKG_NO    = FAC.BKG_NO
+                                             AND FA2.SLS_OFC_CD    = FAC.SLS_OFC_CD
+                                             AND FAC_STS_CD
+                                              IN
+                                               (
+                                                 'RS', 'RM', 'AS', 'IF', 'CS'
+                                               )
+                                    )
+                         ) FAC
+                     WHERE QTY.BKG_NO
+                        IN
+                         (
+                              SELECT
+                                     DOC.BKG_NO
+                                FROM BKG_BL_DOC     DOC,
+                                     BKG_BOOKING    BKG,
+                                     BKG_BOOKING    BK2
+                               WHERE
+                                   (
+                                     BKG.BKG_NO       = DOC.BKG_NO
+                                  OR
+                                     BKG.BL_NO        = DOC.MST_CVRD_BL_NO
+                                   )
+                                 AND BK2.BKG_NO       = DOC.BKG_NO
+                                 AND BK2.BL_NO_TP
+                                  IN
+                                   (
+                                CASE
+                                WHEN BKG.BL_NO_TP = '9'
+                                THEN '0'
+                                ELSE BK2.BL_NO_TP
+                                 END
+                                   )
+                                 AND BK2.BKG_STS_CD
+                              NOT IN
+                                   (
+                                CASE
+                                WHEN BKG.BKG_STS_CD <> 'X'
+                                THEN 'X'
+                                ELSE ' '
+                                 END
+                                   )
+                                 AND BKG.BKG_NO       = @[bkg_no]--'DUS101173700'
+                         )
+                       AND QTY.CNTR_TPSZ_CD NOT LIKE 'Q%'
+                  GROUP BY FAC.BKG_NO,
+                           FAC.SLS_OFC_CD,
+                           QTY.CNTR_TPSZ_CD
+                  ORDER BY QTY.CNTR_TPSZ_CD DESC
+              ) TOB
+             ON
+              (
+                AIS.BKG_NO       = TOB.BKG_NO
+            AND AIS.FAC_SEQ       = TOB.FAC_SEQ
+            AND AIS.CNTR_TPSZ_CD = TOB.CNTR_TPSZ_CD
+              )
+   ) PCD
+   ON
+    ( TBL.BKG_NO         = PCD.BKG_NO
+  AND TBL.FAC_SEQ         = PCD.FAC_SEQ
+  AND TBL.CNTR_TPSZ_CD   = PCD.CNTR_TPSZ_CD
+    )
+ WHEN MATCHED
+ THEN
+          UPDATE
+             SET TBL.BKG_VOL_QTY       = PCD.BKG_VOL_QTY,
+                 TBL.IF_DTRB_AMT       = PCD.IF_DTRB_AMT,
+                 TBL.CURR_CD           = PCD. CURR_CD,
+                 TBL.PAY_IF_DTRB_AMT   = PCD.PAY_IF_DTRB_AMT,
+                 TBL.UPD_USR_ID        = PCD.UPD_USR_ID,
+                 TBL.UPD_DT            = PCD.UPD_DT
+          DELETE
+           WHERE PCD.BKG_VOL_QTY IS NULL
+ WHEN NOT MATCHED
+ THEN
+INSERT
+    (
+      BKG_NO,
+      SLS_OFC_CD,
+      FAC_SEQ,
+      CNTR_TPSZ_CD,
+      BKG_VOL_QTY,
+      IF_DTRB_AMT,
+      CURR_CD,
+      PAY_IF_DTRB_AMT,
+      UPD_USR_ID,
+      UPD_DT,
+      CRE_USR_ID,
+      CRE_DT
+    )
+VALUES
+    (
+      PCD.BKG_NO,
+      PCD.SLS_OFC_CD,
+      PCD.FAC_SEQ,
+      PCD.CNTR_TPSZ_CD,
+      PCD.BKG_VOL_QTY,
+      PCD.IF_DTRB_AMT,
+      PCD.CURR_CD,
+      PCD.PAY_IF_DTRB_AMT,
+      PCD.UPD_USR_ID,
+      PCD.UPD_DT,
+      PCD.CRE_USR_ID,
+      PCD.CRE_DT
+    )			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

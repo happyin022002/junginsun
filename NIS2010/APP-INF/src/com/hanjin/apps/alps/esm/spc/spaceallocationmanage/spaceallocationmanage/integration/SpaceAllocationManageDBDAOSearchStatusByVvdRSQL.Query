@@ -1,0 +1,689 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SpaceAllocationManageDBDAOSearchStatusByVvdRSQL">
+			<desc><![CDATA[[CHM-201322502-01] SPC 프로젝트 - 성수기 선복운영 개선을 위한 T/F추진
+2013.12.05 김시몬 [CHM-201326854] SAQ project로 인한 SPC 변경건_테이블 변경
+2014.02.04 [CHM-201428383-01] RFA 로직 추가
+2014.03.05 김시몬 [선처리] BKG RFA NULL 관련 보완
+2014.03.17 [CHM-20142960] SMP/Allocation control보완 요청 - SPC_GET_SMP_AMEND_FNC 적용
+2014.03.25 김시몬 [선처리] SQM 분기 구하는 로직 관련 보완
+2014.05.22 [선반영] AES-SC관련 로직 추가
+2015.03.04 김성욱 [CHM-201534435] SQM QTA주가 변경 관련 적용 요청]]></desc>
+			<sql><![CDATA[
+WITH PARAM AS (
+    SELECT (SELECT VER_ST_YRWK
+              FROM SPC_MDL_VER_MST
+             WHERE COST_YRWK = M.COST_YRWK
+               AND VER_SEQ   = 1
+               AND TRD_CD    = @[trd_cd]
+               AND CFM_FLG   = 'Y') AS FM_YRWK,
+           @[week]           AS TO_YRWK,
+           @[trd_cd]         AS TRD_CD,
+           @[sub_trd_cd]     AS SUB_TRD_CD
+      FROM SPC_MDL_VER_MST   M
+     WHERE M.CFM_FLG = 'Y'
+       AND M.TRD_CD = @[trd_cd]
+       AND (M.COST_YRWK, M.VER_SEQ) = (SELECT /*+ INDEX_DESC (M XPKSPC_MDL_VER_MST ) */
+                                             COST_YRWK, VER_SEQ
+                                        FROM SPC_MDL_VER_MST M 
+                                       WHERE @[week] BETWEEN VER_ST_YRWK AND VER_END_YRWK
+                                         AND TRD_CD  = @[trd_cd]
+                                         AND CFM_FLG = 'Y'
+                                         AND ROWNUM  = 1)
+)
+, VVDS AS (
+    SELECT P.FM_YRWK       ,
+           P.TO_YRWK       ,
+           MV.TRD_CD       ,
+           MV.SUB_TRD_CD   ,
+           MV.RLANE_CD     ,
+           SUBSTR(MV.SLS_YRMON, 1, 4) AS COST_YR,
+           SUBSTR(MV.SLS_YRMON, 5) AS COST_MON,
+           SUBSTR(MV.SLS_YRMON, 1, 4)||MV.COST_WK AS COST_WK,
+           MV.COST_WK      AS COST_WK2,
+           MV.VSL_CD       ,
+           MV.SKD_VOY_NO   ,
+           MV.DIR_CD       ,
+			  MV.IOC_CD			,
+           (SELECT /*+ INDEX_DESC (m XPKSPC_MDL_VER_MST ) */
+                   DECODE(Q.DIR_CD, NULL, '200001-1', COST_YRWK||'-'||VER_SEQ)
+              FROM SPC_MDL_VER_MST m
+             WHERE SUBSTR(MV.SLS_YRMON, 1, 4)||MV.COST_WK BETWEEN VER_ST_YRWK AND VER_END_YRWK
+               AND TRD_CD    = P.TRD_CD
+               AND CFM_FLG = 'Y'
+               AND ROWNUM  = 1) AS SEASON,
+           SPC_GET_WK_VVD_BSA_FNC('VOL'    , MV.TRD_CD, MV.RLANE_CD, MV.DIR_CD, SUBSTR(MV.SLS_YRMON, 1, 4)||MV.COST_WK, MV.VSL_CD||MV.SKD_VOY_NO||MV.DIR_CD) AS BSA_VOL,
+           -- 2014.09.22
+           NVL(DECODE(A.CTRL_ECC_FLG, 'Y', 'E', DECODE(A.CTRL_LOC_FLG, 'Y', 'L', 'N')), 'N') AS CTRL_DEST,
+           NVL(A.CTRL_DEST_LVL_CD, 'N') AS CTRL_DEST_LVL  -- D = BKG_POD, T = BKG_DEL
+           , SUBSTR(MV.COST_YRMON, 1, 4) AS BSE_YR,
+           , CASE WHEN MV.COST_YRMON >= '201501' 
+                  THEN CEIL(TO_NUMBER(SUBSTR(MV.COST_YRMON, -2))/3)||'Q' 
+                  ELSE CEIL(TO_NUMBER(DECODE(MV.COST_WK,'00','01','53','52',MV.COST_WK))/13)||'Q'
+              END BSE_QTR_CD --CHM-201534435 SQM QTA주가 변경 관련 적용 요청
+      FROM MAS_MON_VVD       MV,
+           PARAM             P ,
+           SPC_HD_HUL_MST    Q , 
+           -- 2014.09.22
+           SPC_ALOC_CTRL_OPT A
+     WHERE SUBSTR(MV.SLS_YRMON, 1, 4)||MV.COST_WK BETWEEN P.FM_YRWK AND P.TO_YRWK
+       AND MV.DELT_FLG     = 'N'
+       AND MV.TRD_CD       = P.TRD_CD
+       AND MV.SUB_TRD_CD   = P.SUB_TRD_CD
+       AND Q.TRD_CD        = MV.TRD_CD
+       AND Q.RLANE_CD      = MV.RLANE_CD
+       AND Q.DIR_CD        = MV.DIR_CD
+       AND MV.VSL_CD       = SUBSTR(@[vvd],1,4)
+       AND MV.SKD_VOY_NO   = SUBSTR(@[vvd],5,4)
+       AND MV.DIR_CD       = SUBSTR(@[vvd],9)
+       AND A.RLANE_CD(+)   = MV.RLANE_CD
+       AND A.DIR_CD(+)     = MV.DIR_CD
+       AND A.VSL_CD(+)     = MV.VSL_CD
+       AND A.SKD_VOY_NO(+) = MV.SKD_VOY_NO 
+       AND A.SKD_DIR_CD(+) = MV.DIR_CD 
+)
+, QTA_DATA AS (
+     SELECT V.FM_YRWK,
+           V.TO_YRWK,
+           V.COST_WK,
+           V.TRD_CD,
+           V.SUB_TRD_CD,
+           MQ.RLANE_CD,
+           MQ.DIR_CD,
+           MQ.VSL_CD,
+           MQ.SKD_VOY_NO,
+           MQ.SKD_DIR_CD,
+           'C' AS CUST_CTRL_CD,
+           -- 2014.09.22
+           'OTHERS' AS DEST_LOC_CD,
+           SUM(MQ.LOD_QTY) AS QTA_QTY 
+      FROM SQM_CFM_QTA      MQ ,
+           SQM_QTA_RLSE_VER MQR,
+           VVDS             V
+     WHERE MQR.BSE_YR           = V.BSE_YR
+--       AND MQR.BSE_QTR_CD       = CEIL(TO_NUMBER(DECODE(V.COST_WK2,'00','01','53','52',V.COST_WK2))/13)||'Q'--CEIL(TO_NUMBER(V.COST_MON)/3)||'Q'
+       -- CHM-201534435 SQM QTA주가 변경 관련 적용 요청
+	   AND MQR.BSE_QTR_CD       = v.BSE_QTR_CD
+       AND MQR.SQM_VER_STS_CD   = 'R'
+       AND MQR.BSE_TP_CD        = 'Q' --
+       AND MQ.QTA_RLSE_VER_NO   = MQR.QTA_RLSE_VER_NO
+       AND MQ.BSE_TP_CD         = MQR.BSE_TP_CD --
+       AND MQ.BSE_YR            = MQR.BSE_YR
+       AND MQ.BSE_QTR_CD        = MQR.BSE_QTR_CD
+       AND MQ.QTA_TGT_CD        = 'D'
+       AND MQ.OFC_VW_CD         = 'L'  --
+       AND MQ.TRD_CD            = V.TRD_CD
+       AND MQ.RLANE_CD          = V.RLANE_CD
+       AND MQ.DIR_CD            = V.DIR_CD
+       AND MQ.VSL_CD            = V.VSL_CD
+       AND MQ.SKD_VOY_NO        = V.SKD_VOY_NO
+       AND MQ.SKD_DIR_CD        = V.DIR_CD
+     GROUP BY V.FM_YRWK,
+              V.TO_YRWK,
+              V.COST_WK,
+              V.TRD_CD,
+              V.SUB_TRD_CD,
+              MQ.RLANE_CD,
+              MQ.DIR_CD,
+              MQ.VSL_CD,
+              MQ.SKD_VOY_NO,
+              MQ.SKD_DIR_CD
+)              
+, FCAST_DATA AS (
+    SELECT P.FM_YRWK,
+           P.TO_YRWK,
+           P.COST_WK,
+           P.TRD_CD,
+           P.SUB_TRD_CD,
+           F.RLANE_CD,
+           F.DIR_CD,
+           F.VSL_CD,
+           F.SKD_VOY_NO,
+           F.SKD_DIR_CD,
+           NVL(C.CUST_CTRL_CD, 'C') AS CUST_CTRL_CD,
+           --2014.09.22
+           CASE WHEN P.CTRL_DEST <> 'N' THEN	                                                      
+                                       NVL((SELECT D.CTRL_LOC_ACCT_CD
+                                              FROM SPC_ALOC_LANE_CTRL_OPT_DTL D
+                                             WHERE P.RLANE_CD         = D.RLANE_CD
+                                               AND SPC_GET_REP_TRD_FNC(P.RLANE_CD)     = D.TRD_CD
+                                               AND SPC_GET_REP_SUB_TRD_FNC(P.RLANE_CD) = D.SUB_TRD_CD
+                                               AND P.DIR_CD       = D.DIR_CD 
+                                               AND D.ALOC_CTRL_TP_CD  = P.CTRL_DEST
+                                               AND D.CTRL_LOC_ACCT_CD = DECODE(P.CTRL_DEST,'L',DECODE(P.CTRL_DEST_LVL,'T',F.DEST_LOC_CD,SUBSTR(F.POD_YD_CD, 1, 5)), 'E', 
+                                                                                                                                 	  (SELECT A.ECC_CD
+                                                                                                                                         FROM MDM_EQ_ORZ_CHT A,  
+                                                                                                                                              MDM_LOCATION B 
+                                                                                                                                        WHERE B.LOC_CD = DECODE(P.CTRL_DEST_LVL,'T',F.DEST_LOC_CD,SUBSTR(F.POD_YD_CD, 1, 5))
+                                                                                                                                          AND A.SCC_CD = B.SCC_CD
+                                                                                                                                      ))
+                                            ),'OTHERS')
+                     ELSE
+                        'OTHERS'
+           END AS DEST_LOC_CD,
+           (F.CFM_TTL_QTY + NVL(CFM_40FT_HC_QTY, 0) * 2 + NVL(CFM_45FT_HC_QTY, 0) * 2 + NVL(CFM_53FT_QTY, 0) * 2) AS FCAST_QTY
+--           SUM(F.CFM_TTL_QTY + NVL(CFM_40FT_HC_QTY, 0) * 2 + NVL(CFM_45FT_HC_QTY, 0) * 2 + NVL(CFM_53FT_QTY, 0) * 2) AS FCAST_QTY
+      FROM SPC_DLY_FCAST_CUST F,
+           SPC_MDL_CUST_CTRL  C,
+           VVDS               P
+     WHERE F.RLANE_CD       = P.RLANE_CD
+       AND F.TRD_CD         = P.TRD_CD
+       AND F.DIR_CD         = P.DIR_CD
+       AND F.VSL_CD         = P.VSL_CD
+       AND F.SKD_VOY_NO     = P.SKD_VOY_NO
+       AND F.SKD_DIR_CD     = P.DIR_CD
+       AND SUBSTR(P.SEASON, 1, 6) = NVL(C.COST_YRWK, SUBSTR(P.SEASON, 1, 6))
+       AND SUBSTR(P.SEASON, 8)    = NVL(C.VER_SEQ,   SUBSTR(P.SEASON, 8))
+       AND F.TRD_CD         = C.TRD_CD(+)
+       AND F.CUST_CNT_CD    = C.CUST_CNT_CD(+)
+       AND F.CUST_SEQ       = C.CUST_SEQ(+)
+       AND NVL(F.SC_NO, NVL(F.RFA_NO, 'X')) = NVL(C.SC_NO(+), NVL(C.RFA_NO(+), 'X'))
+       --AND DECODE(F.TRD_CD, 'AES', NVL(F.RFA_NO, 'X'), NVL(F.SC_NO, 'X')) = DECODE(F.TRD_CD, 'AES', NVL(C.RFA_NO(+), 'X'), NVL(C.SC_NO(+), NVL(F.SC_NO, 'X')))
+       AND EXISTS (SELECT 'A'
+                     FROM VSK_VSL_PORT_SKD
+                    WHERE VSL_CD     = F.VSL_CD
+                      AND SKD_VOY_NO = F.SKD_VOY_NO
+                      AND SKD_DIR_CD = F.SKD_DIR_CD  
+                      AND 'S'        <> NVL(SKD_CNG_STS_CD, 'X')
+                      AND YD_CD      IN (F.POL_YD_CD, F.POD_YD_CD) )
+--     GROUP BY P.FM_YRWK,
+--              P.TO_YRWK,
+--              P.COST_WK,
+--              P.TRD_CD,
+--              P.SUB_TRD_CD,
+--              F.RLANE_CD,
+--              F.DIR_CD,
+--              F.VSL_CD,
+--              F.SKD_VOY_NO,
+--              F.SKD_DIR_CD,
+--              NVL(C.CUST_CTRL_CD, 'C')
+)    
+, ALOC_DATA AS (
+    SELECT P.FM_YRWK,
+           P.TO_YRWK,
+           P.COST_WK,
+           P.TRD_CD,
+           P.SUB_TRD_CD,
+           A.RLANE_CD,
+           A.DIR_CD, 
+           A.VSL_CD,
+           A.SKD_VOY_NO,
+           A.SKD_DIR_CD,
+           A.CUST_CTRL_CD, 
+           DECODE(A.DEST_LOC_CD, 'XXXXX', 'OTHERS', A.DEST_LOC_CD) AS DEST_LOC_CD,
+           SUM(A.ASGN_TTL_QTY + NVL(ASGN_40FT_HC_QTY, 0) * 2 + NVL(ASGN_45FT_HC_QTY, 0) * 2 + NVL(ASGN_53FT_QTY, 0) * 2) AS ALOC_QTY
+      FROM SPC_ALOC_CUST_POL_POD A,
+           VVDS                  P
+     WHERE A.RLANE_CD       = P.RLANE_CD
+       AND A.DIR_CD         = P.DIR_CD
+       AND A.VSL_CD         = P.VSL_CD
+       AND A.SKD_VOY_NO     = P.SKD_VOY_NO
+       AND A.SKD_DIR_CD     = P.DIR_CD
+       AND A.TRD_CD         = P.TRD_CD
+       AND A.SUB_TRD_CD     = P.SUB_TRD_CD
+       
+       AND EXISTS (SELECT 'A'
+                     FROM VSK_VSL_PORT_SKD
+                    WHERE VSL_CD     = A.VSL_CD
+                      AND SKD_VOY_NO = A.SKD_VOY_NO
+                      AND SKD_DIR_CD = A.SKD_DIR_CD  
+                      AND 'S'        <> NVL(SKD_CNG_STS_CD, 'X')
+                      AND YD_CD      IN (A.POL_YD_CD, A.POD_YD_CD) )
+     GROUP BY P.FM_YRWK,
+              P.TO_YRWK,
+              P.COST_WK,
+              P.TRD_CD,
+              P.SUB_TRD_CD,
+              A.RLANE_CD,
+              A.DIR_CD, 
+              A.VSL_CD,
+              A.SKD_VOY_NO,
+              A.SKD_DIR_CD,
+              A.CUST_CTRL_CD,
+              DECODE(A.DEST_LOC_CD, 'XXXXX', 'OTHERS', A.DEST_LOC_CD)
+)       
+, BKG_BOOKING_TMP AS (
+    SELECT B.*, A.SEASON, A.TRD_CD
+      FROM BKG_BOOKING B, VVDS A
+     WHERE 1=1
+       AND A.VSL_CD     = B.VSL_CD
+       AND A.SKD_VOY_NO = B.SKD_VOY_NO
+       AND A.DIR_CD     = B.SKD_DIR_CD
+)
+, BKG_DATA AS (
+    SELECT FM_YRWK   ,
+           TO_YRWK   ,
+           COST_WK   ,
+           TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           CUST_CTRL_CD,
+           DEST_LOC_CD,
+           SUM(BKG_QTY) AS BKG_QTY 
+      FROM (
+            SELECT /*+ORDERED*/
+                   A.FM_YRWK   ,
+                   A.TO_YRWK   ,
+                   A.COST_WK   ,
+                   A.TRD_CD    ,
+                   A.SUB_TRD_CD,
+                   A.RLANE_CD  ,
+                   A.DIR_CD    ,
+                   BV.VSL_CD    ,
+                   BV.SKD_VOY_NO,
+                   BV.SKD_DIR_CD,
+                   
+                   --20140304 추가
+                   CASE WHEN A.TRD_CD = 'AES' AND DECODE(SUBSTR(B.RFA_NO, 1, 3), 'DUM', '', B.RFA_NO) IS NULL AND BC.CUST_CNT_CD = 'CN' AND B.SC_NO IS NULL THEN
+                          NVL(SPC_GET_SMP_RFA_FNC('C',A.SEASON,  BC.CUST_CNT_CD||LPAD(BC.CUST_SEQ,6,'0'), B.POL_CD,B.POD_CD),'C')
+                         
+                   ELSE   
+                          NVL(C.CUST_CTRL_CD, 'C')
+                   END AS CUST_CTRL_CD, 
+                   CASE WHEN A.CTRL_DEST <> 'N' THEN	                                                      
+                                            NVL((SELECT D.CTRL_LOC_ACCT_CD
+                                                   FROM SPC_ALOC_LANE_CTRL_OPT_DTL D
+                                                  WHERE A.RLANE_CD         = D.RLANE_CD
+                                                    AND SPC_GET_REP_TRD_FNC(A.RLANE_CD)     = D.TRD_CD
+                                                    AND SPC_GET_REP_SUB_TRD_FNC(A.RLANE_CD) = D.SUB_TRD_CD
+                                                    AND A.DIR_CD       = D.DIR_CD 
+                                                    AND D.ALOC_CTRL_TP_CD  = A.CTRL_DEST
+                                                    AND D.CTRL_LOC_ACCT_CD = DECODE(A.CTRL_DEST,'L',DECODE(A.CTRL_DEST_LVL,'T',B.DEL_CD,B.POD_CD), 'E', 
+                                                                                                                                 	  (SELECT A.ECC_CD
+                                                                                                                                         FROM MDM_EQ_ORZ_CHT A,  
+                                                                                                                                              MDM_LOCATION C 
+                                                                                                                                        WHERE C.LOC_CD = DECODE(A.CTRL_DEST_LVL,'T',B.DEL_CD,B.POD_CD)
+                                                                                                                                          AND A.SCC_CD = C.SCC_CD
+                                                                                                                                      ))
+                                                ),'OTHERS')
+                                          ELSE
+                                            'OTHERS'
+                   END AS DEST_LOC_CD,
+                   NVL((SELECT SUM(DECODE(SUBSTR(Q.CNTR_TPSZ_CD,2), '2', 1, 2) * Q.OP_CNTR_QTY)
+                          FROM BKG_QUANTITY Q
+                         WHERE B.BKG_NO = Q.BKG_NO
+                   ),0) AS BKG_QTY 
+              FROM VVDS               A  ,
+                   BKG_BOOKING_TMP    B  ,
+                   BKG_VVD            BV ,
+                   MDM_DTL_REV_LANE   DRL,
+                   SPC_MDL_CUST_CTRL  C  ,
+                   BKG_CUSTOMER       BC  --20140304 추가
+             WHERE B.BKG_STS_CD       IN ('W','F')
+               AND B.BKG_CGO_TP_CD    IN ('F', 'B', 'R')
+               AND B.BKG_NO            = BV.BKG_NO
+               AND A.VSL_CD            = B.VSL_CD
+               AND A.SKD_VOY_NO        = B.SKD_VOY_NO
+               AND A.DIR_CD            = B.SKD_DIR_CD
+        
+               AND A.VSL_CD            = BV.VSL_CD
+               AND A.SKD_VOY_NO        = BV.SKD_VOY_NO
+               AND A.DIR_CD            = BV.SKD_DIR_CD
+               AND DRL.RLANE_CD        = A.RLANE_CD
+               AND DRL.VSL_SLAN_DIR_CD = A.DIR_CD
+               AND DRL.TRD_CD          = A.TRD_CD
+               AND DRL.SUB_TRD_CD      = A.SUB_TRD_CD
+               AND DRL.DELT_FLG        = 'N'
+               AND DRL.FM_CONTI_CD     = (SELECT SPC_CONTI_CONV_FNC(L.CONTI_CD, A.RLANE_CD, A.DIR_CD)
+                                            FROM MDM_LOCATION L
+                                           WHERE L.LOC_CD = BV.POL_CD )
+               AND DRL.TO_CONTI_CD     = (SELECT SPC_CONTI_CONV_FNC(L.CONTI_CD, A.RLANE_CD, A.DIR_CD)
+                                            FROM MDM_LOCATION L
+                                           WHERE L.LOC_CD = BV.POD_CD )
+               
+               AND SUBSTR(B.SEASON, 1, 6) = C.COST_YRWK(+)
+               AND SUBSTR(B.SEASON, 8)    = C.VER_SEQ(+)
+               AND B.TRD_CD               = C.TRD_CD(+)
+               AND B.CTRT_CUST_CNT_CD     = C.CUST_CNT_CD(+)
+               AND B.CTRT_CUST_SEQ        = C.CUST_SEQ(+)
+               AND NVL(SPC_GET_SMP_AMEND_FNC(B.TRD_CD, SUBSTR(B.SEASON, 1, 6), SUBSTR(B.SEASON, 8), B.SC_NO), NVL(SPC_GET_SMP_AMEND_FNC(B.TRD_CD, SUBSTR(B.SEASON, 1, 6), SUBSTR(B.SEASON, 8), DECODE(SUBSTR(B.RFA_NO, 1, 3), 'DUM', '', B.RFA_NO)), 'X')) = NVL(C.SC_NO(+), NVL(C.RFA_NO(+), 'X'))
+               --AND DECODE(B.TRD_CD, 'AES', NVL(SPC_GET_SMP_AMEND_FNC(B.TRD_CD, SUBSTR(B.SEASON, 1, 6), SUBSTR(B.SEASON, 8), DECODE(SUBSTR(B.RFA_NO, 1, 3), 'DUM', '', B.RFA_NO)), 'X'), NVL(SPC_GET_SMP_AMEND_FNC(B.TRD_CD, SUBSTR(B.SEASON, 1, 6), SUBSTR(B.SEASON, 8), B.SC_NO), 'X')) = DECODE(B.TRD_CD, 'AES', NVL(C.RFA_NO(+), 'X'), NVL(C.SC_NO(+), NVL(SPC_GET_SMP_AMEND_FNC(B.TRD_CD, SUBSTR(B.SEASON, 1, 6), SUBSTR(B.SEASON, 8), B.SC_NO), 'X')))
+               AND B.BKG_NO           = BC.BKG_NO  --20140304 추가
+               AND BC.BKG_CUST_TP_CD  = 'S'        --20140304 추가
+               AND EXISTS (SELECT 'A'
+                             FROM VSK_VSL_PORT_SKD
+                            WHERE VSL_CD     = A.VSL_CD
+                              AND SKD_VOY_NO = A.SKD_VOY_NO
+                              AND SKD_DIR_CD = A.DIR_CD  
+                              AND 'S'        <> NVL(SKD_CNG_STS_CD, 'X')
+                              AND YD_CD      IN (BV.POL_YD_CD, BV.POD_YD_CD) )
+           )
+     GROUP BY FM_YRWK   ,
+           TO_YRWK   ,
+           COST_WK   ,
+           TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           CUST_CTRL_CD,
+           DEST_LOC_CD
+)
+, MDL_DATA AS (
+    SELECT P.FM_YRWK,
+           P.TO_YRWK,
+           P.COST_WK,
+           P.TRD_CD,
+           P.SUB_TRD_CD,
+           P.RLANE_CD,
+           P.DIR_CD,
+           P.VSL_CD,
+           P.SKD_VOY_NO,
+           P.DIR_CD AS SKD_DIR_CD,
+           M.CUST_CTRL_CD,
+           'OTHERS' AS DEST_LOC_CD,
+           SUM(M.RLANE_ADJ_QTY) AS MDL_QTY
+      FROM SPC_MDL_CUST_REV_LANE M,
+           VVDS                  P
+     WHERE M.COST_YRWK      = SUBSTR(P.SEASON, 1, 6)
+       AND M.VER_SEQ        = SUBSTR(P.SEASON, 8)
+       AND M.TRD_CD         = P.TRD_CD
+       AND M.SUB_TRD_CD     = P.SUB_TRD_CD
+       AND M.RLANE_CD       = P.RLANE_CD
+     GROUP BY P.FM_YRWK,
+              P.TO_YRWK,
+              P.COST_WK,
+              P.TRD_CD,
+              P.SUB_TRD_CD,
+              P.RLANE_CD,
+              P.DIR_CD,
+              P.VSL_CD,
+              P.SKD_VOY_NO,
+              P.DIR_CD,
+              M.CUST_CTRL_CD
+) 
+SELECT TRD_CD,
+       SUB_TRD_CD,
+       RLANE_CD,
+       DIR_CD,
+       DECODE(RLANE_CD, 'TTL', 'ALL', VSL_CD||SKD_VOY_NO||SKD_DIR_CD) AS VVD,
+       BSA,
+       VSL_CD,
+       SKD_VOY_NO,
+       SKD_DIR_CD,
+#if (${type} == 'Y')
+       CUST_CTRL_CD,
+#else
+       DEST_LOC_CD,
+#end
+       MDL_QTY,
+       MDL_RTO||'%' AS MDL_RTO,
+       FCAST_QTY,
+       FCAST_DIFF,
+       FCAST_RTO||'%' AS FCAST_RTO,
+       (FCAST_RTO - MDL_RTO)||'%' AS FCAST_RTO_DIFF,
+       ALOC_QTY,
+       ALOC_DIFF,
+       ALOC_RTO||'%' AS ALOC_RTO,
+       (ALOC_RTO - MDL_RTO)||'%' AS ALOC_RTO_DIFF,
+       BKG_QTY,
+       BKG_DIFF,
+       BKG_RTO||'%' AS BKG_RTO,
+       (BKG_RTO - MDL_RTO)||'%' AS BKG_RTO_DIFF
+  FROM (
+        SELECT TRD_CD,
+               SUB_TRD_CD,
+               RLANE_CD,
+               DIR_CD,
+               VSL_CD,
+               SKD_VOY_NO,
+               SKD_DIR_CD,
+               BSA,
+#if (${type} == 'Y')
+               CUST_CTRL_CD,
+#else
+               DEST_LOC_CD,
+#end
+               MDL_QTY,
+               DECODE(MDL_TTL, 0, 0, ROUND(MDL_QTY / MDL_TTL, 2)) * 100 AS MDL_RTO,
+               FCAST_QTY,
+               FCAST_DIFF,
+               DECODE(FCAST_TTL, 0, 0, ROUND(FCAST_QTY / FCAST_TTL, 2)) * 100 AS FCAST_RTO,
+               ALOC_QTY,
+               ALOC_DIFF,
+               DECODE(ALOC_TTL, 0, 0, ROUND(ALOC_QTY / ALOC_TTL, 2)) * 100 AS ALOC_RTO,
+               BKG_QTY,
+               BKG_DIFF,
+               DECODE(BKG_TTL, 0, 0, ROUND(BKG_QTY / BKG_TTL, 2)) * 100 AS BKG_RTO
+          FROM (
+                SELECT TRD_CD,
+                       SUB_TRD_CD,
+                       RLANE_CD,
+                       DIR_CD,
+                       VSL_CD,
+                       SKD_VOY_NO,
+                       SKD_DIR_CD,
+                       BSA,
+#if (${type} == 'Y')
+                       CUST_CTRL_CD,
+                       DECODE(CUST_CTRL_CD, 'TOTAL', QTA_QTY, DECODE(SIGN(MDL_QTY), -1, 0, MDL_QTY)) AS MDL_QTY,
+                       MAX(QTA_QTY) OVER (PARTITION BY TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD) AS MDL_TTL,
+                       FCAST_QTY,
+                       (FCAST_QTY - DECODE(CUST_CTRL_CD, 'TOTAL', QTA_QTY, DECODE(SIGN(MDL_QTY), -1, 0, MDL_QTY))) AS FCAST_DIFF,
+                       MAX(FCAST_QTY) OVER (PARTITION BY TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD) AS FCAST_TTL,
+                       ALOC_QTY,
+                       (ALOC_QTY - DECODE(CUST_CTRL_CD, 'TOTAL', QTA_QTY, DECODE(SIGN(MDL_QTY), -1, 0, MDL_QTY))) AS ALOC_DIFF,
+                       MAX(ALOC_QTY) OVER (PARTITION BY TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD) AS ALOC_TTL,
+                       BKG_QTY,
+                       (BKG_QTY - DECODE(CUST_CTRL_CD, 'TOTAL', QTA_QTY, DECODE(SIGN(MDL_QTY), -1, 0, MDL_QTY))) AS BKG_DIFF,
+                       MAX(BKG_QTY) OVER (PARTITION BY TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD) AS BKG_TTL
+#else
+               	       DEST_LOC_CD,
+               	       DECODE(DEST_LOC_CD, 'TOTAL', QTA_QTY, DECODE(SIGN(MDL_QTY), -1, 0, MDL_QTY)) AS MDL_QTY,
+                       MAX(QTA_QTY) OVER (PARTITION BY TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD) AS MDL_TTL,
+                       FCAST_QTY,
+                       (FCAST_QTY - DECODE(DEST_LOC_CD, 'TOTAL', QTA_QTY, DECODE(SIGN(MDL_QTY), -1, 0, MDL_QTY))) AS FCAST_DIFF,
+                       MAX(FCAST_QTY) OVER (PARTITION BY TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD) AS FCAST_TTL,
+                       ALOC_QTY,
+                       (ALOC_QTY - DECODE(DEST_LOC_CD, 'TOTAL', QTA_QTY, DECODE(SIGN(MDL_QTY), -1, 0, MDL_QTY))) AS ALOC_DIFF,
+                       MAX(ALOC_QTY) OVER (PARTITION BY TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD) AS ALOC_TTL,
+                       BKG_QTY,
+                       (BKG_QTY - DECODE(DEST_LOC_CD, 'TOTAL', QTA_QTY, DECODE(SIGN(MDL_QTY), -1, 0, MDL_QTY))) AS BKG_DIFF,
+                       MAX(BKG_QTY) OVER (PARTITION BY TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD) AS BKG_TTL
+#end
+
+                  FROM (
+                        SELECT M.TRD_CD,
+                               M.SUB_TRD_CD,
+                               NVL(M.RLANE_CD, 'TTL') AS RLANE_CD,
+                               M.DIR_CD,
+                               M.VSL_CD,
+                               M.SKD_VOY_NO,
+                               M.SKD_DIR_CD,
+                               V.BSA_VOL AS BSA,
+#if (${type} == 'Y')
+                               NVL(CUST_CTRL_CD, 'TOTAL') AS CUST_CTRL_CD,
+#else
+			       NVL(DEST_LOC_CD, 'TOTAL') AS DEST_LOC_CD,
+#end
+                               SUM(QTA_QTY)   AS QTA_QTY,
+#if (${type} == 'Y')
+                               DECODE(CUST_CTRL_CD, 'C', SUM(QTA_QTY) - SUM(MDL_QTY), SUM(MDL_QTY))   AS MDL_QTY,
+#else
+                               DECODE(DEST_LOC_CD, 'OTHERS', SUM(QTA_QTY), 0)   AS MDL_QTY,
+#end                               
+                               SUM(FCAST_QTY) AS FCAST_QTY,
+                               SUM(ALOC_QTY)  AS ALOC_QTY,
+                               floor(SUM(BKG_QTY))   AS BKG_QTY--0042화면 내에서 integer처리하므로
+                          FROM (
+                                SELECT TRD_CD,
+                                       SUB_TRD_CD,
+                                       RLANE_CD,
+                                       DIR_CD,
+                                       VSL_CD,
+                                       SKD_VOY_NO,
+                                       SKD_DIR_CD,
+                                       0 AS BSA,
+#if (${type} == 'Y')
+                                       CUST_CTRL_CD,
+#else
+                                       DEST_LOC_CD,
+#end
+                                       QTA_QTY,
+                                       0 AS FCAST_QTY,
+                                       0 AS ALOC_QTY,
+                                       0 AS BKG_QTY,
+                                       0 AS MDL_QTY
+                                  FROM QTA_DATA
+                                 WHERE TO_YRWK = COST_WK 
+                                 UNION ALL
+                                SELECT TRD_CD,
+                                       SUB_TRD_CD,
+                                       RLANE_CD,
+                                       DIR_CD,
+                                       VSL_CD,
+                                       SKD_VOY_NO,
+                                       SKD_DIR_CD,
+                                       0 AS BSA,
+#if (${type} == 'Y')
+                                       CUST_CTRL_CD,
+#else
+                                       DEST_LOC_CD,
+#end
+                                       0 AS QTA_QTY,
+                                       FCAST_QTY,
+                                       0 AS ALOC_QTY,
+                                       0 AS BKG_QTY,
+                                       0 AS MDL_QTY
+                                  FROM FCAST_DATA
+                                 WHERE TO_YRWK = COST_WK
+                                 UNION ALL
+                                SELECT TRD_CD,
+                                       SUB_TRD_CD,
+                                       RLANE_CD,
+                                       DIR_CD,
+                                       VSL_CD,
+                                       SKD_VOY_NO,
+                                       SKD_DIR_CD,
+                                       0 AS BSA,
+#if (${type} == 'Y')
+                                       CUST_CTRL_CD,
+#else
+                                       DEST_LOC_CD,
+#end
+                                       0 AS QTA_QTY,
+                                       0 AS FCAST_QTY,
+                                       ALOC_QTY,
+                                       0 AS BKG_QTY,
+                                       0 AS MDL_QTY
+                                  FROM ALOC_DATA
+                                 WHERE TO_YRWK = COST_WK
+                                 UNION ALL
+                                SELECT TRD_CD,
+                                       SUB_TRD_CD,
+                                       RLANE_CD,
+                                       DIR_CD,
+                                       VSL_CD,
+                                       SKD_VOY_NO,
+                                       SKD_DIR_CD,
+                                       0 AS BSA,
+#if (${type} == 'Y')
+                                       CUST_CTRL_CD,
+#else
+                                       DEST_LOC_CD,
+#end
+                                       0 AS QTA_QTY,
+                                       0 AS FCAST_QTY,
+                                       0 AS ALOC_QTY,
+                                       BKG_QTY,
+                                       0 AS MDL_QTY
+                                  FROM BKG_DATA M
+                                 WHERE TO_YRWK = COST_WK
+                                 UNION ALL
+                                SELECT TRD_CD,
+                                       SUB_TRD_CD,
+                                       RLANE_CD,
+                                       DIR_CD,
+                                       VSL_CD,
+                                       SKD_VOY_NO,
+                                       SKD_DIR_CD,
+                                       0 AS BSA,
+#if (${type} == 'Y')
+                                       CUST_CTRL_CD,
+#else
+                                       DEST_LOC_CD,
+#end
+                                       0 AS QTA_QTY,
+                                       0 AS FCAST_QTY,
+                                       0 AS ALOC_QTY,
+                                       0 AS BKG_QTY,
+                                       MDL_QTY
+                                  FROM MDL_DATA M
+                                 WHERE TO_YRWK = COST_WK
+                                 UNION ALL
+                                SELECT TRD_CD,
+                                       SUB_TRD_CD,
+                                       RLANE_CD,
+                                       DIR_CD,
+                                       VSL_CD,
+                                       SKD_VOY_NO,
+                                       SKD_DIR_CD,
+                                       0 AS BSA,
+#if (${type} == 'Y')
+                                       'C' CUST_CTRL_CD,
+#else
+                                       'OTHERS'  AS DEST_LOC_CD,
+#end
+                                       
+                                       0 AS QTA_QTY,
+                                       0 AS FCAST_QTY,
+                                       0 AS ALOC_QTY,
+                                       0 AS BKG_QTY,
+                                       SUM(MDL_QTY) AS MDL_QTY
+                                  FROM MDL_DATA M
+                                 WHERE TO_YRWK = COST_WK
+                                 GROUP BY TRD_CD,
+                                          SUB_TRD_CD,
+                                          RLANE_CD,
+                                          DIR_CD,
+                                          VSL_CD,
+                                          SKD_VOY_NO,
+                                          SKD_DIR_CD,
+#if (${type} == 'Y')
+					  CUST_CTRL_CD
+#else					
+					  DEST_LOC_CD
+#end
+                            ) M,
+                              VVDS V
+                         WHERE M.TRD_CD = V.TRD_CD
+                           AND M.SUB_TRD_CD = V.SUB_TRD_CD
+                           AND M.RLANE_CD = V.RLANE_CD
+                           AND M.DIR_CD = V.DIR_CD
+                           AND M.VSL_CD = V.VSL_CD
+                           AND M.SKD_VOY_NO = V.SKD_VOY_NO
+                           AND M.SKD_DIR_CD = V.DIR_CD
+                         GROUP BY GROUPING SETS (
+                          #if (${type} == 'Y')
+                                                    (M.TRD_CD, M.SUB_TRD_CD, M.RLANE_CD, M.DIR_CD, M.VSL_CD, M.SKD_VOY_NO, M.SKD_DIR_CD, V.BSA_VOL, M.CUST_CTRL_CD),
+                          #else
+                                                    (M.TRD_CD, M.SUB_TRD_CD, M.RLANE_CD, M.DIR_CD, M.VSL_CD, M.SKD_VOY_NO, M.SKD_DIR_CD, V.BSA_VOL, M.DEST_LOC_CD),
+                          #end
+                                                    (M.TRD_CD, M.SUB_TRD_CD, M.RLANE_CD, M.DIR_CD, M.VSL_CD, M.SKD_VOY_NO, M.SKD_DIR_CD, V.BSA_VOL)
+                                                )
+                        ) 
+                   WHERE (QTA_QTY <> 0 OR MDL_QTY <> 0 OR FCAST_QTY <> 0 OR ALOC_QTY <> 0 OR BKG_QTY <> 0)    
+                  )
+          )                                 
+ ORDER BY RLANE_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD 
+ #if (${type} == 'Y')
+ 		,DECODE(CUST_CTRL_CD, 'TOTAL', '0', CUST_CTRL_CD)
+#else
+		,DECODE(DEST_LOC_CD, 'TOTAL', '0', 'OTHERS', 'XXXXX', DEST_LOC_CD)
+#end			]]></sql>
+			<params>
+				<param name="trd_cd" type="12" value="TPS" out="N"/>
+				<param name="week" type="12" value="201311" out="N"/>
+				<param name="sub_trd_cd" type="12" value="PS" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

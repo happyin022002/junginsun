@@ -1,0 +1,561 @@
+/*=========================================================
+*Copyright(c) 2011 CyberLogitec
+*@FileName : GeneralBookingReceiptDBDAOModifyChangedCtrtInfoUSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2011.10.14
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2011.10.14 
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.bkg.bookingconduct.generalbookingconduct.generalbookingreceipt.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class GeneralBookingReceiptDBDAOModifyChangedCtrtInfoUSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * GeneralBookingReceiptDBDAOModifyChangedCtrtInfoUSQL
+	  * </pre>
+	  */
+	public GeneralBookingReceiptDBDAOModifyChangedCtrtInfoUSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("ctrt_srep_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("bkg_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("ctrt_ofc_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("org_bkg_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.esm.bkg.bookingconduct.generalbookingconduct.generalbookingreceipt.integration").append("\n"); 
+		query.append("FileName : GeneralBookingReceiptDBDAOModifyChangedCtrtInfoUSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("#if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("UPDATE BKG_BKG_HIS BK" ).append("\n"); 
+		query.append("#else" ).append("\n"); 
+		query.append("UPDATE BKG_BOOKING BK " ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("   SET CTRT_OFC_CD = NVL((case " ).append("\n"); 
+		query.append("            when SUBSTR(NVL(BK.RFA_NO, 'DUM'), 1, 3) <> 'DUM' then " ).append("\n"); 
+		query.append("				(select distinct main.RESPB_SLS_OFC_CD			" ).append("\n"); 
+		query.append("                   from pri_rp_mn main" ).append("\n"); 
+		query.append("                        , pri_rp_hdr hdr" ).append("\n"); 
+		query.append("                    	, (SELECT " ).append("\n"); 
+		query.append("                    		   (select RT_APLY_DT --rate applicable" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    			  from BKG_RT_HIS rt" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    			   AND CORR_NO = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_rate r" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    #end" ).append("\n"); 
+		query.append("                    		       and rt_aply_dt is not null) rt_appl_dt," ).append("\n"); 
+		query.append("                    		   (select skd.vps_etd_dt --etd date" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    		      from bkg_vvd_his vvd, vsk_vsl_port_skd skd, bkg_bkg_his bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    			   and bk.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    			   and vvd.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_vvd vvd, vsk_vsl_port_skd skd, bkg_booking bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    #end " ).append("\n"); 
+		query.append("                    		       and bk.bkg_no          = vvd.bkg_no" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_pre_pst_cd in ('S', 'T')" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = bk.pol_cd" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_cd         = skd.vsl_cd" ).append("\n"); 
+		query.append("                    		       and vvd.skd_voy_no     = skd.skd_voy_no" ).append("\n"); 
+		query.append("                    		       and vvd.skd_dir_cd     = skd.skd_dir_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = skd.vps_port_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_CLPT_IND_SEQ = skd.CLPT_IND_SEQ" ).append("\n"); 
+		query.append("								   and rownum = 1) etd_dt" ).append("\n"); 
+		query.append("                    	  from dual) APPL_DT" ).append("\n"); 
+		query.append("                  where hdr.prop_no         = main.prop_no" ).append("\n"); 
+		query.append("                    and hdr.rfa_no          = BK.RFA_NO" ).append("\n"); 
+		query.append("					and MAIN.eff_dt - 0.0001 < nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("					AND MAIN.exp_dt + 0.9999 > nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("					AND ((main.amdt_seq = 0 and main.prop_sts_cd = 'A') or (main.amdt_seq > 0))" ).append("\n"); 
+		query.append("                   and rownum = 1)" ).append("\n"); 
+		query.append("			when SUBSTR(NVL(BK.TAA_NO, 'DUM'), 1, 3) <> 'DUM' then" ).append("\n"); 
+		query.append("				(select distinct RESPB_SLS_OFC_CD" ).append("\n"); 
+		query.append("                   from pri_taa_mn main" ).append("\n"); 
+		query.append("                        , pri_taa_hdr hdr" ).append("\n"); 
+		query.append("                    	, (SELECT " ).append("\n"); 
+		query.append("                    		   (select RT_APLY_DT --rate applicable" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    			  from BKG_RT_HIS rt" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    			   AND CORR_NO = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_rate r" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    #end" ).append("\n"); 
+		query.append("                    		       and rt_aply_dt is not null) rt_appl_dt," ).append("\n"); 
+		query.append("                    		   (select skd.vps_etd_dt --etd date" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    		      from bkg_vvd_his vvd, vsk_vsl_port_skd skd, bkg_bkg_his bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    			   and bk.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    			   and vvd.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_vvd vvd, vsk_vsl_port_skd skd, bkg_booking bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    #end " ).append("\n"); 
+		query.append("                    		       and bk.bkg_no          = vvd.bkg_no" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_pre_pst_cd in ('S', 'T')" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = bk.pol_cd" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_cd         = skd.vsl_cd" ).append("\n"); 
+		query.append("                    		       and vvd.skd_voy_no     = skd.skd_voy_no" ).append("\n"); 
+		query.append("                    		       and vvd.skd_dir_cd     = skd.skd_dir_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = skd.vps_port_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_CLPT_IND_SEQ = skd.CLPT_IND_SEQ" ).append("\n"); 
+		query.append("								   and rownum = 1) etd_dt" ).append("\n"); 
+		query.append("                    	  from dual) APPL_DT" ).append("\n"); 
+		query.append("				  WHERE HDR.TAA_PROP_NO      = MAIN.TAA_PROP_NO" ).append("\n"); 
+		query.append("                    and hdr.TAA_NO           = BK.TAA_NO" ).append("\n"); 
+		query.append("					and MAIN.eff_dt - 0.0001 < nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("					AND MAIN.exp_dt + 0.9999 > nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("			 	    and main.cfm_flg         = 'Y'" ).append("\n"); 
+		query.append("                    and rownum = 1)" ).append("\n"); 
+		query.append("			when SUBSTR(NVL(BK.SC_NO,  'DUM'), 1, 3) <> 'DUM' then " ).append("\n"); 
+		query.append("#if( ${ctrt_ofc_cd} != '' && ${ctrt_srep_cd} != '' )		" ).append("\n"); 
+		query.append("                @[ctrt_ofc_cd]" ).append("\n"); 
+		query.append("#elseif( ${org_bkg_no} != '' )		                	" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("                (select ctrt_ofc_cd from bkg_booking where bkg_no = @[org_bkg_no])" ).append("\n"); 
+		query.append("#else" ).append("\n"); 
+		query.append("                (SELECT OFC_CD FROM MDM_SLS_REP WHERE SREP_CD = BK.OB_SREP_CD)" ).append("\n"); 
+		query.append("#end " ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("            else (SELECT OFC_CD FROM MDM_SLS_REP WHERE SREP_CD = BK.OB_SREP_CD) end), (SELECT OFC_CD FROM MDM_SLS_REP WHERE SREP_CD = BK.OB_SREP_CD))" ).append("\n"); 
+		query.append(",	CTRT_SREP_CD = NVL((case " ).append("\n"); 
+		query.append("            when SUBSTR(NVL(BK.RFA_NO, 'DUM'), 1, 3) <> 'DUM' then " ).append("\n"); 
+		query.append("				(select distinct main.RESPB_SREP_CD" ).append("\n"); 
+		query.append("                   from pri_rp_mn main" ).append("\n"); 
+		query.append("                        , pri_rp_hdr hdr" ).append("\n"); 
+		query.append("                    	, (SELECT " ).append("\n"); 
+		query.append("                    		   (select RT_APLY_DT --rate applicable" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    			  from BKG_RT_HIS rt" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    			   AND CORR_NO = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_rate r" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    #end" ).append("\n"); 
+		query.append("                    		       and rt_aply_dt is not null) rt_appl_dt," ).append("\n"); 
+		query.append("                    		   (select skd.vps_etd_dt --etd date" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    		      from bkg_vvd_his vvd, vsk_vsl_port_skd skd, bkg_bkg_his bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    			   and bk.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    			   and vvd.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_vvd vvd, vsk_vsl_port_skd skd, bkg_booking bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    #end " ).append("\n"); 
+		query.append("                    		       and bk.bkg_no          = vvd.bkg_no" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_pre_pst_cd in ('S', 'T')" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = bk.pol_cd" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_cd         = skd.vsl_cd" ).append("\n"); 
+		query.append("                    		       and vvd.skd_voy_no     = skd.skd_voy_no" ).append("\n"); 
+		query.append("                    		       and vvd.skd_dir_cd     = skd.skd_dir_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = skd.vps_port_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_CLPT_IND_SEQ = skd.CLPT_IND_SEQ" ).append("\n"); 
+		query.append("								   and rownum = 1) etd_dt" ).append("\n"); 
+		query.append("                    	  from dual) APPL_DT" ).append("\n"); 
+		query.append("                  where hdr.prop_no         = main.prop_no" ).append("\n"); 
+		query.append("                    and hdr.rfa_no          = BK.RFA_NO" ).append("\n"); 
+		query.append("					and MAIN.eff_dt - 0.0001 < nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("					AND MAIN.exp_dt + 0.9999 > nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("					AND ((main.amdt_seq = 0 and main.prop_sts_cd = 'A') or (main.amdt_seq > 0))" ).append("\n"); 
+		query.append("                   and rownum = 1)" ).append("\n"); 
+		query.append("			when SUBSTR(NVL(BK.TAA_NO, 'DUM'), 1, 3) <> 'DUM' then " ).append("\n"); 
+		query.append("				(select distinct RESPB_SREP_CD" ).append("\n"); 
+		query.append("                   from pri_taa_mn main" ).append("\n"); 
+		query.append("                        , pri_taa_hdr hdr" ).append("\n"); 
+		query.append("                    	, (SELECT " ).append("\n"); 
+		query.append("                    		   (select RT_APLY_DT --rate applicable" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    			  from BKG_RT_HIS rt" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    			   AND CORR_NO = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_rate r" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    #end" ).append("\n"); 
+		query.append("                    		       and rt_aply_dt is not null) rt_appl_dt," ).append("\n"); 
+		query.append("                    		   (select skd.vps_etd_dt --etd date" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    		      from bkg_vvd_his vvd, vsk_vsl_port_skd skd, bkg_bkg_his bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    			   and bk.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    			   and vvd.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_vvd vvd, vsk_vsl_port_skd skd, bkg_booking bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    #end " ).append("\n"); 
+		query.append("                    		       and bk.bkg_no          = vvd.bkg_no" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_pre_pst_cd in ('S', 'T')" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = bk.pol_cd" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_cd         = skd.vsl_cd" ).append("\n"); 
+		query.append("                    		       and vvd.skd_voy_no     = skd.skd_voy_no" ).append("\n"); 
+		query.append("                    		       and vvd.skd_dir_cd     = skd.skd_dir_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = skd.vps_port_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_CLPT_IND_SEQ = skd.CLPT_IND_SEQ" ).append("\n"); 
+		query.append("								   and rownum = 1) etd_dt" ).append("\n"); 
+		query.append("                    	  from dual) APPL_DT" ).append("\n"); 
+		query.append("				  WHERE HDR.TAA_PROP_NO      = MAIN.TAA_PROP_NO" ).append("\n"); 
+		query.append("                    and hdr.TAA_NO           = BK.TAA_NO" ).append("\n"); 
+		query.append("					and MAIN.eff_dt - 0.0001 < nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("					AND MAIN.exp_dt + 0.9999 > nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("			 	    and main.cfm_flg         = 'Y'" ).append("\n"); 
+		query.append("                    and rownum = 1)" ).append("\n"); 
+		query.append("			when SUBSTR(NVL(BK.SC_NO,  'DUM'), 1, 3) <> 'DUM' then " ).append("\n"); 
+		query.append("#if( ${ctrt_ofc_cd} != '' && ${ctrt_srep_cd} != '' )		" ).append("\n"); 
+		query.append("                @[ctrt_srep_cd]" ).append("\n"); 
+		query.append("#elseif( ${org_bkg_no} != '' )		                	" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("                (select ctrt_srep_cd from bkg_booking where bkg_no = @[org_bkg_no])" ).append("\n"); 
+		query.append("#else" ).append("\n"); 
+		query.append("                BK.OB_SREP_CD" ).append("\n"); 
+		query.append("#end " ).append("\n"); 
+		query.append("            else BK.OB_SREP_CD end), BK.OB_SREP_CD)" ).append("\n"); 
+		query.append(",   CTRT_CUST_CNT_CD = NVL((case " ).append("\n"); 
+		query.append("			when SUBSTR(NVL(BK.RFA_NO, 'DUM'), 1, 3) <> 'DUM' then " ).append("\n"); 
+		query.append("            				(select distinct main.CTRT_CUST_CNT_CD			" ).append("\n"); 
+		query.append("                               from pri_rp_mn main" ).append("\n"); 
+		query.append("                                    , pri_rp_hdr hdr" ).append("\n"); 
+		query.append("                    	, (SELECT " ).append("\n"); 
+		query.append("                    		   (select RT_APLY_DT --rate applicable" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    			  from BKG_RT_HIS rt" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    			   AND CORR_NO = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_rate r" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    #end" ).append("\n"); 
+		query.append("                    		       and rt_aply_dt is not null) rt_appl_dt," ).append("\n"); 
+		query.append("                    		   (select skd.vps_etd_dt --etd date" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    		      from bkg_vvd_his vvd, vsk_vsl_port_skd skd, bkg_bkg_his bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    			   and bk.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    			   and vvd.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_vvd vvd, vsk_vsl_port_skd skd, bkg_booking bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    #end " ).append("\n"); 
+		query.append("                    		       and bk.bkg_no          = vvd.bkg_no" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_pre_pst_cd in ('S', 'T')" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = bk.pol_cd" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_cd         = skd.vsl_cd" ).append("\n"); 
+		query.append("                    		       and vvd.skd_voy_no     = skd.skd_voy_no" ).append("\n"); 
+		query.append("                    		       and vvd.skd_dir_cd     = skd.skd_dir_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = skd.vps_port_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_CLPT_IND_SEQ = skd.CLPT_IND_SEQ" ).append("\n"); 
+		query.append("								   and rownum = 1) etd_dt" ).append("\n"); 
+		query.append("                    	  from dual) APPL_DT" ).append("\n"); 
+		query.append("                              where hdr.prop_no         = main.prop_no" ).append("\n"); 
+		query.append("                                and hdr.rfa_no          = BK.RFA_NO" ).append("\n"); 
+		query.append("								and MAIN.eff_dt - 0.0001 < nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("								AND MAIN.exp_dt + 0.9999 > nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("            					AND ((main.amdt_seq = 0 and main.prop_sts_cd = 'A') or (main.amdt_seq > 0))" ).append("\n"); 
+		query.append("                               and rownum = 1)" ).append("\n"); 
+		query.append("            			when SUBSTR(NVL(BK.TAA_NO, 'DUM'), 1, 3) <> 'DUM' then" ).append("\n"); 
+		query.append("            				(select distinct CTRT_CUST_CNT_CD" ).append("\n"); 
+		query.append("                               from pri_taa_mn main" ).append("\n"); 
+		query.append("                                    , pri_taa_hdr hdr" ).append("\n"); 
+		query.append("                    	, (SELECT " ).append("\n"); 
+		query.append("                    		   (select RT_APLY_DT --rate applicable" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    			  from BKG_RT_HIS rt" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    			   AND CORR_NO = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_rate r" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    #end" ).append("\n"); 
+		query.append("                    		       and rt_aply_dt is not null) rt_appl_dt," ).append("\n"); 
+		query.append("                    		   (select skd.vps_etd_dt --etd date" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    		      from bkg_vvd_his vvd, vsk_vsl_port_skd skd, bkg_bkg_his bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    			   and bk.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    			   and vvd.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_vvd vvd, vsk_vsl_port_skd skd, bkg_booking bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    #end " ).append("\n"); 
+		query.append("                    		       and bk.bkg_no          = vvd.bkg_no" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_pre_pst_cd in ('S', 'T')" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = bk.pol_cd" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_cd         = skd.vsl_cd" ).append("\n"); 
+		query.append("                    		       and vvd.skd_voy_no     = skd.skd_voy_no" ).append("\n"); 
+		query.append("                    		       and vvd.skd_dir_cd     = skd.skd_dir_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = skd.vps_port_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_CLPT_IND_SEQ = skd.CLPT_IND_SEQ" ).append("\n"); 
+		query.append("								   and rownum = 1) etd_dt" ).append("\n"); 
+		query.append("                    	  from dual) APPL_DT" ).append("\n"); 
+		query.append("            				  WHERE HDR.TAA_PROP_NO      = MAIN.TAA_PROP_NO" ).append("\n"); 
+		query.append("                                and hdr.TAA_NO           = BK.TAA_NO" ).append("\n"); 
+		query.append("								and MAIN.eff_dt - 0.0001 < nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("								AND MAIN.exp_dt + 0.9999 > nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("            			 	    and main.cfm_flg         = 'Y'" ).append("\n"); 
+		query.append("                                and rownum = 1)" ).append("\n"); 
+		query.append("            			when SUBSTR(NVL(BK.SC_NO,  'DUM'), 1, 3) <> 'DUM' then " ).append("\n"); 
+		query.append("            				(select distinct nvl(main.REAL_CUST_CNT_CD, cust.CUST_CNT_CD)" ).append("\n"); 
+		query.append("            				   FROM PRI_SP_HDR HDR" ).append("\n"); 
+		query.append("            						, PRI_SP_MN MAIN" ).append("\n"); 
+		query.append("            						, PRI_SP_CTRT_PTY cust" ).append("\n"); 
+		query.append("                    	, (SELECT " ).append("\n"); 
+		query.append("                    		   (select RT_APLY_DT --rate applicable" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    			  from BKG_RT_HIS rt" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    			   AND CORR_NO = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_rate r" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    #end" ).append("\n"); 
+		query.append("                    		       and rt_aply_dt is not null) rt_appl_dt," ).append("\n"); 
+		query.append("                    		   (select skd.vps_etd_dt --etd date" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    		      from bkg_vvd_his vvd, vsk_vsl_port_skd skd, bkg_bkg_his bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    			   and bk.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    			   and vvd.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_vvd vvd, vsk_vsl_port_skd skd, bkg_booking bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    #end " ).append("\n"); 
+		query.append("                    		       and bk.bkg_no          = vvd.bkg_no" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_pre_pst_cd in ('S', 'T')" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = bk.pol_cd" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_cd         = skd.vsl_cd" ).append("\n"); 
+		query.append("                    		       and vvd.skd_voy_no     = skd.skd_voy_no" ).append("\n"); 
+		query.append("                    		       and vvd.skd_dir_cd     = skd.skd_dir_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = skd.vps_port_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_CLPT_IND_SEQ = skd.CLPT_IND_SEQ" ).append("\n"); 
+		query.append("								   and rownum = 1) etd_dt" ).append("\n"); 
+		query.append("                    	  from dual) APPL_DT" ).append("\n"); 
+		query.append("            				  WHERE HDR.PROP_NO = MAIN.PROP_NO" ).append("\n"); 
+		query.append("            				    and main.prop_no = cust.prop_no" ).append("\n"); 
+		query.append("            				    and main.AMDT_SEQ = cust.AMDT_SEQ" ).append("\n"); 
+		query.append("            				    and cust.PRC_CTRT_PTY_TP_CD = 'C'" ).append("\n"); 
+		query.append("                                and hdr.sc_no        = BK.SC_NO" ).append("\n"); 
+		query.append("								and MAIN.eff_dt - 0.0001 < nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("								AND MAIN.exp_dt + 0.9999 > nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("            					and main.prop_sts_cd = 'F'" ).append("\n"); 
+		query.append("            					and rownum = 1)" ).append("\n"); 
+		query.append("                        else null end)" ).append("\n"); 
+		query.append("		#if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("					, NVL((select cust_cnt_cd from bkg_cust_his cust where cust.bkg_no = bk.bkg_no and bkg_cust_tp_cd = 'S' and cust.corr_no = 'TMP0000001')" ).append("\n"); 
+		query.append("					    , (select cust_cnt_cd from bkg_cust_his cust where cust.bkg_no = bk.bkg_no and bkg_cust_tp_cd = 'F' and cust.corr_no = 'TMP0000001')))" ).append("\n"); 
+		query.append("		#else" ).append("\n"); 
+		query.append("					, NVL((select cust_cnt_cd from bkg_customer cust where cust.bkg_no = bk.bkg_no and bkg_cust_tp_cd = 'S')" ).append("\n"); 
+		query.append("					    , (select cust_cnt_cd from bkg_customer cust where cust.bkg_no = bk.bkg_no and bkg_cust_tp_cd = 'F')))" ).append("\n"); 
+		query.append("		#end" ).append("\n"); 
+		query.append(",   CTRT_CUST_SEQ = NVL((case " ).append("\n"); 
+		query.append("                when SUBSTR(NVL(BK.RFA_NO, 'DUM'), 1, 3) <> 'DUM' then " ).append("\n"); 
+		query.append("            				(select distinct main.CTRT_CUST_SEQ" ).append("\n"); 
+		query.append("                               from pri_rp_mn main" ).append("\n"); 
+		query.append("                                    , pri_rp_hdr hdr" ).append("\n"); 
+		query.append("                    	, (SELECT " ).append("\n"); 
+		query.append("                    		   (select RT_APLY_DT --rate applicable" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    			  from BKG_RT_HIS rt" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    			   AND CORR_NO = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_rate r" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    #end" ).append("\n"); 
+		query.append("                    		       and rt_aply_dt is not null) rt_appl_dt," ).append("\n"); 
+		query.append("                    		   (select skd.vps_etd_dt --etd date" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    		      from bkg_vvd_his vvd, vsk_vsl_port_skd skd, bkg_bkg_his bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    			   and bk.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    			   and vvd.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_vvd vvd, vsk_vsl_port_skd skd, bkg_booking bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    #end " ).append("\n"); 
+		query.append("                    		       and bk.bkg_no          = vvd.bkg_no" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_pre_pst_cd in ('S', 'T')" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = bk.pol_cd" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_cd         = skd.vsl_cd" ).append("\n"); 
+		query.append("                    		       and vvd.skd_voy_no     = skd.skd_voy_no" ).append("\n"); 
+		query.append("                    		       and vvd.skd_dir_cd     = skd.skd_dir_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = skd.vps_port_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_CLPT_IND_SEQ = skd.CLPT_IND_SEQ" ).append("\n"); 
+		query.append("								   and rownum = 1) etd_dt" ).append("\n"); 
+		query.append("                    	  from dual) APPL_DT" ).append("\n"); 
+		query.append("                              where hdr.prop_no         = main.prop_no" ).append("\n"); 
+		query.append("                                and hdr.rfa_no          = BK.RFA_NO" ).append("\n"); 
+		query.append("            					and MAIN.eff_dt - 0.0001 < nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("            					AND MAIN.exp_dt + 0.9999 > nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("            					AND ((main.amdt_seq = 0 and main.prop_sts_cd = 'A') or (main.amdt_seq > 0))" ).append("\n"); 
+		query.append("                               and rownum = 1)" ).append("\n"); 
+		query.append("            			when SUBSTR(NVL(BK.TAA_NO, 'DUM'), 1, 3) <> 'DUM' then " ).append("\n"); 
+		query.append("            				(select distinct CTRT_CUST_SEQ" ).append("\n"); 
+		query.append("                               from pri_taa_mn main" ).append("\n"); 
+		query.append("                                    , pri_taa_hdr hdr" ).append("\n"); 
+		query.append("                    	, (SELECT " ).append("\n"); 
+		query.append("                    		   (select RT_APLY_DT --rate applicable" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    			  from BKG_RT_HIS rt" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    			   AND CORR_NO = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_rate r" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    #end" ).append("\n"); 
+		query.append("                    		       and rt_aply_dt is not null) rt_appl_dt," ).append("\n"); 
+		query.append("                    		   (select skd.vps_etd_dt --etd date" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    		      from bkg_vvd_his vvd, vsk_vsl_port_skd skd, bkg_bkg_his bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    			   and bk.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    			   and vvd.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_vvd vvd, vsk_vsl_port_skd skd, bkg_booking bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    #end " ).append("\n"); 
+		query.append("                    		       and bk.bkg_no          = vvd.bkg_no" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_pre_pst_cd in ('S', 'T')" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = bk.pol_cd" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_cd         = skd.vsl_cd" ).append("\n"); 
+		query.append("                    		       and vvd.skd_voy_no     = skd.skd_voy_no" ).append("\n"); 
+		query.append("                    		       and vvd.skd_dir_cd     = skd.skd_dir_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = skd.vps_port_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_CLPT_IND_SEQ = skd.CLPT_IND_SEQ" ).append("\n"); 
+		query.append("								   and rownum = 1) etd_dt" ).append("\n"); 
+		query.append("                    	  from dual) APPL_DT" ).append("\n"); 
+		query.append("            				  WHERE HDR.TAA_PROP_NO      = MAIN.TAA_PROP_NO" ).append("\n"); 
+		query.append("                                and hdr.TAA_NO           = BK.TAA_NO" ).append("\n"); 
+		query.append("								and MAIN.eff_dt - 0.0001 < nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("								AND MAIN.exp_dt + 0.9999 > nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("            			 	    and main.cfm_flg         = 'Y'" ).append("\n"); 
+		query.append("                                and rownum = 1)" ).append("\n"); 
+		query.append("            			when SUBSTR(NVL(BK.SC_NO,  'DUM'), 1, 3) <> 'DUM' then " ).append("\n"); 
+		query.append("            				(select distinct nvl(main.REAL_CUST_SEQ, CUST_SEQ)" ).append("\n"); 
+		query.append("            				   FROM PRI_SP_HDR HDR" ).append("\n"); 
+		query.append("            						, PRI_SP_MN MAIN" ).append("\n"); 
+		query.append("            						, PRI_SP_CTRT_PTY cust" ).append("\n"); 
+		query.append("                    	, (SELECT " ).append("\n"); 
+		query.append("                    		   (select RT_APLY_DT --rate applicable" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    			  from BKG_RT_HIS rt" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    			   AND CORR_NO = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_rate r" ).append("\n"); 
+		query.append("                    		     where bkg_no = @[bkg_no]" ).append("\n"); 
+		query.append("                    #end" ).append("\n"); 
+		query.append("                    		       and rt_aply_dt is not null) rt_appl_dt," ).append("\n"); 
+		query.append("                    		   (select skd.vps_etd_dt --etd date" ).append("\n"); 
+		query.append("                    #if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("                    		      from bkg_vvd_his vvd, vsk_vsl_port_skd skd, bkg_bkg_his bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    			   and bk.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    			   and vvd.corr_no 		  = 'TMP0000001'" ).append("\n"); 
+		query.append("                    #else" ).append("\n"); 
+		query.append("                    		      from bkg_vvd vvd, vsk_vsl_port_skd skd, bkg_booking bk" ).append("\n"); 
+		query.append("                    		     where bk.bkg_no          = @[bkg_no]  " ).append("\n"); 
+		query.append("                    #end " ).append("\n"); 
+		query.append("                    		       and bk.bkg_no          = vvd.bkg_no" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_pre_pst_cd in ('S', 'T')" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = bk.pol_cd" ).append("\n"); 
+		query.append("                    		       and vvd.vsl_cd         = skd.vsl_cd" ).append("\n"); 
+		query.append("                    		       and vvd.skd_voy_no     = skd.skd_voy_no" ).append("\n"); 
+		query.append("                    		       and vvd.skd_dir_cd     = skd.skd_dir_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_cd         = skd.vps_port_cd" ).append("\n"); 
+		query.append("                    		       and vvd.pol_CLPT_IND_SEQ = skd.CLPT_IND_SEQ" ).append("\n"); 
+		query.append("								   and rownum = 1) etd_dt" ).append("\n"); 
+		query.append("                    	  from dual) APPL_DT" ).append("\n"); 
+		query.append("            				  WHERE HDR.PROP_NO          = MAIN.PROP_NO" ).append("\n"); 
+		query.append("            				    and main.prop_no = cust.prop_no" ).append("\n"); 
+		query.append("            				    and main.AMDT_SEQ = cust.AMDT_SEQ" ).append("\n"); 
+		query.append("            				    and cust.PRC_CTRT_PTY_TP_CD = 'C'" ).append("\n"); 
+		query.append("                                and hdr.sc_no            = BK.SC_NO" ).append("\n"); 
+		query.append("								and MAIN.eff_dt - 0.0001 < nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("								AND MAIN.exp_dt + 0.9999 > nvl(NVL(APPL_DT.RT_APPL_DT, APPL_DT.ETD_DT), bk.bkg_cre_dt)" ).append("\n"); 
+		query.append("            					and main.prop_sts_cd = 'F'" ).append("\n"); 
+		query.append("            					and rownum = 1)" ).append("\n"); 
+		query.append("                        else null end)" ).append("\n"); 
+		query.append("		#if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("					, NVL((select cust_seq from bkg_cust_his cust where cust.bkg_no = bk.bkg_no and bkg_cust_tp_cd = 'S' and cust.corr_no = 'TMP0000001')" ).append("\n"); 
+		query.append("					    , (select cust_seq from bkg_cust_his cust where cust.bkg_no = bk.bkg_no and bkg_cust_tp_cd = 'F' and cust.corr_no = 'TMP0000001')))" ).append("\n"); 
+		query.append("		#else" ).append("\n"); 
+		query.append("					, NVL((select cust_seq from bkg_customer cust where cust.bkg_no = bk.bkg_no and bkg_cust_tp_cd = 'S')" ).append("\n"); 
+		query.append("						, (select cust_seq from bkg_customer cust where cust.bkg_no = bk.bkg_no and bkg_cust_tp_cd = 'F')))" ).append("\n"); 
+		query.append("		#end" ).append("\n"); 
+		query.append("WHERE	BKG_NO = @[bkg_no]" ).append("\n"); 
+		query.append("#if (${ca_flg}== 'Y')" ).append("\n"); 
+		query.append("AND   CORR_NO = 'TMP0000001'" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+
+	}
+}

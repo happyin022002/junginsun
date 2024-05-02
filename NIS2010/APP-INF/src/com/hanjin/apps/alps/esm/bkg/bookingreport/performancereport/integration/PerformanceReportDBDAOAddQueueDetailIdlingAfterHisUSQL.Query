@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PerformanceReportDBDAOAddQueueDetailIdlingAfterHisUSQL">
+			<desc><![CDATA[이전 History와 현재 작업간의 Idling(Actual/Biz/Over)을 관리한다.]]></desc>
+			<sql><![CDATA[
+MERGE INTO BKG_SR_HIS TMP
+      USING(SELECT I.SR_HIS_SEQ,
+                   I.AEND_DT - I.AST_DT SR_IDLE_HRS,
+    	           SUM(CASE WHEN TO_CHAR(I.ST_FM_DT,'D') IN (1,7) OR I.HOL_FLG = 'Y' THEN I.ST_FM_DT
+                            WHEN I.AEND_DT BETWEEN I.ST_FM_DT AND I.ST_TO_DT THEN I.AEND_DT
+                            WHEN I.ST_TO_DT < I.AEND_DT THEN I.ST_TO_DT
+                            WHEN I.AEND_DT < I.ST_FM_DT THEN I.ST_FM_DT
+                            ELSE I.ST_TO_DT + 1
+                        END
+                     -
+                       CASE WHEN TO_CHAR(I.ST_FM_DT,'D') IN (1,7) OR I.HOL_FLG = 'Y' THEN I.ST_FM_DT
+                            WHEN I.AST_DT BETWEEN I.ST_FM_DT AND I.ST_TO_DT THEN I.AST_DT 
+                            WHEN I.ST_FM_DT > I.AST_DT THEN I.ST_FM_DT 
+                            WHEN I.AST_DT > I.ST_TO_DT THEN I.ST_TO_DT 
+                            ELSE I.ST_FM_DT -1
+                        END) SR_WRK_TM_IDLE_HRS,     
+                    I.AEND_DT - I.AST_DT -
+    	           SUM(CASE WHEN TO_CHAR(I.ST_FM_DT,'D') IN (1,7) OR I.HOL_FLG = 'Y' THEN I.ST_FM_DT
+                            WHEN I.AEND_DT BETWEEN I.ST_FM_DT AND I.ST_TO_DT THEN I.AEND_DT
+                            WHEN I.ST_TO_DT < I.AEND_DT THEN I.ST_TO_DT
+                            WHEN I.AEND_DT < I.ST_FM_DT THEN I.ST_FM_DT
+                            ELSE I.ST_TO_DT + 1
+                        END
+                     -
+                       CASE WHEN TO_CHAR(I.ST_FM_DT,'D') IN (1,7) OR I.HOL_FLG = 'Y' THEN I.ST_FM_DT
+                            WHEN I.AST_DT BETWEEN I.ST_FM_DT AND I.ST_TO_DT THEN I.AST_DT 
+                            WHEN I.ST_FM_DT > I.AST_DT THEN I.ST_FM_DT 
+                            WHEN I.AST_DT > I.ST_TO_DT THEN I.ST_TO_DT 
+                            ELSE I.ST_FM_DT -1
+                        END
+                     +
+                       CASE WHEN (TO_CHAR(I.ST_FM_DT,'D') IN (1,7) OR I.HOL_FLG = 'Y' )
+                                     AND I.AST_DT > I.ST_FM_DT AND I.AEND_DT > I.ST_TO_DT THEN I.ST_TO_DT - I.AST_DT
+                                WHEN (TO_CHAR(I.ST_FM_DT,'D') IN (1,7) OR I.HOL_FLG = 'Y' )
+                                     AND I.AST_DT < I.ST_FM_DT AND I.AEND_DT < I.ST_TO_DT THEN I.AEND_DT - I.ST_FM_DT
+                                WHEN (TO_CHAR(I.ST_FM_DT,'D') IN (1,7) OR I.HOL_FLG = 'Y' )
+                                     AND I.AST_DT > I.ST_FM_DT AND I.AEND_DT < I.ST_TO_DT THEN I.AEND_DT - I.AST_DT
+                                WHEN TO_CHAR(I.ST_FM_DT,'D') IN (1,7) OR I.HOL_FLG = 'Y'  THEN 1
+                                ELSE 0
+                        END) SR_OVT_IDLE_HRS
+    	      FROM
+                 (SELECT SR_HIS_SEQ, AST_DT, AEND_DT, ST_FM_DT, ST_TO_DT,
+                         (SELECT DECODE(COUNT(DISTINCT HOL_DT),0,'N','Y')
+                          FROM DMT_HOLIDAY H, MDM_ORGANIZATION O,MDM_LOCATION L
+    				      WHERE O.OFC_CD = (SELECT BKG_OFC_CD FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+                          AND O.LOC_CD = L.LOC_CD
+                          AND (H.CNT_CD = L.CNT_CD OR H.CNT_CD = ' ')
+                          AND (H.RGN_CD = L.RGN_CD OR H.RGN_CD = ' ')
+                          AND (H.STE_CD = L.STE_CD OR H.STE_CD = ' ')
+                          AND (H.LOC_CD = L.LOC_CD OR H.LOC_CD = ' ')
+                          AND HOL_DT BETWEEN TRUNC(ST_FM_DT) AND TRUNC(ST_TO_DT)) HOL_FLG
+    		      FROM (SELECT SR_HIS_SEQ, AST_DT, AEND_DT,
+                               TO_DATE(TO_CHAR(AST_DT,'YYYYMMDD')||W.DOC_WRK_ST_HRMNT,'YYYYMMDDHH24MI') 
+                                 - DECODE(W.DOC_WRK_OVN_FLG,'Y',DECODE(SIGN(AST_DT - TO_DATE(TO_CHAR(AST_DT,'YYYYMMDD')||W.DOC_WRK_ST_HRMNT,'YYYYMMDDHH24MI')),-1,1,0),0) 
+                                 + CNT -1 ST_FM_DT,
+                               TO_DATE(TO_CHAR(AST_DT+DECODE(W.DOC_WRK_OVN_FLG,'Y',1,0),'YYYYMMDD')||W.DOC_WRK_END_HRMNT,'YYYYMMDDHH24MI') 
+                                 - DECODE(W.DOC_WRK_OVN_FLG,'Y',DECODE(SIGN(AST_DT - TO_DATE(TO_CHAR(AST_DT,'YYYYMMDD')||W.DOC_WRK_ST_HRMNT,'YYYYMMDDHH24MI')),-1,1,0),0) 
+                                 + CNT -1 ST_TO_DT
+                         FROM BKG_DPCS_OFC_WRK_TM W, 
+                             (SELECT /*+ INDEX_DESC(BKG_SR_HIS XPKBKG_SR_HIS) */ SR_HIS_SEQ, 
+                                     TO_DATE(@[wrk_st_tm],'YYYYMMDD HH24:MI:SS') AEND_DT 
+                              FROM BKG_SR_HIS
+                              WHERE SR_KND_CD   = @[src_cd]
+                              AND SR_NO        = @[sr_no]
+                              AND BKG_NO       = @[bkg_no]
+                              AND ROWNUM = 1 ) ST,
+                             (SELECT ST_DT AST_DT 
+                              FROM BKG_SR_HIS
+                              WHERE SR_KND_CD   = @[src_cd]
+                              AND SR_NO        = @[sr_no]
+                              AND BKG_NO       = @[bkg_no]
+                              AND SR_HIS_SEQ = (SELECT /*+ INDEX_DESC(BKG_SR_HIS XPKBKG_SR_HIS) */ SR_HIS_SEQ
+                                                FROM BKG_SR_HIS
+                                                  WHERE SR_KND_CD   = @[src_cd]
+                                                  AND SR_NO        = @[sr_no]
+                                                  AND BKG_NO       = @[bkg_no]
+                                                  AND ROWNUM = 1 ) -1) ED,
+                             (SELECT ROWNUM CNT FROM DICT) C
+                         WHERE W.BKG_OFC_CD = (SELECT BKG_OFC_CD FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+                         AND C.CNT <= REPLACE(CEIL(AEND_DT - AST_DT),0,1))) I
+    	    GROUP BY I.SR_HIS_SEQ, I.AEND_DT, I.AST_DT) IDL
+      ON (TMP.SR_KND_CD = @[src_cd]
+         AND TMP.SR_NO = @[sr_no]
+         AND TMP.BKG_NO = @[bkg_no]
+         AND TMP.SR_HIS_SEQ = IDL.SR_HIS_SEQ)
+WHEN MATCHED THEN
+      UPDATE SET TMP.SR_IDLE_HRS = IDL.SR_IDLE_HRS,
+                 TMP.SR_WRK_TM_IDLE_HRS = IDL.SR_WRK_TM_IDLE_HRS,
+                 TMP.SR_OVT_IDLE_HRS = IDL.SR_OVT_IDLE_HRS			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="wrk_st_tm" type="12" value="" out="N"/>
+				<param name="src_cd" type="12" value="" out="N"/>
+				<param name="sr_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

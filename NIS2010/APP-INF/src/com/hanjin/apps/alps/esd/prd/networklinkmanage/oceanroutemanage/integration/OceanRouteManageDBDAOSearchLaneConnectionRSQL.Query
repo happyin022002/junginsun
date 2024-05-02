@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="OceanRouteManageDBDAOSearchLaneConnectionRSQL">
+			<desc><![CDATA[SearchLaneConnection]]></desc>
+			<sql><![CDATA[
+SELECT LC.STD_PORT, 
+        LC.FM_LANE, LC.FM_CRR, LC.FM_DIR, LC.FM_TML, LC.FM_TML_NM, 
+        LC.TO_LANE, LC.TO_CRR, LC.TO_DIR, LC.TO_TML, LC.TO_TML_NM, 
+        DECODE(  
+                 DECODE(LC.FM_ETB, 'SUN', 7, 'MON', 6, 'TUE', 5, 'WED', 4, 'THU', 3, 'FRI', 2, 'SAT', 1) 
+                 - DECODE(LC.TO_ETB, 'SUN', 7, 'MON', 6, 'TUE', 5, 'WED', 4, 'THU', 3, 'FRI', 2, 'SAT', 1) 
+                 ,  -1, 7, -2, 6, -3, 5, -4, 4, -5, 3, -6, 2, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7 ) * 24 ST_TIME ,  
+        STL.LNK_FM_NOD_CD FM_STL, STL.LNK_TO_NOD_CD TO_STL, STL.STL_COST_CD STL_COST_CD,  
+        STL.STL_GRP_CD STL_GRP,  
+        DECODE(LC.FM_TML, LC.TO_TML, 0, NVL(STL_AMT_D2, PRD_GET_LINK_COST_FNC(LC.STD_PORT, 'D2', @[con_type] , @[i_cost_yrmon] ))) STL_AMT_D2,   
+        DECODE(LC.FM_TML, LC.TO_TML, 0, NVL(STL_AMT_D4, PRD_GET_LINK_COST_FNC(LC.STD_PORT, 'D4', @[con_type] , @[i_cost_yrmon] ))) STL_AMT_D4,  
+        DECODE(LC.FM_TML, LC.TO_TML, 0, NVL(STL_AMT_D5, PRD_GET_LINK_COST_FNC(LC.STD_PORT, 'D5', @[con_type] , @[i_cost_yrmon] ))) STL_AMT_D5  
+ FROM  
+     ( 
+     SELECT DISTINCT B.FM_PORT_CD STD_PORT, 
+            A.VSL_SLAN_CD FM_LANE, AC.CRR_CD FM_CRR, A.SKD_DIR_CD FM_DIR, AC.TML_CD FM_TML, AD.YD_NM FM_TML_NM, A.TO_PORT_ETB_DY_CD FM_ETB, 
+            B.VSL_SLAN_CD TO_LANE, BC.CRR_CD TO_CRR, B.SKD_DIR_CD TO_DIR, BC.TML_CD TO_TML, BD.YD_NM TO_TML_NM, B.FM_PORT_ETB_DY_CD TO_ETB 
+     FROM PRD_PF_TZ_TM A, PRD_PF_TZ_TM B, PRD_PORT_TML_MTX AC, PRD_PORT_TML_MTX BC, MDM_YARD AD, MDM_YARD BD  
+     WHERE B.FM_PORT_CD = @[i_port_cd]   
+     AND A.VSL_SLAN_CD LIKE @[i_lane_from] || '%'  
+     AND B.VSL_SLAN_CD LIKE @[i_lane_to] || '%'  
+     AND A.TO_PORT_CD  = B.FM_PORT_CD 
+     AND A.TO_PORT_CD  = AC.PORT_CD    (+) 
+     AND A.VSL_SLAN_CD = AC.VSL_SLAN_CD(+) 
+     AND A.SKD_DIR_CD  = AC.SKD_DIR_CD (+) 
+     AND B.FM_PORT_CD  = BC.PORT_CD    (+) 
+     AND B.VSL_SLAN_CD = BC.VSL_SLAN_CD(+) 
+     AND B.SKD_DIR_CD  = BC.SKD_DIR_CD (+) 
+     AND AC.TML_CD     = AD.YD_CD      (+) 
+     AND BC.TML_CD     = BD.YD_CD      (+)
+     AND A.DELT_FLG <> 'Y'
+     AND B.DELT_FLG <> 'Y'
+     ) LC, -- LANE CONNECTION 
+     ( 
+     SELECT /*+ INDEX(MAS_LNK_AVG_STND_COST XPKMAS_LNK_AVG_STND_COST) */   
+            LNK_FM_NOD_CD, LNK_TO_NOD_CD,  MAS_COST_SRC_CD STL_COST_CD, COST_LOC_GRP_CD STL_GRP_CD,  
+            -- CNTR_TPSZ_CD TP_SZ, STND_COST_USD_AMT STL_AMT   -- STND_COST_USD_AMT  
+            SUM(DECODE(CNTR_TPSZ_CD, 'D2', STND_COST_USD_AMT)) STL_AMT_D2, 
+            SUM(DECODE(CNTR_TPSZ_CD, 'D4', STND_COST_USD_AMT)) STL_AMT_D4, 
+            SUM(DECODE(CNTR_TPSZ_CD, 'D5', STND_COST_USD_AMT)) STL_AMT_D5 
+     FROM MAS_LNK_AVG_STND_COST 
+     WHERE COST_YRMON = @[i_cost_yrmon]   
+     AND LNK_FM_NOD_CD LIKE @[i_port_cd] ||'%'  
+     AND LNK_TO_NOD_CD LIKE @[i_port_cd] ||'%'   
+     AND CO_CD = 'H' 
+     AND CNTR_TPSZ_CD IN ('D2', 'D4', 'D5') 
+     AND FULL_MTY_CD = 'F' 
+     AND MAS_COST_SRC_CD = DECODE(@[con_type] , 'F', 'TRTSTD', 'M', 'TRMTTD', 'TRTSTD') 
+     AND COST_LOC_GRP_CD = 'N' 
+     GROUP BY LNK_FM_NOD_CD, LNK_TO_NOD_CD,  MAS_COST_SRC_CD , COST_LOC_GRP_CD 
+     ) STL -- TS SHUTTLE  
+
+ WHERE LC.FM_TML = STL.LNK_FM_NOD_CD(+) 
+ AND   LC.TO_TML = STL.LNK_TO_NOD_CD(+)			]]></sql>
+			<params>
+				<param name="con_type" type="12" value="" out="N"/>
+				<param name="i_cost_yrmon" type="12" value="" out="N"/>
+				<param name="i_port_cd" type="12" value="" out="N"/>
+				<param name="i_lane_from" type="12" value="" out="N"/>
+				<param name="i_lane_to" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CostManageDBDAOUpdateAddBasicCmcbUSQL">
+			<desc><![CDATA[Basic CMCB 를 Add Creation 한다.]]></desc>
+			<sql><![CDATA[
+MERGE INTO SQM_QTA_LANE_OFC_COST A1 USING
+(
+         SELECT BSE_TP_CD
+              , BSE_YR
+              , BSE_QTR_CD
+              , OFC_VW_CD
+              , TRD_CD
+              , RLANE_CD
+              , DIR_CD
+              , DECODE(OFC_VW_CD, 'C', CTRT_RGN_OFC, 'L', SLS_RGN_OFC) AS RGN_OFC_CD
+              , ROUND(SUM(RA_CM_COST_TTL_AMT) / SUM(LOD_QTY), 5) AS RA_CM_UC_AMT
+              , ROUND(SUM(PA_CM_COST_TTL_AMT) / SUM(LOD_QTY), 5) AS PA_CM_UC_AMT
+           FROM (
+                 SELECT S.BSE_TP_CD
+                      , S.BSE_YR
+                      , S.BSE_QTR_CD
+                      , S.OFC_VW_CD
+                      , T.TRD_CD
+                      , T.RLANE_CD
+                      , T.DIR_CD
+                      , T.CTRT_RHQ_OFC
+                      , T.CTRT_RGN_OFC
+                      , T.SLS_RHQ_OFC
+                      , T.SLS_RGN_OFC
+                      , T.CTRT_OFC_CD
+                      , T.SLS_OFC_CD
+                      , T.LOD_QTY
+                      , T.RA_CM_COST_TTL_AMT
+                      , T.PA_CM_COST_TTL_AMT
+                   FROM (
+                        SELECT /*+ NO_MERGE */ TRD_CD
+                              , RLANE_CD
+                              , DIR_CD
+                              , NVL((SELECT N2ND_PRNT_OFC_CD FROM SQM_ORGANIZATION_V WHERE OFC_CD = CTRT_OFC_CD), 
+                                    (SELECT RHQ_CD FROM SQM_QTA_OFC WHERE RGN_OFC_CD = CTRT_OFC_CD)) AS CTRT_RHQ_OFC
+                              , CASE WHEN SLS_OFC_CD = 'NYCMW' OR SLS_OFC_CD = 'NYCME' 
+                                     THEN (SELECT PRNT_OFC_CD FROM SQM_ORGANIZATION_V WHERE OFC_CD = (SELECT PRNT_OFC_CD FROM SQM_ORGANIZATION_V WHERE OFC_CD = SLS_OFC_CD)) 
+                                     ELSE NVL((SELECT N2ND_PRNT_OFC_CD FROM SQM_ORGANIZATION_V WHERE OFC_CD = SLS_OFC_CD),
+                                              (SELECT RHQ_CD FROM SQM_QTA_OFC WHERE RGN_OFC_CD = SLS_OFC_CD)) END AS SLS_RHQ_OFC
+                              , CASE WHEN CTRT_OFC_CD = 'NYCRA' OR CTRT_OFC_CD = 'HAMRU' OR CTRT_OFC_CD = 'SINRS' OR CTRT_OFC_CD = 'SHARC' 
+                                     THEN SUBSTR(CTRT_OFC_CD, 1, 3)||'SC' 
+                                     ELSE NVL((SELECT N4TH_PRNT_OFC_CD FROM SQM_ORGANIZATION_V WHERE OFC_CD = CTRT_OFC_CD), 
+                                              (SELECT RGN_OFC_CD FROM SQM_QTA_OFC WHERE RGN_OFC_CD = CTRT_OFC_CD)) END AS CTRT_RGN_OFC
+                              , CASE WHEN SLS_OFC_CD = 'NYCRA' OR SLS_OFC_CD = 'HAMRU' OR SLS_OFC_CD = 'SINRS' OR SLS_OFC_CD = 'SHARC' 
+                                     THEN SUBSTR(SLS_OFC_CD, 1, 3)||'SC' WHEN SLS_OFC_CD = 'NYCMW' OR SLS_OFC_CD = 'NYCME'
+                                     THEN NVL((SELECT N4TH_PRNT_OFC_CD FROM SQM_ORGANIZATION_V WHERE OFC_CD = (SELECT PRNT_OFC_CD FROM SQM_ORGANIZATION_V WHERE OFC_CD = SLS_OFC_CD)), 
+                                              (SELECT RGN_OFC_CD FROM SQM_QTA_OFC WHERE RGN_OFC_CD = SLS_OFC_CD )) 
+                                     ELSE NVL((SELECT N4TH_PRNT_OFC_CD FROM SQM_ORGANIZATION_V WHERE OFC_CD = SLS_OFC_CD), 
+                                              (SELECT RGN_OFC_CD FROM SQM_QTA_OFC WHERE RGN_OFC_CD = SLS_OFC_CD)) END AS SLS_RGN_OFC
+                              , CTRT_OFC_CD
+                              , SLS_OFC_CD
+                              , DECODE(SUBSTR(CNTR_TPSZ_CD, -1), '2', BKG_QTY, BKG_QTY * 2) AS LOD_QTY
+                              , (RA_CM_COST_TTL_AMT - DMDT_COM_AMT) AS RA_CM_COST_TTL_AMT
+                              , (PA_CM_COST_TTL_AMT - DMDT_COM_AMT) AS PA_CM_COST_TTL_AMT
+                           FROM MAS_BKG_EXPN_DTL_WK
+                          WHERE SUBSTR(SLS_YRMON, 1, 4)||COST_WK BETWEEN @[f_fm_wk] AND @[f_to_wk]
+#if (${f_trd_cd} != '' && ${f_trd_cd} != 'All')
+                            AND TRD_CD      = @[f_trd_cd]
+#end
+#if (${f_rlane_cd} != '' && ${f_rlane_cd} != 'All')
+                            AND RLANE_CD    = @[f_rlane_cd]
+#end
+#if (${f_dir_cd} != '' && ${f_dir_cd} != 'All')
+                            AND DIR_CD      = @[f_dir_cd]
+#end
+                            AND DELT_FLG     = 'N'
+                            AND BKG_STS_CD    IN ('F', 'S', 'W')
+                            AND BKG_CGO_TP_CD <> 'P'
+                            AND BL_NO_TP      IN ('M', '0')
+                        ) T
+                      , SQM_QTA_LANE_OFC S
+                      , SQM_QTA_LANE_OFC_COST C
+                  WHERE S.BSE_TP_CD  = @[f_bse_tp_cd]
+                    AND S.BSE_YR     = @[f_bse_yr]
+                    AND S.BSE_QTR_CD = DECODE(@[f_bse_tp_cd], 'Y', '00', @[f_bse_qtr_cd])
+                    AND S.OFC_VW_CD  = @[f_ofc_vw_cd]
+#if (${f_rhq_cd} != '' && ${f_rhq_cd} != 'All')
+                    AND S.RHQ_CD     = @[f_rhq_cd]
+#end
+#if (${f_rgn_ofc_cd} != '' && ${f_rgn_ofc_cd} != 'All')
+                    AND S.RGN_OFC_CD  = @[f_rgn_ofc_cd]
+#end
+#if (${f_trd_cd} != '' && ${f_trd_cd} != 'All')
+                    AND S.TRD_CD      = @[f_trd_cd]
+#end
+#if (${f_rlane_cd} != '' && ${f_rlane_cd} != 'All')
+                    AND S.RLANE_CD    = @[f_rlane_cd]
+#end
+#if (${f_dir_cd} != '' && ${f_dir_cd} != 'All')
+                    AND S.DIR_CD      = @[f_dir_cd]
+#end
+                    AND T.TRD_CD        = S.TRD_CD
+                    AND T.RLANE_CD      = S.RLANE_CD
+                    AND T.DIR_CD        = S.DIR_CD
+                    AND T.CTRT_RGN_OFC  = DECODE(S.OFC_VW_CD, 'C', S.RGN_OFC_CD, T.CTRT_RGN_OFC)
+                    AND T.SLS_RGN_OFC   = DECODE(S.OFC_VW_CD, 'L', S.RGN_OFC_CD, T.SLS_RGN_OFC)
+                    AND T.CTRT_RHQ_OFC  = DECODE(S.OFC_VW_CD, 'C', S.RHQ_CD, T.CTRT_RHQ_OFC)
+                    AND T.SLS_RHQ_OFC   = DECODE(S.OFC_VW_CD, 'L', S.RHQ_CD, T.SLS_RHQ_OFC)
+                    AND T.CTRT_RHQ_OFC IS NOT NULL
+                    AND T.SLS_RHQ_OFC  IS NOT NULL
+                    AND S.SQM_ACT_FLG   = 'Y'
+                    AND S.BSE_TP_CD     = C.BSE_TP_CD
+                    AND S.BSE_YR        = C.BSE_YR
+                    AND S.BSE_QTR_CD    = C.BSE_QTR_CD
+                    AND S.OFC_VW_CD     = C.OFC_VW_CD
+                    AND T.TRD_CD        = C.TRD_CD
+                    AND T.RLANE_CD      = C.RLANE_CD
+                    AND T.DIR_CD        = C.DIR_CD
+                    AND T.CTRT_RGN_OFC  = DECODE(S.OFC_VW_CD, 'C', C.RGN_OFC_CD, T.CTRT_RGN_OFC)
+                    AND T.SLS_RGN_OFC   = DECODE(S.OFC_VW_CD, 'L', C.RGN_OFC_CD, T.SLS_RGN_OFC)
+                    AND T.CTRT_RHQ_OFC  = DECODE(S.OFC_VW_CD, 'C', C.RHQ_CD, T.CTRT_RHQ_OFC)
+                    AND T.SLS_RHQ_OFC   = DECODE(S.OFC_VW_CD, 'L', C.RHQ_CD, T.SLS_RHQ_OFC)
+                    AND C.PA_CM_UC_AMT  = 0
+                    AND C.RA_CM_UC_AMT  = 0
+                )
+          WHERE DECODE(OFC_VW_CD, 'C', CTRT_RHQ_OFC, 'L', SLS_RHQ_OFC) IS NOT NULL
+       GROUP BY BSE_TP_CD
+              , BSE_YR
+              , BSE_QTR_CD
+              , OFC_VW_CD
+              , TRD_CD
+              , RLANE_CD
+              , DIR_CD
+              , DECODE(OFC_VW_CD, 'C', CTRT_RGN_OFC, 'L', SLS_RGN_OFC)
+) A2
+ON (    A1.BSE_TP_CD   = A2.BSE_TP_CD
+    AND A1.BSE_YR      = A2.BSE_YR
+    AND A1.BSE_QTR_CD  = A2.BSE_QTR_CD
+    AND A1.OFC_VW_CD   = A2.OFC_VW_CD
+    AND A1.TRD_CD      = A2.TRD_CD
+    AND A1.RLANE_CD    = A2.RLANE_CD
+    AND A1.DIR_CD      = A2.DIR_CD
+    AND A1.RGN_OFC_CD  = A2.RGN_OFC_CD
+)
+
+WHEN MATCHED THEN 
+    UPDATE 
+       SET A1.PA_CM_UC_AMT = A2.PA_CM_UC_AMT
+         , A1.RA_CM_UC_AMT = A2.RA_CM_UC_AMT
+         , A1.UPD_USR_ID   = @[f_usr_id]
+         , A1.UPD_DT       = SYSDATE			]]></sql>
+			<params>
+				<param name="f_fm_wk" type="12" value="" out="N"/>
+				<param name="f_to_wk" type="12" value="" out="N"/>
+				<param name="f_trd_cd" type="12" value="" out="N"/>
+				<param name="f_rlane_cd" type="12" value="" out="N"/>
+				<param name="f_dir_cd" type="12" value="" out="N"/>
+				<param name="f_bse_tp_cd" type="12" value="" out="N"/>
+				<param name="f_bse_yr" type="12" value="" out="N"/>
+				<param name="f_bse_qtr_cd" type="12" value="" out="N"/>
+				<param name="f_ofc_vw_cd" type="12" value="" out="N"/>
+				<param name="f_rhq_cd" type="12" value="" out="N"/>
+				<param name="f_rgn_ofc_cd" type="12" value="" out="N"/>
+				<param name="f_usr_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

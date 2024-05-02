@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AccrualBatchExecuteResultDBDAOSearchAccrualBatchResultOfficeListRSQL">
+			<desc><![CDATA[ Office 별 결산 결과 조회]]></desc>
+			<sql><![CDATA[
+SELECT    BB.RHQ_CD 			
+      ,   BB.SUB_OFC_CD 		
+      ,   BB.OFC_CD CTRL_OFC_CD 
+      ,   SS.EXE_YRMON
+      ,   SS.REV_YRMON
+      ,   SS.MN_COST_TP_CD AS MN_COST_TP_NM
+      ,   (SELECT  TP.SUB_COST_TP_NM
+           FROM    LEA_SUB_COST_TP    TP
+           WHERE   TP.SUB_COST_TP_CD  = SS.SUB_COST_TP_CD
+          )                                                       AS SUB_COST_TP_NM
+      ,  SS.COA_COST_SRC_CD
+      ,   SS.ACCT_CD
+      ,   SS.N1ST_NOD_CD
+      ,   SS.N2ND_NOD_CD
+      ,   SS.N3RD_NOD_CD
+      ,   SS.N4TH_NOD_CD
+      ,   SUM(SS.CNTR_QTY)                                        AS CNTR_QTY
+      ,   SUM(SS.ESTM_COST_AMT   )                                AS ESTM_COST_AMT
+     
+
+      ,   CASE WHEN SS.ACCL_AUTO_CD = 'A' THEN SUM(SS.PST_ACT_COST_AMT)
+               ELSE SUM(SS.PRE_ACT_COST_AMT)
+          END    																											ACT_COST_AMT
+
+	  ,   SUM(SS.PST_ACT_COST_AMT) - SUM(SS.PRE_ACT_COST_AMT)           													AS DIF_ACT_COST_AMT
+      ,   CASE WHEN SUM(SS.ESTM_COST_AMT) = 0 THEN 0
+               ELSE ABS(SUM(SS.PST_ACT_COST_AMT)/SUM(SS.ESTM_COST_AMT))*100
+          END                                                                        										AS ACT_COST_RATIO
+      ,   SUM(SS.ADJ_ACCL_COST_AMT)                                                  										AS ADJ_ACCL_COST_AMT
+      ,   CASE WHEN SS.ACCL_AUTO_CD = 'A' THEN SUM(SS.PST_ACT_COST_AMT) + SUM(SS.ADJ_ACCL_COST_AMT)
+			   ELSE SUM(SS.PRE_ACT_COST_AMT) + SUM(SS.ADJ_ACCL_COST_AMT)
+	      END    																											AS CFM_COST_AMT
+      ,   CASE WHEN SS.ACCL_AUTO_CD = 'A' THEN SUM(SS.PST_ACT_COST_AMT) + SUM(SS.ADJ_ACCL_COST_AMT) - SUM(SS.ESTM_COST_AMT)
+			   ELSE 0
+		  END  																												AS DIF_COST_AMT
+FROM      LEA_ACCL_COST_SMRY    SS
+      ,
+		(SELECT 	YY.RHQ_CD
+				,	YY.OFC_CD
+				,	YY.SUB_OFC_CD
+				----::JSK::--,   OFC_APLY_FM_YRMON
+				----::JSK::--,   OFC_APLY_TO_YRMON
+		 FROM	(
+					
+					------------------------------------------------------------------------------------------------------------------------
+        			SELECT     	DISTINCT
+                   				CASE WHEN XX.OFC_CD IN ('SELTBB','SELOPE') THEN 'SHARC' --('SELTOB','SELCOE') THEN 'SHAAS'
+                        			 ELSE XX.OFC_N3RD_LVL_CD
+                   				END							AS RHQ_CD
+               				,   CASE WHEN XX.OFC_CD IN ('SELTBB','SELOPE') THEN 'SELSC' --('SELTOB','SELCOE') THEN 'SELBB'
+                        			 ELSE XX.OFC_N5TH_LVL_CD
+                   				END  						AS OFC_CD
+               				,   XX.OFC_CD            		AS SUB_OFC_CD
+        			FROM       	(
+                           SELECT     *
+                           FROM       (
+                                      SELECT          L.OFC_N3RD_LVL_CD
+                                                 ,    L.OFC_N5TH_LVL_CD
+                                                 ,    L.OFC_CD
+                                                 ,    L.OFC_APLY_TO_YRMON
+                                                 ,    L.OFC_APLY_FM_YRMON
+                                                 ,    ROW_NUMBER() OVER (PARTITION BY L.OFC_CD ORDER BY L.OFC_APLY_TO_YRMON DESC)  OFC_ORDER
+                                       FROM           COA_OFC_LVL            L
+                                       WHERE          L.OFC_N3RD_LVL_CD      IS NOT NULL
+                                       AND            L.OFC_N5TH_LVL_CD      IS NOT NULL
+                                       ) X
+                            WHERE      X.OFC_ORDER    = 1
+                          ) XX
+
+						  UNION ALL SELECT 'SELHO', 'SELCON', 'SELCON' FROM DUAL  --SELCOT
+                        /* 2012.06.26 :: MANUAL INPUT(OFC:SELCOL) 조회를 위한 HARD CODING */
+					------------------------------------------------------------------------------------------------------------------------
+				) YY
+
+        /* COA_OFC_LVL 테이블과 JOIN */
+		WHERE		YY.RHQ_CD 		= @[f_rhq_cd]
+
+		#if (${f_ctrl_ofc_cd} != '')
+			AND   YY.OFC_CD   = @[f_ctrl_ofc_cd]
+		#elseif(${f_report} == '2')
+			AND   YY.OFC_CD   IN (
+				  ------------------------------------------------------------------
+				  SELECT     DISTINCT
+							 LL.OFC_N5TH_LVL_CD                                                                            
+				  FROM       COA_OFC_LVL                LL
+				  WHERE      1 = 1
+				  AND        CASE (
+								  SELECT  OFC_LVL
+								  FROM    (
+										  SELECT  L.OFC_LVL
+										  FROM    COA_OFC_LVL       L 
+										  WHERE   L.OFC_N3RD_LVL_CD IS NOT NULL
+										  AND     L.OFC_N5TH_LVL_CD IS NOT NULL 
+										  AND     L.OFC_CD          = @[bind_ofc_cd]    /* LOGIN-OFFICE CODE BINDING */
+										  ORDER BY L.OFC_APLY_TO_YRMON  DESC   
+										  )  
+								   WHERE   ROWNUM  = 1  
+								  ) 
+								   WHEN '1' THEN 'XXXXX'
+								   WHEN '2' THEN LL.OFC_N3RD_LVL_CD
+								   WHEN '3' THEN LL.OFC_N3RD_LVL_CD
+								   WHEN '4' THEN LL.OFC_CD
+								   WHEN '5' THEN LL.OFC_CD
+								   WHEN '6' THEN LL.OFC_CD
+								   WHEN '7' THEN LL.OFC_CD
+								   WHEN '9' THEN 'XXXXX'
+								   ELSE          'XXXXX' 
+							 END                        = @[bind_ofc_cd]    /* LOGIN-OFFICE CODE BINDING */       
+				  AND        LL.OFC_N5TH_LVL_CD         IS NOT NULL
+				  ------------------------------------------------------------------
+				 ) 
+		#end
+
+
+		#if (${f_sub_ofc_cd} != '')
+			AND	  YY.SUB_OFC_CD = @[f_sub_ofc_cd]
+		
+		#elseif(${f_report} == '2' && '1'=='0')
+			AND   YY.SUB_OFC_CD IN (
+				  ------------------------------------------------------------------
+				  SELECT     XX.SUB_OFC_CD
+				  FROM       ( 
+							 ----------------------------------------------------
+							  SELECT     DISTINCT
+										 LL.OFC_CD                  AS SUB_OFC_CD
+							  FROM       COA_OFC_LVL                LL
+							  WHERE      1 = 1
+							  AND        CASE (
+											  SELECT  OFC_LVL
+											  FROM    (
+													  SELECT  L.OFC_LVL
+													  FROM    COA_OFC_LVL       L 
+													  WHERE   L.OFC_N3RD_LVL_CD IS NOT NULL
+													  AND     L.OFC_N5TH_LVL_CD IS NOT NULL 
+													  AND     L.OFC_CD          = @[bind_sub_ofc_cd]     /* LOGIN-OFFICE CODE BINDING */
+													  ORDER BY L.OFC_APLY_TO_YRMON  DESC   
+													  )    
+											   WHERE   ROWNUM  = 1 
+											  ) 
+											   WHEN '1' THEN 'XXXXX'
+											   WHEN '2' THEN 'XXXXX'
+											   WHEN '3' THEN 'XXXXX'
+											   WHEN '4' THEN LL.OFC_N5TH_LVL_CD
+											   WHEN '5' THEN LL.OFC_N5TH_LVL_CD
+											   WHEN '6' THEN LL.OFC_N5TH_LVL_CD
+											   WHEN '7' THEN LL.OFC_N5TH_LVL_CD
+											   WHEN '9' THEN 'XXXXX'
+											   ELSE          'XXXXX' 
+										 END                        = @[bind_sub_ofc_cd]	/* LOGIN-OFFICE CODE BINDING */
+																			   
+									 OR  LL.OFC_CD                  = @[bind_sub_ofc_cd]	/* LOGIN-OFFICE CODE BINDING */
+							 ----------------------------------------------------
+							 ) XX
+				  ------------------------------------------------------------------
+				 ) 
+		#end
+
+          ) BB
+WHERE     SS.REV_YRMON          BETWEEN REPLACE(@[frm_rev_yrmon_from], '-') AND REPLACE(@[frm_rev_yrmon_to], '-')
+AND       SS.OTR_CRR_FLG  =  'N'
+----::JSK::--AND	      SS.REV_YRMON			BETWEEN BB.OFC_APLY_FM_YRMON 				AND BB.OFC_APLY_TO_YRMON
+AND       SS.CTRL_OFC_CD        = BB.SUB_OFC_CD
+
+AND (1=2
+#if (${f_cost_type_f} == '1')
+    OR SS.MN_COST_TP_CD      IN ('TR', 'TM')
+#end
+#if (${f_cost_type_m} == '1')
+    OR SS.MN_COST_TP_CD = 'MT'
+#end
+#if (${f_cost_type_c} == '1')
+    OR SS.MN_COST_TP_CD = 'CH'
+#end
+#if (${f_cost_type_fv} == '1')
+    OR SS.SUB_COST_TP_CD     IN ('TRDF','TMDF')
+#end
+#if (${f_cost_type_ev} == '1')
+    OR SS.SUB_COST_TP_CD     IN ('TRDM','TMDM')
+#end
+#if (${f_cost_type_u} == '1')
+    OR       SS.UPD_KND_IND_CD      = 'SM'                                                ----- unmapped
+#end
+)
+
+                    /* ---------------------------------------------------------
+                       -- 생성된 데이터 종류에 대한 분류코드 (UPD_KND_IND_CD) --
+                      ML : Manual Generation Data
+                      SM : Actual Invoice Summary
+                      .........................................................
+                      LB : Link Basic
+                      LO : Link Other
+                      NB : Node Basic
+                      NO : Node Other
+                      .........................................................
+                      LC : Link Full Volume Incentive
+                      NC : Node Full Volume Incentive
+                      ----------------------------------------------------------
+                    */
+
+GROUP BY  BB.RHQ_CD
+      ,   BB.SUB_OFC_CD
+      ,   BB.OFC_CD
+      ,   SS.EXE_YRMON
+      ,   SS.REV_YRMON
+      ,   SS.MN_COST_TP_CD
+      ,   SS.SUB_COST_TP_CD
+      ,   SS.COA_COST_SRC_CD
+      ,   SS.ACCT_CD
+      ,   SS.N1ST_NOD_CD
+      ,   SS.N2ND_NOD_CD
+      ,   SS.N3RD_NOD_CD
+      ,   SS.N4TH_NOD_CD
+      ,   SS.ACCL_AUTO_CD			]]></sql>
+			<params>
+				<param name="f_rhq_cd" type="12" value="" out="N"/>
+				<param name="f_ctrl_ofc_cd" type="12" value="" out="N"/>
+				<param name="bind_ofc_cd" type="12" value="" out="N"/>
+				<param name="f_sub_ofc_cd" type="12" value="" out="N"/>
+				<param name="bind_sub_ofc_cd" type="12" value="" out="N"/>
+				<param name="frm_rev_yrmon_from" type="12" value="" out="N"/>
+				<param name="frm_rev_yrmon_to" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

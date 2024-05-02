@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ChargeAmountDiscountMgtDBDAOSearchAfterBookingPfmcListRSQL">
+			<desc><![CDATA[ChargeAmountDiscountMgtDBDAOSearchAfterBookingPfmcList]]></desc>
+			<sql><![CDATA[
+SELECT B.CUST_CD
+     , B.CUST_NM
+     , A.POL_CD
+     , A.POD_CD
+     , A.DMDT_TRF_CD
+     , NVL(A.ORG_CHG_AMT,0) ORG_CHG_AMT
+     , NVL(A.EXPT_AMT,0) EXPT_AMT
+     , NVL(AFT_EXPT_DC_AMT,0) AFT_EXPT_DC_AMT
+     , NVL(BILL_AMT,0) BILL_AMT
+     , NVL(INV_PAY_AMT,0) INV_PAY_AMT
+     , DECODE(NVL(BILL_AMT,0),0,0, ROUND(INV_PAY_AMT/BILL_AMT * 100,2)) AS COLL_RT
+     , DECODE(NVL(ORG_CHG_AMT,0),0,0,ROUND(( EXPT_AMT + AFT_EXPT_DC_AMT )/ORG_CHG_AMT * 100,2)) AS EXPT_DC_RT
+    FROM (
+            SELECT CUST_CD, ( SELECT CUST_LGL_ENG_NM FROM MDM_CUSTOMER WHERE CUST_CNT_CD = SUBSTR(CUST_CD,1,2) AND CUST_SEQ = TO_NUMBER(SUBSTR(CUST_CD,3))) CUST_NM,
+                   POL_CD, POD_CD, DMDT_TRF_CD, 
+                   ROUND(SUM(ORG_CHG_AMT/USD_LOCL_XCH_RT),2) ORG_CHG_AMT, 
+                   ROUND(SUM((CMDT_EXPT_AMT + SC_RFA_EXPT_AMT)/USD_LOCL_XCH_RT),2) AS EXPT_AMT,
+                   ROUND(SUM(AFT_EXPT_DC_AMT/USD_LOCL_XCH_RT),2) AFT_EXPT_DC_AMT, 
+                   ROUND(SUM(BILL_AMT/USD_LOCL_XCH_RT),2) BILL_AMT, 
+                   ROUND(SUM(INV_PAY_AMT/USD_LOCL_XCH_RT),2) INV_PAY_AMT
+            FROM (
+                        SELECT /*+ USE_CONCAT */
+                            @[cust_cd] CUST_CD,
+                            
+                            SUBSTR(BB.POL_CD,1,2)        POL_CD, 
+                            SUBSTR(BB.POD_CD,1,2)        POD_CD, 
+                            T2.DMDT_TRF_CD, 
+            	            T2.BZC_TRF_CURR_CD,
+            	            SUM ( T2.ORG_CHG_AMT ) ORG_CHG_AMT, 
+                            SUM ( NVL(T2.CMDT_EXPT_AMT, 0) ) CMDT_EXPT_AMT, 
+                            SUM ( T2.SC_RFA_EXPT_AMT ) SC_RFA_EXPT_AMT,
+                            SUM ( T2.AFT_EXPT_DC_AMT ) AFT_EXPT_DC_AMT,
+                            SUM(  T2.BIL_AMT ) BILL_AMT, 
+                            
+                            ROUND(SUM( NVL(( SELECT SUM(A.INV_PAY_AMT/B.INV_XCH_RT/B.BKG_CNTR_QTY)
+                                      FROM DMT_INV_OTS_PAY_RCV A, DMT_INV_MN B
+                                      WHERE A.DMDT_INV_NO = T2.DMDT_INV_NO
+                                        AND A.DMDT_INV_NO = B.DMDT_INV_NO
+                                        AND DMDT_INV_PAY_TP_CD = 'M'
+                                        AND B.DMDT_AR_IF_CD = 'Y' ),0) ),2) INV_PAY_AMT,
+                            ( SELECT USD_LOCL_XCH_RT 
+                                FROM GL_MON_XCH_RT
+                               WHERE 1=1
+                                 AND  ACCT_XCH_RT_YRMON	=	TO_CHAR(T2.TO_MVMT_DT,'YYYYMM') 
+                                 AND  ACCT_XCH_RT_LVL	=	'1' 
+                                 AND  CURR_CD			=	T2.BZC_TRF_CURR_CD )  USD_LOCL_XCH_RT
+
+                    FROM    BKG_BOOKING BB
+            				, DMT_CHG_BKG_CNTR T1 
+                            , DMT_CHG_CALC     T2 
+                    WHERE   1=1 
+                    AND   BB.RFA_NO IN (( SELECT	RFH.RFA_NO
+                                              FROM	PRI_RP_MN RFA ,PRI_RP_HDR RFH
+                                             WHERE RFA.PROP_NO = RFH.PROP_NO 
+                                               AND RFA.AMDT_SEQ = (SELECT /*+ NO_UNNEST */ MAX (AMDT_SEQ) 
+                                                                     FROM PRI_RP_MN 
+                                                                    WHERE PROP_NO = RFH.PROP_NO 
+                                                                      AND ROWNUM <= 1) 
+                                			 
+                                				AND RFA.CTRT_CUST_CNT_CD = SUBSTR(@[cust_cd], 1, 2) 
+                                				AND RFA.CTRT_CUST_SEQ	= SUBSTR(@[cust_cd], 3) ))
+                     
+                    AND     BB.BKG_NO = T1.BKG_NO
+                    AND     T2.TO_MVMT_DT BETWEEN TO_DATE(@[fm_dt], 'YYYY-MM-DD') 
+            			                  AND     TO_DATE(@[to_dt], 'YYYY-MM-DD') + .99999 
+             
+                    AND T2.DMDT_CHG_STS_CD	IN ('F', 'C', 'I', 'N') 
+                    AND T2.SYS_AREA_GRP_ID	= T1.SYS_AREA_GRP_ID 
+                    AND T2.CNTR_NO			= T1.CNTR_NO 
+                    AND T2.CNTR_CYC_NO		= T1.CNTR_CYC_NO 
+                    AND	T2.DMDT_CHG_LOC_DIV_CD <> 'SZP'				        AND	            ( 
+                        (T2.DUL_TP_EXPT_FLG = 'Y' AND SUBSTR(T2.DMDT_TRF_CD, 1, 1) = 'C') 
+                        OR 
+                        (T2.DUL_TP_EXPT_FLG = 'N') 
+                        ) 
+                                         
+                    AND T2.ORG_CHG_AMT > 0
+            GROUP BY 
+                            SUBSTR(BB.POL_CD,1,2)        , 
+                            SUBSTR(BB.POD_CD,1,2)        , 
+                            T2.DMDT_TRF_CD 				 ,
+							T2.TO_MVMT_DT,
+							T2.BZC_TRF_CURR_CD
+                            
+                            UNION ALL
+            SELECT          /*+ USE_CONCAT */                  
+                            @[cust_cd] CUST_CD,
+                            SUBSTR(BB.POL_CD,1,2)        POL_CD, 
+                            SUBSTR(BB.POD_CD,1,2)        POD_CD, 
+                            T2.DMDT_TRF_CD, 
+            	            T2.BZC_TRF_CURR_CD,
+            	            SUM ( T2.ORG_CHG_AMT ) ORG_CHG_AMT, 
+                            SUM ( NVL(T2.CMDT_EXPT_AMT, 0) ) CMDT_EXPT_AMT, 
+                            SUM ( T2.SC_RFA_EXPT_AMT ) SC_RFA_EXPT_AMT,
+                            SUM ( T2.AFT_EXPT_DC_AMT ) AFT_EXPT_DC_AMT,
+                            SUM(  T2.BIL_AMT ) BILL_AMT, 
+                            
+                            ROUND(SUM( NVL(( SELECT SUM(A.INV_PAY_AMT/B.INV_XCH_RT/B.BKG_CNTR_QTY)
+                                      FROM DMT_INV_OTS_PAY_RCV A, DMT_INV_MN B
+                                      WHERE A.DMDT_INV_NO = T2.DMDT_INV_NO
+                                        AND A.DMDT_INV_NO = B.DMDT_INV_NO
+                                        AND DMDT_INV_PAY_TP_CD = 'M'
+                                        AND B.DMDT_AR_IF_CD = 'Y' ),0) ),2) INV_PAY_AMT,
+                            ( SELECT USD_LOCL_XCH_RT 
+                                FROM GL_MON_XCH_RT
+                               WHERE 1=1
+                                 AND  ACCT_XCH_RT_YRMON	=	TO_CHAR(T2.TO_MVMT_DT,'YYYYMM') 
+                                 AND  ACCT_XCH_RT_LVL	=	'1' 
+                                 AND  CURR_CD			=	T2.BZC_TRF_CURR_CD )  USD_LOCL_XCH_RT
+
+                    FROM    BKG_BOOKING BB
+            				, DMT_CHG_BKG_CNTR T1 
+                            , DMT_CHG_CALC     T2 
+                    WHERE   1=1 
+                    AND   BB.SC_NO IN (( SELECT	SPH.SC_NO
+                                              FROM	PRI_SP_CTRT_PTY SCP,
+                                                    PRI_SP_HDR SPH,  
+                                              		PRI_SP_MN SC                                              		 
+                                             WHERE	SPH.PROP_NO = SC.PROP_NO 
+                                               AND	SCP.PROP_NO = SPH.PROP_NO 
+                                               AND	SC.AMDT_SEQ = SCP.AMDT_SEQ 
+                                               AND	SCP.PRC_CTRT_PTY_TP_CD = 'C' 
+                                               AND	SC.AMDT_SEQ = (	SELECT /*+ NO_UNNEST */ MAX (AMDT_SEQ) 
+                                                                      FROM PRI_SP_MN 
+                                                                     WHERE PROP_NO = SPH.PROP_NO 
+                                                                       AND ROWNUM <= 1) 
+                                 
+                                				AND SCP.CUST_CNT_CD = SUBSTR(@[cust_cd], 1, 2) 
+                                               	AND SCP.CUST_SEQ	= SUBSTR(@[cust_cd], 3) ))
+                           
+                    AND     BB.BKG_NO = T1.BKG_NO
+                    AND     T2.TO_MVMT_DT BETWEEN TO_DATE(@[fm_dt], 'YYYY-MM-DD') 
+            			                  AND     TO_DATE(@[to_dt], 'YYYY-MM-DD') + .99999 
+             
+                    AND T2.DMDT_CHG_STS_CD	IN ('F', 'C', 'I', 'N') 
+                    AND T2.SYS_AREA_GRP_ID	= T1.SYS_AREA_GRP_ID 
+                    AND T2.CNTR_NO			= T1.CNTR_NO 
+                    AND T2.CNTR_CYC_NO		= T1.CNTR_CYC_NO 
+                    AND	T2.DMDT_CHG_LOC_DIV_CD <> 'SZP'				        AND	            ( 
+                        (T2.DUL_TP_EXPT_FLG = 'Y' AND SUBSTR(T2.DMDT_TRF_CD, 1, 1) = 'C') 
+                        OR 
+                        (T2.DUL_TP_EXPT_FLG = 'N') 
+                        ) 
+                                         
+                    AND T2.ORG_CHG_AMT > 0
+            GROUP BY 
+                            SUBSTR(BB.POL_CD,1,2)        , 
+                            SUBSTR(BB.POD_CD,1,2)        , 
+                            T2.DMDT_TRF_CD ,
+                            T2.TO_MVMT_DT,
+							T2.BZC_TRF_CURR_CD
+                            )
+            GROUP BY CUST_CD,
+                   POL_CD, POD_CD, DMDT_TRF_CD ) A, 
+          ( SELECT @[cust_cd] CUST_CD, 
+                   ( SELECT CUST_LGL_ENG_NM FROM MDM_CUSTOMER WHERE CUST_CNT_CD = SUBSTR(@[cust_cd],1,2) AND CUST_SEQ = TO_NUMBER(SUBSTR(@[cust_cd],3))) CUST_NM
+                   FROM DUAL ) B
+    WHERE B.CUST_CD = A.CUST_CD(+)
+    ORDER BY DMDT_TRF_CD,POL_CD,POD_CD			]]></sql>
+			<params>
+				<param name="cust_cd" type="12" value="" out="N"/>
+				<param name="fm_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,363 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="EqInterchangeDBDAOAvailableOnewayListRSQL">
+			<desc><![CDATA[Available Oneway Inventory 조회]]></desc>
+			<sql><![CDATA[
+WITH ONH_APRO_QTY AS
+(SELECT AGMT_SEQ
+       ,CNTR_ONH_AUTH_NO
+       ,CNTR_TPSZ_CD
+       ,ONH_QTY
+  FROM LSE_ONH_APRO_QTY
+ WHERE CRE_DT > TO_DATE('20150731', 'YYYYMMDD')
+ GROUP BY AGMT_SEQ, CNTR_ONH_AUTH_NO, CNTR_TPSZ_CD, ONH_QTY
+),
+MDM_ALL_YARD AS
+(SELECT C.RCC_CD
+       ,C.LCC_CD
+       ,C.ECC_CD
+       ,C.SCC_CD
+       ,B.LOC_CD
+       ,A.YD_CD
+  FROM MDM_YARD A, MDM_LOCATION B, MDM_EQ_ORZ_CHT C
+ WHERE A.LOC_CD = B.LOC_CD
+   AND B.SCC_CD = C.SCC_CD
+   AND A.DELT_FLG ='N'
+   AND B.DELT_FLG ='N'
+   AND C.DELT_FLG ='N'
+),
+MDM_ALL_LOC AS
+(SELECT B.RCC_CD
+       ,B.LCC_CD
+       ,B.ECC_CD
+       ,B.SCC_CD
+       ,A.LOC_CD
+       ,A.CONTI_CD
+  FROM MDM_LOCATION A, MDM_EQ_ORZ_CHT B
+ WHERE A.SCC_CD = B.SCC_CD
+   AND A.DELT_FLG ='N'
+   AND B.DELT_FLG ='N'
+),
+MDM_SCC AS
+(SELECT SCC_CD, CONTI_CD  FROM 
+  (SELECT SCC_CD, CONTI_CD, row_number() over(partition by SCC_CD order by CONTI_CD desc) rn
+    FROM MDM_LOCATION 
+   WHERE SCC_CD IS NOT NULL
+     AND CONTI_CD IS NOT NULL
+     AND DELT_FLG = 'N')
+WHERE RN = 1
+GROUP BY SCC_CD, CONTI_CD
+),
+ALL_APRO AS 
+(SELECT 
+        B.CNTR_NO
+       ,B.CNTR_AUTH_NO
+       ,C.RCC_CD -- MT의 경우 MVMT YARD 기준이다.
+       ,C.LCC_CD
+       ,C.ECC_CD
+       ,C.SCC_CD
+       ,B.DISP_FLG
+       ,B.LSTM_CD
+       ,B.CNTR_TPSZ_CD
+       ,C.LOC_CD LOC_CD_C
+       ,A.LOC_CD LOC_CD_A
+       ,B.CNMV_STS_CD
+       ,B.CNMV_DT
+       ,B.CRNT_YD_CD
+       ,B.ONH_DT
+       ,A.FREE_DYS
+       ,A.LSEE_VNDR_SEQ
+       ,B.VNDR_SEQ
+       ,A.AGMT_SEQ
+       ,A.CRE_DT
+       ,B.ACIAC_DIV_CD
+  FROM  LSE_ONH_APRO A
+       ,MST_CONTAINER B
+       ,MDM_ALL_YARD C
+ WHERE 1=1
+   AND A.LSTM_CD = 'OF'
+   AND B.LSTM_CD = 'OF'
+   AND A.DELT_FLG = 'N'
+   AND B.CRNT_YD_CD = C.YD_CD(+)
+   AND B.CNTR_AUTH_NO IS NOT NULL
+   AND A.CRE_DT > TO_DATE('20150731', 'YYYYMMDD')
+   AND A.CNTR_ONH_AUTH_NO = B.CNTR_AUTH_NO),
+MT_APRO AS
+(
+SELECT 'M' STS 
+       ,CNTR_NO
+       ,CNTR_AUTH_NO
+       ,RCC_CD -- MT의 경우 MVMT YARD 기준이다.
+       ,LCC_CD
+       ,ECC_CD
+       ,SCC_CD
+       ,DISP_FLG
+       ,LSTM_CD
+       ,CNTR_TPSZ_CD
+       ,LOC_CD_C CONTI_FROM
+       ,LOC_CD_A OFF_HIRE_LOC
+       ,LOC_CD_A TARGET_DOL
+       ,CNMV_STS_CD
+       ,CNMV_DT
+       ,CRNT_YD_CD
+       ,ONH_DT
+       ,FREE_DYS
+       ,TRUNC(SYSDATE) - (TRUNC(ONH_DT)+1) USING_DAYS
+       ,DECODE(LSEE_VNDR_SEQ,NULL,VNDR_SEQ,LSEE_VNDR_SEQ) LESSOR
+       ,AGMT_SEQ
+       ,CRE_DT APP_DT
+       ,TRUNC(SYSDATE) - (TRUNC(CRE_DT)+1) S_DAYS
+  FROM  ALL_APRO
+ WHERE 1=1
+   AND CNMV_STS_CD = 'MT'
+   AND ACIAC_DIV_CD = 'A'
+),
+ALL_APRO_GROUP AS
+(SELECT CNTR_AUTH_NO
+       ,RCC_CD
+       ,LCC_CD
+       ,ECC_CD
+       ,SCC_CD
+       ,AGMT_SEQ
+       ,CNTR_TPSZ_CD
+       ,SUM(DECODE(CNTR_NO, NULL, 0, 1)) AS QTY
+  FROM ALL_APRO
+  GROUP BY CNTR_AUTH_NO
+          ,RCC_CD
+          ,LCC_CD
+          ,ECC_CD
+          ,SCC_CD
+          ,AGMT_SEQ
+          ,CNTR_TPSZ_CD
+),
+ALL_APRO_AGMT AS
+(SELECT AGMT_SEQ
+  FROM ALL_APRO
+  GROUP BY AGMT_SEQ
+),
+OFF_AGMT AS
+(SELECT 
+       B.AGMT_SEQ
+  FROM MST_CNTR_STS_HIS A,
+       LSE_AGREEMENT B
+ WHERE 1=1
+   AND A.AGMT_CTY_CD = B.AGMT_CTY_CD
+   AND A.AGMT_SEQ = B.AGMT_SEQ
+   AND SUBSTR(NVL(A.CNTR_STS_RMK, ' '), 1, 6) <> 'SELLOE'
+   AND LSTM_CD = 'OF'
+   AND A.CNTR_STS_CD IN ('LSO', 'DIO')
+   AND B.AGMT_SEQ IN (SELECT AGMT_SEQ FROM ALL_APRO_AGMT)
+   AND A.AGMT_SEQ IN (SELECT AGMT_SEQ FROM ALL_APRO_AGMT)
+   AND A.AGMT_SEQ <> 999990
+   AND A.CNTR_STS_EVNT_DT > TO_DATE('20150731', 'YYYYMMDD')
+GROUP BY B.AGMT_SEQ
+)
+SELECT * FROM
+(SELECT AAA.*
+       ,DECODE(CONTI_FROM,NULL,'COM','A',DECODE(CONTI_TO,NULL,'TBN','E','AES','F','AFS','M','TPS','A','IES','TBN')
+                                    ,'E',DECODE(CONTI_TO,NULL,'TBN','F','EFS','E','IES','M','TAS','TBN')
+                                    ,'F',DECODE(CONTI_TO,NULL,'TBN','F','IFS','TBN')
+                                    ,'M',DECODE(CONTI_TO,NULL,'TBN','M','IMS','F','MFS','TBN')
+                                    ,'TBN'
+               ) TRD
+       ,DECODE(AAA.ONH_SCC,NULL,NULL,AAA.MVMT_SCC,'Y','N') MVNT_DOL      
+ FROM                                        
+(SELECT  AA.*
+       ,BB.CONTI_CD CONTI_TO 
+       ,BB.RCC_CD OFF_RCC_CD
+       ,BB.LCC_CD OFF_LCC_CD
+       ,BB.ECC_CD OFF_ECC_CD
+       ,BB.SCC_CD OFF_SCC_CD
+  FROM
+(
+SELECT STS
+       ,CNTR_NO
+       ,A.CNTR_AUTH_NO
+       ,A.RCC_CD -- A의 경우 AUTH에 입력한 SCC 기준이다.(ECC_CD 컬럼에 실질적으로는 SCC가 들어간다)
+       ,A.LCC_CD
+       ,A.ECC_CD
+       ,A.SCC_CD
+       ,DISP_FLG
+       ,LSTM_CD
+       ,A.CNTR_TPSZ_CD
+       ,A.ONH_QTY - NVL(QTY,0) ONH_QTY
+       ,CONTI_FROM
+       ,OFF_HIRE_LOC
+       ,TARGET_DOL
+       ,CNMV_STS_CD
+       ,CNMV_DT
+       ,CRNT_YD_CD
+       ,ONH_DT
+       ,FREE_DYS
+       ,USING_DAYS
+       ,LESSOR
+       ,A.AGMT_SEQ
+       ,APP_DT
+       ,S_DAYS
+       ,MVMT_SCC
+       ,ONH_SCC
+ FROM
+       (SELECT 'A' STS
+       ,'' CNTR_NO
+       ,A.CNTR_ONH_AUTH_NO CNTR_AUTH_NO
+       ,B.RCC_CD -- A의 경우 AUTH에 입력한 SCC 기준이다.(ECC_CD 컬럼에 실질적으로는 SCC가 들어간다)
+       ,B.LCC_CD
+       ,B.ECC_CD
+       ,B.SCC_CD
+       ,'' DISP_FLG
+       ,A.LSTM_CD
+       ,C.CNTR_TPSZ_CD
+       ,SUM(C.ONH_QTY) ONH_QTY
+       ,D.CONTI_CD CONTI_FROM
+       ,A.LOC_CD OFF_HIRE_LOC
+       ,A.LOC_CD TARGET_DOL
+       ,'' CNMV_STS_CD
+       ,NULL CNMV_DT
+       ,'' CRNT_YD_CD
+       ,NULL ONH_DT
+       ,A.FREE_DYS
+       ,NULL  USING_DAYS
+       ,A.LSEE_VNDR_SEQ LESSOR
+       ,A.AGMT_SEQ
+       ,TO_CHAR (A.CRE_DT, 'YYYY-MM-DD') APP_DT
+       ,TRUNC(SYSDATE) - (TRUNC(A.CRE_DT)+1) S_DAYS
+       ,NULL MVMT_SCC
+       ,NULL ONH_SCC
+  FROM LSE_ONH_APRO A, MDM_EQ_ORZ_CHT B, ONH_APRO_QTY C, MDM_SCC D
+ WHERE 1=1
+   AND A.LSTM_CD = 'OF'
+   AND A.AGMT_SEQ = C.AGMT_SEQ
+   AND A.DELT_FLG = 'N'
+   AND A.ECC_CD = B.SCC_CD(+)
+   AND A.ECC_CD = D.SCC_CD(+)
+   AND A.CNTR_ONH_AUTH_NO = C.CNTR_ONH_AUTH_NO
+   AND A.CRE_DT > TO_DATE('20150731', 'YYYYMMDD')
+GROUP BY  
+        A.CNTR_ONH_AUTH_NO---------------
+       ,B.RCC_CD -- A의 경우 AUTH에 입력한 SCC 기준이다.(ECC_CD 컬럼에 실질적으로는 SCC가 들어간다)
+       ,B.LCC_CD
+       ,B.ECC_CD
+       ,B.SCC_CD
+       ,A.LSTM_CD
+       ,C.CNTR_TPSZ_CD
+     --  ,SUM(C.ONH_QTY) ONH_QTY
+       ,D.CONTI_CD
+       ,A.LOC_CD
+       ,A.LOC_CD
+       ,A.FREE_DYS
+       ,A.LSEE_VNDR_SEQ
+       ,A.AGMT_SEQ
+       ,A.CRE_DT) A, ALL_APRO_GROUP B
+ WHERE  1=1
+   AND A.AGMT_SEQ NOT IN (SELECT AGMT_SEQ FROM OFF_AGMT)
+   AND A.CNTR_AUTH_NO = B.CNTR_AUTH_NO(+)
+   AND A.RCC_CD = B.RCC_CD(+)
+   AND A.LCC_CD = B.LCC_CD(+)
+   AND A.ECC_CD = B.ECC_CD(+)
+   AND A.SCC_CD = B.SCC_CD(+)
+   AND A.AGMT_SEQ = B.AGMT_SEQ(+)
+   AND A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD(+)
+UNION ALL
+SELECT STS 
+       ,CNTR_NO
+       ,CNTR_AUTH_NO
+       ,RCC_CD
+       ,LCC_CD
+       ,ECC_CD
+       ,A.SCC_CD
+       ,DISP_FLG
+       ,LSTM_CD
+       ,CNTR_TPSZ_CD
+       ,NULL ONH_QTY
+       ,B.CONTI_CD CONTI_FROM
+       ,OFF_HIRE_LOC
+       ,TARGET_DOL
+       ,CNMV_STS_CD
+       ,TO_CHAR (CNMV_DT, 'YYYY-MM-DD') CNMV_DT
+       ,CRNT_YD_CD
+       ,TO_CHAR (ONH_DT, 'YYYY-MM-DD') ONH_DT
+       ,FREE_DYS
+       ,USING_DAYS
+       ,LESSOR
+       ,AGMT_SEQ
+       ,TO_CHAR (APP_DT, 'YYYY-MM-DD') APP_DT
+       ,S_DAYS
+       ,MST_LOC_FNC(SUBSTR(A.CRNT_YD_CD, 1, 5), 'SCC') MVMT_SCC
+       ,MST_LOC_FNC(SUBSTR(A.OFF_HIRE_LOC, 1, 5), 'SCC') ONH_SCC        
+  FROM MT_APRO A, MDM_LOCATION B
+ WHERE A.CONTI_FROM = B.LOC_CD(+)
+#if (${vndr_seq} != '')
+  AND LESSOR = @[vndr_seq]
+#end
+      ) AA,
+       MDM_ALL_LOC BB
+WHERE AA.OFF_HIRE_LOC = BB.LOC_CD(+)) AAA
+WHERE 1=1
+#if (${cntr_tpsz_cd_seq} != '')
+AND CNTR_TPSZ_CD IN (
+   	#foreach($key IN ${cntr_tpsz_cd_seq})
+   		#if($velocityCount < $cntr_tpsz_cd_seq.size())
+   			'$key',
+   		#else
+   			'$key'
+   		#end
+   	#end
+        )
+#end 
+
+#if (${loc_fm_tp} == 'RCC')
+  AND RCC_CD = @[loc_fm]
+#elseif (${loc_fm_tp} == 'LCC')
+  AND LCC_CD = @[loc_fm]
+#elseif (${loc_fm_tp} == 'ECC')
+  AND ECC_CD = @[loc_fm]
+#elseif (${loc_fm_tp} == 'SCC')
+  AND SCC_CD = @[loc_fm]
+#end
+
+#if (${loc_tp} == 'RCC')
+  AND OFF_RCC_CD = @[loc_to]
+#elseif (${loc_tp} == 'LCC')
+  AND OFF_LCC_CD = @[loc_to]
+#elseif (${loc_tp} == 'ECC')
+  AND OFF_ECC_CD = @[loc_to]
+#elseif (${loc_tp} == 'SCC')
+  AND OFF_SCC_CD = @[loc_to]
+#end
+
+#if (${stay} == 'A')
+  AND S_DAYS >= @[dys]
+#elseif (${stay} == 'O')
+  AND USING_DAYS >= @[dys]
+#end
+
+#if (${dpsl} != '')
+  AND DISP_FLG = 'Y'
+#end
+
+#if (${sts} == 'A')
+  AND STS = 'A'
+#elseif (${sts} == 'M')
+  AND STS = 'M'
+#end
+
+#if (${agmt_seq} != '')
+  AND AGMT_SEQ = @[agmt_seq]
+#end
+
+ORDER BY APP_DT DESC)
+#if (${trd} != '')
+WHERE TRD = @[trd]
+#end			]]></sql>
+			<params>
+				<param name="vndr_seq" type="12" value="" out="N"/>
+				<param name="loc_fm" type="12" value="" out="N"/>
+				<param name="loc_to" type="12" value="" out="N"/>
+				<param name="dys" type="12" value="" out="N"/>
+				<param name="agmt_seq" type="12" value="" out="N"/>
+				<param name="trd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

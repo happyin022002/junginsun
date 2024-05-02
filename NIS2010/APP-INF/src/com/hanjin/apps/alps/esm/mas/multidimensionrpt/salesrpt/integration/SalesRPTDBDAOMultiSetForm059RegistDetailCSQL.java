@@ -1,0 +1,126 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : SalesRPTDBDAOMultiSetForm059RegistDetailCSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.10.14
+*@LastModifier : 김기대
+*@LastVersion : 1.0
+* 2009.10.14 김기대
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.mas.multidimensionrpt.salesrpt.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author Kim Ki Dae
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class SalesRPTDBDAOMultiSetForm059RegistDetailCSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * MultiSetForm059RegistDetail INSERT
+	  * </pre>
+	  */
+	public SalesRPTDBDAOMultiSetForm059RegistDetailCSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",Y";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("rpt_itm_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",Y";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("upd_usr_id",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",Y";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("rpt_itm_desc",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",Y";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("rpt_itm_col_nm",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",Y";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cre_usr_id",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",Y";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("slct_itm_fom_seq",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.esm.mas.multidimensionrpt.salesrpt.integration").append("\n"); 
+		query.append("FileName : SalesRPTDBDAOMultiSetForm059RegistDetailCSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("INSERT INTO MAS_RPT_ITM_INFO_DTL(" ).append("\n"); 
+		query.append("SLCT_ITM_FOM_SEQ" ).append("\n"); 
+		query.append(", MAS_RPT_ITM_CD" ).append("\n"); 
+		query.append(", RPT_ITM_DESC" ).append("\n"); 
+		query.append(", RPT_ITM_COL_NM" ).append("\n"); 
+		query.append(", CRE_USR_ID" ).append("\n"); 
+		query.append(", CRE_DT" ).append("\n"); 
+		query.append(", UPD_USR_ID" ).append("\n"); 
+		query.append(", UPD_DT" ).append("\n"); 
+		query.append(")VALUES (" ).append("\n"); 
+		query.append("@[slct_itm_fom_seq]" ).append("\n"); 
+		query.append(", @[rpt_itm_cd]" ).append("\n"); 
+		query.append(", @[rpt_itm_desc]" ).append("\n"); 
+		query.append(", @[rpt_itm_col_nm]" ).append("\n"); 
+		query.append(", @[cre_usr_id]" ).append("\n"); 
+		query.append(", SYSDATE" ).append("\n"); 
+		query.append(", @[upd_usr_id]" ).append("\n"); 
+		query.append(", SYSDATE" ).append("\n"); 
+		query.append(")" ).append("\n"); 
+
+	}
+}

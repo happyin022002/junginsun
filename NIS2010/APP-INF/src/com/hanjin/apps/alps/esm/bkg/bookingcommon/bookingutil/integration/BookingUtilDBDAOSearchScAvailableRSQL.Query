@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="BookingUtilDBDAOSearchScAvailableRSQL">
+			<desc><![CDATA[sc no의 가용성을 확인한다
+
+미주 S/C renewal case
+   - 미주 S/C renewal시 : BKG Date와 S/C 종료시점이 calendar day로 7일까지 들어간 경우는 exception 처리
+   - BKG의 application date가 아닌 S/C Expiration date를 가지고 SC NO 확인 로직 실행]]></desc>
+			<sql><![CDATA[
+#if (${page_type}== 'ESM_BKG_0079_08')
+
+SELECT count(1) cnt        
+	  FROM PRI_SP_HDR HDR
+		, PRI_SP_MN MAIN
+		, (
+
+            SELECT 
+            	CASE 
+            		WHEN LENGTH(RT_APLY_DT) > 0     THEN  
+	#if (${application_date} != '')
+		(select to_date(@[application_date]||'0000','yyyymmddhh24mi') from dual) 
+	#else
+		RT_APLY_DT
+	#end
+		#if (${application_date} != '')
+					WHEN '1' > 0 THEN 		(select to_date(@[application_date]||'0000','yyyymmddhh24mi') from dual) 
+		#end
+					WHEN LENGTH(VPS_ETD_DT) > 0     THEN  VPS_ETD_DT
+            		WHEN LENGTH(BKG_CRE_DT) > 0     THEN  BKG_CRE_DT
+            		ELSE sysdate
+            	END	APPL_DT
+            FROM 
+	#if (${ca_flg}== 'Y')
+			BKG_BKG_HIS  BKG, 
+			BKG_RT_HIS  RATE, 
+	#else
+            BKG_BOOKING  BKG, 
+            BKG_RATE  RATE,
+	#end
+		(
+			SELECT 
+		    	BK.BKG_NO, VVD.VSL_CD, VVD.SKD_VOY_NO,
+			    VVD.SKD_DIR_CD, VVD.POL_CD, VVD.POL_CLPT_IND_SEQ, 
+		    (SELECT VPS_ETD_DT 
+		     FROM VSK_VSL_PORT_SKD S2
+		     WHERE S2.VSL_CD = VVD.VSL_CD
+		       AND S2.SKD_VOY_NO = VVD.SKD_VOY_NO
+		       AND S2.SKD_DIR_CD = VVD.SKD_DIR_CD
+		       AND S2.VPS_PORT_CD = VVD.POL_CD
+		       AND S2.CLPT_IND_SEQ = VVD.POL_CLPT_IND_SEQ) VPS_ETD_DT
+			FROM
+				#if (${ca_flg}== 'Y')
+					BKG_BKG_HIS BK, BKG_VVD_HIS VVD
+				#else
+					BKG_BOOKING BK, BKG_VVD VVD
+				#end
+			WHERE BK.BKG_NO = VVD.BKG_NO
+			AND BK.POL_CD = VVD.POL_CD
+			AND BK.BKG_NO =@[bkg_no]
+			#if (${ca_flg}== 'Y')
+				AND BK.corr_no 		  = 'TMP0000001'
+				AND VVD.corr_no 	  = 'TMP0000001'	
+			#end 
+		) VVD
+				
+			WHERE 
+            BKG.BKG_NO=RATE.BKG_NO
+			AND BKG.BKG_NO=VVD.BKG_NO(+)
+            AND BKG.BKG_NO= @[bkg_no]
+	#if (${ca_flg}== 'Y')
+			AND BKG.corr_no 		  = 'TMP0000001'
+			AND RATE.corr_no 		  = 'TMP0000001'
+	#end
+
+		) APPL_DT
+	 WHERE HDR.PROP_NO = MAIN.PROP_NO
+	   and MAIN.eff_dt - 0.0001 < APPL_DT.APPL_DT
+	   AND MAIN.exp_dt + 0.9999 > APPL_DT.APPL_DT
+	   and main.prop_sts_cd = 'F'
+	   and hdr.sc_no = @[sc_no]
+
+#else
+
+	SELECT count(1) cnt        
+	  FROM PRI_SP_HDR HDR
+		, PRI_SP_MN MAIN
+		, (select case  when appl_dt - ctrt_exp_dt between 0 and 7 then ctrt_exp_dt
+                        else appl_dt
+                  end appl_dt
+           from
+            (select appl_dt,(select max(d.ctrt_exp_dt)
+                             from pri_sp_hdr h, pri_sp_mn m, pri_sp_dur d
+                            where sc_no = @[sc_no]
+                              and h.prop_no = m.prop_no
+                              and m.prop_sts_cd = 'F'
+                              and appl_dt > m.exp_dt
+                              and m.prop_no = d.prop_no
+                              and m.amdt_seq = d.amdt_seq
+                              and 'N' = NVL((select 'Y'
+                                             from pri_sp_mn
+                                             where prop_no = m.prop_no
+                                             and appl_dt between eff_dt and exp_dt
+                                             and prop_sts_cd = 'F'
+                                             and rownum = 1
+                                             ),'N')
+                            ) ctrt_exp_dt
+
+               from 
+                  (
+#if (${bkg_no} != '') 
+				SELECT 0.5 RANK, LAST_DAY(ADD_MONTHS(TO_DATE(BHCC.ATTR_CTNT9,'YYYYMMDD'),-1)) appl_dt 
+				FROM BKG_HRD_CDG_CTNT BHCC
+				WHERE BHCC.HRD_CDG_ID = 'NO_RATE_PROC_CTR'
+				AND   BHCC.ATTR_CTNT8 LIKE '%'||NVL(@[sc_no],'X123456789')||'%'
+				AND  SYSDATE <= TO_DATE(BHCC.ATTR_CTNT9,'YYYYMMDD') + 0.99999
+				union all
+                select 1 rank, RT_APLY_DT appl_dt 
+                  from bkg_rt_his r
+                 where bkg_no = @[bkg_no]
+			       and corr_no = 'TMP0000001'
+                   and rt_aply_dt is not null
+			    union all
+			    select 2 rank, RT_APLY_DT appl_dt --rate applicable
+                  from bkg_rate r
+                 where bkg_no = @[bkg_no]
+                   and rt_aply_dt is not null
+                union all
+                select 3 rank, skd.vps_etd_dt appl_dt --onboard date
+                  from bkg_vvd_his vvd, vsk_vsl_port_skd skd, bkg_bkg_his bk
+                 where bk.bkg_no          = @[bkg_no] 
+			       and bk.corr_no 		  = 'TMP0000001'
+			       and vvd.corr_no 		  = 'TMP0000001'
+                   and bk.bkg_no          = vvd.bkg_no
+                   and vvd.vsl_pre_pst_cd in ('S', 'T')
+                   and vvd.pol_cd         = bk.pol_cd
+                   and vvd.vsl_cd         = skd.vsl_cd
+                   and vvd.skd_voy_no     = skd.skd_voy_no
+                   and vvd.skd_dir_cd     = skd.skd_dir_cd
+                   and vvd.pol_cd         = skd.vps_port_cd
+                   and vvd.pol_CLPT_IND_SEQ = skd.CLPT_IND_SEQ
+                union all
+                select 4 rank, skd.vps_etd_dt appl_dt --onboard date
+                  from bkg_vvd vvd, vsk_vsl_port_skd skd, bkg_booking bk
+                 where bk.bkg_no          = @[bkg_no] 
+                   and bk.bkg_no          = vvd.bkg_no
+                   and vvd.vsl_pre_pst_cd in ('S', 'T')
+                   and vvd.pol_cd         = bk.pol_cd
+                   and vvd.vsl_cd         = skd.vsl_cd
+                   and vvd.skd_voy_no     = skd.skd_voy_no
+                   and vvd.skd_dir_cd     = skd.skd_dir_cd
+                   and vvd.pol_cd         = skd.vps_port_cd
+                   and vvd.pol_CLPT_IND_SEQ = skd.CLPT_IND_SEQ
+                union all 
+#end
+                select 5 rank, sysdate appl_dt
+                  from dual)   
+            where rownum = 1)) appl
+	 WHERE HDR.PROP_NO = MAIN.PROP_NO
+	   and MAIN.eff_dt - 0.0001 < APPL.APPL_DT
+	   AND MAIN.exp_dt + 0.9999 > APPL.APPL_DT
+	   and main.prop_sts_cd = 'F'
+	   and hdr.sc_no = @[sc_no]
+
+#end			]]></sql>
+			<params>
+				<param name="application_date" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="sc_no" type="12" value="AEN090001" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

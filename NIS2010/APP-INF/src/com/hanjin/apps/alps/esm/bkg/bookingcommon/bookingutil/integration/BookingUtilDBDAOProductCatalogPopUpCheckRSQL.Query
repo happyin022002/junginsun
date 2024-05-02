@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="BookingUtilDBDAOProductCatalogPopUpCheckRSQL">
+			<desc><![CDATA[부킹메인에서 Product Catalog 팝업 오픈여부 체크]]></desc>
+			<sql><![CDATA[
+SELECT CNST
+    FROM (
+           SELECT DISTINCT PCTL_NO, DECODE(NVL(CC.SVC_USE_FLG, 'Y'), 'N', 'X', 'N') CNST, DECODE(NVL(CC.SVC_USE_FLG,'Y'),'N',1,2) ORD, CC.ORG_NOD_CD NOD
+           FROM (
+    			SELECT /*+ USE_NL(D, M, Q) */ DECODE(C.NOD_CD,'ALL',D.ORG_NOD_CD,C.NOD_CD) NOD_CD, C.PORT_PNT_CD, C.SVC_USE_FLG, D.PCTL_NO, D.ORG_NOD_CD, D.PCTL_SEQ
+                FROM PRD_NOD_CNST_MGMT C
+                   , PRD_PROD_CTL_QTY Q
+                    ,PRD_PROD_CTL_MST M
+                   , (SELECT /*+ FIRST_ROWS */ PCTL_NO, PCTL_SEQ, ORG_NOD_CD, NOD_LNK_DIV_CD, PCTL_IO_BND_CD, MTY_YD_FLG, ARR_ST_DT, DEP_FSH_DT
+                             , LEAD (VSL_SLAN_CD) OVER (PARTITION BY PCTL_NO ORDER BY PCTL_SEQ) POL_SLAN_CD
+                             , LEAD (VSL_CD || SKD_VOY_NO || SKD_DIR_CD) OVER (PARTITION BY PCTL_NO ORDER BY PCTL_SEQ) POL_VVD
+                             , LAG (VSL_SLAN_CD) OVER (PARTITION BY PCTL_NO ORDER BY PCTL_SEQ) POD_SLAN_CD
+                             , LAG  (VSL_CD || SKD_VOY_NO || SKD_DIR_CD) OVER (PARTITION BY PCTL_NO ORDER BY PCTL_SEQ) POD_VVD
+                        FROM PRD_PROD_CTL_ROUT_DTL
+                        WHERE PCTL_NO LIKE DECODE(@[pctl_no], NULL, NULL, @[pctl_no]||'%')) D
+                   , MDM_VSL_SVC_LANE SL,MDM_VSL_SVC_LANE SD
+    			 WHERE M.PCTL_NO = D.PCTL_NO
+    			 AND D.PCTL_NO = Q.PCTL_NO
+                 AND D.ORG_NOD_CD LIKE DECODE(C.NOD_CD, 'ALL','%',C.NOD_CD||'%')
+    			 AND NVL(M.CMDT_CD,'X')  = NVL(C.CMDT_CD, NVL(M.CMDT_CD,'X'))
+    			 AND NVL(C.DELT_FLG, 'N') <> 'Y'
+    			 AND NVL(C.CNTR_TP_CD, Q.CNTR_TPSZ_CD)
+    				= DECODE(C.CNTR_TP_CD, NULL, Q.CNTR_TPSZ_CD, DECODE(SUBSTR(Q.CNTR_TPSZ_CD, 1, 1), 'T', 'T', 'O', 'S', 'F', 'S',
+    																	'D',Q.CNTR_TPSZ_CD,
+    																	'R',Q.CNTR_TPSZ_CD) )
+    			 AND (
+    					(
+                                                -- 사용자 요청으로 PC생성일 기준으로 변경
+    						TRUNC(TO_DATE(NVL(C.EFF_FM_DT,'19000101'),'yyyy/mm/dd hh24:mi:ss')) <= M.CRE_DT AND
+    						M.CRE_DT < TRUNC(TO_DATE(NVL(C.EFF_TO_DT,'25000101'),'yyyy/mm/dd hh24:mi:ss')+1)
+    					)
+    				)
+    			AND D.NOD_LNK_DIV_CD = 'N'
+	            AND SL.VSL_SLAN_CD(+) = D.POL_SLAN_CD
+	            AND SD.VSL_SLAN_CD(+) = D.POD_SLAN_CD
+                AND (   D.POL_SLAN_CD || ',' || DECODE(SL.VSL_SVC_TP_CD, 'O', 'FDR') LIKE '%' || C.VSL_SLAN_CD || '%'
+                     OR D.POD_SLAN_CD || ',' || DECODE(SD.VSL_SVC_TP_CD, 'O', 'FDR') LIKE '%' || C.VSL_SLAN_CD || '%'
+                    )
+    			AND NVL(C.VSL_CD || C.SKD_VOY_NO || C.SKD_DIR_CD, '#') IN (D.POL_VVD, D.POD_VVD, DECODE(C.VSL_CD || C.SKD_VOY_NO || C.SKD_DIR_CD, NULL, '#'))
+                AND NOT EXISTS (SELECT 'X'
+                                  FROM PRD_NOD_CNST_EXPT X
+                                 WHERE 1=1
+                                   AND X.NOD_CD          = C.NOD_CD
+                                   AND X.NOD_CNST_ITM_CD = C.NOD_CNST_ITM_CD
+                                   AND X.NOD_CNST_SEQ    = C.NOD_CNST_SEQ
+                                   AND X.DELT_FLG = 'N'
+                                   AND (
+                                        (X.CNST_EXPT_TP_CD = 'K' AND X.CNST_EXPT_NO = @[sc_no]) OR
+                                        (X.CNST_EXPT_TP_CD = 'R' AND X.CNST_EXPT_NO = @[rfa_no])
+                                       )
+                               )
+    			ORDER BY DECODE(NVL(SVC_USE_FLG,'Y'),'N',1,2)
+                ) CC
+			WHERE NVL(CC.PORT_PNT_CD, 'ALL') = 'ALL'
+               OR CC.PORT_PNT_CD IN 
+                  (
+                      (SELECT CASE
+                          WHEN PCTL_SEQ  = (SELECT  MIN(PCTL_SEQ) FROM PRD_PROD_CTL_ROUT_DTL
+                              WHERE  PCTL_NO = DD.pctl_no
+                              AND PCTL_IO_BND_CD = 'O'
+                              AND NOD_LNK_DIV_CD = 'N'
+                              AND MTY_YD_FLG = 'N'  ) THEN 'POR'
+                          END
+                      FROM PRD_PROD_CTL_ROUT_DTL DD
+                      WHERE DD.pctl_no = CC.pctl_no
+                      AND Dd.NOD_LNK_DIV_CD = 'N'
+                      and dd.PCTL_SEQ = cc.PCTL_SEQ
+                      AND (DD.ORG_NOD_CD LIKE CC.NOD_CD||'%')
+                      ),
+                      (SELECT CASE
+                          WHEN PCTL_SEQ  = (SELECT  MAX(PCTL_SEQ) FROM PRD_PROD_CTL_ROUT_DTL
+                              WHERE  PCTL_NO = DD.pctl_no
+                              AND PCTL_IO_BND_CD = 'O'
+                              AND NOD_LNK_DIV_CD = 'N'
+                              AND MTY_YD_FLG = 'N'  ) THEN 'POL'
+                          END
+                      FROM PRD_PROD_CTL_ROUT_DTL DD
+                      WHERE DD.pctl_no = CC.pctl_no
+                      AND Dd.NOD_LNK_DIV_CD = 'N'
+                      and dd.PCTL_SEQ = cc.PCTL_SEQ
+                      AND (DD.ORG_NOD_CD LIKE CC.NOD_CD||'%')
+                      ),
+                      (SELECT CASE
+                          WHEN PCTL_SEQ  IN (SELECT  PCTL_SEQ FROM PRD_PROD_CTL_ROUT_DTL
+                              WHERE  PCTL_NO = DD.pctl_no
+                              AND PCTL_IO_BND_CD = 'T'
+                              AND NOD_LNK_DIV_CD = 'N'  ) THEN 'TS'
+                          END
+                      FROM PRD_PROD_CTL_ROUT_DTL DD
+                      WHERE DD.pctl_no = CC.pctl_no
+                      AND Dd.NOD_LNK_DIV_CD = 'N'
+                      and dd.PCTL_SEQ = cc.PCTL_SEQ
+                      AND (DD.ORG_NOD_CD LIKE CC.NOD_CD||'%')
+                      ),
+                      (SELECT CASE
+                          WHEN PCTL_SEQ  = (SELECT  MIN(PCTL_SEQ) FROM PRD_PROD_CTL_ROUT_DTL
+                              WHERE  PCTL_NO = DD.pctl_no
+                              AND PCTL_IO_BND_CD = 'I'
+                              AND NOD_LNK_DIV_CD = 'N'
+                              AND MTY_YD_FLG = 'N'  ) THEN 'POD'
+                          END
+                      FROM PRD_PROD_CTL_ROUT_DTL DD
+                      WHERE DD.pctl_no = CC.pctl_no
+                      AND Dd.NOD_LNK_DIV_CD = 'N'
+                      and dd.PCTL_SEQ = cc.PCTL_SEQ
+                      AND (DD.ORG_NOD_CD LIKE CC.NOD_CD||'%')
+                      ),
+                      (SELECT CASE
+                          WHEN PCTL_SEQ  = (SELECT  MAX(PCTL_SEQ) FROM PRD_PROD_CTL_ROUT_DTL
+                              WHERE  PCTL_NO = DD.pctl_no
+                              AND PCTL_IO_BND_CD = 'I'
+                              AND NOD_LNK_DIV_CD = 'N'
+                              AND MTY_YD_FLG = 'N'  ) THEN 'DEL'
+                          END
+                      FROM PRD_PROD_CTL_ROUT_DTL DD
+                      WHERE DD.pctl_no = CC.pctl_no
+                      AND Dd.NOD_LNK_DIV_CD = 'N'
+                      and dd.PCTL_SEQ = cc.PCTL_SEQ
+                      AND (DD.ORG_NOD_CD LIKE CC.NOD_CD||'%')
+                      )
+                  )
+		   ) T			]]></sql>
+			<params>
+				<param name="pctl_no" type="12" value="" out="N"/>
+				<param name="sc_no" type="12" value="" out="N"/>
+				<param name="rfa_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

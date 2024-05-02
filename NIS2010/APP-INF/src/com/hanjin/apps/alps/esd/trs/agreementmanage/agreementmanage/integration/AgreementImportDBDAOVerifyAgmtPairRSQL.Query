@@ -1,0 +1,331 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AgreementImportDBDAOVerifyAgmtPairRSQL">
+			<desc><![CDATA[Agreement Pair Type data Verify 수행]]></desc>
+			<sql><![CDATA[
+SELECT SR
+      ,SUBSTR(MAX(RULE_CHK)
+       || CASE WHEN MIN(ALL_CHK) <> MAX(ALL_CHK) THEN ',TPSZ DUP ERR' END
+       || MAX(UI_DUP),2) RMK --UI에 동일한 자료가 있는지 체크
+      ,DECODE(RT_UPD_STS_CD, 'I', MAX(DB_DUP), '') RMK2 --DB에 동일한 자료가 있는지 체크
+  FROM (
+        SELECT -- Effective date CHECK
+               CASE WHEN T.EFF_TO_DT IS NULL
+                      OR T.EFF_FM_DT IS NULL
+                      OR T.EFF_TO_DT - T.EFF_FM_DT < 0
+                    THEN ',EF DATE ER'
+               END 
+               || -- Customer code CHECK
+               CASE WHEN T.CUST_CNT_CD <> 'XX'
+                     AND
+                        (SELECT 1
+                           FROM MDM_CUSTOMER M
+                          WHERE 1=1
+                            AND M.CUST_CNT_CD   = T.CUST_CNT_CD
+                            AND M.CUST_SEQ      = T.CUST_SEQ
+                            AND M.DELT_FLG = 'N'
+                            AND ROWNUM = 1
+                        ) IS NULL 
+                    THEN ',CUST ERR'
+               END
+               || -- Commodity group code CHECK
+               CASE WHEN T.CMDT_GRP_CD <> 'XXXX'
+                     AND
+                        (SELECT 1
+                           FROM TRS_TRSP_CMDT_GRP C
+                          WHERE 1=1
+                            AND C.TRSP_GRP_CMDT_CD = T.CMDT_GRP_CD
+                            AND C.DELT_FLG = 'N'
+                            AND ROWNUM = 1
+                        ) IS NULL 
+                    THEN ',CMDT GRP ERR'
+               END
+               || -- From Node Check
+               CASE WHEN T.FM_NOD_CD <> '0000000'
+                     AND
+                        (SELECT 1
+                           FROM MDM_YARD M
+                          WHERE 1=1
+                            AND M.YD_CD   LIKE (T.FM_NOD_CD||'%')
+                            AND T.FM_NOD_CD IS NOT NULL
+                            AND M.DELT_FLG = 'N'
+                            AND ROWNUM = 1
+                          UNION
+                         SELECT 1
+                           FROM MDM_LSE_CO_YD M
+                          WHERE 1=1
+                            AND M.LSE_CO_YD_CD  LIKE (T.FM_NOD_CD||'%')
+                            AND M.DELT_FLG = 'N'
+                            AND ROWNUM = 1
+                        ) IS NULL 
+                    THEN ',FM NODE ERR'
+               END
+               || -- Via Node Check
+               CASE WHEN T.VIA_NOD_CD <> '0000000'
+                     AND
+                        (SELECT 1
+                           FROM MDM_YARD M
+                          WHERE 1=1
+                            AND M.YD_CD   LIKE (T.VIA_NOD_CD||'%')
+                            AND DELT_FLG = 'N'
+                            AND ROWNUM = 1
+                         ) IS NULL 
+                    THEN ',VIA NODE ERR'
+               END
+               || -- Door Node Check
+               CASE WHEN T.DOR_NOD_CD <> '0000000'
+                     AND
+                        (SELECT 1
+                           FROM MDM_ZONE M
+                          WHERE 1=1
+                            AND M.ZN_CD   LIKE (T.DOR_NOD_CD||'%')
+                            AND DELT_FLG = 'N'
+                            AND ROWNUM = 1
+                        ) IS NULL 
+                    THEN ',DOOR NODE ERR'
+               END
+               || -- To Node CHECK
+               CASE WHEN T.TO_NOD_CD <> '0000000'
+                     AND
+                        (SELECT 1
+                           FROM MDM_YARD M
+                          WHERE 1=1
+                            AND M.YD_CD   LIKE (T.TO_NOD_CD||'%')
+                            AND DELT_FLG = 'N'
+                            AND ROWNUM = 1
+                          UNION
+                         SELECT 1
+                           FROM MDM_LSE_CO_YD M
+                          WHERE 1=1
+                            AND M.LSE_CO_YD_CD   LIKE (T.TO_NOD_CD||'%')
+                            AND DELT_FLG = 'N'
+                            AND ROWNUM = 1
+                        ) IS NULL 
+                    THEN ',TO NODE ERR'
+               END
+               || -- REVERSE CHECK
+               CASE WHEN T.TRSP_RVS_APLY_FLG = 'Y' AND (T.VIA_NOD_CD <> '0000000')
+                    THEN ',REVERSE FLAG ERR'
+               END
+               || -- WEIGHT CHECK
+               CASE WHEN T.CGO_TP_CD = 'F' AND (T.TO_WGT IS NULL OR T.TO_WGT = 0) THEN ',WGT INPUT CHK' END
+               || -- RE-CHK AGMT TYPE
+               CASE WHEN T.FM_NOD_CD IS NOT NULL AND T.TRSP_AGMT_DIST != 0 THEN ',RE-CHK AGMT TYPE' END
+               || -- RULE-A CHECK
+               CASE WHEN
+                   (SELECT 1
+                      FROM TRS_AGMT_EQ_TP_RULE            H
+                     WHERE TRSP_AGMT_RULE_TP_CD         = 'P'
+                       AND TRSP_AGMT_STEP_KNT           = 1
+                       AND TRSP_AGMT_TP_CD              = T.TRSP_AGMT_RT_TP_CD
+                       AND TRSP_MOD_CD                  = T.AGMT_TRSP_TP_CD
+                       AND NVL(FM_LOC_COND_CD, 'N/A')   = DECODE(T.FM_NOD_CD, '0000000', 'N/A', 'NN')
+                       AND NVL(VIA_LOC_COND_CD, 'N/A')  = DECODE(T.VIA_NOD_CD, '0000000', 'N/A', 'NN')
+                       AND NVL(TO_LOC_COND_CD, 'N/A')   = DECODE(T.TO_NOD_CD, '0000000', 'N/A', 'NN')
+                       AND NVL(RCV_COND_CD, 'N/A')      = DECODE(T.WTR_RCV_TERM_CD, '0', 'N/A', 'NN')
+                       AND NVL(DE_COND_CD, 'N/A')       = DECODE(T.WTR_DE_TERM_CD, '0', 'N/A', 'NN')
+                       AND ROWNUM                       = 1
+                   ) IS NULL THEN ',RULE-A ERR'
+               END
+               || -- RULE-B CHECK
+               CASE WHEN
+                   (SELECT 1
+                      FROM TRS_AGMT_EQ_TP_RULE            H
+                     WHERE TRSP_AGMT_RULE_TP_CD             = 'P'
+                       AND TRSP_AGMT_STEP_KNT                  = 2
+                       AND NVL(RAIL_SVC_TP_CD, 'N/A')          = DECODE(T.RAIL_SVC_TP_CD, '00', 'N/A', T.RAIL_SVC_TP_CD)
+                       AND NVL(CURR_COND_CD, 'N/A')            = DECODE(T.CURR_CD, 'XXX', 'N/A', 'NN')
+                       AND NVL(RT_COND_CD, 'N/A')              = DECODE(T.TRSP_ONE_WY_RT, NULL, 'N/A', 'NN')
+                       AND NVL(RND_TRP_RT_COND_CD, 'N/A')      = DECODE(T.TRSP_RND_RT, NULL, 'N/A', 'NN')
+                       AND ROWNUM                              = 1
+                   ) IS NULL THEN ',RULE-B ERR'
+               END
+               || -- RULE-C RULE CHECK
+               CASE WHEN
+                   (SELECT 1
+                      FROM TRS_AGMT_EQ_TP_RULE            H
+                     WHERE TRSP_AGMT_RULE_TP_CD                = 'P'
+                       AND TRSP_AGMT_STEP_KNT                  = 3
+                       AND TRSP_AGMT_COST_MOD_CD               = T.TRSP_COST_MOD_CD
+                       AND NVL(TRSP_AGMT_CGO_TP_CD, 'N/A')     = DECODE(T.CGO_TP_CD, '0', 'N/A', T.CGO_TP_CD)
+                       AND NVL(DOR_LOC_COND_CD, 'N/A')         = DECODE(T.DOR_NOD_CD, '0000000', 'N/A', 'NN')
+                       AND TRSP_AGMT_EQ_KND_CD                 = T.EQ_KND_CD
+                       AND NVL(H.TRSP_AGMT_EQ_SZ_CD, 'N/A')    = NVL(T.TRSP_AGMT_EQ_SZ_CD, 'N/A') --Genset은 Size가 없으므로 NVL처리
+                       AND ROWNUM                              = 1
+                   ) IS NULL THEN ',RULE-C ERR'
+               END
+               || -- RULE-D RULE CHECK
+               CASE WHEN
+                   (SELECT 1
+                      FROM TRS_AGMT_EQ_TP_RULE            H
+                     WHERE TRSP_AGMT_RULE_TP_CD                = 'P'
+                       AND TRSP_AGMT_STEP_KNT                  = 4
+                       AND TRSP_AGMT_COST_MOD_CD               = T.TRSP_COST_MOD_CD
+                       AND NVL(TRSP_AGMT_CGO_TP_CD, 'N/A')     = DECODE(T.CGO_TP_CD, '0', 'N/A', T.CGO_TP_CD)
+                       AND TRSP_AGMT_EQ_KND_CD                 = T.EQ_KND_CD
+                       AND TRSP_AGMT_EQ_TP_CD                  = T.TRSP_AGMT_EQ_TP_CD
+                       AND NVL(CHSS_NO_COND_CD, 'N/A')         = DECODE(T.TRSP_AGMT_BDL_QTY, '0', 'N/A', 'NN')
+                       AND ROWNUM                              = 1
+                   ) IS NULL THEN ',RULE-D ERR'
+               END
+               || -- RULE-F RULE CHECK
+               CASE WHEN
+                   (SELECT 1
+                      FROM TRS_AGMT_EQ_TP_RULE            H
+                     WHERE TRSP_AGMT_RULE_TP_CD                = 'P'
+                       AND TRSP_AGMT_STEP_KNT                  = 6
+                       AND TRSP_AGMT_EQ_TP_CD                  = T.TRSP_AGMT_EQ_TP_CD
+                       AND NVL(H.TRSP_AGMT_EQ_SZ_CD, 'N/A')    = NVL(T.TRSP_AGMT_EQ_SZ_CD, 'N/A') --Genset은 Size가 없으므로 NVL처리
+                       AND ROWNUM                              = 1
+                   ) IS NULL THEN ',RULE-F ERR'
+               END
+               || -- Agreement Approval Date
+               CASE WHEN T.EQ_KND_CD = 'U'
+                     AND T.AGMT_APRO_DT IS NULL
+                    THEN ',AGMT Approval Date is missing'
+               END
+               || -- CNT Type Check
+               CASE WHEN T.CUST_NOMI_TRKR_IND_CD <> 'HJS' AND (T.CUST_CNT_CD = 'XX' OR CUST_SEQ = 0 )
+                             THEN ',AGMT Customer is missing'
+                    WHEN T.CUST_NOMI_TRKR_IND_CD = 'HJS'  AND (T.CUST_CNT_CD != 'XX' OR CUST_SEQ != 0 )
+                             THEN ',AGMT Customer is invalid'
+               END
+               || -- Agreement Approval Date가 Update날짜보다 클 경우                
+               CASE WHEN TO_CHAR(NVL((SELECT GLOBALDATE_PKG.TIME_LOCAL_OFC_FNC(USR.OFC_CD) DT
+                                        FROM COM_USER USR
+                                       WHERE USR.USR_ID = T.CRE_USR_ID
+                         ),SYSDATE), 'YYYYMMDD') < TO_CHAR(AGMT_APRO_DT,'YYYYMMDD')
+                    THEN ',Approval DT > Update DT'
+               END
+               /**
+                ||
+              (SELECT CASE WHEN COUNT(1)> 0 THEN ',CNT DUP'
+                            ELSE ''
+                        END
+                  FROM TRS_AGMT_HDR   A
+                      ,TRS_AGMT_RT_TP C
+                      ,TRS_AGMT_NOD   D
+                      ,TRS_AGMT_EQ_RT E
+                 WHERE A.TRSP_AGMT_OFC_CTY_CD   = C.TRSP_AGMT_OFC_CTY_CD
+                   AND A.TRSP_AGMT_SEQ          = C.TRSP_AGMT_SEQ
+                   AND C.TRSP_AGMT_OFC_CTY_CD   = D.TRSP_AGMT_OFC_CTY_CD
+                   AND C.TRSP_AGMT_SEQ          = D.TRSP_AGMT_SEQ
+                   AND C.TRSP_AGMT_RT_TP_SER_NO = D.TRSP_AGMT_RT_TP_SER_NO
+                   AND D.TRSP_AGMT_OFC_CTY_CD   = E.TRSP_AGMT_OFC_CTY_CD
+                   AND D.TRSP_AGMT_SEQ          = E.TRSP_AGMT_SEQ
+                   AND D.TRSP_AGMT_RT_TP_SER_NO = E.TRSP_AGMT_RT_TP_SER_NO
+                   AND D.TRSP_AGMT_NOD_SEQ      = E.TRSP_AGMT_NOD_SEQ
+                   AND C.TRSP_AGMT_OFC_CTY_CD   = T.TRSP_AGMT_OFC_CTY_CD
+                   AND C.TRSP_AGMT_SEQ          = T.TRSP_AGMT_SEQ
+                   AND C.TRSP_AGMT_RT_TP_CD     = T.TRSP_AGMT_RT_TP_CD
+                   AND C.CGO_TP_CD              = T.CGO_TP_CD
+                   AND C.CUST_NOMI_TRKR_FLG     = T.CUST_NOMI_TRKR_FLG
+                   AND C.CUST_CNT_CD            = T.CUST_CNT_CD
+                   AND C.CUST_SEQ               = T.CUST_SEQ
+                   AND C.TRSP_COST_MOD_CD       = T.TRSP_COST_MOD_CD
+                   AND C.AGMT_TRSP_TP_CD        = T.AGMT_TRSP_TP_CD
+                   AND C.CMDT_GRP_CD            = T.CMDT_GRP_CD
+                   AND C.RAIL_SVC_TP_CD         = T.RAIL_SVC_TP_CD
+                   AND D.FM_NOD_CD              = T.FM_NOD_CD
+                   AND D.VIA_NOD_CD             = T.VIA_NOD_CD
+                   AND D.DOR_NOD_CD             = T.DOR_NOD_CD
+                   AND D.TO_NOD_CD              = T.TO_NOD_CD
+                   AND D.TRSP_AGMT_DIST         = T.TRSP_AGMT_DIST
+                   AND D.DIST_MEAS_UT_CD        = T.DIST_MEAS_UT_CD
+                   AND D.TRSP_DIST_TP_CD        = T.TRSP_DIST_TP_CD
+                   AND NVL(E.DELT_FLG, 'Y') = 'N'
+                   AND NVL(C.CUST_NOMI_TRKR_IND_CD,'HJS') <> NVL(T.CUST_NOMI_TRKR_IND_CD,'HJS')
+                )
+                */
+               AS RULE_CHK
+               ,TO_NUMBER(ROW_NO) SR
+               ,CASE WHEN INSTR(TRSP_AGMT_EQ_TP_CD||TRSP_AGMT_EQ_SZ_CD, 'AL') > 0 THEN 1 ELSE 0 END ALL_CHK
+               ,TRSP_TMP_SEQ  
+               ,RT_UPD_STS_CD
+               ,(SELECT '; LINE '||U.ROW_NO ||' DUP'
+                   FROM TRS_AGMT_TMP U
+                  WHERE U.TRSP_AGMT_OFC_CTY_CD = T.TRSP_AGMT_OFC_CTY_CD
+                    AND U.TRSP_AGMT_SEQ       = T.TRSP_AGMT_SEQ
+                    AND U.AGMT_TRSP_TP_CD     = T.AGMT_TRSP_TP_CD
+                    AND U.CGO_TP_CD           = T.CGO_TP_CD
+                    AND U.CUST_NOMI_TRKR_FLG  = T.CUST_NOMI_TRKR_FLG
+                    AND U.CUST_CNT_CD         = T.CUST_CNT_CD
+                    AND U.CUST_SEQ            = T.CUST_SEQ
+                    AND U.TRSP_COST_MOD_CD    = T.TRSP_COST_MOD_CD
+                    AND U.AGMT_TRSP_TP_CD     = T.AGMT_TRSP_TP_CD
+                    AND U.CMDT_GRP_CD         = T.CMDT_GRP_CD
+                    AND U.RAIL_SVC_TP_CD      = T.RAIL_SVC_TP_CD
+                    AND U.FM_NOD_CD           = T.FM_NOD_CD
+                    AND U.VIA_NOD_CD          = T.VIA_NOD_CD
+                    AND U.DOR_NOD_CD          = T.DOR_NOD_CD
+                    AND U.TO_NOD_CD           = T.TO_NOD_CD
+                    AND U.TRSP_AGMT_DIST      = T.TRSP_AGMT_DIST
+                    AND U.DIST_MEAS_UT_CD     = T.DIST_MEAS_UT_CD
+                    AND U.TRSP_DIST_TP_CD     = T.TRSP_DIST_TP_CD
+                    AND U.TRSP_AGMT_EQ_TP_CD  = T.TRSP_AGMT_EQ_TP_CD
+                    AND U.TRSP_AGMT_EQ_SZ_CD  = T.TRSP_AGMT_EQ_SZ_CD
+                    AND U.EQ_KND_CD           = T.EQ_KND_CD
+                    AND U.TRSP_AGMT_BDL_QTY   = T.TRSP_AGMT_BDL_QTY
+                    AND U.TO_WGT              = DECODE(T.TRSP_SCG_CD, 'XX', T.TO_WGT, U.TO_WGT) -- BASIC RATE일 경우만 WEIGHT를 체크한다.
+                    AND U.WGT_MEAS_UT_CD      = DECODE(T.TRSP_SCG_CD, 'XX', T.WGT_MEAS_UT_CD, U.WGT_MEAS_UT_CD) -- BASIC RATE일 경우만 WEIGHT를 체크한다.
+                    AND U.TRSP_RVS_APLY_FLG   = T.TRSP_RVS_APLY_FLG
+                    AND U.TRSP_SCG_CD         = T.TRSP_SCG_CD
+                    AND U.TRSP_TMP_SEQ        = T.TRSP_TMP_SEQ
+                    AND U.ROW_NO             <> T.ROW_NO
+                    AND U.DELT_FLG            = 'N'
+                    AND ROWNUM = 1
+                ) UI_DUP
+               ,(SELECT 'DUP'
+                  FROM TRS_AGMT_HDR   A
+                      ,TRS_AGMT_RT_TP C
+                      ,TRS_AGMT_NOD   D
+                      ,TRS_AGMT_EQ_RT E
+                 WHERE A.TRSP_AGMT_OFC_CTY_CD   = C.TRSP_AGMT_OFC_CTY_CD
+                   AND A.TRSP_AGMT_SEQ          = C.TRSP_AGMT_SEQ
+                   AND C.TRSP_AGMT_OFC_CTY_CD   = D.TRSP_AGMT_OFC_CTY_CD
+                   AND C.TRSP_AGMT_SEQ          = D.TRSP_AGMT_SEQ
+                   AND C.TRSP_AGMT_RT_TP_SER_NO = D.TRSP_AGMT_RT_TP_SER_NO
+                   AND D.TRSP_AGMT_OFC_CTY_CD   = E.TRSP_AGMT_OFC_CTY_CD
+                   AND D.TRSP_AGMT_SEQ          = E.TRSP_AGMT_SEQ
+                   AND D.TRSP_AGMT_RT_TP_SER_NO = E.TRSP_AGMT_RT_TP_SER_NO
+                   AND D.TRSP_AGMT_NOD_SEQ      = E.TRSP_AGMT_NOD_SEQ
+                   AND C.TRSP_AGMT_OFC_CTY_CD   = T.TRSP_AGMT_OFC_CTY_CD
+                   AND C.TRSP_AGMT_SEQ          = T.TRSP_AGMT_SEQ
+                   AND C.TRSP_AGMT_RT_TP_CD     = T.TRSP_AGMT_RT_TP_CD
+                   AND C.CGO_TP_CD              = T.CGO_TP_CD
+                   AND C.CUST_NOMI_TRKR_FLG     = T.CUST_NOMI_TRKR_FLG
+                   AND C.CUST_CNT_CD            = T.CUST_CNT_CD
+                   AND C.CUST_SEQ               = T.CUST_SEQ
+                   AND C.TRSP_COST_MOD_CD       = T.TRSP_COST_MOD_CD
+                   AND C.AGMT_TRSP_TP_CD        = T.AGMT_TRSP_TP_CD
+                   AND C.CMDT_GRP_CD            = T.CMDT_GRP_CD
+                   AND C.RAIL_SVC_TP_CD         = T.RAIL_SVC_TP_CD
+                   AND D.FM_NOD_CD              = T.FM_NOD_CD
+                   AND D.VIA_NOD_CD             = T.VIA_NOD_CD
+                   AND D.DOR_NOD_CD             = T.DOR_NOD_CD
+                   AND D.TO_NOD_CD              = T.TO_NOD_CD
+                   AND D.TRSP_AGMT_DIST         = T.TRSP_AGMT_DIST
+                   AND D.DIST_MEAS_UT_CD        = T.DIST_MEAS_UT_CD
+                   AND D.TRSP_DIST_TP_CD        = T.TRSP_DIST_TP_CD
+                   AND E.TRSP_AGMT_EQ_TP_SZ_CD  = T.TRSP_AGMT_EQ_TP_CD||T.TRSP_AGMT_EQ_SZ_CD
+                   AND E.EQ_KND_CD              = T.EQ_KND_CD                
+                   AND E.TRSP_AGMT_BDL_QTY      = T.TRSP_AGMT_BDL_QTY    
+                   AND E.TO_WGT                 = T.TO_WGT               
+                   AND E.WGT_MEAS_UT_CD         = T.WGT_MEAS_UT_CD
+                   AND T.RT_UPD_STS_CD         <> 'I'
+                   AND ROWNUM = 1  
+                ) DB_DUP
+           FROM TRS_AGMT_TMP T
+          WHERE TRSP_TMP_SEQ = @[trsp_tmp_seq]
+            AND NVL(DELT_FLG,'N') = 'N'
+            AND ROW_NO IS NOT NULL
+       )
+GROUP BY TRSP_TMP_SEQ ,SR ,RT_UPD_STS_CD
+ORDER BY SR			]]></sql>
+			<params>
+				<param name="trsp_tmp_seq" type="12" value="451" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

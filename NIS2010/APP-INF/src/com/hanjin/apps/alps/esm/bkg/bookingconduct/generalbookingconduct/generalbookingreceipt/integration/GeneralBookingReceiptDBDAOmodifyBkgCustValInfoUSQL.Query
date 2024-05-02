@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="GeneralBookingReceiptDBDAOmodifyBkgCustValInfoUSQL">
+			<desc><![CDATA[ESM_BKG_1054에서 Code Validation시 Bkg Customer를 Update하는 Logic]]></desc>
+			<sql><![CDATA[
+UPDATE BKG_CUSTOMER BC
+  SET BC.MTCH_FLG = NVL(( SELECT DECODE(BRAT.RT_BL_TP_CD, 'B', 'N', NULL)
+                            FROM BKG_RATE BRAT
+                           WHERE BRAT.BKG_NO = BC.BKG_NO
+                             AND ROWNUM = 1 ), 'Y') -- Co-Biz일 경우에는 N을 아닐 경우 O를 기입
+    , BC.VAL_CD = ( SELECT DECODE(BRAT.RT_BL_TP_CD, 'B', 'C', NULL)
+                            FROM BKG_RATE BRAT
+                           WHERE BRAT.BKG_NO = BC.BKG_NO
+                             AND ROWNUM = 1 )  -- Co-Biz일 경우에는 C를 아닐 경우 그냥 Automatch이므로 null을 기입
+    , BC.AN_SND_FLG = 'Y'
+    , BC.VAL_OFC_CD = @[val_ofc_cd]
+    , BC.VAL_USR_ID = @[val_usr_id]
+    , BC.VAL_DT = TO_DATE( @[val_dtm] , 'YYYYMMDDHH24MISS')
+    , BC.CHG_DP_FLG = (SELECT NVL(MAX(AN_PRN_RT_FLG), 'N')
+                         FROM BKG_USR_DFLT_SET
+                        WHERE USR_ID = @[val_usr_id])
+
+    , BC.ORG_CUST_CNT_CD = BC.CUST_CNT_CD
+    , BC.ORG_CUST_SEQ = BC.CUST_SEQ
+
+    , BC.UPD_USR_ID = @[val_usr_id]
+    , BC.UPD_DT  = SYSDATE
+WHERE (BC.BKG_NO, BC.BKG_CUST_TP_CD) IN
+(
+    SELECT SUBQ.BKG_NO
+         , SUBQ.BKG_CUST_TP_CD
+      FROM ( 
+            SELECT BKGM.BKG_NO
+                 , BKGM.BKG_CUST_TP_CD
+                 , NVL( ( SELECT DECODE(BRAT.RT_BL_TP_CD, 'B', 'B', NULL)
+                            FROM BKG_RATE BRAT
+                           WHERE BRAT.BKG_NO = BKGM.BKG_NO
+                             AND ROWNUM = 1 )
+                       ,( SELECT 'Y' --decode(BKGM.RT_BL_TP_CD, 'B', 'COBIZ', 'AUTO')
+                            FROM BKG_CUST_CD_VAL BVAL -- MDM CUSTOMER VALIDATION TABLE (목적 - mdm_customer 와 동일한지  검사)
+                               , MDM_CUSTOMER MCST  -- 임시 고객코드는 매핑에서 제외 (20091230 - 윤윤한수석 요청에 의해)
+                           WHERE BKGM.CUST_SEQ > 0
+                             AND BVAL.CUST_CNT_CD = BKGM.CUST_CNT_CD -- PK -- Match Case
+                             AND BVAL.CUST_SEQ = BKGM.CUST_SEQ    -- PK
+                             AND MCST.CUST_CNT_CD = BKGM.CUST_CNT_CD
+                             AND MCST.CUST_SEQ = BKGM.CUST_SEQ
+                             AND NVL(MCST.NMD_CUST_FLG,'N')  <> 'Y'    -- 임시 고객코드는 매핑에서 제외 (20091230 - 윤윤한수석 요청에 의해)
+                             AND BVAL.DELT_FLG = 'N'
+ 
+                            -- 미주에 대해서만 3 digit Address 체크 로직 추가
+                             AND 1 = CASE WHEN SUBSTR(BKGM.POD_CD,1,2) NOT IN ('US') THEN 1
+                                          WHEN SUBSTR(BKGM.POD_CD,1,2) IN ('US') AND UPPER(SUBSTR(BVAL.VAL_CUST_ADDR,1,3)) = UPPER(SUBSTR(BKGM.CUST_ADDR,1,3)) THEN 1
+                                          ELSE 0 END
+                                          
+                             AND 1 = CASE WHEN SUBSTR(BVAL.VAL_CUST_NM,1,10) = SUBSTR(BKGM.VAL_NM, 1,10) THEN 1  
+                                          WHEN LENGTH(BVAL.VAL_CUST_NM) > 2   -- 한쪽에 등록된 validation name이 3자이상이고 10자 미만일 경우, 10자리로 검사하면 안잡힐 내용을 잡아준다.
+                                               AND LENGTH(BKGM.VAL_NM) > 2
+                                               AND  ((LENGTH(BVAL.VAL_CUST_NM) < 10 
+                                                    OR LENGTH(BKGM.VAL_NM) < 10))
+                                               AND  SUBSTR(BVAL.VAL_CUST_NM,1,DECODE(SIGN(LENGTH(BVAL.VAL_CUST_NM) - LENGTH(BKGM.VAL_NM)), -1, LENGTH(BVAL.VAL_CUST_NM), LENGTH(BKGM.VAL_NM)))
+                                                  = SUBSTR(BKGM.VAL_NM,1,DECODE(SIGN(LENGTH(BVAL.VAL_CUST_NM) - LENGTH(BKGM.VAL_NM)), -1, LENGTH(BVAL.VAL_CUST_NM), LENGTH(BKGM.VAL_NM)))
+                                               THEN 1 
+                                          ELSE 0 END
+                             AND rownum = 1
+                         )
+                      ) AS RT_BL_TP_CD
+              FROM (
+                    SELECT BKGM.BKG_NO
+                          , BKGM.SAM_CNEE_NTFY_FLG
+                          , BKGM.CUST_TO_ORD_FLG
+                          , BKGM.POD_CD
+                          , BKGM.DEL_CD
+                          , BCST.VAL_NM
+                          , BCST.CUST_CNT_CD
+                          , BCST.CUST_SEQ
+                          , BCST.BKG_CUST_TP_CD
+                          , BCST.CUST_ADDR
+                     FROM BKG_BOOKING BKGM
+                         JOIN BKG_VVD BVVD ON
+                            ( BVVD.BKG_NO = BKGM.BKG_NO
+#if ( ${ts_flg} != 'Y')     
+                              AND BVVD.POD_CD = BKGM.POD_CD
+#else
+                              AND BVVD.POD_CD = BKGM.PST_RLY_PORT_CD
+#end
+                              AND BKGM.BKG_STS_CD <> 'X' -- 무효한 bkg제거
+                              AND BKGM.BKG_STS_CD <> 'S'  -- AS IS와 동일하게 하기위해 추가 20091124
+                              AND BKGM.BL_NO IS NOT NULL  -- AS IS와 동일하게 하기위해 추가 20091124
+                              AND BKGM.BKG_CGO_TP_CD IN ('F', 'R') -- full, revenue empty container
+                            ) 
+#if ( ${sch_tp} == 'D') 
+                         JOIN VSK_VSL_PORT_SKD VSKD ON
+                            ( BVVD.VSL_PRE_PST_CD IN ('T', 'U') -- 입항 VVD (S는 제거)
+                              AND BVVD.VSL_CD = VSKD.VSL_CD 
+                              AND BVVD.SKD_VOY_NO = VSKD.SKD_VOY_NO
+                              AND BVVD.SKD_DIR_CD = VSKD.SKD_DIR_CD
+                              AND BVVD.POD_CD = VSKD.VPS_PORT_CD
+                              AND BVVD.POD_CLPT_IND_SEQ = VSKD.CLPT_IND_SEQ 
+                            )
+#end
+                          JOIN BKG_CUSTOMER BCST ON -- BOOKING CUSTOMER
+                              ( BKGM.BKG_NO = BCST.BKG_NO
+                               AND BCST.BKG_CUST_TP_CD IN ('C', 'N')
+                               AND BCST.MTCH_FLG = 'N'    -- validation이 되지 않은 데이터에 한정하여 처리(Auto match 제거)
+                               AND BCST.VAL_CD IS NULL    -- validation이 되지 않은 데이터에 한정하여 처리(Manual Code Validation 제거) (X - Auto-Cancel로 들어오는 값은 처리안하므로 해당 logic에서는 변경없음 20100201)
+                               AND TRIM(REPLACE(BCST.CUST_NM, CHR(10) || CHR(13) , '')) IS NOT NULL -- 고객명 없으면 처리안함 (20090716)
+                               AND (
+                                        (BKGM.SAM_CNEE_NTFY_FLG = 'N' 
+                                         AND BKGM.CUST_TO_ORD_FLG = 'N' -- Consignee, Notify둘다 생성
+                                        )
+                                     OR (BKGM.SAM_CNEE_NTFY_FLG = 'Y'  -- Notify는 Consignee와 같으므로 Consignee만 생성
+                                         AND BCST.BKG_CUST_TP_CD = 'C'
+                                        )
+                                     OR (BKGM.CUST_TO_ORD_FLG = 'Y'    -- Notify에게 연락하므로 Notify만 생성
+                                         AND BCST.BKG_CUST_TP_CD = 'N'
+                                        )
+                                   )
+                              )
+                          LEFT OUTER JOIN BKG_RATE BRAT ON   -- added 20090826
+                              (BRAT.BKG_NO = BKGM.BKG_NO )
+                     WHERE 1=1
+#if (${sch_tp} == 'V') 
+                       AND BVVD.VSL_CD     = SUBSTR(@[vvd],1,4)   -- VVD (OPTIONAL 1)
+                       AND BVVD.SKD_VOY_NO = SUBSTR(@[vvd],5,4)   -- VVD (OPTIONAL 1)
+                       AND BVVD.SKD_DIR_CD = SUBSTR(@[vvd],9,1)   -- VVD (OPTIONAL 1)
+                       AND BVVD.POD_CD     IN (${pod_cd}) -- CodeValidationBackEndJob IN 처리
+#elseif (${sch_tp} == 'D') 
+                       AND VSKD.VPS_ETA_DT BETWEEN TO_DATE(@[vps_eta_dt_start], 'YYYYMMDD') AND (TO_DATE(@[vps_eta_dt_end], 'YYYYMMDD') +1)  -- DURATION (OPTIONAL 2)
+                       AND VSKD.VPS_PORT_CD = @[pod_cd] -- (OPTIONAL 3)
+#elseif (${sch_tp} == 'B') 
+                       AND BKGM.BL_NO = @[bl_no]  -- BL NO (OPTIONAL 5-1)
+#else 
+                       AND 1 = 0
+#end
+#if (${sch_tp} != 'B' && ${del_cd} != '') 
+                       AND BKGM.DEL_CD LIKE @[del_cd] || '%'  -- DELIVERY PORT CD (OPTIONAL 4)
+#end
+#if (${sch_tp} != 'B' && ${pol_cd} != '') 
+                       AND BKGM.POL_CD = @[pol_cd] -- (OPTIONAL)
+#end
+                   )BKGM
+           ) SUBQ 
+     WHERE SUBQ.RT_BL_TP_CD IS NOT NULL
+)			]]></sql>
+			<params>
+				<param name="val_ofc_cd" type="12" value="" out="N"/>
+				<param name="val_usr_id" type="12" value="" out="N"/>
+				<param name="val_dtm" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="vps_eta_dt_start" type="12" value="" out="N"/>
+				<param name="vps_eta_dt_end" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="bl_no" type="12" value="" out="N"/>
+				<param name="del_cd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

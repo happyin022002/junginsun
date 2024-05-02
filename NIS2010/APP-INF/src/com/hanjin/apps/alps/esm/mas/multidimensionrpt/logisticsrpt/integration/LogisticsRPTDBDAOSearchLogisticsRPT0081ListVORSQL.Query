@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LogisticsRPTDBDAOSearchLogisticsRPT0081ListVORSQL">
+			<desc><![CDATA[Logistics Exp. by Office [ESM_MAS_0081화면] 쿼리1
+2011.06.21 이석준 [CHM-201111642-01] 
+                 MAS Logistics Exp. By Office화면에서 R.Month / S.Month 구분요청
+2014.07.10 PEJ [CHM-201431087] [MAS] Multi-Dimension Report > Logistics PFMC > Expense 화면 조회로직 변경요청
+                      모든계정의 AMT가 0 이 아니것
+                      VOLUME INCENTIVE AMT 제외
+2014.08.13 박은주 [CHM-201431516]  Logistics PFMC Report - KPI 3 추가 및 화면변경 요청사항
+2015.08.31 손진환 [CHM-201536958] Split15-[그룹사 표준 코드 시행] SML 프로그램 대응 및 데이타 마이그레이션 작업 요청]]></desc>
+			<sql><![CDATA[
+--Logistics Exp. By Office - Sheet1
+SELECT P_REPORT
+#if(${f_chkprd} =='W' && ${f_split_mw} =='T')
+      ,COST_YRMON || COST_WK AS COST_YRMONWK
+#else
+      ,COST_RMON || COST_WK  AS COST_YRMONWK
+#end
+      ,COST_YRMON
+      ,COST_RMON
+      ,COST_WK
+      ,RHQ_CD
+      ,CASE WHEN KPI_CD = 'RAIL' THEN DECODE(CTRL_OFC_CD, 'PHXSA', 'NYCRA', CTRL_OFC_CD)
+       ELSE CTRL_OFC_CD
+       END CTRL_OFC_CD
+      ,COST_ACT_GRP_TP_CD
+      ,MAS_GET_CD_NM_FNC('CD01065', DECODE(COST_ACT_GRP_TP_CD, 'N', 'TM', 'TR')) LGS_KPI_COST_GRP_NM
+--      ,KPI_CD
+      ,CASE WHEN P_KPITYPE = '3' THEN
+           D2.INTG_CD_VAL_DESC
+       ELSE
+           MAS_GET_CD_NM_FNC(DECODE( P_KPITYPE, '1','CD01064', '2', 'CD00950'), KPI_CD)
+       END KPI_NM              
+      ,P_KPITYPE
+      ,SUM(VOL) VOL
+      ,DECODE(@[f_excld_crr_hlg], 'T', SUM(TM_AMT + TR_AMT), SUM(TM_AMT + TR_AMT - CRR_HLG_AMT)) TOTAL_COST
+      ,DECODE(@[f_excld_crr_hlg], 'T', SUM(TM_AMT + TR_AMT), SUM(TM_AMT + TR_AMT - CRR_HLG_AMT)) / DECODE(SUM(VOL), 0, 1, SUM(VOL)) UNIT_COST
+      ,'3' KPI_ORDER
+  FROM (
+        SELECT
+#if (${f_chkprd} == 'W')
+               /*+  FULL(c3) PARALLEL(c3,4)*/
+#else
+               /*+ ordered FULL(c3) PARALLEL(c3,4) use_nl(c6)*/
+#end
+               C1.P_REPORT       /*split을 안하면 모두 X, 두개다 있는경우, month만 있는경우, week만 있는경우*/
+              ,DECODE(C1.P_SPLIT_MW||P_CHKPRD, 'TW', C2.SLS_YRMON, 'X') AS COST_YRMON
+              ,DECODE(C1.P_SPLIT_MW||P_CHKPRD, 'TW', C2.COST_YRMON, 'TM', C2.COST_YRMON, 'X') AS COST_RMON
+              ,DECODE(C1.P_SPLIT_MW||P_CHKPRD, 'TW', C2.COST_WK, 'X') AS COST_WK
+              ,(CASE WHEN C1.P_REPORT = '1' THEN 'X'
+                     ELSE (CASE WHEN C1.P_YEAR = '2007' OR C1.P_YEAR = '2008' THEN C6.OFC_N3RD_LVL_CD
+                                ELSE C6.OFC_N2ND_LVL_CD
+                            END)
+                 END ) AS RHQ_CD     /*RHQ, Control OFFICE에서만 보여준다.*/
+              ,(CASE WHEN C1.P_REPORT = '3' THEN C6.OFC_N5TH_LVL_CD
+                     ELSE 'X'
+                 END) AS CTRL_OFC_CD    /*Control OFFICE에서만 보여준다.*/
+              ,C5.COST_ACT_GRP_TP_CD
+              ,C1.P_KPITYPE
+              ,DECODE(C1.P_KPITYPE,'1',DECODE(C5.STTL_FLG, 'Y',   'ST', C5.LGS_KPI_MN_CD)
+                                  ,'2',DECODE(C5.STTL_FLG, 'Y', 'SHTL', C5.LGS_KPI_CD)
+                                  ,'3',DECODE(C5.RHQ_CD,'SHARC',DECODE(C5.LGS_KPI_CD, 'RAIL','TRCK',C5.LGS_KPI_CD)
+                                                       ,'SELSC',DECODE(C5.LGS_KPI_CD, 'RAIL','TRCK',C5.LGS_KPI_CD)
+                                                       ,'TYOSC',DECODE(C5.LGS_KPI_CD, 'RAIL','TRCK',C5.LGS_KPI_CD)
+                                                       ,C5.LGS_KPI_CD)
+                      ) KPI_CD   /*Shuttle의 경우*/
+              ,SUM(NVL(C5.CNTR_QTY, 0)) VOL
+              ,(CASE C1.P_INCLD_TML
+                    WHEN 'T' THEN SUM(C5.FCNTR_STVG_TTL_AMT - NVL(C5.TML_VOL_INCNT_AMT,0))
+                    ELSE SUM(C5.FCNTR_STVG_TTL_AMT - NVL(C5.TML_VOL_INCNT_AMT,0) - C5.TML_AMT)
+               END) AS TM_AMT
+              ,SUM(C5.FCNTR_TRSP_TTL_AMT - NVL(C5.TRNS_VOL_INCNT_AMT,0)) TR_AMT
+              ,SUM(NVL(C5.CRR_HLG_SVC_CHG_AMT,0)) CRR_HLG_AMT
+         FROM (SELECT @[f_year]     P_YEAR
+                    ,@[f_fm_mon]   P_SCOST_YRMON
+                    ,@[f_to_mon]   P_ECOST_YRMON
+                    ,@[f_sls_mon]  P_SLS_MON
+                    ,@[f_fm_wk]    P_SCOST_WEEK
+                    ,@[f_to_wk]    P_ECOST_WEEK
+                    ,@[f_split_mw] P_SPLIT_MW
+                    ,@[f_chkprd]   P_CHKPRD
+                    ,@[f_report]   P_REPORT
+                    ,@[f_rhq_cd]   P_RHQ_CD
+                    ,@[f_ctrl_ofc_cd] P_CTRL_OFC_CD
+                    ,@[f_in_out]   P_INOUT
+                    ,DECODE(@[f_lgs_kpi_cost_grp_cd], 'TM', 'N', 'TR', 'L', '') P_COST_ACT_GRP_TP_CD   /*P_LGS_KPI_COST_GRP_CD*/
+                    ,@[f_kpi_type] P_KPITYPE
+                    ,@[f_lgs_mn_kpi_cd] P_LGS_KPI_MN_CD
+                    ,@[f_lgs_kpi_cd] P_LGS_KPI_CD
+                    ,@[f_incld_tml] P_INCLD_TML
+                    ,DECODE(@[f_lgs_mn_kpi_cd], 'ST', 'Y', 'N') P_MN_SHTL
+                    ,DECODE(@[f_lgs_kpi_cd], 'SHTL', 'Y', 'N') P_SHTL
+                FROM DUAL
+              ) C1
+             ,MAS_MON_VVD C2
+             ,MAS_RGST_BKG C3
+             ,MAS_BKG_LGS_SMRY C5
+             ,MAS_OFC_LVL C6
+        WHERE 1 = 1
+#if (${f_chkprd} == 'W')
+    #if (${f_sls_mon} != '')
+          AND C2.SLS_YRMON           = C1.P_YEAR || C1.P_SLS_MON
+          AND C2.COST_WK             BETWEEN C1.P_SCOST_WEEK AND C1.P_ECOST_WEEK
+    #else
+          AND C2.SLS_YRMON           LIKE C1.P_YEAR||'%'
+          AND C2.COST_WK             BETWEEN C1.P_SCOST_WEEK AND C1.P_ECOST_WEEK     /*COST_WK*/
+    #end
+#elseif (${f_chkprd} == 'M')
+          AND C2.COST_YRMON          BETWEEN C1.P_SCOST_YRMON AND C1.P_ECOST_YRMON
+#end
+#if (${f_kpi_type} == '2' && ${f_lgs_kpi_cd} != '')
+    #if (${f_lgs_kpi_cd} == 'SHTL')
+          AND C5.STTL_FLG            = 'Y'
+    #else
+          AND C5.STTL_FLG            <> 'Y'
+          AND C5.LGS_KPI_CD          = C1.P_LGS_KPI_CD
+    #end
+#end
+#if (${f_kpi_type} == '1' && ${f_lgs_mn_kpi_cd} != '')
+    #if (${f_lgs_mn_kpi_cd} == 'ST')
+          AND C5.STTL_FLG            = 'Y'
+    #else
+          AND C5.STTL_FLG            <> 'Y'
+          AND C5.LGS_KPI_MN_CD       = C1.P_LGS_KPI_MN_CD
+    #end
+#end
+#if ((${f_kpi_type} == '3') && ${f_lgs_kpi3_cd} != '')
+                   --KIP3는 코드를 들고 있는것이 아니라 DESC를 들고 있어서 아래와 같이 걸어 줘야 함
+          AND C5.LGS_KPI_CD       IN (
+                                       SELECT INTG_CD_VAL_CTNT
+                                         FROM COM_INTG_CD_DTL
+                                        WHERE INTG_CD_ID       = 'CD03163'
+                                          AND INTG_CD_VAL_DESC = C1.P_LGS_KPI3_CD
+                                      )
+#end
+          AND C5.COST_ACT_GRP_CD     NOT IN ('NIBC','NOBC')
+#if (${f_rhq_cd} != '')
+    #if (${f_year} == '2007' || ${f_year} == '2008')
+          AND C6.OFC_N3RD_LVL_CD     = C1.P_RHQ_CD
+    #else
+          AND C6.OFC_N2ND_LVL_CD     = C1.P_RHQ_CD
+    #end
+#end
+#if (${f_ctrl_ofc_cd} != '')
+    #if (${f_ctrl_ofc_cd} == 'PHXSA')
+          AND C6.OFC_N5TH_LVL_CD     = C1.P_CTRL_OFC_CD
+          AND C5.LGS_KPI_CD         != 'RAIL'
+    #elseif (${f_ctrl_ofc_cd} == 'NYCRA')
+          AND (C6.OFC_N5TH_LVL_CD    = 'NYCRA' OR (C6.OFC_N5TH_LVL_CD = 'PHXSA' AND C5.LGS_KPI_CD = 'RAIL'))
+    #else
+          AND C6.OFC_N5TH_LVL_CD     = C1.P_CTRL_OFC_CD
+    #end
+#end
+#if (${f_lgs_kpi_cost_grp_cd} != '')
+          AND C5.COST_ACT_GRP_TP_CD  = C1.P_COST_ACT_GRP_TP_CD
+#end
+#if (${f_in_out} != '')
+          AND CASE C5.COST_ACT_GRP_CD
+                WHEN 'PRWD' THEN 'O'
+                WHEN 'POWD' THEN 'I'
+                WHEN 'TRWD' THEN 'R'
+                ELSE C5.COST_IO_BND_CD
+              END = @[f_in_out]
+#end
+#if (${f_chkprd} == 'W')
+          AND C2.SLS_YRMON           BETWEEN C6.OFC_APLY_FM_YRMON  and C6.OFC_APLY_TO_YRMON
+#elseif (${f_chkprd} == 'M')
+          AND C2.COST_YRMON          BETWEEN C6.OFC_APLY_FM_YRMON  and C6.OFC_APLY_TO_YRMON
+#end
+          AND C3.BKG_STS_CD          IN('F', 'S')
+          AND C3.BL_NO_TP            IN('M', '0')
+          AND C2.DELT_FLG            NOT IN('Y')
+          AND C3.BKG_CGO_TP_CD       NOT IN('P')
+          AND C2.VSL_CD              = C3.VSL_CD
+          AND C2.SKD_VOY_NO          = C3.SKD_VOY_NO
+          AND C2.DIR_CD              = C3.DIR_CD
+          AND C2.TRD_CD              = C3.TRD_CD
+          AND C2.RLANE_CD            = C3.RLANE_CD
+          AND C2.IOC_CD              = C3.IOC_CD
+          AND C3.BKG_NO              = C5.BKG_NO
+          AND C5.CTRL_OFC_CD         = C6.OFC_CD
+        GROUP BY C1.P_REPORT
+                ,DECODE(C1.P_SPLIT_MW||P_CHKPRD, 'TW', C2.SLS_YRMON, 'X')
+                ,DECODE(C1.P_SPLIT_MW||P_CHKPRD, 'TW', C2.COST_YRMON, 'TM', C2.COST_YRMON, 'X')
+                ,DECODE(C1.P_SPLIT_MW||P_CHKPRD, 'TW', C2.COST_WK, 'X')
+                ,(CASE WHEN C1.P_REPORT = '1' THEN 'X'
+                       ELSE (CASE WHEN C1.P_YEAR = '2007' OR C1.P_YEAR = '2008' THEN C6.OFC_N3RD_LVL_CD
+                                  ELSE C6.OFC_N2ND_LVL_CD END)
+                   END)
+                ,(CASE WHEN C1.P_REPORT = '3' THEN C6.OFC_N5TH_LVL_CD
+                       ELSE 'X'
+                   END)
+                ,C5.COST_ACT_GRP_TP_CD
+                ,C1.P_KPITYPE
+                ,DECODE(C1.P_KPITYPE,'1',DECODE(C5.STTL_FLG, 'Y',   'ST', C5.LGS_KPI_MN_CD)
+                                    ,'2',DECODE(C5.STTL_FLG, 'Y', 'SHTL', C5.LGS_KPI_CD)
+                                    ,'3',DECODE(C5.RHQ_CD,'SHARC',DECODE(C5.LGS_KPI_CD, 'RAIL','TRCK',C5.LGS_KPI_CD)
+                                                         ,'SELSC',DECODE(C5.LGS_KPI_CD, 'RAIL','TRCK',C5.LGS_KPI_CD)
+                                                         ,'TYOSC',DECODE(C5.LGS_KPI_CD, 'RAIL','TRCK',C5.LGS_KPI_CD)
+                                                         ,C5.LGS_KPI_CD)
+                        )
+      ) D1
+      ,COM_INTG_CD_DTL D2
+ WHERE D2.INTG_CD_ID       = DECODE( P_KPITYPE, '1','CD01064', '2', 'CD00950', '3' ,'CD03163')
+   AND D2.INTG_CD_VAL_CTNT = D1.KPI_CD
+ GROUP BY P_REPORT
+         ,COST_YRMON
+         ,COST_RMON
+         ,COST_WK
+         ,RHQ_CD
+         ,CASE WHEN KPI_CD = 'RAIL' THEN DECODE(CTRL_OFC_CD, 'PHXSA', 'NYCRA', CTRL_OFC_CD)
+          ELSE CTRL_OFC_CD
+          END 
+         ,COST_ACT_GRP_TP_CD
+         ,MAS_GET_CD_NM_FNC('CD01065', DECODE(COST_ACT_GRP_TP_CD, 'N', 'TM', 'TR')) 
+         ,CASE WHEN P_KPITYPE = '3' THEN
+              D2.INTG_CD_VAL_DESC
+          ELSE
+              MAS_GET_CD_NM_FNC(DECODE( P_KPITYPE, '1','CD01064', '2', 'CD00950'), KPI_CD)
+          END               
+         ,P_KPITYPE
+ORDER BY COST_YRMON
+        ,COST_RMON
+        ,COST_WK
+        ,RHQ_CD
+        ,CTRL_OFC_CD
+        ,KPI_ORDER
+        ,KPI_NM			]]></sql>
+			<params>
+				<param name="f_excld_crr_hlg" type="12" value="" out="N"/>
+				<param name="f_year" type="12" value="" out="N"/>
+				<param name="f_fm_mon" type="12" value="" out="N"/>
+				<param name="f_to_mon" type="12" value="" out="N"/>
+				<param name="f_sls_mon" type="12" value="" out="N"/>
+				<param name="f_fm_wk" type="12" value="" out="N"/>
+				<param name="f_to_wk" type="12" value="" out="N"/>
+				<param name="f_split_mw" type="12" value="" out="N"/>
+				<param name="f_chkprd" type="12" value="" out="N"/>
+				<param name="f_report" type="12" value="" out="N"/>
+				<param name="f_rhq_cd" type="12" value="" out="N"/>
+				<param name="f_ctrl_ofc_cd" type="12" value="" out="N"/>
+				<param name="f_in_out" type="12" value="" out="N"/>
+				<param name="f_lgs_kpi_cost_grp_cd" type="12" value="" out="N"/>
+				<param name="f_kpi_type" type="12" value="" out="N"/>
+				<param name="f_lgs_mn_kpi_cd" type="12" value="" out="N"/>
+				<param name="f_lgs_kpi_cd" type="12" value="" out="N"/>
+				<param name="f_incld_tml" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

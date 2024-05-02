@@ -1,0 +1,718 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SurchargeAutoRatingDBDAOSearchChgRateByOBSRSQL">
+			<desc><![CDATA[OBS Charge 정보를 조회한다.]]></desc>
+			<sql><![CDATA[
+WITH 
+BK AS(                                      
+SELECT BK.BKG_NO               AS BKG_NO,
+       BK.SVC_SCP_CD           AS BKG_SVC_SCP_CD ,
+       BK.CMDT_CD              AS BK_CMDT_CD ,
+       DECODE(BK.PRE_RLY_PORT_CD||BK.PST_RLY_PORT_CD,NULL,'Y','N') BK_DIR_CALL_FLG  ,
+       TO_DATE( TO_CHAR(SYSDATE,'YYYY/MM/DD HH24:MI'),'YYYY/MM/DD HH24:MI') AS RT_APLY_DT ,
+       BR.BKG_CTRT_TP_CD,               
+       BK.RCV_TERM_CD ,  
+       BK.DE_TERM_CD  ,
+       
+       BK.POR_CD AS BK_POR_CD,
+       BK.POL_CD AS BK_POL_CD,
+       BK.POD_CD AS BK_POD_CD,
+       BK.DEL_CD AS BK_DEL_CD,
+       
+       L1.CNT_CD||L1.STE_CD  BK_POR_STE_CD    ,
+       L1.RGN_CD             BK_POR_RGN_CD    ,
+       L1.CNT_CD             BK_POR_CNT_CD    ,
+       
+       L2.CNT_CD||L1.STE_CD  BK_POL_STE_CD    ,
+       L2.RGN_CD             BK_POL_RGN_CD    ,
+       L2.CNT_CD             BK_POL_CNT_CD    ,
+       
+       L3.CNT_CD||L1.STE_CD  BK_POD_STE_CD    ,
+       L3.RGN_CD             BK_POD_RGN_CD    ,
+       L3.CNT_CD             BK_POD_CNT_CD    ,
+       
+       L4.CNT_CD||L1.STE_CD  BK_DEL_STE_CD    ,
+       L4.RGN_CD             BK_DEL_RGN_CD    ,
+       L4.CNT_CD             BK_DEL_CNT_CD    ,
+       
+       BC.PROP_NO            BK_PROP_NO       ,
+       BC.AMDT_SEQ           BK_AMDT_SEQ      ,
+       
+      ( SELECT LOC_CD FROM MDM_ORGANIZATION WHERE OFC_CD =@[login_office] ) AS USR_LOC_CD,
+       BR.PPD_RCV_OFC_CD,
+       BR.CLT_OFC_CD
+       
+FROM BKG_BOOKING BK,
+     BKG_RATE    BR,
+     BKG_CHG_RT  BC,
+     MDM_LOCATION L1,
+     MDM_LOCATION L2,
+     MDM_LOCATION L3,
+     MDM_LOCATION L4
+WHERE BK.BKG_NO   = @[bkg_no]
+AND   BR.BKG_NO   = BK.BKG_NO
+AND   BC.BKG_NO(+)= BK.BKG_NO
+AND   BC.CHG_CD(+)= 'OFT'
+AND   L1.LOC_CD   = BK.POR_CD 
+AND   L2.LOC_CD   = BK.POL_CD 
+AND   L3.LOC_CD   = BK.POD_CD 
+AND   L4.LOC_CD   = BK.DEL_CD 
+)
+,
+NC AS (
+SELECT  NC.NOTE_CONV_CHG_CD         , 
+        NC.NOTE_CONV_RULE_CD        ,
+        NC.BKG_RAT_UT_CD            ,
+        NC.RT_APPL_TP_CD            ,  
+        NC.CURR_CD                  ,  
+        NC.FRT_RT_AMT               ,  
+        NC.PAY_TERM_CD              ,
+        ROW_NUMBER() OVER ( PARTITION BY NC.CHG_RULE_TP_CD, NC.NOTE_CONV_CHG_CD,   
+                                         NC.NOTE_CONV_RULE_CD, NC.RULE_APPL_CHG_CD
+                            ORDER BY  
+                              ( SELECT A.PRIO_SEQ FROM PRI_NOTE_CONV_TP A WHERE A.PRC_CTRT_TP_CD = bk.bkg_ctrt_tp_cd AND A.NOTE_CONV_TP_CD = NC.NOTE_CONV_TP_CD ) ,  
+                              GREATEST(DECODE(BKG_CMDT_TP_CD, 'C', 600, 'G', 400, 'R', 300, 0), DECODE(BKG_SCG_GRP_CMDT_CD, NULL, 0, 500))  
+                                + DECODE(BKG_POR_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_POL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_POD_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_DEL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_TS_PORT_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_RCV_TERM_CD      , NULL, 0, 1)  
+                                + DECODE(BKG_DE_TERM_CD       , NULL, 0, 1)   DESC  ,  
+                              NC.FRT_RT_AMT         ,  
+                              NC.NOTE_CONV_MAPG_ID  ,  
+                              NC.NOTE_CONV_SEQ 
+                            ) ROW_NUMBER  ,  
+  
+        RANK() OVER ( PARTITION BY NC.CHG_RULE_TP_CD, NC.NOTE_CONV_CHG_CD, NC.NOTE_CONV_RULE_CD  
+                      ORDER BY  
+                        ( SELECT A.PRIO_SEQ FROM PRI_NOTE_CONV_TP A, BK WHERE A.PRC_CTRT_TP_CD = BK.bkg_ctrt_tp_cd AND A.NOTE_CONV_TP_CD = NC.NOTE_CONV_TP_CD ) ,  
+                        GREATEST(DECODE(BKG_CMDT_TP_CD, 'C', 600, 'G', 400, 'R', 300, 0), DECODE(BKG_SCG_GRP_CMDT_CD, NULL, 0, 500))  
+                          + DECODE(BKG_POR_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                          + DECODE(BKG_POL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                          + DECODE(BKG_POD_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                          + DECODE(BKG_DEL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                          + DECODE(BKG_RCV_TERM_CD      , NULL, 0, 1)  
+                          + DECODE(BKG_DE_TERM_CD       , NULL, 0, 1)   DESC
+                      ) ROW_RANK  
+FROM    BK, PRI_SC_NOTE_CONV NC,
+        MDM_CHARGE                MC
+WHERE   NC.SVC_SCP_CD = BK.BKG_SVC_SCP_CD
+AND     NC.PROP_NO = BK.bk_prop_no
+AND     NC.AMDT_SEQ = BK.BK_AMDT_SEQ
+AND     BK.RT_APLY_DT BETWEEN NC.EFF_DT AND NC.EXP_DT + 0.99999 
+/*******************************************************************************************  
+NOTE 가 정상적인 상태인지를 CHECK 한다.  
+*******************************************************************************************/  
+AND     EXISTS  (  
+                SELECT 'X' FROM PRI_SG_STND_NOTE_CTNT     A WHERE A.NOTE_CONV_MAPG_ID = NC.NOTE_CONV_MAPG_ID AND NC.NOTE_CONV_TP_CD = 'T'  
+                UNION ALL  
+                SELECT 'X' FROM PRI_SP_SCP_NOTE_CTNT      A WHERE A.NOTE_CONV_MAPG_ID = NC.NOTE_CONV_MAPG_ID AND NC.NOTE_CONV_TP_CD = 'P' AND A.SRC_INFO_CD <> 'AD' AND A.NOTE_TP_CD = 'P'  
+                UNION ALL  
+                SELECT 'X' FROM PRI_SP_SCP_RT_CNOTE       A WHERE A.NOTE_CONV_MAPG_ID = NC.NOTE_CONV_MAPG_ID AND NC.NOTE_CONV_TP_CD = 'C' AND A.SRC_INFO_CD <> 'AD'  
+                UNION ALL  
+                SELECT 'X' FROM PRI_SP_SCP_RT_CMDT_RNOTE  A WHERE A.NOTE_CONV_MAPG_ID = NC.NOTE_CONV_MAPG_ID AND NC.NOTE_CONV_TP_CD = 'R' AND A.SRC_INFO_CD <> 'AD'  
+                )  
+AND     NC.CHG_RULE_TP_CD = 'C'
+AND     NC.NOTE_CONV_CHG_CD = 'OBS'
+AND     NC.RT_APPL_TP_CD IN ('I', 'N', 'F') -- Include, Not Applicable, Fixed Amount에 한해 적용
+AND     MC.CHG_CD(+)            = NC.NOTE_CONV_CHG_CD  
+AND     (  
+            NC.RULE_APPL_CHG_TP_CD  IS NULL  
+        OR  NC.RULE_APPL_CHG_TP_CD  = 'S'           /* SURCHARGE 를 대상으로 함 */  
+        )
+        
+/*******************************************************************************************  
+R/D TERM CHECK ( MDM_CHARGE 의 R/D TERM CHECK 포함 )  
+*******************************************************************************************/  
+AND     (  
+            NC.BKG_RCV_TERM_CD  = BK.RCV_TERM_CD  
+        OR  (  
+                NC.BKG_RCV_TERM_CD IS NULL  
+            AND (  
+                    MC.CHG_APLY_AREA_CD = 'C'  
+                OR  BK.RCV_TERM_CD  IN ( DECODE(NC.CHG_RULE_TP_CD, 'R', BK.RCV_TERM_CD), DECODE(MC.NA_RD_TERM_FLG, 'Y', BK.RCV_TERM_CD), DECODE(MC.CY_RD_TERM_FLG, 'Y', 'Y'), DECODE(MC.DOR_RD_TERM_FLG, 'Y', 'D'), DECODE(MC.CFS_RD_TERM_FLG, 'Y', 'S'), DECODE(MC.TKL_TML_FLG, 'Y', 'T') )  
+                )  
+            )  
+        )  
+  
+AND     (  
+            NC.BKG_DE_TERM_CD   = BK.DE_TERM_CD  
+        OR  (  
+                NC.BKG_DE_TERM_CD IS NULL  
+            AND (  
+                    MC.CHG_APLY_AREA_CD = 'P'  
+                OR  BK.DE_TERM_CD   IN ( DECODE(NC.CHG_RULE_TP_CD, 'R', BK.DE_TERM_CD), DECODE(MC.NA_RD_TERM_FLG, 'Y', BK.DE_TERM_CD), DECODE(MC.CY_RD_TERM_FLG, 'Y', 'Y'), DECODE(MC.DOR_RD_TERM_FLG, 'Y', 'D'), DECODE(MC.CFS_RD_TERM_FLG, 'Y', 'S'), DECODE(MC.TKL_TML_FLG, 'Y', 'T') )  
+                )  
+            )  
+        )  
+/*******************************************************************************************  
+< ROUTE >  
+STANDARD NOTE 의 경우는 GROUP 을 사용하지 않으므로,  
+STANDARD NOTE 를 위한 특별한 고려가 필요하지 않음.  
+*******************************************************************************************/  
+/* POR */  
+AND     (  
+            NC.BKG_POR_DEF_CD IS NULL  
+        OR  ( 
+                NC.BKG_POR_DEF_CD = DECODE(NC.BKG_POR_TP_CD, 'L', bk_por_cd, 'T', bk_por_ste_cd, 'R', bk_por_rgn_cd, 'C', bk_por_cnt_cd) 
+            )          
+        OR  (  
+                NC.BKG_POR_TP_CD  = 'G'  
+            AND EXISTS  (  
+                        SELECT  'X'  
+                        FROM    BKG_AUTO_RT_GRP_LOC_TMP GL  
+                        WHERE   GL.PRC_GRP_LOC_CD = NC.BKG_POR_DEF_CD  
+                        AND     GL.LOC_CD = bk_por_cd 
+                        )  
+            )  
+        )  
+/* POL */  
+AND     (  
+            NC.BKG_POL_DEF_CD IS NULL  
+        OR  NC.BKG_POL_DEF_CD = DECODE(NC.BKG_POL_TP_CD, 'L', bk_pol_cd, 'T', bk_pol_ste_cd, 'R', bk_pol_rgn_cd, 'C', bk_pol_cnt_cd)  
+        OR  (  
+                NC.BKG_POL_TP_CD  = 'G'  
+            AND EXISTS  (  
+                        SELECT  'X'  
+                        FROM    BKG_AUTO_RT_GRP_LOC_TMP GL  
+                        WHERE   GL.PRC_GRP_LOC_CD = NC.BKG_POL_DEF_CD  
+                        AND     GL.LOC_CD = bk_pol_cd
+                        )  
+            )  
+        )              
+/* POD */  
+AND     (  
+            NC.BKG_POD_DEF_CD IS NULL  
+        OR  NC.BKG_POD_DEF_CD = DECODE(NC.BKG_POD_TP_CD, 'L', bk_pod_cd, 'T', bk_pod_ste_cd, 'R', bk_pod_rgn_cd, 'C', bk_pod_cnt_cd)  
+        OR  (  
+                NC.BKG_POD_TP_CD  = 'G'  
+            AND EXISTS  (  
+                        SELECT  'X'  
+                        FROM    BKG_AUTO_RT_GRP_LOC_TMP GL  
+                        WHERE   GL.PRC_GRP_LOC_CD = NC.BKG_POD_DEF_CD  
+                        AND     GL.LOC_CD         = bk_pod_cd  
+                        )  
+            )  
+        )  
+/* DEL */  
+AND     (  
+            NC.BKG_DEL_DEF_CD IS NULL  
+        OR  NC.BKG_DEL_DEF_CD = DECODE(NC.BKG_DEL_TP_CD, 'L', bk_del_cd, 'T', bk_del_ste_cd, 'R', bk_del_rgn_cd, 'C', bk_del_cnt_cd)  
+        OR  (  
+                NC.BKG_DEL_TP_CD  = 'G'  
+            AND EXISTS  (  
+                        SELECT  'X'  
+                        FROM    BKG_AUTO_RT_GRP_LOC_TMP GL  
+                        WHERE   GL.PRC_GRP_LOC_CD = NC.BKG_DEL_DEF_CD  
+                        AND     GL.LOC_CD         = bk_del_cd  
+                        )  
+            )  
+        )
+AND     'S' = BK.BKG_CTRT_TP_CD
+
+UNION ALL
+
+SELECT  NC.NOTE_CONV_CHG_CD         , 
+        NC.NOTE_CONV_RULE_CD        ,
+        NC.BKG_RAT_UT_CD            ,
+        NC.RT_APPL_TP_CD            ,  
+        NC.CURR_CD                  ,  
+        NC.FRT_RT_AMT               ,  
+        NC.PAY_TERM_CD              ,
+        ROW_NUMBER() OVER ( PARTITION BY NC.CHG_RULE_TP_CD, NC.NOTE_CONV_CHG_CD,   
+                                         NC.NOTE_CONV_RULE_CD
+                            ORDER BY  
+                              ( SELECT A.PRIO_SEQ FROM PRI_NOTE_CONV_TP A WHERE A.PRC_CTRT_TP_CD = bk.bkg_ctrt_tp_cd AND A.NOTE_CONV_TP_CD = NC.NOTE_CONV_TP_CD ) ,  
+                              GREATEST(DECODE(BKG_CMDT_TP_CD, 'C', 600, 'G', 400, 'R', 300, 0))  
+                                + DECODE(BKG_POR_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_POL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_POD_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_DEL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_TS_PORT_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  DESC  ,  
+                              NC.FRT_RT_AMT         ,  
+                              NC.NOTE_CONV_MAPG_ID  ,  
+                              NC.NOTE_CONV_SEQ 
+                            ) ROW_NUMBER  ,  
+  
+        RANK() OVER ( PARTITION BY NC.CHG_RULE_TP_CD, NC.NOTE_CONV_CHG_CD, NC.NOTE_CONV_RULE_CD  
+                      ORDER BY  
+                        ( SELECT A.PRIO_SEQ FROM PRI_NOTE_CONV_TP A, BK WHERE A.PRC_CTRT_TP_CD = BK.bkg_ctrt_tp_cd AND A.NOTE_CONV_TP_CD = NC.NOTE_CONV_TP_CD ) ,  
+                        GREATEST(DECODE(BKG_CMDT_TP_CD, 'C', 600, 'G', 400, 'R', 300, 0))  
+                          + DECODE(BKG_POR_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                          + DECODE(BKG_POL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                          + DECODE(BKG_POD_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                          + DECODE(BKG_DEL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)   DESC
+                      ) ROW_RANK  
+FROM    BK, PRI_RFA_NOTE_CONV NC,  
+        MDM_CHARGE                MC
+WHERE   NC.SVC_SCP_CD = BK.BKG_SVC_SCP_CD
+AND     NC.PROP_NO = BK.bk_prop_no
+AND     NC.AMDT_SEQ = BK.BK_AMDT_SEQ
+AND     BK.RT_APLY_DT BETWEEN NC.EFF_DT AND NC.EXP_DT + 0.99999 
+/*******************************************************************************************  
+NOTE 가 정상적인 상태인지를 CHECK 한다.  
+*******************************************************************************************/  
+AND     EXISTS  (  
+                SELECT 'X' FROM PRI_RP_SCP_NOTE_CTNT      A WHERE A.NOTE_CONV_MAPG_ID = NC.NOTE_CONV_MAPG_ID AND NC.NOTE_CONV_TP_CD = 'P' AND A.SRC_INFO_CD <> 'AD' AND A.NOTE_TP_CD = 'P'  
+                UNION ALL  
+                SELECT 'X' FROM PRI_RP_SCP_RT_CNOTE       A WHERE A.NOTE_CONV_MAPG_ID = NC.NOTE_CONV_MAPG_ID AND NC.NOTE_CONV_TP_CD = 'C' AND A.SRC_INFO_CD <> 'AD'  
+                UNION ALL  
+                SELECT 'X' FROM PRI_RP_SCP_RT_CMDT_RNOTE  A WHERE A.NOTE_CONV_MAPG_ID = NC.NOTE_CONV_MAPG_ID AND NC.NOTE_CONV_TP_CD = 'R' AND A.SRC_INFO_CD <> 'AD'  
+                UNION ALL  
+                SELECT 'X' FROM PRI_TRI_NOTE              A WHERE A.NOTE_CONV_MAPG_ID = NC.NOTE_CONV_MAPG_ID AND NC.NOTE_CONV_TP_CD = 'F'  
+                )   
+AND     NC.CHG_RULE_TP_CD = 'C'
+AND     NC.NOTE_CONV_CHG_CD = 'OBS'
+AND     NC.RT_APPL_TP_CD IN ('I', 'N', 'F') -- Include, Not Applicable, Fixed Amount에 한해 적용
+AND     MC.CHG_CD(+)            = NC.NOTE_CONV_CHG_CD  
+
+/*******************************************************************************************  
+< ROUTE >  
+STANDARD NOTE 의 경우는 GROUP 을 사용하지 않으므로,  
+STANDARD NOTE 를 위한 특별한 고려가 필요하지 않음.  
+*******************************************************************************************/  
+/* POR */  
+AND     (  
+            NC.BKG_POR_DEF_CD IS NULL  
+        OR  ( 
+                NC.BKG_POR_DEF_CD = DECODE(NC.BKG_POR_TP_CD, 'L', bk_por_cd, 'T', bk_por_ste_cd, 'R', bk_por_rgn_cd, 'C', bk_por_cnt_cd) 
+            )          
+        OR  (  
+                NC.BKG_POR_TP_CD  = 'G'  
+            AND EXISTS  (  
+                        SELECT  'X'  
+                        FROM    BKG_AUTO_RT_GRP_LOC_TMP GL  
+                        WHERE   GL.PRC_GRP_LOC_CD = NC.BKG_POR_DEF_CD  
+                        AND     GL.LOC_CD = bk_por_cd 
+                        )  
+            )  
+        )  
+/* POL */  
+AND     (  
+            NC.BKG_POL_DEF_CD IS NULL  
+        OR  NC.BKG_POL_DEF_CD = DECODE(NC.BKG_POL_TP_CD, 'L', bk_pol_cd, 'T', bk_pol_ste_cd, 'R', bk_pol_rgn_cd, 'C', bk_pol_cnt_cd)  
+        OR  (  
+                NC.BKG_POL_TP_CD  = 'G'  
+            AND EXISTS  (  
+                        SELECT  'X'  
+                        FROM    BKG_AUTO_RT_GRP_LOC_TMP GL  
+                        WHERE   GL.PRC_GRP_LOC_CD = NC.BKG_POL_DEF_CD  
+                        AND     GL.LOC_CD = bk_pol_cd
+                        )  
+            )  
+        )              
+/* POD */  
+AND     (  
+            NC.BKG_POD_DEF_CD IS NULL  
+        OR  NC.BKG_POD_DEF_CD = DECODE(NC.BKG_POD_TP_CD, 'L', bk_pod_cd, 'T', bk_pod_ste_cd, 'R', bk_pod_rgn_cd, 'C', bk_pod_cnt_cd)  
+        OR  (  
+                NC.BKG_POD_TP_CD  = 'G'  
+            AND EXISTS  (  
+                        SELECT  'X'  
+                        FROM    BKG_AUTO_RT_GRP_LOC_TMP GL  
+                        WHERE   GL.PRC_GRP_LOC_CD = NC.BKG_POD_DEF_CD  
+                        AND     GL.LOC_CD         = bk_pod_cd  
+                        )  
+            )  
+        )  
+/* DEL */  
+AND     (  
+            NC.BKG_DEL_DEF_CD IS NULL  
+        OR  NC.BKG_DEL_DEF_CD = DECODE(NC.BKG_DEL_TP_CD, 'L', bk_del_cd, 'T', bk_del_ste_cd, 'R', bk_del_rgn_cd, 'C', bk_del_cnt_cd)  
+        OR  (  
+                NC.BKG_DEL_TP_CD  = 'G'  
+            AND EXISTS  (  
+                        SELECT  'X'  
+                        FROM    BKG_AUTO_RT_GRP_LOC_TMP GL  
+                        WHERE   GL.PRC_GRP_LOC_CD = NC.BKG_DEL_DEF_CD  
+                        AND     GL.LOC_CD         = bk_del_cd  
+                        )  
+            )  
+        )
+AND     'R' = BK.BKG_CTRT_TP_CD
+
+UNION ALL
+
+SELECT  NC.NOTE_CONV_CHG_CD         , 
+        NC.NOTE_CONV_RULE_CD        ,
+        NC.BKG_RAT_UT_CD            ,
+        NC.RT_APPL_TP_CD            ,  
+        NC.CURR_CD                  ,  
+        NC.FRT_RT_AMT               ,  
+        NC.PAY_TERM_CD              ,
+        ROW_NUMBER() OVER ( PARTITION BY NC.CHG_RULE_TP_CD, NC.NOTE_CONV_CHG_CD,   
+                                         NC.NOTE_CONV_RULE_CD
+                            ORDER BY  
+                              ( SELECT A.PRIO_SEQ FROM PRI_NOTE_CONV_TP A WHERE A.PRC_CTRT_TP_CD = bk.bkg_ctrt_tp_cd AND A.NOTE_CONV_TP_CD = NC.NOTE_CONV_TP_CD ) ,  
+                              GREATEST(DECODE(BKG_CMDT_TP_CD, 'C', 600, 'G', 400, 'R', 300, 0))  
+                                + DECODE(BKG_POR_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_POL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_POD_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_DEL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_TS_PORT_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                                + DECODE(BKG_RCV_TERM_CD      , NULL, 0, 1)  
+                                + DECODE(BKG_DE_TERM_CD       , NULL, 0, 1)   DESC  ,  
+                              NC.FRT_RT_AMT         ,  
+                              NC.NOTE_CONV_MAPG_ID  ,  
+                              NC.NOTE_CONV_SEQ 
+                            ) ROW_NUMBER  ,  
+  
+        RANK() OVER ( PARTITION BY NC.CHG_RULE_TP_CD, NC.NOTE_CONV_CHG_CD, NC.NOTE_CONV_RULE_CD  
+                      ORDER BY  
+                        ( SELECT A.PRIO_SEQ FROM PRI_NOTE_CONV_TP A, BK WHERE A.PRC_CTRT_TP_CD = BK.bkg_ctrt_tp_cd AND A.NOTE_CONV_TP_CD = NC.NOTE_CONV_TP_CD ) ,  
+                        GREATEST(DECODE(BKG_CMDT_TP_CD, 'C', 600, 'G', 400, 'R', 300, 0))  
+                          + DECODE(BKG_POR_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                          + DECODE(BKG_POL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                          + DECODE(BKG_POD_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                          + DECODE(BKG_DEL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)  
+                          + DECODE(BKG_RCV_TERM_CD      , NULL, 0, 1)  
+                          + DECODE(BKG_DE_TERM_CD       , NULL, 0, 1)   DESC
+                      ) ROW_RANK  
+FROM    BK, PRI_TAA_TRI_LIST TL, PRI_TRI_RT RT, PRI_TRI_NOTE_CONV NC,  
+        MDM_CHARGE                MC
+WHERE   TL.TAA_PROP_NO  = BK.bk_prop_no
+AND     TL.AMDT_SEQ     = BK.BK_AMDT_SEQ 
+AND     RT.TRI_PROP_NO  = TL.TRI_PROP_NO  
+AND     BK.RT_APLY_DT BETWEEN RT.EFF_DT AND RT.EXP_DT + 0.99999 
+AND     RT.PROP_STS_CD  = 'F'  
+AND     NC.TRI_PROP_NO  = RT.TRI_PROP_NO  
+AND     NC.AMDT_SEQ     = RT.AMDT_SEQ  
+AND     BK.RT_APLY_DT   BETWEEN NC.EFF_DT AND NC.EXP_DT + 0.99999 
+/*******************************************************************************************  
+NOTE 가 정상적인 상태인지를 CHECK 한다.  
+*******************************************************************************************/  
+AND     EXISTS  (  
+                SELECT 'X' FROM PRI_TRI_NOTE  A WHERE A.NOTE_CONV_MAPG_ID = NC.NOTE_CONV_MAPG_ID AND NC.NOTE_CONV_TP_CD = 'F'  
+                UNION ALL  
+                SELECT 'X' FROM PRI_TRI_RT    A WHERE A.NOTE_CONV_MAPG_ID = NC.NOTE_CONV_MAPG_ID AND NC.NOTE_CONV_TP_CD = 'R'  
+                )   
+AND     NC.CHG_RULE_TP_CD = 'C'
+AND     NC.NOTE_CONV_CHG_CD = 'OBS'
+AND     NC.RT_APPL_TP_CD IN ('I', 'N', 'F') -- Include, Not Applicable, Fixed Amount에 한해 적용
+AND     MC.CHG_CD(+)            = NC.NOTE_CONV_CHG_CD  
+AND     (  
+            NC.RULE_APPL_CHG_TP_CD  IS NULL  
+        OR  NC.RULE_APPL_CHG_TP_CD  = 'S'           /* SURCHARGE 를 대상으로 함 */  
+        )
+        
+/*******************************************************************************************  
+R/D TERM CHECK ( MDM_CHARGE 의 R/D TERM CHECK 포함 )  
+*******************************************************************************************/  
+AND     (  
+            NC.BKG_RCV_TERM_CD  = BK.RCV_TERM_CD  
+        OR  (  
+                NC.BKG_RCV_TERM_CD IS NULL  
+            AND (  
+                    MC.CHG_APLY_AREA_CD = 'C'  
+                OR  BK.RCV_TERM_CD  IN ( DECODE(NC.CHG_RULE_TP_CD, 'R', BK.RCV_TERM_CD), DECODE(MC.NA_RD_TERM_FLG, 'Y', BK.RCV_TERM_CD), DECODE(MC.CY_RD_TERM_FLG, 'Y', 'Y'), DECODE(MC.DOR_RD_TERM_FLG, 'Y', 'D'), DECODE(MC.CFS_RD_TERM_FLG, 'Y', 'S'), DECODE(MC.TKL_TML_FLG, 'Y', 'T') )  
+                )  
+            )  
+        )  
+  
+AND     (  
+            NC.BKG_DE_TERM_CD   = BK.DE_TERM_CD  
+        OR  (  
+                NC.BKG_DE_TERM_CD IS NULL  
+            AND (  
+                    MC.CHG_APLY_AREA_CD = 'P'  
+                OR  BK.DE_TERM_CD   IN ( DECODE(NC.CHG_RULE_TP_CD, 'R', BK.DE_TERM_CD), DECODE(MC.NA_RD_TERM_FLG, 'Y', BK.DE_TERM_CD), DECODE(MC.CY_RD_TERM_FLG, 'Y', 'Y'), DECODE(MC.DOR_RD_TERM_FLG, 'Y', 'D'), DECODE(MC.CFS_RD_TERM_FLG, 'Y', 'S'), DECODE(MC.TKL_TML_FLG, 'Y', 'T') )  
+                )  
+            )  
+        )  
+/*******************************************************************************************  
+< ROUTE >  
+STANDARD NOTE 의 경우는 GROUP 을 사용하지 않으므로,  
+STANDARD NOTE 를 위한 특별한 고려가 필요하지 않음.  
+*******************************************************************************************/  
+/* POR */  
+AND     (  
+            NC.BKG_POR_DEF_CD IS NULL  
+        OR  ( 
+                NC.BKG_POR_DEF_CD = DECODE(NC.BKG_POR_TP_CD, 'L', bk_por_cd, 'T', bk_por_ste_cd, 'R', bk_por_rgn_cd, 'C', bk_por_cnt_cd) 
+            )          
+        OR  (  
+                NC.BKG_POR_TP_CD  = 'G'  
+            AND EXISTS  (  
+                        SELECT  'X'  
+                        FROM    BKG_AUTO_RT_GRP_LOC_TMP GL  
+                        WHERE   GL.PRC_GRP_LOC_CD = NC.BKG_POR_DEF_CD  
+                        AND     GL.LOC_CD = bk_por_cd 
+                        )  
+            )  
+        )  
+/* POL */  
+AND     (  
+            NC.BKG_POL_DEF_CD IS NULL  
+        OR  NC.BKG_POL_DEF_CD = DECODE(NC.BKG_POL_TP_CD, 'L', bk_pol_cd, 'T', bk_pol_ste_cd, 'R', bk_pol_rgn_cd, 'C', bk_pol_cnt_cd)  
+        OR  (  
+                NC.BKG_POL_TP_CD  = 'G'  
+            AND EXISTS  (  
+                        SELECT  'X'  
+                        FROM    BKG_AUTO_RT_GRP_LOC_TMP GL  
+                        WHERE   GL.PRC_GRP_LOC_CD = NC.BKG_POL_DEF_CD  
+                        AND     GL.LOC_CD = bk_pol_cd
+                        )  
+            )  
+        )              
+/* POD */  
+AND     (  
+            NC.BKG_POD_DEF_CD IS NULL  
+        OR  NC.BKG_POD_DEF_CD = DECODE(NC.BKG_POD_TP_CD, 'L', bk_pod_cd, 'T', bk_pod_ste_cd, 'R', bk_pod_rgn_cd, 'C', bk_pod_cnt_cd)  
+        OR  (  
+                NC.BKG_POD_TP_CD  = 'G'  
+            AND EXISTS  (  
+                        SELECT  'X'  
+                        FROM    BKG_AUTO_RT_GRP_LOC_TMP GL  
+                        WHERE   GL.PRC_GRP_LOC_CD = NC.BKG_POD_DEF_CD  
+                        AND     GL.LOC_CD         = bk_pod_cd  
+                        )  
+            )  
+        )  
+/* DEL */  
+AND     (  
+            NC.BKG_DEL_DEF_CD IS NULL  
+        OR  NC.BKG_DEL_DEF_CD = DECODE(NC.BKG_DEL_TP_CD, 'L', bk_del_cd, 'T', bk_del_ste_cd, 'R', bk_del_rgn_cd, 'C', bk_del_cnt_cd)  
+        OR  (  
+                NC.BKG_DEL_TP_CD  = 'G'  
+            AND EXISTS  (  
+                        SELECT  'X'  
+                        FROM    BKG_AUTO_RT_GRP_LOC_TMP GL  
+                        WHERE   GL.PRC_GRP_LOC_CD = NC.BKG_DEL_DEF_CD  
+                        AND     GL.LOC_CD         = bk_del_cd  
+                        )  
+            )  
+        )
+AND     'T' = BK.BKG_CTRT_TP_CD
+)
+,  
+NC_P AS  
+(  
+  
+/*******************************************************************************************  
+적용될 CONVERSION 이 같은 NOTE_CONV_TP_CD 에서 하나의 NOTE_CONV_RULE_CD 가 되도록 우선순위가 낮은 것을 제거한다.  
+*******************************************************************************************/  
+SELECT  NC.NOTE_CONV_CHG_CD         , 
+        NC.BKG_RAT_UT_CD            ,
+        NC.RT_APPL_TP_CD            ,  
+        NC.CURR_CD                  ,  
+        NC.FRT_RT_AMT               ,  
+        NC.PAY_TERM_CD              
+FROM    NC  
+WHERE   (NVL(NOTE_CONV_RULE_CD,'NOT') <> 'TYP' AND ROW_NUMBER  = 1 AND ROW_RANK = 1 )
+)
+,
+S3 AS (
+SELECT BKG_NO,
+       CHG_CD,
+       RAT_UT_CD,
+       CURR_CD,
+       SCG_AMT,
+       'DR' as CGO_CATE_CD,
+       PAY_TERM_CD,
+       CASE WHEN @[login_office] = PPD_RCV_OFC_CD OR PPD_RCV_OFC_CD = CLT_OFC_CD THEN @[login_office]
+            WHEN @[login_office] = (SELECT PRNT_OFC_CD FROM MDM_ORGANIZATION WHERE OFC_CD = (SELECT BKG_OFC_CD FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no]))
+                 THEN (SELECT BKG_OFC_CD FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+            ELSE @[login_office]
+       END LOGIN_OFFICE
+ 
+
+ FROM 
+(
+
+    SELECT 
+     SR.*, 
+     SUB_M.*,
+     ROW_NUMBER() OVER ( PARTITION BY SP.CHG_CD
+                                        ORDER BY
+    /*******************************************************************************************
+    ADJUST 인 경우 최우선으로 적용한다.
+    *******************************************************************************************/
+                                          GREATEST(DECODE(SR.CMDT_CD, NULL, 0, 600), DECODE(SR.SCG_GRP_CMDT_CD, NULL, 0, 500))
+                                            + DECODE(SR.POR_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)
+                                            + DECODE(SR.POL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)
+                                            + DECODE(SR.POD_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)
+                                            + DECODE(SR.DEL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)
+                                      DESC) ROW_NUMBER  
+    ,
+      RANK() OVER ( PARTITION BY SP.CHG_CD
+                                        ORDER BY
+         GREATEST(DECODE(SR.CMDT_CD, NULL, 0, 600), DECODE(SR.SCG_GRP_CMDT_CD, NULL, 0, 500))
+                                            + DECODE(SR.POR_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)
+                                            + DECODE(SR.POL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)
+                                            + DECODE(SR.POD_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)
+                                            + DECODE(SR.DEL_TP_CD, 'L', 600, 'G', 500, 'T', 400, 'R', 300, 'C', 200, 0)
+                                      DESC) ROW_RANK  
+    FROM BK SUB_M,
+      PRI_SCG_PRF SP,
+      PRI_SCG_RT SR,
+      MDM_CHARGE MC  
+    WHERE SP.SVC_SCP_CD  =  SUB_M.BKG_SVC_SCP_CD 
+    AND   SP.CHG_CD  =  'OBS' /* BKG_SVC_SCP_CD 를 사용한다. */ 
+    AND   SR.SVC_SCP_CD      =  SP.SVC_SCP_CD
+    AND   SR.CHG_CD    =  SP.CHG_CD
+    AND   SR.WDR_FLG   =  'N'
+    AND   SR.DELT_FLG  =  'N'   /*  SUCHARGE 적용 중지 여부*/ 
+    AND   SR.SCG_RQST_PROC_CD = 'A'
+    AND   MC.CHG_CD       = SP.CHG_CD
+    AND   SUB_M.RT_APLY_DT    BETWEEN SR.EFF_DT AND SR.EXP_DT + 0.99999   /* 0.99999 는 23시 59분 59초를 의미 */
+    /*******************************************************************************************
+    R/D TERM CHECK ( MDM_CHARGE 의 R/D TERM CHECK 포함 )
+    *******************************************************************************************/
+    AND     (
+            SR.PRC_RCV_TERM_CD  = SUB_M.RCV_TERM_CD
+            OR  (
+                    ( SP.RCV_DE_TERM_USE_FLG = 'N' OR SR.PRC_RCV_TERM_CD IS NULL )
+                     AND (
+                          MC.CHG_APLY_AREA_CD = 'C'
+                          OR  SUB_M.RCV_TERM_CD  IN ( DECODE(MC.NA_RD_TERM_FLG, 'Y', SUB_M.RCV_TERM_CD), DECODE(MC.CY_RD_TERM_FLG, 'Y', 'Y'), DECODE(MC.DOR_RD_TERM_FLG, 'Y', 'D'), DECODE(MC.CFS_RD_TERM_FLG, 'Y', 'S'), DECODE(MC.TKL_TML_FLG, 'Y', 'T') )
+                         )
+                    )
+                )
+    AND     (
+            SR.PRC_DE_TERM_CD   = SUB_M.DE_TERM_CD
+            OR  (
+                    ( SP.RCV_DE_TERM_USE_FLG = 'N' OR SR.PRC_DE_TERM_CD IS NULL )
+                    AND (
+                        MC.CHG_APLY_AREA_CD = 'P'
+                        OR  SUB_M.DE_TERM_CD   IN ( DECODE(MC.NA_RD_TERM_FLG, 'Y', SUB_M.DE_TERM_CD), DECODE(MC.CY_RD_TERM_FLG, 'Y', 'Y'), DECODE(MC.DOR_RD_TERM_FLG, 'Y', 'D'), DECODE(MC.CFS_RD_TERM_FLG, 'Y', 'S'), DECODE(MC.TKL_TML_FLG, 'Y', 'T') )
+                        )
+                    )
+            )
+    /* POR */
+    AND     (
+                SP.POR_USE_FLG  = 'N'
+            OR  SR.POR_DEF_CD   IS NULL
+            OR  SR.POR_DEF_CD   =  DECODE(SUB_M.USR_LOC_CD,SR.POR_DEF_CD,SUB_M.USR_LOC_CD,
+                                                                        DECODE(SR.POR_TP_CD, 'L', SUB_M.BK_POR_CD, 'T', SUB_M.BK_POR_STE_CD, 'R', SUB_M.BK_POR_RGN_CD, 'C', SUB_M.BK_POR_CNT_CD) )
+         
+            OR  (
+                    SR.POR_TP_CD  = 'G'
+                AND EXISTS  (
+                            SELECT  'X'
+                            FROM    PRI_SCG_GRP_LOC     GL  ,
+                                    PRI_SCG_GRP_LOC_DTL GD
+                            WHERE   GD.SVC_SCP_CD     = GL.SVC_SCP_CD
+                            AND     GD.CHG_CD         = GL.CHG_CD
+                            AND     GD.GRP_LOC_SEQ    = GL.GRP_LOC_SEQ
+                            AND     GL.SVC_SCP_CD     = SR.SVC_SCP_CD
+                            AND     GL.CHG_CD         = SR.CHG_CD
+                            AND     GL.SCG_GRP_LOC_CD = SR.POR_DEF_CD
+                            AND     GD.DTL_LOC_DEF_CD = DECODE(GD.DTL_LOC_TP_CD, 'L', SUB_M.BK_POR_CD, 'T', SUB_M.BK_POR_STE_CD, 'R', SUB_M.BK_POR_RGN_CD, 'C', SUB_M.BK_POR_CNT_CD)
+                            )
+                )
+            )
+    /* POL */
+    AND     (
+                SP.POL_USE_FLG  = 'N'
+            OR  SR.POL_DEF_CD   IS NULL
+            OR  SR.POL_DEF_CD   = DECODE(SUB_M.USR_LOC_CD,SR.POL_DEF_CD,SUB_M.USR_LOC_CD,
+                                                                       DECODE(SR.POL_TP_CD, 'L', SUB_M.BK_POL_CD, 'T', SUB_M.BK_POL_STE_CD, 'R', SUB_M.BK_POL_RGN_CD, 'C', SUB_M.BK_POL_CNT_CD) )
+                                                                       
+            OR  (
+                    SR.POL_TP_CD  = 'G'
+                AND EXISTS  (
+                            SELECT  'X'
+                            FROM    PRI_SCG_GRP_LOC     GL  ,
+                                    PRI_SCG_GRP_LOC_DTL GD
+                            WHERE   GD.SVC_SCP_CD     = GL.SVC_SCP_CD
+                            AND     GD.CHG_CD         = GL.CHG_CD
+                            AND     GD.GRP_LOC_SEQ    = GL.GRP_LOC_SEQ
+                            AND     GL.SVC_SCP_CD     = SR.SVC_SCP_CD
+                            AND     GL.CHG_CD         = SR.CHG_CD
+                            AND     GL.SCG_GRP_LOC_CD = SR.POL_DEF_CD
+                            AND     GD.DTL_LOC_DEF_CD = DECODE(GD.DTL_LOC_TP_CD, 'L', SUB_M.BK_POL_CD, 'T', SUB_M.BK_POL_STE_CD, 'R', SUB_M.BK_POL_RGN_CD, 'C', SUB_M.BK_POL_CNT_CD)
+                            )
+                )
+            )
+    /* POD */
+    AND     (
+                SP.POD_USE_FLG  = 'N'
+            OR  SR.POD_DEF_CD   IS NULL
+            OR  SR.POD_DEF_CD   = DECODE(SUB_M.USR_LOC_CD,SR.POD_DEF_CD,SUB_M.USR_LOC_CD,
+                                                                       DECODE(SR.POD_TP_CD, 'L', SUB_M.BK_POD_CD, 'T', SUB_M.BK_POD_STE_CD, 'R', SUB_M.BK_POD_RGN_CD, 'C',SUB_M.BK_POD_CNT_CD) )
+                                                                       
+            OR  (
+                    SR.POD_TP_CD  = 'G'
+                AND EXISTS  (
+                            SELECT  'X'
+                            FROM    PRI_SCG_GRP_LOC     GL  ,
+                                    PRI_SCG_GRP_LOC_DTL GD
+                            WHERE   GD.SVC_SCP_CD     = GL.SVC_SCP_CD
+                            AND     GD.CHG_CD         = GL.CHG_CD
+                            AND     GD.GRP_LOC_SEQ    = GL.GRP_LOC_SEQ
+                            AND     GL.SVC_SCP_CD     = SR.SVC_SCP_CD
+                            AND     GL.CHG_CD         = SR.CHG_CD
+                            AND     GL.SCG_GRP_LOC_CD = SR.POD_DEF_CD
+                            AND     GD.DTL_LOC_DEF_CD = DECODE(GD.DTL_LOC_TP_CD, 'L', SUB_M.BK_POD_CD, 'T', SUB_M.BK_POD_STE_CD, 'R', SUB_M.BK_POD_RGN_CD, 'C', SUB_M.BK_POD_CNT_CD)
+                            )
+                )
+            )
+    /* DEL */
+    AND     (
+                SP.DEL_USE_FLG  = 'N'
+            OR  SR.DEL_DEF_CD   IS NULL
+            OR  SR.DEL_DEF_CD   = DECODE(SUB_M.USR_LOC_CD,SR.DEL_DEF_CD,SUB_M.USR_LOC_CD,
+                                                                       DECODE(SR.DEL_TP_CD, 'L', SUB_M.BK_DEL_CD, 'T', SUB_M.BK_DEL_STE_CD, 'R', SUB_M.BK_DEL_RGN_CD, 'C', SUB_M.BK_DEL_CNT_CD) )
+            OR  (
+                    SR.DEL_TP_CD  = 'G'
+                AND EXISTS  (
+                            SELECT  'X'
+                            FROM    PRI_SCG_GRP_LOC     GL  ,
+                                    PRI_SCG_GRP_LOC_DTL GD
+                            WHERE   GD.SVC_SCP_CD     = GL.SVC_SCP_CD
+                            AND     GD.CHG_CD         = GL.CHG_CD
+                            AND     GD.GRP_LOC_SEQ    = GL.GRP_LOC_SEQ
+                            AND     GL.SVC_SCP_CD     = SR.SVC_SCP_CD
+                            AND     GL.CHG_CD         = SR.CHG_CD
+                            AND     GL.SCG_GRP_LOC_CD = SR.DEL_DEF_CD
+                            AND     GD.DTL_LOC_DEF_CD = DECODE(GD.DTL_LOC_TP_CD, 'L', SUB_M.BK_DEL_CD, 'T', SUB_M.BK_DEL_STE_CD, 'R', SUB_M.BK_DEL_RGN_CD, 'C', SUB_M.BK_DEL_CNT_CD)
+                            )
+                )
+            )
+
+       /* DIR CALL */
+        AND     (
+                    SP.DIR_CALL_USE_FLG = 'N'
+                OR  SR.DIR_CALL_FLG     IS NULL
+                OR  SR.DIR_CALL_FLG     = BK_DIR_CALL_FLG
+                )
+
+        /* COMMODITY */
+        AND     (
+                    SP.CMDT_USE_FLG   = 'N'
+                OR  SR.CMDT_CD        IS NULL
+                OR  SR.CMDT_CD        = BK_CMDT_CD
+                )
+
+)XX
+WHERE   1=1     
+AND     XX.ROW_NUMBER     = 1
+AND     XX.ROW_RANK       = 1
+AND     XX.SCG_AMT        > 0
+AND     NOT EXISTS (SELECT RT_APPL_TP_CD
+                    FROM NC_P
+                    WHERE RT_APPL_TP_CD = 'N')
+)
+SELECT S3.BKG_NO,
+       NVL(F.BKG_RAT_UT_CD, S3.RAT_UT_CD) RAT_UT_CD,
+       NVL(F.CURR_CD, S3.CURR_CD) CURR_CD,
+       NVL(F.FRT_RT_AMT, S3.SCG_AMT) SCG_AMT, 
+       S3.CGO_CATE_CD,
+       NVL(F.PAY_TERM_CD, S3.PAY_TERM_CD) PAY_TERM_CD,
+       NVL(I.RT_APPL_TP_CD, 'N') FRT_INCL_XCLD_DIV_CD,
+       LOGIN_OFFICE
+FROM S3, NC_P F, NC_P I
+WHERE S3.CHG_CD = F.NOTE_CONV_CHG_CD(+)
+AND 'F' = F.RT_APPL_TP_CD(+)
+AND S3.CHG_CD = I.NOTE_CONV_CHG_CD(+)
+AND 'I' = I.RT_APPL_TP_CD(+)
+AND ROWNUM = 1			]]></sql>
+			<params>
+				<param name="login_office" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

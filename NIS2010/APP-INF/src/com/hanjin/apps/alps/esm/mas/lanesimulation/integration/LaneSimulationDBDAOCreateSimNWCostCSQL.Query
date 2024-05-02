@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LaneSimulationDBDAOCreateSimNWCostCSQL">
+			<desc><![CDATA[History------------------------------
+2010.11.15 이행지 [CHM-201006375-01] [MAS] Trunk IPC와 Ocean간 내부거래 신규 추가로 인해서
+                                                        기존로직에서 제외하도록 수정
+]]></desc>
+			<sql><![CDATA[
+INSERT INTO MAS_SIM_NTWK_COST(SIM_DT, SIM_NO, SECT_NO, VSL_CD, TML_CD, VSL_DBL_CALL_SEQ, 
+                              VSL_CLSS_CAPA, VOP_CD,SGRP_COST_CD, NTWK_COST_AMT, 
+                              AFT_OCN_TRNS_COST_AMT, CRE_USR_ID, CRE_DT, UPD_USR_ID, UPD_DT)
+	         SELECT 
+	                C2.SIM_DT 
+	               ,C2.SIM_NO 
+	               ,C2.SECT_NO 
+	               ,C2.VSL_CD 
+	               ,C2.TML_CD 
+	               ,C2.VSL_DBL_CALL_SEQ 
+	               ,C2.VSL_CLSS_CAPA 
+	               ,C2.VOP_CD 
+	               ,C1.SGRP_COST_CD 
+	               ,DECODE(C1.SGRP_COST_CD, 'OVPC', C2.OVPC 
+	                                      , 'OVCT', C2.OVCT 
+	                                      , 'OVBK', C2.OVBK 
+	        	#foreach(${header_value} IN ${header})                               
+				   ,'${header_value}', c2.${header_value}
+                #end
+	                                      ) NTWK_COST_AMT 
+	               ,DECODE(C1.SGRP_COST_CD, 'OVPC', C2.OVPC 
+	                                      , 'OVCT', C2.OVCT 
+	                                      , 'OVBK', C2.OVBK 
+	        	#foreach(${header_value} IN ${header})                               
+				   ,'${header_value}', c2.${header_value}
+				#end
+	                                      ) * NVL2(C2.IOC_CD, DECODE(C2.IOC_CD,'I',(1-C2.HJS_RATIO * C2.LOCAL_RATIO),(1+C2.HJS_RATIO * C2.LOCAL_RATIO)), 1) AS AFT_OCN_TRNS_COST_AMT 
+	               ,@[cre_usr_id]
+	               ,SYSDATE
+	               ,@[upd_usr_id]
+	               ,SYSDATE
+	           FROM ( 
+	                SELECT ROW_NUMBER() OVER(ORDER BY STND_COST_CD) NUM,STND_COST_NM, STND_COST_CD, SGRP_COST_CD 
+	                FROM MAS_STND_ACCT 
+	                WHERE MGRP_COST_CD IN ('OV', 'OF') 
+	                  AND STND_COST_CD NOT IN ('54400000','92200000','92100000','54600000') 
+	                ORDER BY 1 
+	                ) C1 
+	               ,( 
+	                 SELECT 
+	                        B1.SIM_DT 
+	                       ,B1.SIM_NO 
+	                       ,B1.SECT_NO 
+	                       ,B1.VSL_CD 
+	                       ,B2.TML_CD 
+	                       ,B2.VSL_DBL_CALL_SEQ 
+	                       ,B1.VOP_CD 
+	                       ,B1.VSL_CLSS_CAPA 
+	                       ,B2.PT_TF * B2.APLY_VOY_RTO AS OVPC 
+	                       ,B2.CL_TF * B2.APLY_VOY_RTO AS OVCT 
+	                       ,NVL((B1.FO_S * B2.SEA_DYS * B1.FO_UC_AMT + B1.FO_P * B2.PORT_DYS * B1.FO_UC_AMT) + (B1.DO_S * B2.TTL_DYS * B1.DO_UC_AMT),0)  AS OVBK 
+	        			#foreach(${header_value} IN ${header})                
+							,NVL(SUM(DECODE(B3.SGRP_COST_CD,'${header_value}',B3.VSL_DLY_COST_AMT)),0)*B2.TTL_DYS ${header_value}
+                        #end
+	                       ,B1.HJS_RATIO 
+	                       ,B4.IOC_CD 
+	                       ,DECODE(B4.IOC_CD,'I', DECODE(NVL(B4.VSL_TRNS_QTY,0),0,0, B4.VSL_TRNS_QTY/(HJS_BSA+B4.VSL_TRNS_QTY))
+	                                        ,'O', DECODE(NVL(B4.VSL_TRNS_QTY,0),0,0, B4.VSL_TRNS_QTY/HJS_BSA)
+	                              ) LOCAL_RATIO
+	                 FROM 
+	                     ( 
+	                      SELECT 
+	                             A1.SIM_DT 
+	                            ,A1.SIM_NO 
+	                            ,A1.SECT_NO 
+	                            ,A1.RLANE_CD 
+	                            ,A1.SKD_DIR_CD 
+	                            ,A2.VSL_CD 
+	                            ,A2.VOP_CD 
+	                            ,A2.VSL_CLSS_CAPA 
+	                            ,A2.VSL_CAPA 
+	                            ,A2.BSA_CAPA 
+	                            ,DECODE(NVL(A2.BSA_CAPA,0),0,0,A2.FNL_HJS_BSA_CAPA/A2.BSA_CAPA) AS HJS_RATIO 
+	                            ,A2.FNL_HJS_BSA_CAPA*A2.LDF_RTO AS HJS_BSA 
+	                            ,A3.FOIL_SAIL_CSM AS FO_S 
+	                            ,A3.FOIL_PORT_CSM AS FO_P 
+	                            ,A3.FOIL_UC_AMT AS FO_UC_AMT 
+	                            ,A3.DOIL_CSM AS DO_S 
+	                            ,A3.DOIL_UC_AMT AS DO_UC_AMT 
+	                      FROM MAS_SIM_SVC_LANE A1 
+	                          ,MAS_SIM_VSL_SET_INFO A2 
+	                          ,MAS_SIM_BNK_COST A3 
+	                          ,( 
+	                            SELECT VSL_CD, VSL_OSHP_CD, VOP_CD, STND_LDB_CAPA, VSL_CLSS_CAPA 
+	                              FROM MAS_VSL_RGST 
+	                             WHERE DELT_FLG= 'N' 
+	                             UNION ALL 
+	                            SELECT VSL_CD, VSL_OSHP_CD, VOP_CD, STND_LDB_CAPA, VSL_CLSS_CAPA 
+	                             FROM MAS_SIM_VSL_RGST 
+	                           ) A4 
+	                      WHERE A1.SIM_DT  = A2.SIM_DT(+) 
+	                        AND A1.SIM_NO  = A2.SIM_NO(+) 
+	                        AND A1.SECT_NO = A2.SECT_NO(+) 
+	                        AND '1'        = A2.SIM_DIV_CD(+) 
+	                        AND A2.SIM_DT  = A3.SIM_DT(+) 
+	                        AND A2.SIM_NO  = A3.SIM_NO(+) 
+	                        AND A2.SECT_NO = A3.SECT_NO(+) 
+	                        AND A2.VSL_CLSS_CAPA = A3.VSL_CLSS_CAPA(+) 
+	                        AND A2.VSL_CD  = A4.VSL_CD 
+	                        AND A1.SIM_DT  = @[sim_dt] 
+	                        AND A1.SIM_NO  = @[sim_no] 
+	                        AND A2.VOP_CD  = 'SML' 
+	                     )  B1, -- VESSEL,  CLASS CAPA, BUNKER 
+	                     ( 
+	                      SELECT DISTINCT 
+	                             A1.TML_CD 
+	                            ,A1.VSL_DBL_CALL_SEQ 
+	                            ,A1.SECT_NO 
+	                            ,A1.PORT_SEQ 
+	                            ,A1.PORT_DYS 
+	                            ,A1.SEA_DYS 
+	                            ,A1.TTL_TZ_DYS TTL_DYS 
+	                            ,A1.APLY_VOY_RTO 
+	                            ,A2.VSL_CLSS_CAPA 
+	                            ,A2.PORT_TRF_AMT PT_TF 
+	                            ,A2.CNL_FEE_AMT CL_TF 
+	                      FROM MAS_SIM_TML_OP_DYS A1 
+	                          ,MAS_SIM_PORT_CHG A2 
+	                      WHERE A1.SIM_DT   = A2.SIM_DT 
+	                        AND A1.SIM_NO   = A2.SIM_NO 
+	                        AND A1.TML_CD   = A2.TML_CD 
+	                        AND A1.SIM_DT   = @[sim_dt]
+	                        AND A1.SIM_NO   = @[sim_no] 
+	                      ORDER BY A1.SECT_NO, A1.PORT_SEQ 
+	                     ) B2, -- 운항일수, PORT_CHARGE AND CANAL FEE 
+	                     ( 
+	                      SELECT VSL_CD 
+	                            ,SGRP_COST_CD 
+	                            ,SUM(VSL_DLY_COST_AMT) VSL_DLY_COST_AMT 
+	                      FROM MAS_SIM_DLY_HIR 
+	                      WHERE SIM_DT  = @[sim_dt] 
+	                        AND SIM_NO  = @[sim_no] 
+	                      GROUP BY VSL_CD,SGRP_COST_CD 
+	                     ) B3 -- OWN FIXED DAILY HIRE 
+	                     ,MAS_SIM_INTR_TRNS_VOL B4 
+	                 WHERE B1.VSL_CLSS_CAPA = B2.VSL_CLSS_CAPA(+) 
+	                   AND B1.SECT_NO        = B2.SECT_NO(+) 
+	                   AND B1.VSL_CD         = B3.VSL_CD(+) 
+	                   AND B1.SIM_DT         = B4.SIM_DT(+) 
+	                   AND B1.SIM_NO         = B4.SIM_NO(+) 
+	                   AND B1.VSL_CD         = B4.VSL_CD(+) 
+	                   AND B1.SKD_DIR_CD     = B4.SKD_DIR_CD(+) 
+	                 GROUP BY B1.SIM_DT 
+	                       ,B1.SIM_NO 
+	                       ,B1.SECT_NO 
+	                       ,B1.VSL_CD 
+	                       ,B2.TML_CD 
+	                       ,B2.VSL_DBL_CALL_SEQ 
+	                       ,B1.VOP_CD 
+	                       ,B1.VSL_CLSS_CAPA 
+	                       ,B2.PT_TF * B2.APLY_VOY_RTO 
+	                       ,B2.CL_TF * B2.APLY_VOY_RTO 
+	                       ,NVL((B1.FO_S * B2.SEA_DYS * B1.FO_UC_AMT + B1.FO_P * B2.PORT_DYS * B1.FO_UC_AMT) + (B1.DO_S * B2.TTL_DYS * B1.DO_UC_AMT),0) 
+	                       ,B2.TTL_DYS 
+	                       ,B1.HJS_RATIO 
+	                       ,B4.IOC_CD 
+	                       ,DECODE(B4.IOC_CD,'I', DECODE(NVL(B4.VSL_TRNS_QTY,0),0,0, B4.VSL_TRNS_QTY/(HJS_BSA+B4.VSL_TRNS_QTY))
+	                                        ,'O', DECODE(NVL(B4.VSL_TRNS_QTY,0),0,0, B4.VSL_TRNS_QTY/HJS_BSA)
+	                              ) 
+	                ORDER BY B1.SECT_NO,B1.VSL_CD,B2.TML_CD 
+	                ) C2 
+	           ORDER BY SECT_NO, VSL_CD,TML_CD,SGRP_COST_CD, VSL_CLSS_CAPA			]]></sql>
+			<params>
+				<param name="cre_usr_id" type="12" value="" out="Y"/>
+				<param name="upd_usr_id" type="12" value="" out="Y"/>
+				<param name="sim_dt" type="12" value="" out="Y"/>
+				<param name="sim_no" type="12" value="" out="Y"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

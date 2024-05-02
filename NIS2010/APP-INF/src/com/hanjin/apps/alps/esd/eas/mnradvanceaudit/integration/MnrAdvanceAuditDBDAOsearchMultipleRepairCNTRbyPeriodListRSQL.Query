@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="MnrAdvanceAuditDBDAOsearchMultipleRepairCNTRbyPeriodListRSQL">
+			<desc><![CDATA[ESD_EAS_0365
+Multiple Repair CNTR by Period
+특정기간 동안 다발 수리한 CNTR 조회 - Cleaning 제외]]></desc>
+			<sql><![CDATA[
+WITH ROW_DATA AS (
+    SELECT   EQ_NO
+           , EQ_TPSZ_CD
+           , LSTM_CD,OWNR_CO_CD
+           , CURR_CD
+           , ONH_DT
+           , USING_DAYS
+           , EQ_CNT
+           , MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC( MNR_INP_DT , CURR_CD, 'USD', COST_AMT ) AS CHG_COST_AMT
+           , MNR_COMMON_PKG.MNR_CAL_DV_FNC( 'U', EQ_NO, P_ONH_DT ) AS DV_VALUE
+    FROM     (
+               SELECT   /*+ USE_NL(B A D E) */
+                        B.EQ_NO
+                      , MAX(B.EQ_TPSZ_CD) AS EQ_TPSZ_CD
+                      , MAX(D.LSTM_CD) AS LSTM_CD
+                      , (
+                          SELECT   DECODE(INTG_CD_VAL_CTNT,'H','SM Line',INTG_CD_VAL_DP_DESC)
+                          FROM     COM_INTG_CD_DTL CD
+                          WHERE    1 = 1
+                          AND      INTG_CD_ID ='CD01047'
+                          AND      CD.INTG_CD_VAL_CTNT = D.OWNR_CO_CD
+                        ) AS OWNR_CO_CD
+                      , MAX(A.CURR_CD) AS CURR_CD
+                      , SUM(B.COST_AMT) AS COST_AMT
+                      , TO_CHAR(MAX(A.MNR_INP_DT), 'YYYYMM') AS MNR_INP_DT
+                      , TO_CHAR(MAX(D.ONH_DT), 'YYYY-MM-DD') AS ONH_DT
+                      , TO_CHAR(MAX(D.ONH_DT), 'YYYYMMDD') AS P_ONH_DT
+                      , CASE WHEN MAX(E.CNTR_STS_CD) IN ('LSO', 'SBO', 'DIO', 'MUO', 'LST', 'SRO', 'SLD', 'SCR', 'DON', 'TLL') THEN TRUNC(MAX(E.CNTR_STS_EVNT_DT)) - TRUNC(MAX(D.ONH_DT)) + 1
+                             ELSE TRUNC(SYSDATE) - TRUNC(MAX(D.ONH_DT)) + 1
+                        END AS USING_DAYS
+                      , COUNT(1) OVER( PARTITION BY B.EQ_NO ) AS EQ_CNT
+               FROM     MNR_ORD_DTL B
+                      , MNR_ORD_HDR A
+                      , MST_CONTAINER D
+                      , MST_CNTR_STS_HIS E
+               WHERE    1 = 1
+               AND      A.MNR_ORD_OFC_CTY_CD = B.MNR_ORD_OFC_CTY_CD
+               AND      A.MNR_ORD_SEQ = B.MNR_ORD_SEQ 
+               AND      B.EQ_NO = D.CNTR_NO
+               AND      D.CNTR_NO = E.CNTR_NO
+               AND      D.LST_STS_SEQ = E.CNTR_STS_SEQ
+               AND      A.MNR_GRP_TP_CD = 'RPR'
+               AND      B.COST_CD != 'MRDRCL'
+               AND      A.EQ_KND_CD = 'U'
+               AND      B.EQ_NO IS NOT NULL
+               AND      A.MNR_WO_TP_CD IN ('EST', 'SPL')
+               AND      A.MNR_INP_DT BETWEEN TO_DATE(@[s_start_dt] || '000000', 'YYYY-MM-DDHH24MISS') AND TO_DATE(@[s_end_dt] || '235959', 'YYYY-MM-DDHH24MISS')
+#if(${s_prefix_eq_no} != '')
+               AND      B.EQ_NO BETWEEN @[s_prefix_eq_no] || @[s_from_eq_no] AND @[s_prefix_eq_no] || @[s_to_eq_no]
+#end
+#if(${s_eq_tpsz_cd} != '')
+               AND      B.EQ_TPSZ_CD IN
+                        (
+    #foreach ($tpszCd IN ${eqTpSzCds})
+        #if($velocityCount < $eqTpSzCds.size())
+                          '$tpszCd',
+        #else
+                          '$tpszCd'
+        #end
+    #end              
+                        )
+#end
+#if(${s_ownership} != '')
+               AND      D.OWNR_CO_CD = @[s_ownership]
+#end
+#if(${s_rcc_cd} != '')
+               AND      EXISTS
+                        (
+                          SELECT   'X'
+                          FROM     MDM_YARD YD
+                                 , MDM_LOCATION LOC
+                                 , MDM_EQ_ORZ_CHT CHT
+                          WHERE    1 = 1
+                          AND      B.YD_CD = YD.YD_CD
+                          AND      YD.LOC_CD = LOC.LOC_CD
+                          AND      LOC.SCC_CD = CHT.SCC_CD
+                          AND      CHT.RCC_CD = @[s_rcc_cd]
+                        )
+#end
+               GROUP BY A.MNR_ORD_OFC_CTY_CD
+                      , A.MNR_ORD_SEQ
+                      , B.EQ_NO
+                      , D.OWNR_CO_CD
+             )
+)
+SELECT   EQ_NO
+       , MAX(EQ_TPSZ_CD) EQ_TPSZ_CD
+       , MAX(LSTM_CD) LSTM_CD
+       , MAX(OWNR_CO_CD) OWNR_CO_CD
+       , MAX(ONH_DT) ENTRY_DAY
+       , MAX(USING_DAYS) USING_DAYS
+       , MAX(DV_VALUE) DV_VALUE
+       , COUNT(1) NO_OF_CASE
+       , SUM(CHG_COST_AMT) TOTAL_AMT
+FROM     ROW_DATA
+GROUP BY EQ_NO
+HAVING   COUNT(1) > NVL(TO_NUMBER(@[s_rpr_cnt]), 3)
+#if(${s_rpr_amt} != '')
+AND      SUM(CHG_COST_AMT) > TO_NUMBER(@[s_rpr_amt])
+#end
+#if(${s_over_dv_amt} != '')
+AND      SUM(CHG_COST_AMT) > MAX(NVL(DV_VALUE, 0))
+#end
+ORDER BY EQ_NO			]]></sql>
+			<params>
+				<param name="s_start_dt" type="12" value="" out="N"/>
+				<param name="s_end_dt" type="12" value="" out="N"/>
+				<param name="s_prefix_eq_no" type="12" value="" out="N"/>
+				<param name="s_from_eq_no" type="12" value="" out="N"/>
+				<param name="s_to_eq_no" type="12" value="" out="N"/>
+				<param name="s_ownership" type="12" value="" out="N"/>
+				<param name="s_rcc_cd" type="12" value="" out="N"/>
+				<param name="s_rpr_cnt" type="12" value="" out="N"/>
+				<param name="s_rpr_amt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

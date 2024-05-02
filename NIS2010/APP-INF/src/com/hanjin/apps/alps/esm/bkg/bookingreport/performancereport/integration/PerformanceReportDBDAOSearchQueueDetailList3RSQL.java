@@ -1,0 +1,92 @@
+/*=========================================================
+*Copyright(c) 2012 CyberLogitec
+*@FileName : PerformanceReportDBDAOSearchQueueDetailList3RSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2012.01.20
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2012.01.20 
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.bkg.bookingreport.performancereport.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class PerformanceReportDBDAOSearchQueueDetailList3RSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * search
+	  * </pre>
+	  */
+	public PerformanceReportDBDAOSearchQueueDetailList3RSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("bkg_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.esm.bkg.bookingreport.performancereport.integration").append("\n"); 
+		query.append("FileName : PerformanceReportDBDAOSearchQueueDetailList3RSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT XTER_RQST_NO" ).append("\n"); 
+		query.append("      ,XTER_RQST_SEQ" ).append("\n"); 
+		query.append("      ,XTER_SNDR_ID  " ).append("\n"); 
+		query.append("  FROM BKG_XTER_RQST_MST " ).append("\n"); 
+		query.append(" WHERE BKG_NO = @[bkg_no] " ).append("\n"); 
+		query.append("   AND NVL(SNACCS_MSG_TP_CD, ' ')  NOT IN ( 'SAT050', 'SAT054' )" ).append("\n"); 
+		query.append("   AND (XTER_RQST_NO, XTER_RQST_SEQ, XTER_SNDR_ID) IN (" ).append("\n"); 
+		query.append("														SELECT XTER_RQST_NO, XTER_RQST_SEQ, XTER_SNDR_ID" ).append("\n"); 
+		query.append("														  FROM (" ).append("\n"); 
+		query.append("																SELECT XTER_RQST_NO, XTER_RQST_SEQ, XTER_SNDR_ID" ).append("\n"); 
+		query.append("																  FROM BKG_XTER_RQST_MST" ).append("\n"); 
+		query.append("																   WHERE BKG_NO = @[bkg_no] " ).append("\n"); 
+		query.append("																   AND NVL(SNACCS_MSG_TP_CD, ' ')  NOT IN ( 'SAT050', 'SAT054' )" ).append("\n"); 
+		query.append("														           AND NVL(XTER_BL_TP_CD, ' ') <> 'H'" ).append("\n"); 
+		query.append("														           AND NVL(XTER_BKG_RQST_STS_CD,' ') <> 'T'" ).append("\n"); 
+		query.append("														           AND DOC_TP_CD = 'S'" ).append("\n"); 
+		query.append("																   ORDER BY CRE_DT DESC" ).append("\n"); 
+		query.append("																) A" ).append("\n"); 
+		query.append("														 WHERE ROWNUM =1 )" ).append("\n"); 
+		query.append("   AND NVL(XTER_BL_TP_CD, ' ') <> 'H'" ).append("\n"); 
+
+	}
+}

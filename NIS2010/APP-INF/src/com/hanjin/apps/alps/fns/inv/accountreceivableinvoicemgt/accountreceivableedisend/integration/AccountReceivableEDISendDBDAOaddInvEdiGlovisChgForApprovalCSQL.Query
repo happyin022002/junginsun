@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AccountReceivableEDISendDBDAOaddInvEdiGlovisChgForApprovalCSQL">
+			<desc><![CDATA[Glovis에서 청구 승인이 온이후에 C/A가 발생해서
+다시 전송시에는 
+A/R main table과 Glovis EDI charge table의 차액 만큼만 입력한다.]]></desc>
+			<sql><![CDATA[
+INSERT INTO INV_EDI_GLOVIS_CHG
+(
+        AR_IF_NO, IF_SEQ, CHG_SEQ, CHG_CD
+        , CURR_CD, PER_TP_CD, TRF_RT_AMT, RAT_AS_CNTR_QTY, CHG_AMT, INV_XCH_RT, CHG_RMK
+        , CRE_USR_ID, CRE_DT, UPD_USR_ID, UPD_DT
+        , EURO_LOCL_XCH_RT
+)
+SELECT  @[ar_if_no] 
+        , (SELECT NVL(MAX(IF_SEQ), 1)
+           FROM   INV_EDI_GLOVIS_HDR
+           WHERE  AR_IF_NO = @[ar_if_no]
+          ) AS IF_SEQ
+        , ROW_NUMBER() OVER(ORDER BY 4,5,6,7) AS CHG_SEQ
+        , CHG_CD
+        , CURR_CD
+        , PER_TP_CD
+        , TRF_RT_AMT
+        , CNTR_QTY
+        , DIF_CHG_AMT
+        , INV_XCH_RT
+        , '' AS CHG_RMK
+        , @[cre_usr_id], SYSDATE,@[upd_usr_id], SYSDATE
+        , EURO_LOCL_XCH_RT
+FROM (
+        SELECT    NVL(T2.CHG_CD     , T1.CHG_CD     ) AS CHG_CD
+                , NVL(T2.CURR_CD    , T1.CURR_CD    ) AS CURR_CD
+                , NVL(T2.PER_TP_CD  , T1.PER_TP_CD  ) AS PER_TP_CD
+                , NVL(T2.TRF_RT_AMT , T1.TRF_RT_AMT ) AS TRF_RT_AMT
+                , NVL(T2.CNTR_QTY   , T1.CNTR_QTY   ) AS CNTR_QTY
+                , (NVL(T2.CHG_AMT, 0) - NVL(T1.CHG_AMT,0)) AS DIF_CHG_AMT
+                , DECODE(NVL(T2.CURR_CD, T1.CURR_CD)              , 'KRW' , 1                  , @[inv_xch_rt]      ) AS INV_XCH_RT
+                , DECODE(NVL(T2.CURR_CD, T1.CURR_CD)||@[eur_gubun], 'USDY', @[euro_locl_xch_rt],                  0 ) AS EURO_LOCL_XCH_RT
+                  -- 구주발 OUT BOUND, USD CHARGE 존재할 경우 EUR EXCHAGE RATE
+        FROM    (
+                -- 청구 승인에 합
+                SELECT  T2.CHG_CD, T2.CURR_CD, T2.PER_TP_CD
+                        , T2.TRF_RT_AMT
+                        , T2.RAT_AS_CNTR_QTY        AS CNTR_QTY
+                        , SUM(T2.CHG_AMT        )   AS CHG_AMT
+                FROM    INV_EDI_GLOVIS_HDR T1, INV_EDI_GLOVIS_CHG T2
+                WHERE   T1.AR_IF_NO        = T2.AR_IF_NO
+                AND     T1.IF_SEQ          = T2.IF_SEQ
+                AND     T1.BL_SRC_NO       = @[bl_src_no]
+                AND     T1.RE_TP_CD        = 'A'
+                GROUP BY T2.CHG_CD, T2.CURR_CD, T2.PER_TP_CD, T2.TRF_RT_AMT,T2.RAT_AS_CNTR_QTY
+                )  T1 FULL OUTER JOIN 
+                ( 
+                -- INV C/A
+                SELECT  CHG_CD, CURR_CD,PER_TP_CD,TRF_RT_AMT,RAT_AS_CNTR_QTY AS CNTR_QTY, 
+                        SUM(CHG_AMT) CHG_AMT
+                FROM    INV_AR_MN T1, INV_AR_CHG T2
+                WHERE   T1.BL_SRC_NO       = @[bl_src_no] --C/A가 발생한 I/F NO
+                AND     T1.AR_IF_NO        = T2.AR_IF_NO
+                AND     T1.AR_OFC_CD       = @[ar_ofc_cd]
+               	AND     T1.IO_BND_CD       = @[io_bnd_cd]                   
+               	AND     T1.ACT_CUST_CNT_CD = 'KR'
+               	AND     T1.ACT_CUST_SEQ    = 19575
+               	AND     T1.REV_TP_CD       IN ('B', 'C')
+                GROUP BY CHG_CD, CURR_CD,PER_TP_CD,TRF_RT_AMT,RAT_AS_CNTR_QTY
+                ) T2 ON
+        (       T1.CHG_CD       = T2.CHG_CD
+        AND     T1.CURR_CD      = T2.CURR_CD
+        AND     T1.PER_TP_CD    = T2.PER_TP_CD
+        AND     T1.CNTR_QTY     = T2.CNTR_QTY
+        AND     T1.TRF_RT_AMT   = T2.TRF_RT_AMT
+        )
+     )
+WHERE DIF_CHG_AMT <>0			]]></sql>
+			<params>
+				<param name="ar_if_no" type="12" value="" out="N"/>
+				<param name="cre_usr_id" type="12" value="" out="N"/>
+				<param name="upd_usr_id" type="12" value="" out="N"/>
+				<param name="inv_xch_rt" type="12" value="" out="N"/>
+				<param name="eur_gubun" type="12" value="" out="N"/>
+				<param name="euro_locl_xch_rt" type="12" value="" out="N"/>
+				<param name="bl_src_no" type="12" value="" out="N"/>
+				<param name="ar_ofc_cd" type="12" value="" out="N"/>
+				<param name="io_bnd_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

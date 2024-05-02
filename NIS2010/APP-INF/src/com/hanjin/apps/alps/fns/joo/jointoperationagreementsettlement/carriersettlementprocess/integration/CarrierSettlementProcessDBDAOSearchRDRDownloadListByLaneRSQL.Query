@@ -1,0 +1,588 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CarrierSettlementProcessDBDAOSearchRDRDownloadListByLaneRSQL">
+			<desc><![CDATA[--------------------------------------------------------
+History
+2011.01.11 김상수 [CHM-201007350-01] JOO - RDR Inquiry by Lane 기능 보완 요청
+                  1. 보완 대상
+                     가. 조회  Option
+                        - Region Multi 선택
+                        - Carrier 추가 - Multi 선택
+                     나. Remark Pop up 추가 - 일부 Data 저장 및 해당 컬럼에 반영 (계산 Logic 포함)
+                     다. Asjusted Allocation 컬럼 추가 (계산Logic 포함)
+                     라. Over Used 계산 Logic( Allocation 참조 컬럼을  Adjusted Allocation으로 변경
+                     마. 기타 : 컬럼별 계산 Logic 수정
+2011.01.20 김상수 [CHM-201108389-01] RDR Inquiry by Lane 추가 기능 개발
+                   - Slot Release TEU, WT에 사용자가 입력하는 Data를 반영할 수 있도록 보완
+2012.05.11 김창헌 [CHM-201217413-01]
+                   [ALPS JOO] TDR Inquiry by VVD 및 RDR Inquiry by Lane
+                   - Sum 기능 추가, 정렬순서 및 표시형식 변경]]></desc>
+			<sql><![CDATA[
+WITH PA AS (SELECT H.VSL_CD,
+                   H.VOY_NO,
+                   H.DIR_CD,
+                   H.REGION,
+                   H.PORT_CD,
+                   TO_CHAR (K.VPS_ETD_DT, 'YYYY-MM-DD HH24:MI') VPS_ETD_DT,
+                   H.REMARK,
+                   @[vvd] VVD
+              FROM RDR_HEADER H,
+                   VSK_VSL_PORT_SKD K
+             WHERE K.VPS_ETD_DT BETWEEN TO_DATE (REPLACE (@[pre_fr], '-', ''), 'YYYYMMDD')
+                                    AND TO_DATE (REPLACE (@[pre_to], '-', ''), 'YYYYMMDD') + 0.99999
+#if (${region} != '')
+               AND H.REGION IN (${region})
+#end
+               AND K.SLAN_CD = @[rlane_cd]
+#if (${skd_dir_cd} != '')
+               AND K.SKD_DIR_CD = @[skd_dir_cd]
+#end
+               AND H.VSL_CD = K.VSL_CD
+               AND H.VOY_NO = K.SKD_VOY_NO
+               AND H.PORT_CD = K.VPS_PORT_CD
+               AND H.DIR_CD = K.SKD_DIR_CD
+               AND K.CLPT_IND_SEQ = '1' --> 수정 : 조건수정
+           )
+
+ , SRC AS (
+
+SELECT Z.VSL_CD,
+       Z.VOY_NO,
+       Z.DIR_CD,
+       Z.VSL_CD || Z.VOY_NO || Z.DIR_CD VVD,
+       Z.REGION,
+       Z.PORT_CD,
+       Z.OPR_CD,
+       Z.VPS_ETD_DT,
+       SUM (Z.ALC_ALLOC) ALC_ALLOC,
+       SUM (Z.ALC_WGT) ALC_WGT,
+       CASE
+          WHEN (NVL (R.JO_SLT_RLSE_TEU_QTY, 0) != 0 AND NVL (R.JO_SLT_RLSE_WGT, 0) != 0) OR R.JO_SLT_RLSE_CD != 'C' THEN
+               R.JO_SLT_RLSE_TEU_QTY
+          ELSE
+               SUM (Z.SWAP_SLOT)
+       END SWAP_SLOT,                                           /* Slot R TEU */
+       CASE
+          WHEN (NVL (R.JO_SLT_RLSE_TEU_QTY, 0) != 0 AND NVL (R.JO_SLT_RLSE_WGT, 0) != 0) OR R.JO_SLT_RLSE_CD != 'C' THEN
+               R.JO_SLT_RLSE_WGT
+          ELSE
+               SUM (Z.SWAP_WGT)
+       END SWAP_WGT,                                            /* Slot R WT */
+       CASE
+          WHEN (NVL (R.JO_SLT_RLSE_TEU_QTY, 0) != 0 AND NVL (R.JO_SLT_RLSE_WGT, 0) != 0) OR R.JO_SLT_RLSE_CD != 'C' THEN
+          -- JOO의 SLT_RLSE_TEU와 SLT_RLSE_WGT에 사용자로 부터 입력된 값이 있으면
+             -- 저장된 JO_SLT_RLSE_CD를 보여줌
+               R.JO_SLT_RLSE_CD
+          ELSE
+          -- JOO에 저장된 Data Row가 없거나 0일때, OPF값이 없으면 C 있으면 P
+               DECODE (SUM (Z.SWAP_SLOT) + SUM (Z.SWAP_WGT), 0, 'C', 'P')
+       END JO_SLT_RLSE_CD,                                      /* Slot R R/Option */
+       CASE
+          WHEN (CASE -- JO_SLT_RLSE_CD불러오는 LOGIC과 동일
+                   WHEN (NVL (R.JO_SLT_RLSE_TEU_QTY, 0) != 0 AND NVL (R.JO_SLT_RLSE_WGT, 0) != 0) OR R.JO_SLT_RLSE_CD != 'C' THEN
+                        R.JO_SLT_RLSE_CD
+                   ELSE
+                        DECODE (SUM (Z.SWAP_SLOT) + SUM (Z.SWAP_WGT), 0, 'C', 'P')
+                END) = 'R' THEN
+                -- JO_SLT_RLSE_CD 결과값이 R이면
+               SUM (Z.ALC_ALLOC)
+          WHEN (CASE -- JO_SLT_RLSE_CD불러오는 LOGIC과 동일
+                   WHEN (NVL (R.JO_SLT_RLSE_TEU_QTY, 0) != 0 AND NVL (R.JO_SLT_RLSE_WGT, 0) != 0) OR R.JO_SLT_RLSE_CD != 'C' THEN
+                        R.JO_SLT_RLSE_CD
+                   ELSE
+                        DECODE (SUM (Z.SWAP_SLOT) + SUM (Z.SWAP_WGT), 0, 'C', 'P')
+                END) = 'C' THEN
+               SUM (Z.ALC_ALLOC) + NVL (R.JO_SLT_RLSE_TEU_QTY, 0)
+          ELSE
+               SUM (Z.ALC_ALLOC) + SUM (Z.SWAP_SLOT)
+       END ADJUST_TEU,                                          /* Adjusted Allocation TEU */
+       CASE
+          WHEN (CASE -- JO_SLT_RLSE_CD불러오는 LOGIC과 동일
+                   WHEN (NVL (R.JO_SLT_RLSE_TEU_QTY, 0) != 0 AND NVL (R.JO_SLT_RLSE_WGT, 0) != 0) OR R.JO_SLT_RLSE_CD != 'C' THEN
+                        R.JO_SLT_RLSE_CD
+                   ELSE
+                        DECODE (SUM (Z.SWAP_SLOT) + SUM (Z.SWAP_WGT), 0, 'C', 'P')
+                END) = 'R' THEN
+               SUM (Z.ALC_WGT)
+          WHEN (CASE -- JO_SLT_RLSE_CD불러오는 LOGIC과 동일
+                   WHEN (NVL (R.JO_SLT_RLSE_TEU_QTY, 0) != 0 AND NVL (R.JO_SLT_RLSE_WGT, 0) != 0) OR R.JO_SLT_RLSE_CD != 'C' THEN
+                        R.JO_SLT_RLSE_CD
+                   ELSE
+                        DECODE (SUM (Z.SWAP_SLOT) + SUM (Z.SWAP_WGT), 0, 'C', 'P')
+                END) = 'C' THEN
+               SUM (Z.ALC_WGT) + NVL (R.JO_SLT_RLSE_WGT, 0)
+          ELSE
+               SUM (Z.ALC_WGT) + SUM (Z.SWAP_WGT)
+       END ADJUST_WT,                                           /* Adjusted Allocation WT */
+       SUM (Z.ACT_SLOT) + NVL (R.JO_VOID_TEU_QTY, 0) ACT_SLOT,
+       SUM (Z.ACT_WGT) ACT_WGT,
+       CASE  -- (ACT_SLOT - ADJUST)
+          WHEN (CASE -- JO_SLT_RLSE_CD불러오는 LOGIC과 동일
+                   WHEN (NVL (R.JO_SLT_RLSE_TEU_QTY, 0) != 0 AND NVL (R.JO_SLT_RLSE_WGT, 0) != 0) OR R.JO_SLT_RLSE_CD != 'C' THEN
+                        R.JO_SLT_RLSE_CD
+                   ELSE
+                        DECODE (SUM (Z.SWAP_SLOT) + SUM (Z.SWAP_WGT), 0, 'C', 'P')
+                END) = 'R' THEN
+               GREATEST ((SUM (Z.ACT_SLOT) + NVL (R.JO_VOID_TEU_QTY, 0)) - SUM (Z.ALC_ALLOC), 0)
+          WHEN (CASE -- JO_SLT_RLSE_CD불러오는 LOGIC과 동일
+                   WHEN (NVL (R.JO_SLT_RLSE_TEU_QTY, 0) != 0 AND NVL (R.JO_SLT_RLSE_WGT, 0) != 0) OR R.JO_SLT_RLSE_CD != 'C' THEN
+                        R.JO_SLT_RLSE_CD
+                   ELSE
+                        DECODE (SUM (Z.SWAP_SLOT) + SUM (Z.SWAP_WGT), 0, 'C', 'P')
+                END) = 'C' THEN
+               GREATEST ((SUM (Z.ACT_SLOT) + NVL (R.JO_VOID_TEU_QTY, 0)) - (SUM (Z.ALC_ALLOC) + NVL (R.JO_SLT_RLSE_TEU_QTY, 0)), 0)
+          ELSE
+               GREATEST ((SUM (Z.ACT_SLOT) + NVL (R.JO_VOID_TEU_QTY, 0)) - (SUM (Z.ALC_ALLOC) + SUM (Z.SWAP_SLOT)), 0)
+       END OVER_SLOT,                                           /* Over Used TEU */
+       CASE  -- (ACT_SLOT - ADJUST)
+          WHEN (CASE -- JO_SLT_RLSE_CD불러오는 LOGIC과 동일
+                   WHEN (NVL (R.JO_SLT_RLSE_TEU_QTY, 0) != 0 AND NVL (R.JO_SLT_RLSE_WGT, 0) != 0) OR R.JO_SLT_RLSE_CD != 'C' THEN
+                        R.JO_SLT_RLSE_CD
+                   ELSE
+                        DECODE (SUM (Z.SWAP_SLOT) + SUM (Z.SWAP_WGT), 0, 'C', 'P')
+                END) = 'R' THEN
+               GREATEST (SUM (Z.ACT_WGT) - SUM (Z.ALC_WGT), 0)
+          WHEN (CASE -- JO_SLT_RLSE_CD불러오는 LOGIC과 동일
+                   WHEN (NVL (R.JO_SLT_RLSE_TEU_QTY, 0) != 0 AND NVL (R.JO_SLT_RLSE_WGT, 0) != 0) OR R.JO_SLT_RLSE_CD != 'C' THEN
+                        R.JO_SLT_RLSE_CD
+                   ELSE
+                        DECODE (SUM (Z.SWAP_SLOT) + SUM (Z.SWAP_WGT), 0, 'C', 'P')
+                END) = 'C' THEN
+               GREATEST (SUM (Z.ACT_WGT) - (SUM (Z.ALC_WGT) + NVL (R.JO_SLT_RLSE_WGT, 0)), 0)
+          ELSE /* C, P, null (Default = P) */
+               GREATEST (SUM (Z.ACT_WGT) - (SUM (Z.ALC_WGT) + SUM (Z.SWAP_WGT)), 0)
+       END OVER_WGT,                                            /* Over Used WT */
+       NVL (R.JO_SHRT_LEG_RMK_TEU_QTY, 0) JO_SHRT_LEG_RMK_TEU_QTY,
+       NVL (R.JO_SHRT_LEG_RMK_WGT, 0) JO_SHRT_LEG_RMK_WGT,
+       NVL (R.JO_SHRT_LEG_RMK_DIFF_QTY, 0) JO_SHRT_LEG_RMK_DIFF_QTY,
+       SUM (Z.LOAD_20) LOAD_20,
+       SUM (Z.BSA_HC20) BSA_HC20,
+       SUM (Z.LOAD_40) LOAD_40,
+       SUM (Z.BSA_HC40) BSA_HC40,
+       SUM (Z.LOAD_45) LOAD_45,
+       SUM (Z.BSA_45) BSA_45,
+       SUM (Z.R_O) + NVL (R.JO_RF_OCN_QTY, 0) R_O,
+       SUM (Z.R_I) + NVL (R.JO_RF_IPT_QTY, 0) R_I,
+       SUM (Z.EMPTY_TEU) EMPTY_TEU,
+       SUM (Z.EMPTY_WT) EMPTY_WT,
+       NVL2 (MAX (Z.REMARK), 'Yes', 'No') REMARK,
+       NVL2 (MAX (Z.REMARK), 'Yes', 'No') SOURCE,    -- Excell 다운로드시 보여지는 컬럼
+       Z.REMARK REMARK_CONT,
+       NVL (R.JO_RF_OCN_QTY, 0) JO_RF_OCN_QTY,
+       NVL (R.JO_RF_IPT_QTY, 0) JO_RF_IPT_QTY,
+       NVL (R.JO_VOID_TEU_QTY, 0) JO_VOID_TEU_QTY
+  FROM (SELECT /* 1.Allocation TEU & Allocation WT*/
+               H.VSL_CD,
+               H.VOY_NO,
+               H.DIR_CD,
+               H.REGION,
+               H.PORT_CD,
+               A.OPR_CD,
+               H.VPS_ETD_DT,
+               NVL (SUM (A.BSA_SLOT), 0) + NVL (SUM (A.SWAP_SLOT), 0) ALC_ALLOC, /* Allocation TEU */
+               NVL (SUM (A.BSA_WGT), 0) + NVL (SUM (A.SWAP_WGT), 0) ALC_WGT,     /* Allocation WT */
+               NVL (SUM (A.RELEASE_SLOT), 0) SWAP_SLOT,                             /* Slot Release TEU */
+               NVL (SUM (A.RELEASE_WGT), 0) SWAP_WGT,                               /* Slot Release WT */
+               0 ACT_SLOT,
+               0 ACT_WGT,
+               0 LOAD_20,
+               0 BSA_HC20,
+               0 LOAD_40,
+               0 BSA_HC40,
+               0 LOAD_45,
+               0 BSA_45,
+               0 R_O,
+               0 R_I,
+               0 EMPTY_TEU,
+               0 EMPTY_WT,
+               NVL (MAX (H.REMARK), '') REMARK
+          FROM PA H,
+               RDR_ALLOCATION A
+         WHERE H.VSL_CD = A.VSL_CD
+           AND H.VOY_NO = A.VOY_NO
+           AND H.DIR_CD = A.DIR_CD
+           AND H.REGION = A.REGION
+#if (${vvd} != '')
+           AND H.VSL_CD || H.VOY_NO || H.DIR_CD LIKE H.VVD || '%'
+#end
+#if (${opr_cd} != '')
+           AND A.OPR_CD IN (${opr_cd})
+#end
+        GROUP BY A.OPR_CD,
+                 H.VSL_CD,
+                 H.VOY_NO,
+                 H.DIR_CD,
+                 H.REGION,
+                 H.PORT_CD,
+                 H.VPS_ETD_DT
+
+
+        UNION ALL
+
+
+        SELECT /* 2.ACTUAL USED, TEU, WT - 1)TEU 2) WT */
+               H.VSL_CD,
+               H.VOY_NO,
+               H.DIR_CD,
+               H.REGION,
+               H.PORT_CD,
+               A.OPR_CD,
+               H.VPS_ETD_DT,
+               0 ALC_ALLOC,
+               0 ALC_WGT,
+               0 SWAP_SLOT,
+               0 SWAP_WGT,
+                    SUM (DECODE (A.TYPE, 'F', A.SLOT_QTY, 0)) +
+                    SUM (DECODE (A.TYPE, 'E', A.SLOT_QTY, 0)) +
+                    SUM (DECODE (A.TYPE, 'A', A.SLOT_QTY, 0)) +
+                    SUM (DECODE (A.TYPE, 'H', A.SLOT_QTY, 'L', A.SLOT_QTY, 0)) ACT_SLOT,
+               SUM (A.WEIGHT) ACT_WGT,
+               0 LOAD_20,
+               0 BSA_HC20,
+               0 LOAD_40,
+               0 BSA_HC40,
+               0 LOAD_45,
+               0 BSA_45,
+               0 R_O,
+               0 R_I,
+               SUM (DECODE (A.TYPE, 'E', A.SLOT_QTY, 0)) EMPTY_TEU,
+               SUM (A.WEIGHT) EMPTY_WT,
+               NVL (MAX (H.REMARK), '') REMARK
+          FROM PA H,
+               RDR_UTILIZE A
+         WHERE H.VSL_CD = A.VSL_CD
+           AND H.VOY_NO = A.VOY_NO
+           AND H.DIR_CD = A.DIR_CD
+           AND H.REGION = A.REGION
+#if (${vvd} != '')
+           AND H.VSL_CD || H.VOY_NO || H.DIR_CD LIKE H.VVD || '%'
+#end
+#if (${opr_cd} != '')
+           AND A.OPR_CD IN (${opr_cd})
+#end
+        GROUP BY A.OPR_CD,
+                 H.VSL_CD,
+                 H.VOY_NO,
+                 H.DIR_CD,
+                 H.REGION,
+                 H.PORT_CD,
+                 H.VPS_ETD_DT
+
+
+        UNION ALL
+
+
+        SELECT /* 3.RF - 1) R-O*/
+               H.VSL_CD,
+               H.VOY_NO,
+               H.DIR_CD,
+               H.REGION,
+               H.PORT_CD,
+               M.OPR_CD,
+               H.VPS_ETD_DT,
+               0 ALC_ALLOC,
+               0 ALC_WGT,
+               0 SWAP_SLOT,
+               0 SWAP_WGT,
+               0 ACT_SLOT,
+               0 ACT_WGT,
+               0 LOAD_20,
+               0 BSA_HC20,
+               0 LOAD_40,
+               0 BSA_HC40,
+               0 LOAD_45,
+               0 BSA_45,
+               SUM (DECODE (M.CNTR_SIZE, '2', 1, '3', 1, 0)) + SUM (DECODE (M.CNTR_SIZE, '4', 1, 'H', 1, 'L', 1, 0)) R_O,
+               0 R_I,
+               0 EMPTY_TEU,
+               0 EMPTY_WT,
+               NVL (MAX (H.REMARK), '') REMARK
+          FROM PA H,
+               RDR_CNTR_DETAIL M
+         WHERE H.VSL_CD = M.VSL_CD
+           AND H.VOY_NO = M.VOY_NO
+           AND H.DIR_CD = M.DIR_CD
+           AND M.TEMP IS NOT NULL
+           AND M.CARGO_TYPE != 'IR'
+           AND H.REGION = M.REGION
+#if (${vvd} != '')
+           AND H.VSL_CD || H.VOY_NO || H.DIR_CD LIKE H.VVD || '%'
+#end
+#if (${opr_cd} != '')
+           AND M.OPR_CD IN (${opr_cd})
+#end
+        GROUP BY M.OPR_CD,
+                 H.VSL_CD,
+                 H.VOY_NO,
+                 H.DIR_CD,
+                 H.REGION,
+                 H.PORT_CD,
+                 H.VPS_ETD_DT
+
+
+        UNION ALL
+
+
+        /*** R-O, 2.Internally ****/
+        SELECT H.VSL_CD,
+               H.VOY_NO,
+               H.DIR_CD,
+               H.REGION,
+               H.PORT_CD,
+               S.OPR_CD,
+               H.VPS_ETD_DT,
+               0 ALC_ALLOC,
+               0 ALC_WGT,
+               0 SWAP_SLOT,
+               0 SWAP_WGT,
+               0 ACT_SLOT,
+               0 ACT_WGT,
+               0 LOAD_20,
+               0 BSA_HC20,
+               0 LOAD_40,
+               0 BSA_HC40,
+               0 LOAD_45,
+               0 BSA_45,
+               SUM (DECODE (S.CNTR_SIZE, '2', QTY, 0)) + SUM (DECODE (S.CNTR_SIZE, '4', QTY, 0)) R_O,
+               0 R_I,
+               0 EMPTY_TEU,
+               0 EMPTY_WT,
+               NVL (MAX (H.REMARK), '') REMARK
+          FROM PA H,
+               RDR_SUMMARY S
+         WHERE H.VSL_CD = S.VSL_CD
+           AND H.VOY_NO = S.VOY_NO
+           AND H.DIR_CD = S.DIR_CD
+           AND H.REGION = S.REGION
+           AND H.VSL_CD = S.VSL_CD
+           AND H.VOY_NO = S.VOY_NO
+           AND H.DIR_CD = S.DIR_CD
+           AND H.REGION = S.REGION
+           AND S.CNTR_TYPE = 'T'
+#if (${vvd} != '')
+           AND H.VSL_CD || H.VOY_NO || H.DIR_CD LIKE H.VVD || '%'
+#end
+#if (${opr_cd} != '')
+           AND S.OPR_CD IN (${opr_cd})
+#end
+        GROUP BY S.OPR_CD,
+                 H.VSL_CD,
+                 H.VOY_NO,
+                 H.DIR_CD,
+                 H.REGION,
+                 H.PORT_CD,
+                 H.VPS_ETD_DT
+
+
+        UNION ALL
+
+
+        SELECT /* 3.RF - 1) R-I*/
+               H.VSL_CD,
+               H.VOY_NO,
+               H.DIR_CD,
+               H.REGION,
+               H.PORT_CD,
+               M.OPR_CD,
+               H.VPS_ETD_DT,
+               0 ALC_ALLOC,
+               0 ALC_WGT,
+               0 SWAP_SLOT,
+               0 SWAP_WGT,
+               0 ACT_SLOT,
+               0 ACT_WGT,
+               0 LOAD_20,
+               0 BSA_HC20,
+               0 LOAD_40,
+               0 BSA_HC40,
+               0 LOAD_45,
+               0 BSA_45,
+               0 R_O,
+               SUM (DECODE (M.CNTR_SIZE, '2', 1, '3', 1, 0)) + SUM (DECODE (M.CNTR_SIZE, '4', 1, 'H', 1, 'L', 1, 0)) R_I,
+               0 EMPTY_TEU,
+               0 EMPTY_WT,
+               NVL (MAX (H.REMARK), '') REMARK
+          FROM PA H,
+               RDR_CNTR_DETAIL M
+         WHERE H.VSL_CD = M.VSL_CD
+           AND H.VOY_NO = M.VOY_NO
+           AND H.DIR_CD = M.DIR_CD
+           AND M.TEMP IS NOT NULL
+           AND M.CARGO_TYPE = 'IR'
+           AND H.REGION = M.REGION
+#if (${vvd} != '')
+           AND H.VSL_CD || H.VOY_NO || H.DIR_CD LIKE H.VVD || '%'
+#end
+#if (${opr_cd} != '')
+           AND M.OPR_CD IN (${opr_cd})
+#end
+        GROUP BY M.OPR_CD,
+                 H.VSL_CD,
+                 H.VOY_NO,
+                 H.DIR_CD,
+                 H.REGION,
+                 H.PORT_CD,
+                 H.VPS_ETD_DT
+
+
+        UNION ALL
+
+
+        SELECT /* 3.RF - 1) R-I INTERNAL*/
+               H.VSL_CD,
+               H.VOY_NO,
+               H.DIR_CD,
+               H.REGION,
+               H.PORT_CD,
+               S.OPR_CD,
+               H.VPS_ETD_DT,
+               0 ALC_ALLOC,
+               0 ALC_WGT,
+               0 SWAP_SLOT,
+               0 SWAP_WGT,
+               0 ACT_SLOT,
+               0 ACT_WGT,
+               0 LOAD_20,
+               0 BSA_HC20,
+               0 LOAD_40,
+               0 BSA_HC40,
+               0 LOAD_45,
+               0 BSA_45,
+               0 R_O,
+               SUM (DECODE (S.CNTR_SIZE, '2', QTY, 0)) + SUM (DECODE (S.CNTR_SIZE, '4', QTY, 0)) R_I,
+               0 EMPTY_TEU,
+               0 EMPTY_WT,
+               NVL (MAX (H.REMARK), '') REMARK
+          FROM PA H,
+               RDR_SUMMARY S
+         WHERE H.VSL_CD = S.VSL_CD
+           AND H.VOY_NO = S.VOY_NO
+           AND H.DIR_CD = S.DIR_CD
+           AND H.VSL_CD = S.VSL_CD
+           AND H.VOY_NO = S.VOY_NO
+           AND H.DIR_CD = S.DIR_CD
+           AND H.REGION = S.REGION
+           AND S.CNTR_TYPE = 'I'
+#if (${vvd} != '')
+           AND H.VSL_CD || H.VOY_NO || H.DIR_CD LIKE H.VVD || '%'
+#end
+#if (${opr_cd} != '')
+           AND S.OPR_CD IN (${opr_cd})
+#end
+        GROUP BY S.OPR_CD,
+                 H.VSL_CD,
+                 H.VOY_NO,
+                 H.DIR_CD,
+                 H.REGION,
+                 H.PORT_CD,
+                 H.VPS_ETD_DT
+
+
+        UNION ALL
+
+
+        /* 4.20HC, 40HC, 45*/
+        SELECT --DISTINCT
+               H.VSL_CD,
+               H.VOY_NO,
+               H.DIR_CD,
+               H.REGION,
+               H.PORT_CD,
+               DECODE (M.OPR_CD, NULL, B.OPR_CD, M.OPR_CD) OPR_CD,
+               H.VPS_ETD_DT,
+               0 ALC_ALLOC,
+               0 ALC_WGT,
+               0 SWAP_SLOT,
+               0 SWAP_WGT,
+               0 ACT_SLOT,
+               0 ACT_WGT,
+               SUM (DECODE (M.TYPE, 'F', M.SLOT_HC20, 'E', M.SLOT_HC20, 0)) LOAD_20,
+               TO_NUMBER (NVL (B.HC20_QTY, 0)) BSA_HC20,
+               SUM (NVL (M.SLOT_HC, 0)) LOAD_40,
+               TO_NUMBER (NVL (B.HC_QTY, 0)) BSA_HC40,
+               SUM (NVL (M.SLOT_45, 0)) LOAD_45,
+               TO_NUMBER (NVL (B.QTY_45, 0)) BSA_45,
+               0 R_O,
+               0 R_I,
+               0 EMPTY_TEU,
+               0 EMPTY_WT,
+               NVL (MAX (H.REMARK), '') REMARK
+          FROM PA H,
+               RDR_BSA B,
+               RDR_UTILIZE M
+         WHERE H.VSL_CD = B.VSL_CD
+           AND H.VOY_NO = B.VOY_NO
+           AND H.DIR_CD = B.DIR_CD
+           AND H.REGION = B.REGION
+           AND H.VSL_CD = M.VSL_CD
+           AND H.VOY_NO = M.VOY_NO
+           AND H.DIR_CD = M.DIR_CD
+           AND H.REGION = M.REGION
+           AND DECODE (M.OPR_CD, NULL, 'N', B.OPR_CD) = NVL (M.OPR_CD, 'N')
+#if (${vvd} != '')
+           AND H.VSL_CD || H.VOY_NO || H.DIR_CD LIKE H.VVD || '%'
+#end
+#if (${opr_cd} != '')
+           AND M.OPR_CD IN (${opr_cd})
+#end
+        GROUP BY M.OPR_CD,
+                 B.OPR_CD,
+                 NVL (B.HC20_RAT, 0),
+                 NVL (B.HC_RAT, 0),
+                 NVL (B.UN_RAT_45, 0),
+                 NVL (B.OV_RAT_45, 0),
+                 NVL (B.HC20_QTY, 0),
+                 NVL (B.HC_QTY, 0),
+                 NVL (B.QTY_45, 0),
+                 H.VSL_CD,
+                 H.VOY_NO,
+                 H.DIR_CD,
+                 H.REGION,
+                 H.PORT_CD,
+                 H.VPS_ETD_DT) Z,
+       JOO_RDR_VVD_CRR_RMK R
+ WHERE Z.VSL_CD = R.VSL_CD(+)
+   AND Z.VOY_NO = R.SKD_VOY_NO(+)
+   AND Z.DIR_CD = R.SKD_DIR_CD(+)
+   AND Z.REGION = R.JO_RGN_CD(+)
+   AND Z.PORT_CD = R.PORT_CD(+)
+   AND Z.OPR_CD = R.JO_CRR_CD(+)
+ GROUP BY Z.VSL_CD,
+          Z.VOY_NO,
+          Z.DIR_CD,
+          Z.REGION,
+          Z.PORT_CD,
+          Z.OPR_CD,
+          Z.VPS_ETD_DT,
+          Z.REMARK,
+          R.JO_SHRT_LEG_RMK_TEU_QTY,
+          R.JO_SHRT_LEG_RMK_WGT,
+          R.JO_SLT_RLSE_CD,
+          R.JO_SHRT_LEG_RMK_DIFF_QTY,
+          R.JO_RF_OCN_QTY,
+          R.JO_RF_IPT_QTY,
+          R.JO_VOID_TEU_QTY,
+          R.JO_SLT_RLSE_TEU_QTY,
+          R.JO_SLT_RLSE_WGT
+
+)
+
+SELECT  T2.*
+FROM    (
+        SELECT    
+                  MIN(T1.VVD || T1.VPS_ETD_DT) OVER (PARTITION BY T1.VVD) AS VVD_ETD_GROUP
+                , T1.*
+        FROM    SRC T1
+        ) T2
+ORDER BY SUBSTR(VVD_ETD_GROUP, 10), T2.VVD, T2.VPS_ETD_DT, T2.PORT_CD, T2.OPR_CD			]]></sql>
+			<params>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="pre_fr" type="12" value="" out="N"/>
+				<param name="pre_to" type="12" value="" out="N"/>
+				<param name="rlane_cd" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

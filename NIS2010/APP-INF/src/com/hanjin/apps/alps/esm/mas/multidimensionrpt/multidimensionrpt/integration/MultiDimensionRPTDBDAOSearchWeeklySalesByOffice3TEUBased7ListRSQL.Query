@@ -1,0 +1,1580 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="MultiDimensionRPTDBDAOSearchWeeklySalesByOffice3TEUBased7ListRSQL">
+			<desc><![CDATA[2014.01.02 김수정 [CHM-201327858] [MAS] IAS P&L 추가
+2015.08.31 손진환 [CHM-201536958] Split15-[그룹사 표준 코드 시행] SML 프로그램 대응 및 데이타 마이그레이션 작업 요청]]></desc>
+			<sql><![CDATA[
+WITH COMM_RTO
+AS (SELECT COST_YRMON,
+           TRD_CD,
+           RLANE_CD,
+           VSL_CD,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           STATUS,
+           VOL,
+           IAS_RTO,
+           CMMT_RTO,
+           CASE WHEN ROUND(SUM(DECODE(STATUS, 'T/S', CMMT_RTO, IAS_RTO*CMMT_RTO)) OVER (PARTITION BY COST_YRMON, TRD_CD, RLANE_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD), 3) <> 1 AND VOL <> 0 THEN
+                     CASE WHEN STATUS = 'T/S' THEN 1
+                          ELSE IAS_RTO
+                     END
+                ELSE
+                     CASE WHEN STATUS = 'T/S' THEN CMMT_RTO
+                          ELSE IAS_RTO * CMMT_RTO
+                     END
+           END RTO
+      FROM (       
+                SELECT A.COST_YRMON,
+                       TRD_CD,
+                       RLANE_CD,
+                       VSL_CD,
+                       SKD_VOY_NO,
+                       SKD_DIR_CD,
+                       STATUS,
+                       NVL(VOL, 0) AS VOL,
+                       SUM(NVL(VOL, 0)) OVER (PARTITION BY A.COST_YRMON,TRD_CD, RLANE_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD) AS TTL_VOL,
+                       SUM(IAS_VOL) OVER (PARTITION BY A.COST_YRMON,TRD_CD, RLANE_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD) AS IAS_VOL,
+                       CASE WHEN STATUS = 'T/S' THEN 0
+                            ELSE DECODE(SUM(IAS_VOL) OVER (PARTITION BY A.COST_YRMON,TRD_CD, RLANE_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD), 0, 0, ROUND(VOL / SUM(IAS_VOL) OVER (PARTITION BY A.COST_YRMON,TRD_CD, RLANE_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD), 2))
+                       END IAS_RTO,
+                       DECODE(STATUS, 'T/S', OCN_CMMT_RTO, IAS_CMMT_RTO) AS CMMT_RTO
+                  FROM (
+                        SELECT COST_YRMON,
+                               TRD_CD,
+                               RLANE_CD,
+                               VSL_CD,
+                               SKD_VOY_NO,
+                               SKD_DIR_CD,
+                               B.STATUS,
+                               SUM(DECODE(A.STATUS, B.STATUS, VOL, 0)) AS VOL,
+                               SUM(DECODE(B.STATUS, 'T/S', 0, DECODE(A.STATUS, B.STATUS, VOL, 0))) AS IAS_VOL
+                          FROM (
+                                SELECT B.COST_YRMON,
+                                       FM_TRD_CD AS TRD_CD,
+                                       FM_RLANE_CD AS RLANE_CD,
+                                       FM_VSL_CD AS VSL_CD,
+                                       FM_SKD_VOY_NO AS SKD_VOY_NO,
+                                       FM_SKD_DIR_CD AS SKD_DIR_CD,
+                                       TS_QTY AS VOL, 
+                                       CASE WHEN FM_RLANE_CD||FM_VSL_CD||FM_SKD_VOY_NO||FM_SKD_DIR_CD = TO_RLANE_CD||TO_VSL_CD||TO_SKD_VOY_NO||TO_SKD_DIR_CD THEN 'L/C'
+                                            WHEN TO_TRD_CD = 'IAS' THEN 'IAS T/S'
+                                            ELSE 'T/S'
+                                       END STATUS    
+                                  FROM MAS_LANE_TS_QTY A,
+                                       MAS_MON_VVD B,   
+                                       MAS_LANE_RGST L1
+                                 WHERE B.TRD_CD = A.FM_TRD_CD
+                                   AND B.RLANE_CD = A.FM_RLANE_CD
+                                   AND B.IOC_CD = A.FM_IOC_CD
+                                   AND B.VSL_CD = A.FM_VSL_CD
+                                   AND B.SKD_VOY_NO = A.FM_SKD_VOY_NO
+                                   AND B.DIR_CD = A.FM_SKD_DIR_CD
+                                   AND B.DELT_FLG = 'N'
+                                   AND B.RLANE_CD = L1.RLANE_CD
+                                   AND B.DIR_CD = L1.DIR_CD
+                                   AND B.TRD_CD = L1.TRD_CD
+                                   AND B.IOC_CD = L1.IOC_CD
+#if(${f_chkprd} =='M')
+                                   AND B.COST_YRMON    BETWEEN @[f_year]||@[f_fm_mon] AND @[f_year]||@[f_to_mon]   
+#elseif (${f_chkprd} =='W')
+                                   AND B.SLS_YRMON     LIKE @[f_year]||@[f_sls_mon]||'%'    
+                                   AND B.COST_WK       BETWEEN @[f_fm_wk] AND @[f_to_wk]   
+#end	
+
+#if(${f_trd_cd} !='') 
+                                   AND B.TRD_CD    = @[f_trd_cd]  
+#end
+#if(${f_rlane_cd} !='') 
+                                   AND B.RLANE_CD  = @[f_rlane_cd]
+#end
+#if(${f_dir_cd} !='')   
+                                   AND B.DIR_CD    = @[f_dir_cd] 
+#end
+#if(${f_vsl_cd} !='') 
+                                   AND B.VSL_CD    = @[f_vsl_cd] 
+#end
+#if(${f_skd_voy_no} !='')  
+                                   AND B.SKD_VOY_NO    = @[f_skd_voy_no] 
+#end                               
+#if(${f_skd_dir_cd} !='')          
+                                   AND B.DIR_CD     = @[f_skd_dir_cd] 
+#end                               
+#if(${f_sub_trd_cd} !='')          
+                                   AND B.SUB_TRD_CD = @[f_sub_trd_cd] 
+#end                    
+#if(${f_ias_rgn_cd} !='') 
+                                   AND L1.IAS_RGN_CD = @[f_ias_rgn_cd] 
+#end
+#if(${f_trd_dir_cd} !='') 
+                                   AND L1.HUL_BND_CD = @[f_trd_dir_cd] 
+#end   
+                            ) A,
+                            (SELECT 'L/C' STATUS FROM DUAL
+                             UNION ALL
+                             SELECT 'T/S' STATUS FROM DUAL
+                             UNION ALL
+                             SELECT 'IAS T/S' STATUS FROM DUAL) B
+                        GROUP BY COST_YRMON,
+                               TRD_CD,
+                               RLANE_CD,
+                               VSL_CD,
+                               SKD_VOY_NO,
+                               SKD_DIR_CD,
+                               B.STATUS
+                    ) A, 
+                    (SELECT A.COST_YRMON,
+                            FM_TRD_CD,
+                            FM_RLANE_CD,
+                            FM_DIR_CD,
+                            SUM(DECODE(TO_TRD_CD, 'IAS', BSA_CMMT_RTO / 100, 0)) AS IAS_CMMT_RTO,
+                            SUM(DECODE(TO_TRD_CD, 'IAS', 0, BSA_CMMT_RTO / 100)) AS OCN_CMMT_RTO 
+                       FROM MAS_LANE_TS_BSA_CMMT A
+                      WHERE 1=1
+                        AND EXISTS (SELECT 'A' 
+                                      FROM MAS_MON_VVD B
+                                     WHERE B.COST_YRMON = A.COST_YRMON
+                                       AND B.TRD_CD = A.FM_TRD_CD
+                                       AND B.RLANE_CD = A.FM_RLANE_CD
+                                       AND B.DIR_CD = A.FM_DIR_CD
+                                       AND B.DELT_FLG = 'N'
+#if(${f_chkprd} =='M')
+                                       AND B.COST_YRMON    BETWEEN @[f_year]||@[f_fm_mon] AND @[f_year]||@[f_to_mon]   
+#elseif (${f_chkprd} =='W')
+                                       AND B.SLS_YRMON     LIKE @[f_year]||@[f_sls_mon]||'%'    
+                                       AND B.COST_WK       BETWEEN @[f_fm_wk] AND @[f_to_wk]   
+#end	
+
+#if(${f_trd_cd} !='') 
+                                       AND B.TRD_CD    = @[f_trd_cd]  
+#end
+#if(${f_rlane_cd} !='') 
+                                       AND B.RLANE_CD  = @[f_rlane_cd]
+#end
+#if(${f_dir_cd} !='')   
+                                       AND B.DIR_CD    = @[f_dir_cd] 
+#end
+#if(${f_vsl_cd} !='') 
+                                       AND B.VSL_CD    = @[f_vsl_cd] 
+#end
+#if(${f_skd_voy_no} !='')  
+                                       AND B.SKD_VOY_NO    = @[f_skd_voy_no] 
+#end
+#if(${f_skd_dir_cd} !='') 
+                                       AND B.DIR_CD     = @[f_skd_dir_cd] 
+#end
+#if(${f_sub_trd_cd} !='') 
+                                       AND B.SUB_TRD_CD = @[f_sub_trd_cd] 
+#end
+                                   )
+                      GROUP BY A.COST_YRMON,
+                            FM_TRD_CD,
+                            FM_RLANE_CD,
+                            FM_DIR_CD
+                      ) B
+                WHERE 1=1
+                  AND NVL(A.COST_YRMON, B.COST_YRMON) = B.COST_YRMON
+                  AND NVL(A.TRD_CD, B.FM_TRD_CD) = B.FM_TRD_CD
+                  AND NVL(A.RLANE_CD, B.FM_RLANE_CD) = B.FM_RLANE_CD
+                  AND NVL(A.SKD_DIR_CD, B.FM_DIR_CD)  = B.FM_DIR_CD 
+        ) 
+)    
+SELECT A.COST_YRMON 
+      ,A.SLS_YRMON 
+      ,A.COST_WK
+	  ,'' RHQ
+      ,A.TRD_CD 
+      ,A.SUB_TRD_CD 
+      ,A.RLANE_CD 
+      ,A.IOC_CD 
+      ,A.VSL_CD 
+      ,A.SKD_VOY_NO 
+      ,A.DIR_CD
+      ,A.HUL_BND_CD 
+      ,A.STATUS
+	
+#foreach($key in ${allcols})
+      ,SUM(DECODE(A.STND_COST_CD, '$key', NVL(A.AMT,0), 0)) AS COST_AMT$velocityCount
+#end		
+  FROM ( 
+    SELECT COST_YRMON
+          ,SLS_YRMON
+          ,COST_WK
+          ,TRD_CD
+          ,SUB_TRD_CD
+          ,RLANE_CD
+          ,IOC_CD       
+          ,VSL_CD 
+          ,SKD_VOY_NO 
+          ,DIR_CD 
+          ,HUL_BND_CD
+          ,STATUS
+          ,DECODE (B2.RNUM 
+                   ,1, 'VOYAGE00'
+                   ,2, 'BSA00000'
+                   ,3, 'LOAD0000'
+                   ,4, 'LOADFACT' 
+                   ,5, 'REVENUE0' 
+                   ,6, '41101011'
+                   ,7, 'RPB00000' 
+                   ,8, 'OTHINCOM'
+                   ,9, '43207011'
+                   ,10, '43102011'
+                   ,11, '43201011'
+                   ,12, 'INCOMTTL'
+                   ,13, '51101011'
+                   ,14, '51101071'
+                   ,15, '51101021'
+                   ,16, '51101031'
+                   ,17, '51101051'
+                   ,18, '51101041'
+                   ,19, '51101061'
+                   ,20, '92301000'
+                   ,21, '51601011'
+                   ,22, '51601012'
+                   ,23, '51301011'
+                   ,24, '51301021'
+                   ,25, '51301031'
+                   ,26, '51301041'
+                   ,27, '51301051'
+                   ,28, '51301061'
+                   ,29, '51301081'
+                   ,30, '92303000'
+                   ,31, '51102000'
+                   ,32, '51302000'
+                   ,33, '51401011'
+                   ,34, 'CMCOST00'
+                   ,35, 'CMCB0000'
+                   ,36, 'CMCTOTAL'
+                   ,37, 'CMB00000' 
+                   ,38, '51801011'
+                                    
+                   ,39, '52101013'
+                   ,40, '52201013'
+                   ,41, '52301013'
+                   ,42, '52401013'
+                   ,43, '52601013'
+                   ,44, '52101012'
+                   ,45, '52201012'
+                   ,46, '52301012'
+                   ,47, '52401012'
+                   ,48, '52601012'
+                   ,49, '52111021'
+                   
+                   ,50, '65000000'
+                   ,51, '65010001'
+                   ,52, '54600000'
+                   ,53, 'OPCOSTEX'
+                   ,54, 'OPCOSTIN'
+                   ,55, 'OPCB0000'
+                   ,56, 'BOPTTLEX'
+                   ,57, 'BOPTTLIN'
+                   ,58, 'BOPB0000'
+                   ,59, '51801012'
+                  			   	   
+
+    	       ) STND_COST_CD	   
+          ,DECODE (B2.RNUM     	
+                   ,1, VOYAGE
+                   ,2, SUPPLY
+                   ,3, TOT_QTY
+                   ,4, DECODE (SUPPLY, 0, 0, TOT_QTY / SUPPLY) * 100
+                   ,5, FREIGTH_REV 
+                   ,6, FREIGTH_REV
+                   ,7, DECODE (TOT_QTY, 0, 0, FREIGTH_REV / TOT_QTY)
+                   ,8, (MISC_REV + SPC_CHTR + DMDT_COST)
+                   ,9, MISC_REV
+                   ,10, SPC_CHTR
+                   ,11, DMDT_COST
+                   ,12, (FREIGTH_REV + (MISC_REV + SPC_CHTR + DMDT_COST))
+                   ,13, BASIC_STEVEDORAGE
+                   ,14, OTHER_CY_EXPENSE
+                   ,15, TS_STEVEDORAGE
+                   ,16, ON_DOCK_CY_EXPENSE
+                   ,17, CARGO_HANDLING_EXPENSE
+                   ,18, STORAGE
+                   ,19, MISC_CARGO_HANDLING_EXPENSE
+                   ,20, EXCLUSIVE_TERMINAL_ADD_COST
+                   ,21, CARGO_VARIABLE_VOLUME_DISCOUNT
+                   ,22, 0
+                   ,23, RAIL_DIRECT
+                   ,24, RAIL_TRUCK
+                   ,25, TRUCK_DIRCET
+                   ,26, WATER_DIRECT
+                   ,27, WATER_RAIL
+                   ,28, WATER_TRUCK
+                   ,29, OTHER_TRANSPORT_EXPENSE
+                   ,30, CARRIERS_HAULAGE_SVG_CHG
+                   ,31, EMPTY_TERMINAL_EXPENSE
+                   ,32, EMPTY_TRANSPORT_EXPENSE
+                   ,33, AGENT_COMMISSION
+                   ,34, CM_COST_TOTAL
+                   ,35, DECODE(TOT_QTY, 0, 0, CM_COST_TOTAL / TOT_QTY)
+                   ,36, CM
+                   ,37, DECODE(TOT_QTY, 0, 0, CM / TOT_QTY)
+                   ,38, US_DOMESTIC_SAV_CREDIT
+                   
+                   ,39, CNTR_STERM_RNTL_LAND_AMT  
+                   ,40, CNTR_LTERM_RNTL_LAND_AMT  
+                   ,41, CNTR_MNR_LAND_AMT  
+                   ,42, CNTR_DPC_LAND_AMT  
+                   ,43, CNTR_INSUR_LAND_AMT                  
+                   ,44, CNTR_STERM_RNTL_OTR_AMT  
+                   ,45, CNTR_LTERM_RNTL_OTR_AMT  
+                   ,46, CNTR_MNR_OTR_AMT  
+                   ,47, CNTR_DPC_OTR_AMT  
+                   ,48, CNTR_INSUR_OTR_AMT   
+                   ,49, CHSS_AMT  
+                   
+                   ,50, BUSINESS_ACTIVITY_COST
+                   ,51, GEN_EXPN
+                   ,52, INTERNAL_EXPN
+
+                   ,53, OP_COST - VSL_INT_EXP
+                   ,54, OP_COST
+                   ,55, DECODE(TOT_QTY, 0, 0, (OP_COST - VSL_INT_EXP) / TOT_QTY)                   
+                   ,56, ((FREIGTH_REV + SUPPLY + SPC_CHTR) - CM_COST_TOTAL - OP_COST - VSL_INT_EXP)
+                   ,57, ((FREIGTH_REV + SUPPLY + SPC_CHTR) - CM_COST_TOTAL - OP_COST)
+                   ,58, DECODE(TOT_QTY, 0, 0, ((FREIGTH_REV + SUPPLY + SPC_CHTR) - CM_COST_TOTAL - OP_COST - VSL_INT_EXP) / TOT_QTY)                    
+                   ,59, DECODE (@[f_pro_vw], 'P', ONE_WY_SAV_PFIT_ANAL_AMT ,  ONE_WY_SAV_RESPB_ANAL_AMT)
+                   
+              ) AS AMT
+    
+      FROM (
+            SELECT COST_YRMON
+                  ,SLS_YRMON
+                  ,COST_WK
+                  ,TRD_CD
+                  ,SUB_TRD_CD
+                  ,RLANE_CD
+                  ,IOC_CD       
+                  ,VSL_CD 
+                  ,SKD_VOY_NO 
+                  ,DIR_CD 
+                  ,HUL_BND_CD
+                  ,STATUS
+                  ,SUM(VOYAGE     ) AS VOYAGE
+                  ,SUM(TOT_QTY    ) AS TOT_QTY 
+                  ,SUM(FREIGTH_REV) AS FREIGTH_REV 
+                  ,SUM(MISC_REV   ) AS MISC_REV 
+                  ,SUM(SUPPLY)      AS SUPPLY
+                  ,SUM(SPC_CHTR)    AS SPC_CHTR                  
+                  
+                  ,SUM(DMDT_COST)                      AS DMDT_COST 
+                  ,SUM(BASIC_STEVEDORAGE             ) AS BASIC_STEVEDORAGE 
+                  ,SUM(OTHER_CY_EXPENSE              ) AS OTHER_CY_EXPENSE 
+                  ,SUM(TS_STEVEDORAGE                ) AS TS_STEVEDORAGE 
+                  ,SUM(ON_DOCK_CY_EXPENSE            ) AS ON_DOCK_CY_EXPENSE 
+                  ,SUM(CARGO_HANDLING_EXPENSE        ) AS CARGO_HANDLING_EXPENSE 
+                  ,SUM(STORAGE                       ) AS STORAGE 
+                  ,SUM(MISC_CARGO_HANDLING_EXPENSE   ) AS MISC_CARGO_HANDLING_EXPENSE 
+                  ,SUM(EXCLUSIVE_TERMINAL_ADD_COST   ) AS EXCLUSIVE_TERMINAL_ADD_COST 
+                  ,SUM(CARGO_VARIABLE_VOLUME_DISCOUNT) AS CARGO_VARIABLE_VOLUME_DISCOUNT 
+                  ,SUM(RAIL_DIRECT                   ) AS RAIL_DIRECT 
+                  ,SUM(RAIL_TRUCK                    ) AS RAIL_TRUCK 
+                  ,SUM(TRUCK_DIRCET                  ) AS TRUCK_DIRCET 
+                  ,SUM(WATER_DIRECT                  ) AS WATER_DIRECT 
+                  ,SUM(WATER_RAIL                    ) AS WATER_RAIL 
+                  ,SUM(WATER_TRUCK                   ) AS WATER_TRUCK 
+                  ,SUM(OTHER_TRANSPORT_EXPENSE       ) AS OTHER_TRANSPORT_EXPENSE 
+                  ,SUM(CARRIERS_HAULAGE_SVG_CHG      ) AS CARRIERS_HAULAGE_SVG_CHG
+                  ,SUM(EMPTY_TERMINAL_EXPENSE        ) AS EMPTY_TERMINAL_EXPENSE 
+                  ,SUM(EMPTY_TRANSPORT_EXPENSE       ) AS EMPTY_TRANSPORT_EXPENSE 
+                  ,SUM(AGENT_COMMISSION              ) AS AGENT_COMMISSION 
+                   
+                  ,SUM(CM_COST_TOTAL)   AS CM_COST_TOTAL 
+                  ,SUM(CM)              AS CM
+                
+              	    
+                  ,SUM(US_DOMESTIC_SAV_CREDIT      ) AS US_DOMESTIC_SAV_CREDIT
+                  
+
+                  ,SUM(CNTR_STERM_RNTL_LAND_AMT )    AS CNTR_STERM_RNTL_LAND_AMT  
+                  ,SUM(CNTR_LTERM_RNTL_LAND_AMT )    AS CNTR_LTERM_RNTL_LAND_AMT  
+                  ,SUM(CNTR_MNR_LAND_AMT )           AS CNTR_MNR_LAND_AMT  
+                  ,SUM(CNTR_DPC_LAND_AMT )           AS CNTR_DPC_LAND_AMT  
+                  ,SUM(CNTR_INSUR_LAND_AMT )         AS CNTR_INSUR_LAND_AMT  
+                  
+                  ,SUM(CNTR_STERM_RNTL_OTR_AMT )     AS CNTR_STERM_RNTL_OTR_AMT  
+                  ,SUM(CNTR_LTERM_RNTL_OTR_AMT )     AS CNTR_LTERM_RNTL_OTR_AMT  
+                  ,SUM(CNTR_MNR_OTR_AMT )            AS CNTR_MNR_OTR_AMT  
+                  ,SUM(CNTR_DPC_OTR_AMT )            AS CNTR_DPC_OTR_AMT  
+                  ,SUM(CNTR_INSUR_OTR_AMT  )         AS CNTR_INSUR_OTR_AMT   
+                  ,SUM(CHSS_AMT )                    AS CHSS_AMT  
+                  ,SUM(ONE_WY_SAV_PFIT_ANAL_AMT  )   AS ONE_WY_SAV_PFIT_ANAL_AMT   
+                  ,SUM(ONE_WY_SAV_RESPB_ANAL_AMT  )  AS ONE_WY_SAV_RESPB_ANAL_AMT   
+
+                  ,SUM(BUSINESS_ACTIVITY_COST      ) AS BUSINESS_ACTIVITY_COST
+                  ,SUM(GEN_EXPN                    ) AS GEN_EXPN 
+                  ,SUM(INTERNAL_EXPN               ) AS INTERNAL_EXPN
+                  ,SUM(OP_COST) + SUM(GEN_EXPN) + SUM(INTERNAL_EXPN) AS OP_COST
+                  ,SUM(VSL_INT_EXP)                  AS VSL_INT_EXP
+              FROM (
+
+                    SELECT V.COST_YRMON
+                          ,V.SLS_YRMON
+                          ,V.COST_WK         
+                          ,V.TRD_CD 
+                          ,V.SUB_TRD_CD 
+                          ,V.RLANE_CD 
+                          ,V.IOC_CD 
+                          ,V.VSL_CD 
+                          ,V.SKD_VOY_NO 
+                          ,V.DIR_CD 
+                          ,R.HUL_BND_CD
+                          ,CR.STATUS
+                          ,COUNT(DISTINCT V.TRD_CD|| V.RLANE_CD || V.IOC_CD || V.VSL_CD || V.SKD_VOY_NO || V.DIR_CD)  AS VOYAGE
+                          ,SUM(DECODE(SUBSTR(A2.SPCL_CNTR_TPSZ_CD,-1),'2',A2.BKG_QTY,'3',A2.BKG_QTY,A2.BKG_QTY*2)) AS TOT_QTY 
+                          ,SUM(A2.BKG_REV+A2.BKG_OFT_REV)      AS FREIGTH_REV 
+                          ,SUM(A2.BKG_MISC_REV+A2.SCR_CHG_REV) AS MISC_REV 
+                          ,0 AS SUPPLY
+                          ,0 AS SPC_CHTR      		
+                          ,SUM(A2.DMDT_COM_AMT)             AS DMDT_COST 
+                          ,SUM(A2.BZC_STVG_COM_AMT)         AS BASIC_STEVEDORAGE 
+                          ,SUM(A2.OTR_CY_HNDL_COM_AMT)      AS OTHER_CY_EXPENSE 
+                          ,SUM(A2.TS_STVG_COM_AMT)          AS TS_STEVEDORAGE 
+                          ,SUM(A2.DCK_CY_HNDL_COM_AMT)      AS ON_DOCK_CY_EXPENSE 
+                          ,SUM(A2.CGO_HNDL_COM_AMT)         AS CARGO_HANDLING_EXPENSE 
+                          ,SUM(A2.FCNTR_STO_COM_AMT)        AS STORAGE 
+                          ,SUM(A2.MISC_CGO_HNDL_COM_AMT)    AS MISC_CARGO_HANDLING_EXPENSE 
+                          ,SUM(A2.TML_COM_AMT)              AS EXCLUSIVE_TERMINAL_ADD_COST
+                          ,SUM(A2.CGO_VAR_VOL_DC_AMT)       AS CARGO_VARIABLE_VOLUME_DISCOUNT 
+                          ,SUM(A2.FULL_RAIL_DIR_COM_AMT)    AS RAIL_DIRECT 
+                          ,SUM(A2.FULL_RAIL_TRK_COM_AMT)    AS RAIL_TRUCK 
+                          ,SUM(A2.FULL_TRK_DIR_COM_AMT)     AS TRUCK_DIRCET 
+                          ,SUM(A2.FULL_WTR_DIR_COM_AMT)     AS WATER_DIRECT 
+                          ,SUM(A2.FULL_WTR_RAIL_COM_AMT)    AS WATER_RAIL 
+                          ,SUM(A2.FULL_WTR_TRK_COM_AMT)     AS WATER_TRUCK 
+                          ,SUM(A2.FULL_TRSP_COM_AMT)        AS OTHER_TRANSPORT_EXPENSE 
+                          ,SUM(A2.CRR_HLG_SVC_CHG_AMT)      AS CARRIERS_HAULAGE_SVG_CHG
+                          		
+                          ,SUM(A2.MTY_STVG_PA_AMT)          AS EMPTY_TERMINAL_EXPENSE 
+                          ,SUM(A2.MTY_TRSP_PA_AMT)          AS EMPTY_TRANSPORT_EXPENSE 
+                            		
+                          ,SUM(A2.AC_COM_AMT)               AS AGENT_COMMISSION 
+                                                 
+                          ,SUM(DECODE('P','P',A2.PA_CM_COST_TTL_AMT,'R',A2.RA_CM_COST_TTL_AMT))   AS CM_COST_TOTAL 
+                          ,SUM(A2.BKG_REV+A2.BKG_OFT_REV) - SUM(DECODE('P','P',A2.PA_CM_COST_TTL_AMT,'R',A2.RA_CM_COST_TTL_AMT)) AS CM
+                          
+                          ,SUM(A2.USA_DMST_SAV_CR_AMT)       				   AS US_DOMESTIC_SAV_CREDIT
+                          ,SUM(A2.CNTR_STERM_RNTL_LAND_AMT )                             AS CNTR_STERM_RNTL_LAND_AMT  
+                          ,SUM(A2.CNTR_LTERM_RNTL_LAND_AMT )                             AS CNTR_LTERM_RNTL_LAND_AMT  
+                          ,SUM(A2.CNTR_MNR_LAND_AMT )                                    AS CNTR_MNR_LAND_AMT  
+                          ,SUM(A2.CNTR_DPC_LAND_AMT )                                    AS CNTR_DPC_LAND_AMT  
+                          ,SUM(A2.CNTR_INSUR_LAND_AMT )                                  AS CNTR_INSUR_LAND_AMT  
+                          
+                          ,SUM(A2.CNTR_STERM_RNTL_OTR_AMT )                              AS CNTR_STERM_RNTL_OTR_AMT  
+                          ,SUM(A2.CNTR_LTERM_RNTL_OTR_AMT )                              AS CNTR_LTERM_RNTL_OTR_AMT  
+                          ,SUM(A2.CNTR_MNR_OTR_AMT )                                     AS CNTR_MNR_OTR_AMT  
+                          ,SUM(A2.CNTR_DPC_OTR_AMT )                                     AS CNTR_DPC_OTR_AMT  
+                          ,SUM(A2.CNTR_INSUR_OTR_AMT  )                                  AS CNTR_INSUR_OTR_AMT   
+                          ,SUM(A2.CHSS_AMT )                                             AS CHSS_AMT  
+                          ,SUM(A2.ONE_WY_SAV_PFIT_ANAL_AMT  )                            AS ONE_WY_SAV_PFIT_ANAL_AMT   
+                          ,SUM(A2.ONE_WY_SAV_RESPB_ANAL_AMT  )                           AS ONE_WY_SAV_RESPB_ANAL_AMT   
+                          ,SUM(A2.BIZ_ACT_PA_AMT)                                           AS BUSINESS_ACTIVITY_COST 
+                          ,0 AS OP_COST
+                          ,0 AS GEN_EXPN
+                          ,0 AS INTERNAL_EXPN
+                          ,0 AS VSL_INT_EXP
+                      FROM  MAS_BKG_EXPN_DTL_WK A2 
+                           ,MAS_MON_VVD V
+                           ,BKG_VVD B
+                           ,MAS_OFC_LVL A4
+                           ,MAS_LANE_RGST R
+                           ,COMM_RTO CR
+                      WHERE 1 = 1
+                        AND NVL(V.DELT_FLG,'N')   = 'N'
+                        AND V.VSL_CD = B.VSL_CD
+                        AND V.SKD_VOY_NO = B.SKD_VOY_NO
+                        AND V.DIR_CD = B.SKD_DIR_CD
+                        AND B.BKG_NO = A2.BKG_NO
+                          
+                        AND A2.SLS_YRMON     BETWEEN A4.OFC_APLY_FM_YRMON AND A4.OFC_APLY_TO_YRMON
+                       
+                        AND A2.AGMT_SGN_OFC_CD = A4.OFC_CD
+                        AND NVL(A2.DELT_FLG, 'N') = 'N' 
+                        AND A2.BKG_STS_CD    IN ('F','S') 
+                        AND A2.BKG_CGO_TP_CD <> 'P' 
+                        AND A2.BL_NO_TP      IN ('M','0')
+                       
+                        AND V.RLANE_CD = R.RLANE_CD
+                        AND V.DIR_CD = R.DIR_CD
+                        AND V.IOC_CD = R.IOC_CD
+                        AND V.TRD_CD = R.TRD_CD
+                        AND R.DELT_FLG = 'N' 
+                        AND A4.OFC_LVL < '9'                            
+                    
+                        AND V.TRD_CD = CR.TRD_CD
+                        AND V.RLANE_CD = CR.RLANE_CD
+                        AND V.VSL_CD = CR.VSL_CD
+                        AND V.SKD_VOY_NO = CR.SKD_VOY_NO
+                        AND V.DIR_CD = CR.SKD_DIR_CD
+
+                        AND V.RLANE_CD <> 'PSGIA' -- PSGIA 노선은 아래 쿼리에서 별도 처리
+                        
+                        AND CR.STATUS = DECODE(A2.TRD_CD, 'IAS', DECODE(A2.VSL_CD||A2.SKD_VOY_NO||A2.DIR_CD, V.VSL_CD||V.SKD_VOY_NO||V.DIR_CD, 'L/C', 'IAS T/S'), 'T/S')
+                       
+                       
+#if(${f_chkprd} =='M')
+                        AND V.COST_YRMON    BETWEEN @[f_year]||@[f_fm_mon] AND @[f_year]||@[f_to_mon]   
+#elseif (${f_chkprd} =='W')
+                        AND V.SLS_YRMON     LIKE @[f_year]||@[f_sls_mon]||'%'    
+                        AND V.COST_WK       BETWEEN @[f_fm_wk] AND @[f_to_wk]   
+#end	
+
+#if(${f_trd_cd} !='') 
+                        AND V.TRD_CD    = @[f_trd_cd]  
+#end
+#if(${f_rlane_cd} !='') 
+                        AND V.RLANE_CD  = @[f_rlane_cd]
+#end
+#if(${f_dir_cd} !='')   
+                        AND V.DIR_CD    = @[f_dir_cd] 
+#end
+#if(${f_vsl_cd} !='') 
+                        AND V.VSL_CD    = @[f_vsl_cd] 
+#end
+#if(${f_skd_voy_no} !='')  
+                        AND V.SKD_VOY_NO    = @[f_skd_voy_no] 
+#end
+#if(${f_skd_dir_cd} !='') 
+                        AND V.DIR_CD     = @[f_skd_dir_cd] 
+#end
+#if(${f_sub_trd_cd} !='') 
+                        AND V.SUB_TRD_CD = @[f_sub_trd_cd] 
+#end
+#if(${f_ias_rgn_cd} !='') 
+                        AND R.IAS_RGN_CD = @[f_ias_rgn_cd] 
+#end
+#if(${f_trd_dir_cd} !='') 
+                        AND R.HUL_BND_CD = @[f_trd_dir_cd] 
+#end        			
+                     GROUP BY V.COST_YRMON
+                             ,V.SLS_YRMON
+                             ,V.COST_WK         
+                             ,V.TRD_CD 
+                             ,V.SUB_TRD_CD 
+                             ,V.RLANE_CD 
+                             ,V.IOC_CD 
+                             ,V.VSL_CD 
+                             ,V.SKD_VOY_NO 
+                             ,V.DIR_CD 
+                             ,R.HUL_BND_CD
+                             ,CR.STATUS 
+                            
+                    UNION ALL
+                    
+-- PSGIA =======================================================================                    
+            SELECT COST_YRMON
+                  ,SLS_YRMON
+                  ,COST_WK         
+                  ,TRD_CD 
+                  ,SUB_TRD_CD 
+                  ,RLANE_CD 
+                  ,IOC_CD 
+                  ,VSL_CD 
+                  ,SKD_VOY_NO 
+                  ,DIR_CD 
+                  ,HUL_BND_CD
+                  ,STATUS
+                  ,COUNT(DISTINCT VOYAGE)  AS VOYAGE
+      
+                  , SUM(DECODE(STATUS, STATUS2, TOT_QTY                         ,0)) AS TOT_QTY
+                  , SUM(DECODE(STATUS, STATUS2, FREIGTH_REV                     ,0)) AS FREIGTH_REV
+                  , SUM(DECODE(STATUS, STATUS2, MISC_REV                        ,0)) AS MISC_REV
+                  , SUM(DECODE(STATUS, STATUS2, SUPPLY                          ,0)) AS SUPPLY
+                  , SUM(DECODE(STATUS, STATUS2, SPC_CHTR                        ,0)) AS SPC_CHTR
+                  , SUM(DECODE(STATUS, STATUS2, DMDT_COST                       ,0)) AS DMDT_COST
+                  , SUM(DECODE(STATUS, STATUS2, BASIC_STEVEDORAGE               ,0)) AS BASIC_STEVEDORAGE
+                  , SUM(DECODE(STATUS, STATUS2, OTHER_CY_EXPENSE                ,0)) AS OTHER_CY_EXPENSE
+                  , SUM(DECODE(STATUS, STATUS2, TS_STEVEDORAGE                  ,0)) AS TS_STEVEDORAGE
+                  , SUM(DECODE(STATUS, STATUS2, ON_DOCK_CY_EXPENSE              ,0)) AS ON_DOCK_CY_EXPENSE
+                  , SUM(DECODE(STATUS, STATUS2, CARGO_HANDLING_EXPENSE          ,0)) AS CARGO_HANDLING_EXPENSE
+                  , SUM(DECODE(STATUS, STATUS2, STORAGE                         ,0)) AS STORAGE
+                  , SUM(DECODE(STATUS, STATUS2, MISC_CARGO_HANDLING_EXPENSE     ,0)) AS MISC_CARGO_HANDLING_EXPENSE
+                  , SUM(DECODE(STATUS, STATUS2, EXCLUSIVE_TERMINAL_ADD_COST     ,0)) AS EXCLUSIVE_TERMINAL_ADD_COST
+                  , SUM(DECODE(STATUS, STATUS2, CARGO_VARIABLE_VOLUME_DISCOUNT  ,0)) AS CARGO_VARIABLE_VOLUME_DISCOUNT
+                  , SUM(DECODE(STATUS, STATUS2, RAIL_DIRECT                     ,0)) AS RAIL_DIRECT
+                  , SUM(DECODE(STATUS, STATUS2, RAIL_TRUCK                      ,0)) AS RAIL_TRUCK
+                  , SUM(DECODE(STATUS, STATUS2, TRUCK_DIRCET                    ,0)) AS TRUCK_DIRCET
+                  , SUM(DECODE(STATUS, STATUS2, WATER_DIRECT                    ,0)) AS WATER_DIRECT
+                  , SUM(DECODE(STATUS, STATUS2, WATER_RAIL                      ,0)) AS WATER_RAIL
+                  , SUM(DECODE(STATUS, STATUS2, WATER_TRUCK                     ,0)) AS WATER_TRUCK
+                  , SUM(DECODE(STATUS, STATUS2, OTHER_TRANSPORT_EXPENSE         ,0)) AS OTHER_TRANSPORT_EXPENSE
+                  , SUM(DECODE(STATUS, STATUS2, CARRIERS_HAULAGE_SVG_CHG        ,0)) AS CARRIERS_HAULAGE_SVG_CHG
+                  , SUM(DECODE(STATUS, STATUS2, EMPTY_TERMINAL_EXPENSE          ,0)) AS EMPTY_TERMINAL_EXPENSE
+                  , SUM(DECODE(STATUS, STATUS2, EMPTY_TRANSPORT_EXPENSE         ,0)) AS EMPTY_TRANSPORT_EXPENSE
+                  , SUM(DECODE(STATUS, STATUS2, AGENT_COMMISSION                ,0)) AS AGENT_COMMISSION
+                  
+                  , SUM(DECODE(STATUS, STATUS2, DECODE('P','P',PA_CM_COST_TTL_AMT,'R',RA_CM_COST_TTL_AMT), 0))   AS CM_COST_TOTAL 
+                  , SUM(DECODE(STATUS, STATUS2, BKG_REV+BKG_OFT_REV, 0)) 
+                  - SUM(DECODE(STATUS, STATUS2, DECODE('P','P',PA_CM_COST_TTL_AMT,'R',RA_CM_COST_TTL_AMT), 0)) AS CM                   
+                           
+                  , SUM(DECODE(STATUS, STATUS2, US_DOMESTIC_SAV_CREDIT          ,0)) AS US_DOMESTIC_SAV_CREDIT
+                  
+                  , SUM(DECODE(STATUS, STATUS2, CNTR_STERM_RNTL_LAND_AMT        ,0)) AS CNTR_STERM_RNTL_LAND_AMT  
+                  , SUM(DECODE(STATUS, STATUS2, CNTR_LTERM_RNTL_LAND_AMT        ,0)) AS CNTR_LTERM_RNTL_LAND_AMT  
+                  , SUM(DECODE(STATUS, STATUS2, CNTR_MNR_LAND_AMT               ,0)) AS CNTR_MNR_LAND_AMT  
+                  , SUM(DECODE(STATUS, STATUS2, CNTR_DPC_LAND_AMT               ,0)) AS CNTR_DPC_LAND_AMT  
+                  , SUM(DECODE(STATUS, STATUS2, CNTR_INSUR_LAND_AMT             ,0)) AS CNTR_INSUR_LAND_AMT  
+                  , SUM(DECODE(STATUS, STATUS2, CNTR_STERM_RNTL_OTR_AMT         ,0)) AS CNTR_STERM_RNTL_OTR_AMT  
+                  , SUM(DECODE(STATUS, STATUS2, CNTR_LTERM_RNTL_OTR_AMT         ,0)) AS CNTR_LTERM_RNTL_OTR_AMT  
+                  , SUM(DECODE(STATUS, STATUS2, CNTR_MNR_OTR_AMT                ,0)) AS CNTR_MNR_OTR_AMT  
+                  , SUM(DECODE(STATUS, STATUS2, CNTR_DPC_OTR_AMT                ,0)) AS CNTR_DPC_OTR_AMT  
+                  , SUM(DECODE(STATUS, STATUS2, CNTR_INSUR_OTR_AMT              ,0)) AS CNTR_INSUR_OTR_AMT   
+                  , SUM(DECODE(STATUS, STATUS2, CHSS_AMT                        ,0)) AS CHSS_AMT  
+                  , SUM(DECODE(STATUS, STATUS2, ONE_WY_SAV_PFIT_ANAL_AMT        ,0)) AS ONE_WY_SAV_PFIT_ANAL_AMT   
+                  , SUM(DECODE(STATUS, STATUS2, ONE_WY_SAV_RESPB_ANAL_AMT       ,0)) AS ONE_WY_SAV_RESPB_ANAL_AMT
+
+                  , SUM(DECODE(STATUS, STATUS2, BUSINESS_ACTIVITY_COST          ,0)) AS BUSINESS_ACTIVITY_COST
+                  , SUM(DECODE(STATUS, STATUS2, OP_COST                         ,0)) AS OP_COST
+                  , SUM(DECODE(STATUS, STATUS2, GEN_EXPN                        ,0)) AS GEN_EXPN
+                  , SUM(DECODE(STATUS, STATUS2, INTERNAL_EXPN                   ,0)) AS INTERNAL_EXPN  
+                  ,0 AS VSL_INT_EXP
+                  
+               FROM (
+                                                          
+                            SELECT V.COST_YRMON
+                                  ,V.SLS_YRMON
+                                  ,V.COST_WK         
+                                  ,V.TRD_CD 
+                                  ,V.SUB_TRD_CD 
+                                  ,V.RLANE_CD 
+                                  ,V.IOC_CD 
+                                  ,V.VSL_CD 
+                                  ,V.SKD_VOY_NO 
+                                  ,V.DIR_CD 
+                                  ,R.HUL_BND_CD
+                                  ,CR.STATUS
+                                  
+                                  , CASE WHEN A2.TRD_CD = 'IAS' AND A2.VSL_CD||A2.SKD_VOY_NO||A2.DIR_CD  = V.VSL_CD||V.SKD_VOY_NO||V.DIR_CD THEN 'L/C'
+                                         WHEN A2.TRD_CD = 'IAS' AND A2.VSL_CD||A2.SKD_VOY_NO||A2.DIR_CD <> V.VSL_CD||V.SKD_VOY_NO||V.DIR_CD THEN 'IAS T/S'
+                                         ELSE 'T/S' END STATUS2
+                                         
+                                  ,(V.TRD_CD|| V.RLANE_CD || V.IOC_CD || V.VSL_CD || V.SKD_VOY_NO || V.DIR_CD) AS VOYAGE
+                                  ,DECODE(SUBSTR(A2.SPCL_CNTR_TPSZ_CD,-1),'2',A2.BKG_QTY,'3',A2.BKG_QTY,A2.BKG_QTY*2)          AS TOT_QTY 
+                                  ,(A2.BKG_REV+A2.BKG_OFT_REV)      AS FREIGTH_REV 
+                                  ,(A2.BKG_MISC_REV+A2.SCR_CHG_REV) AS MISC_REV 
+                                  ,0 AS SUPPLY
+                                  ,0 AS SPC_CHTR      		
+                                  ,A2.DMDT_COM_AMT             AS DMDT_COST 
+                                  ,A2.BZC_STVG_COM_AMT         AS BASIC_STEVEDORAGE 
+                                  ,A2.OTR_CY_HNDL_COM_AMT      AS OTHER_CY_EXPENSE 
+                                  ,A2.TS_STVG_COM_AMT          AS TS_STEVEDORAGE 
+                                  ,A2.DCK_CY_HNDL_COM_AMT      AS ON_DOCK_CY_EXPENSE 
+                                  ,A2.CGO_HNDL_COM_AMT         AS CARGO_HANDLING_EXPENSE 
+                                  ,A2.FCNTR_STO_COM_AMT        AS STORAGE 
+                                  ,A2.MISC_CGO_HNDL_COM_AMT    AS MISC_CARGO_HANDLING_EXPENSE 
+                                  ,A2.TML_COM_AMT              AS EXCLUSIVE_TERMINAL_ADD_COST
+                                  ,A2.CGO_VAR_VOL_DC_AMT       AS CARGO_VARIABLE_VOLUME_DISCOUNT 
+                                  ,A2.FULL_RAIL_DIR_COM_AMT    AS RAIL_DIRECT 
+                                  ,A2.FULL_RAIL_TRK_COM_AMT    AS RAIL_TRUCK 
+                                  ,A2.FULL_TRK_DIR_COM_AMT     AS TRUCK_DIRCET 
+                                  ,A2.FULL_WTR_DIR_COM_AMT     AS WATER_DIRECT 
+                                  ,A2.FULL_WTR_RAIL_COM_AMT    AS WATER_RAIL 
+                                  ,A2.FULL_WTR_TRK_COM_AMT     AS WATER_TRUCK 
+                                  ,A2.FULL_TRSP_COM_AMT        AS OTHER_TRANSPORT_EXPENSE 
+                                  ,A2.CRR_HLG_SVC_CHG_AMT      AS CARRIERS_HAULAGE_SVG_CHG  
+                                                                  		
+                                  ,A2.MTY_STVG_PA_AMT          AS EMPTY_TERMINAL_EXPENSE 
+                                  ,A2.MTY_STVG_PA_AMT          AS EMPTY_TRANSPORT_EXPENSE                                     		
+                                  ,A2.AC_COM_AMT               AS AGENT_COMMISSION                                 
+                                  
+                                  ,A2.USA_DMST_SAV_CR_AMT      AS US_DOMESTIC_SAV_CREDIT
+                                  ,(A2.CNTR_STERM_RNTL_LAND_AMT )                             AS CNTR_STERM_RNTL_LAND_AMT  
+                                  ,(A2.CNTR_LTERM_RNTL_LAND_AMT )                             AS CNTR_LTERM_RNTL_LAND_AMT  
+                                  ,(A2.CNTR_MNR_LAND_AMT )                                    AS CNTR_MNR_LAND_AMT  
+                                  ,(A2.CNTR_DPC_LAND_AMT )                                    AS CNTR_DPC_LAND_AMT  
+                                  ,(A2.CNTR_INSUR_LAND_AMT )                                  AS CNTR_INSUR_LAND_AMT  
+                                  
+                                  ,(A2.CNTR_STERM_RNTL_OTR_AMT )                              AS CNTR_STERM_RNTL_OTR_AMT  
+                                  ,(A2.CNTR_LTERM_RNTL_OTR_AMT )                              AS CNTR_LTERM_RNTL_OTR_AMT  
+                                  ,(A2.CNTR_MNR_OTR_AMT )                                     AS CNTR_MNR_OTR_AMT  
+                                  ,(A2.CNTR_DPC_OTR_AMT )                                     AS CNTR_DPC_OTR_AMT  
+                                  ,(A2.CNTR_INSUR_OTR_AMT  )                                  AS CNTR_INSUR_OTR_AMT   
+                                  ,(A2.CHSS_AMT )                                             AS CHSS_AMT  
+                                  ,(A2.ONE_WY_SAV_PFIT_ANAL_AMT  )                            AS ONE_WY_SAV_PFIT_ANAL_AMT   
+                                  ,(A2.ONE_WY_SAV_RESPB_ANAL_AMT  )                           AS ONE_WY_SAV_RESPB_ANAL_AMT   
+                                  ,A2.BIZ_ACT_PA_AMT           AS BUSINESS_ACTIVITY_COST 
+                                  ,0 AS OP_COST
+                                  ,0 AS GEN_EXPN
+                                  ,0 AS INTERNAL_EXPN
+                                  
+                                  ,A2.PA_CM_COST_TTL_AMT
+                                  ,A2.RA_CM_COST_TTL_AMT
+                                  ,A2.MTY_STVG_PA_AMT
+                                  ,A2.MTY_TRSP_PA_AMT
+                                  ,A2.BKG_REV
+                                  ,A2.BKG_OFT_REV
+                                  ,A2.BKG_MISC_REV
+                                  ,A2.SCR_CHG_REV
+                                  , MAS_PSG_TS_ARRAY_FNC(
+                                        a2.n1st_trd_cd, DECODE (MAS_SLAN_CONTI_CONV_FNC(A2.n1st_finc_vvd_cd, SUBSTR(A2.N1ST_RLANE_CD, 1, 3), SUBSTR (A2.n1st_ioc_conti_cd, 1, 1)), MAS_SLAN_CONTI_CONV_FNC(A2.n1st_finc_vvd_cd, SUBSTR(A2.N1ST_RLANE_CD, 1, 3), SUBSTR (A2.n1st_ioc_conti_cd, 2, 1)), 'I', 'O'), A2.n1st_rlane_cd, SUBSTR (A2.n1st_finc_vvd_cd, 1, 9), A2.n1st_pol_cd, A2.n1st_pod_cd, --1
+                                        a2.n2nd_trd_cd, DECODE (MAS_SLAN_CONTI_CONV_FNC(A2.n2nd_finc_vvd_cd, SUBSTR(A2.N2nd_RLANE_CD, 1, 3), SUBSTR (A2.n2nd_ioc_conti_cd, 1, 1)), MAS_SLAN_CONTI_CONV_FNC(A2.n2nd_finc_vvd_cd, SUBSTR(A2.n2nd_RLANE_CD, 1, 3), SUBSTR (A2.n2nd_ioc_conti_cd, 2, 1)), 'I', 'O'), A2.n2nd_rlane_cd, SUBSTR (A2.n2nd_finc_vvd_cd, 1, 9), A2.n2nd_pol_cd, A2.n2nd_pod_cd, --2
+                                        a2.n3rd_trd_cd, DECODE (MAS_SLAN_CONTI_CONV_FNC(A2.n3rd_finc_vvd_cd, SUBSTR(A2.n3rd_RLANE_CD, 1, 3), SUBSTR (A2.n3rd_ioc_conti_cd, 1, 1)), MAS_SLAN_CONTI_CONV_FNC(A2.n3rd_finc_vvd_cd, SUBSTR(A2.n3rd_RLANE_CD, 1, 3), SUBSTR (A2.n3rd_ioc_conti_cd, 2, 1)), 'I', 'O'), A2.n3rd_rlane_cd, SUBSTR (A2.n3rd_finc_vvd_cd, 1, 9), A2.n3rd_pol_cd, A2.n3rd_pod_cd, --3
+                                        a2.n4th_trd_cd, DECODE (MAS_SLAN_CONTI_CONV_FNC(A2.n4th_finc_vvd_cd, SUBSTR(A2.n4th_RLANE_CD, 1, 3), SUBSTR (A2.n4th_ioc_conti_cd, 1, 1)), MAS_SLAN_CONTI_CONV_FNC(A2.n4th_finc_vvd_cd, SUBSTR(A2.n4th_RLANE_CD, 1, 3), SUBSTR (A2.n4th_ioc_conti_cd, 2, 1)), 'I', 'O'), A2.n4th_rlane_cd, SUBSTR (A2.n4th_finc_vvd_cd, 1, 9), A2.n4th_pol_cd, A2.n4th_pod_cd  --4
+                                        ) VVD_INFO
+                                  
+                              FROM  MAS_BKG_EXPN_DTL_WK A2 
+                                   ,MAS_MON_VVD V
+                                   ,BKG_VVD B
+                                   ,MAS_OFC_LVL A4
+                                   ,MAS_LANE_RGST R
+                                   ,COMM_RTO CR
+                              WHERE 1 = 1
+                                AND NVL(V.DELT_FLG,'N')   = 'N'
+                                AND V.VSL_CD = B.VSL_CD
+                                AND V.SKD_VOY_NO = B.SKD_VOY_NO
+                                AND V.DIR_CD = B.SKD_DIR_CD
+                                AND B.BKG_NO = A2.BKG_NO
+                                  
+                                AND A2.SLS_YRMON     BETWEEN A4.OFC_APLY_FM_YRMON AND A4.OFC_APLY_TO_YRMON
+                               
+                                AND A2.AGMT_SGN_OFC_CD = A4.OFC_CD
+                                AND NVL(A2.DELT_FLG, 'N') = 'N' 
+                                AND A2.BKG_STS_CD    IN ('F','S') 
+                                AND A2.BKG_CGO_TP_CD <> 'P' 
+                                AND A2.BL_NO_TP      IN ('M','0')
+                               
+                                AND V.RLANE_CD = R.RLANE_CD
+                                AND V.DIR_CD = R.DIR_CD
+                                AND V.IOC_CD = R.IOC_CD
+                                AND V.TRD_CD = R.TRD_CD
+                                AND R.DELT_FLG = 'N' 
+                                AND A4.OFC_LVL < '9'                            
+                            
+                                AND V.TRD_CD = CR.TRD_CD
+                                AND V.RLANE_CD = CR.RLANE_CD
+                                AND V.VSL_CD = CR.VSL_CD
+                                AND V.SKD_VOY_NO = CR.SKD_VOY_NO
+                                AND V.DIR_CD = CR.SKD_DIR_CD
+                                
+                                AND V.RLANE_CD = 'PSGIA' -- PSGIA 노선만 해당됨.
+                                
+                               
+        #if(${f_chkprd} =='M')
+                                AND V.COST_YRMON    BETWEEN @[f_year]||@[f_fm_mon] AND @[f_year]||@[f_to_mon]   
+        #elseif (${f_chkprd} =='W')
+                                AND V.SLS_YRMON     LIKE @[f_year]||@[f_sls_mon]||'%'    
+                                AND V.COST_WK       BETWEEN @[f_fm_wk] AND @[f_to_wk]   
+        #end	
+        
+        #if(${f_trd_cd} !='') 
+                                AND V.TRD_CD    = @[f_trd_cd]  
+        #end
+        #if(${f_rlane_cd} !='') 
+                                AND V.RLANE_CD  = @[f_rlane_cd]
+        #end
+        #if(${f_dir_cd} !='')   
+                                AND V.DIR_CD    = @[f_dir_cd] 
+        #end
+        #if(${f_vsl_cd} !='') 
+                                AND V.VSL_CD    = @[f_vsl_cd] 
+        #end
+        #if(${f_skd_voy_no} !='')  
+                                AND V.SKD_VOY_NO    = @[f_skd_voy_no] 
+        #end
+        #if(${f_skd_dir_cd} !='') 
+                                AND V.DIR_CD     = @[f_skd_dir_cd] 
+        #end
+        #if(${f_sub_trd_cd} !='') 
+                                AND V.SUB_TRD_CD = @[f_sub_trd_cd] 
+        #end
+        #if(${f_ias_rgn_cd} !='') 
+                                AND R.IAS_RGN_CD = @[f_ias_rgn_cd] 
+        #end
+        #if(${f_trd_dir_cd} !='') 
+                                AND R.HUL_BND_CD = @[f_trd_dir_cd] 
+        #end       
+        
+          ) 
+                  WHERE TRD_CD||RLANE_CD IN ((SUBSTR(VVD_INFO, 1, 3)||SUBSTR(VVD_INFO, 5, 5)), (SUBSTR(VVD_INFO, 29, 3)||SUBSTR(VVD_INFO, 33, 5)), (SUBSTR(VVD_INFO, 57, 3)||SUBSTR(VVD_INFO, 61, 5)), (SUBSTR(VVD_INFO, 85, 3)||SUBSTR(VVD_INFO, 89, 5)), (SUBSTR(VVD_INFO, 113, 3)||SUBSTR(VVD_INFO, 117, 5)))
+                  GROUP BY COST_YRMON
+                          , SLS_YRMON
+                          , COST_WK
+                          , TRD_CD
+                          , SUB_TRD_CD
+                          , RLANE_CD
+                          , IOC_CD
+                          , VSL_CD
+                          , SKD_VOY_NO
+                          , DIR_CD
+                          , HUL_BND_CD
+                          , STATUS 			
+                                    
+                  UNION ALL                    
+                                        
+-- PSGIA =======================================================================  
+
+                    
+
+                    SELECT V.COST_YRMON
+                          ,V.SLS_YRMON
+                          ,V.COST_WK         
+                          ,V.TRD_CD 
+                          ,V.SUB_TRD_CD 
+                          ,V.RLANE_CD 
+                          ,V.IOC_CD 
+                          ,V.VSL_CD 
+                          ,V.SKD_VOY_NO 
+                          ,V.DIR_CD 
+                          ,R.HUL_BND_CD
+                          ,CR.STATUS
+                          ,0 AS VOYAGE
+                          ,0 AS TOT_QTY 
+                          ,0 AS FREIGTH_REV 
+                          ,0 AS MISC_REV 
+                          ,((FNL_HJS_BSA_CAPA) * CR.RTO) AS SUPPLY
+                          ,((NVL(INCM_BZC_CHTR_AMT, 0)+NVL(INCM_SUB_CHTR_AMT, 0)+NVL(INCM_CRS_CHTR_AMT, 0)) * CR.RTO) SPC_CHTR
+                          ,0 AS DMDT_COST                      
+                          ,0 AS BASIC_STEVEDORAGE 
+                          ,0 AS OTHER_CY_EXPENSE 
+                          ,0 AS TS_STEVEDORAGE 
+                          ,0 AS ON_DOCK_CY_EXPENSE 
+                          ,0 AS CARGO_HANDLING_EXPENSE 
+                          ,0 AS STORAGE 
+                          ,0 AS MISC_CARGO_HANDLING_EXPENSE 
+                          ,0 AS EXCLUSIVE_TERMINAL_ADD_COST 
+                          ,0 AS CARGO_VARIABLE_VOLUME_DISCOUNT 
+                          ,0 AS RAIL_DIRECT 
+                          ,0 AS RAIL_TRUCK 
+                          ,0 AS TRUCK_DIRCET 
+                          ,0 AS WATER_DIRECT 
+                          ,0 AS WATER_RAIL 
+                          ,0 AS WATER_TRUCK 
+                          ,0 AS OTHER_TRANSPORT_EXPENSE 
+                          ,0 AS CARRIERS_HAULAGE_SVG_CHG
+                          ,0 AS EMPTY_TERMINAL_EXPENSE 
+                          ,0 AS EMPTY_TRANSPORT_EXPENSE 
+                          ,0 AS AGENT_COMMISSION 
+                           
+                          ,0 AS CM_COST_TOTAL 
+                          ,0 AS CM
+                          
+                          
+                          ,0 AS US_DOMESTIC_SAV_CREDIT
+                          ,0 AS CNTR_STERM_RNTL_LAND_AMT  
+                          ,0 AS CNTR_LTERM_RNTL_LAND_AMT  
+                          ,0 AS CNTR_MNR_LAND_AMT  
+                          ,0 AS CNTR_DPC_LAND_AMT  
+                          ,0 AS CNTR_INSUR_LAND_AMT  
+                          
+                          ,0 AS CNTR_STERM_RNTL_OTR_AMT  
+                          ,0 AS CNTR_LTERM_RNTL_OTR_AMT  
+                          ,0 AS CNTR_MNR_OTR_AMT  
+                          ,0 AS CNTR_DPC_OTR_AMT  
+                          ,0 AS CNTR_INSUR_OTR_AMT   
+                          ,0 AS CHSS_AMT  
+                          ,0 AS ONE_WY_SAV_PFIT_ANAL_AMT   
+                          ,0 AS ONE_WY_SAV_RESPB_ANAL_AMT   
+                          ,0 AS BUSINESS_ACTIVITY_COST
+                          ,0 AS OP_COST
+                          ,0 AS GEN_EXPN
+                          ,0 AS INTERNAL_EXPN
+                          ,0 AS VSL_INT_EXP
+                      FROM  MAS_MON_VVD V
+                           ,MAS_LANE_RGST R
+                           ,BSA_VVD_MST B
+                           ,COMM_RTO CR
+                      WHERE 1=1
+                        AND NVL(V.DELT_FLG,'N')   = 'N'
+                        AND V.RLANE_CD = R.RLANE_CD
+                        AND V.DIR_CD = R.DIR_CD
+                        AND V.IOC_CD = R.IOC_CD
+                        AND V.TRD_CD = R.TRD_CD
+                        AND R.DELT_FLG = 'N' 	
+                        AND V.TRD_CD = B.TRD_CD
+                        AND V.RLANE_CD = B.RLANE_CD
+                        AND V.VSL_CD = B.VSL_CD
+                        AND V.SKD_VOY_NO = B.SKD_VOY_NO
+                        AND V.DIR_CD = B.SKD_DIR_CD
+                        AND V.TRD_CD = CR.TRD_CD
+                        AND V.RLANE_CD = CR.RLANE_CD
+                        AND V.VSL_CD = CR.VSL_CD
+                        AND V.SKD_VOY_NO = CR.SKD_VOY_NO
+                        AND V.DIR_CD = CR.SKD_DIR_CD #if(${f_chkprd} =='M')
+                        AND V.COST_YRMON    BETWEEN @[f_year]||@[f_fm_mon] AND @[f_year]||@[f_to_mon]   
+#elseif (${f_chkprd} =='W')
+                        AND V.SLS_YRMON     LIKE @[f_year]||@[f_sls_mon]||'%'    
+                        AND V.COST_WK       BETWEEN @[f_fm_wk] AND @[f_to_wk]   
+#end	
+
+#if(${f_trd_cd} !='') 
+                        AND V.TRD_CD    = @[f_trd_cd]  
+#end
+#if(${f_rlane_cd} !='') 
+                        AND V.RLANE_CD  = @[f_rlane_cd]
+#end
+#if(${f_dir_cd} !='')   
+                        AND V.DIR_CD    = @[f_dir_cd] 
+#end
+#if(${f_vsl_cd} !='') 
+                        AND V.VSL_CD    = @[f_vsl_cd] 
+#end
+#if(${f_skd_voy_no} !='')  
+                        AND V.SKD_VOY_NO    = @[f_skd_voy_no] 
+#end
+#if(${f_skd_dir_cd} !='') 
+                        AND V.DIR_CD     = @[f_skd_dir_cd] 
+#end
+#if(${f_sub_trd_cd} !='') 
+                        AND V.SUB_TRD_CD = @[f_sub_trd_cd] 
+#end
+#if(${f_ias_rgn_cd} !='') 
+                        AND R.IAS_RGN_CD = @[f_ias_rgn_cd] 
+#end
+#if(${f_trd_dir_cd} !='') 
+                        AND R.HUL_BND_CD = @[f_trd_dir_cd] 
+#end
+               
+                    -- OP COST TOTAL
+                    UNION ALL
+                    SELECT A1.COST_YRMON  
+                          ,A1.SLS_YRMON  
+                          ,A1.COST_WK
+                          ,A1.TRD_CD 
+                          ,A1.SUB_TRD_CD 
+                          ,A1.RLANE_CD 
+                          ,A1.IOC_CD 
+                          ,A1.VSL_CD 
+                          ,A1.SKD_VOY_NO 
+                          ,A1.DIR_CD 
+                          ,L1.HUL_BND_CD
+                          ,R.STATUS
+                                              		
+                          ,0 AS VOYAGE
+                          ,0 AS TOT_QTY 
+                          ,0 AS FREIGTH_REV 
+                          ,0 AS MISC_REV 
+                          ,0 AS SUPPLY
+                          ,0 SPC_CHTR
+                          ,0 AS DMDT_COST                      
+                          ,0 AS BASIC_STEVEDORAGE 
+                          ,0 AS OTHER_CY_EXPENSE 
+                          ,0 AS TS_STEVEDORAGE 
+                          ,0 AS ON_DOCK_CY_EXPENSE 
+                          ,0 AS CARGO_HANDLING_EXPENSE 
+                          ,0 AS STORAGE 
+                          ,0 AS MISC_CARGO_HANDLING_EXPENSE 
+                          ,0 AS EXCLUSIVE_TERMINAL_ADD_COST 
+                          ,0 AS CARGO_VARIABLE_VOLUME_DISCOUNT 
+                          ,0 AS RAIL_DIRECT 
+                          ,0 AS RAIL_TRUCK 
+                          ,0 AS TRUCK_DIRCET 
+                          ,0 AS WATER_DIRECT 
+                          ,0 AS WATER_RAIL 
+                          ,0 AS WATER_TRUCK 
+                          ,0 AS OTHER_TRANSPORT_EXPENSE 
+                          ,0 AS CARRIERS_HAULAGE_SVG_CHG
+                          ,0 AS EMPTY_TERMINAL_EXPENSE 
+                          ,0 AS EMPTY_TRANSPORT_EXPENSE 
+                          ,0 AS AGENT_COMMISSION 
+                           
+                          ,0 AS CM_COST_TOTAL 
+                          ,0 AS CM
+                          
+                          
+                          ,0 AS US_DOMESTIC_SAV_CREDIT
+                          ,0 AS CNTR_STERM_RNTL_LAND_AMT  
+                          ,0 AS CNTR_LTERM_RNTL_LAND_AMT  
+                          ,0 AS CNTR_MNR_LAND_AMT  
+                          ,0 AS CNTR_DPC_LAND_AMT  
+                          ,0 AS CNTR_INSUR_LAND_AMT  
+                          
+                          ,0 AS CNTR_STERM_RNTL_OTR_AMT  
+                          ,0 AS CNTR_LTERM_RNTL_OTR_AMT  
+                          ,0 AS CNTR_MNR_OTR_AMT  
+                          ,0 AS CNTR_DPC_OTR_AMT  
+                          ,0 AS CNTR_INSUR_OTR_AMT   
+                          ,0 AS CHSS_AMT  
+                          ,0 AS ONE_WY_SAV_PFIT_ANAL_AMT   
+                          ,0 AS ONE_WY_SAV_RESPB_ANAL_AMT   
+                          ,0 AS BUSINESS_ACTIVITY_COST
+                          
+                          ,SUM(NTWK_HIR_COST_AMT) * MAX(NVL(R.RTO, 0)) AS OP_COST
+                          ,0 AS GEN_EXPN
+                          ,0 AS INTERNAL_EXPN
+                          ,SUM(DECODE(A2.STND_COST_CD,'72100000',NTWK_HIR_COST_AMT,0)) AS VSL_INT_EXP
+
+                      FROM MAS_MON_VVD A1 
+                          ,MAS_VVD_HIR A2 
+                          ,MAS_LANE_RGST L1
+                          ,COMM_RTO R
+                      WHERE A1.VSL_CD       = A2.VSL_CD 
+                        AND A1.SKD_VOY_NO   = A2.SKD_VOY_NO 
+                        AND A1.DIR_CD       = A2.DIR_CD 
+                        AND A1.TRD_CD       = A2.TRD_CD 
+                        AND A1.RLANE_CD     = A2.RLANE_CD 
+                        AND A1.IOC_CD       = A2.IOC_CD 
+                        
+                        AND A1.RLANE_CD = L1.RLANE_CD
+                        AND A1.DIR_CD = L1.DIR_CD
+                        AND A1.TRD_CD = L1.TRD_CD
+                        AND A1.IOC_CD = L1.IOC_CD
+                        AND A1.DELT_FLG     <> 'Y'
+                        			
+                        AND A1.VSL_CD       = R.VSL_CD 
+                        AND A1.SKD_VOY_NO   = R.SKD_VOY_NO 
+                        AND A1.DIR_CD       = R.SKD_DIR_CD 
+                        AND A1.TRD_CD       = R.TRD_CD 
+                        AND A1.RLANE_CD     = R.RLANE_CD 
+#if(${f_chkprd} =='M')
+                        AND A1.COST_YRMON    BETWEEN @[f_year]||@[f_fm_mon] AND @[f_year]||@[f_to_mon]   
+#elseif (${f_chkprd} =='W')
+                        AND A1.SLS_YRMON     LIKE @[f_year]||@[f_sls_mon]||'%'    
+                        AND A1.COST_WK       BETWEEN @[f_fm_wk] AND @[f_to_wk]   
+#end	
+
+#if(${f_trd_cd} !='') 
+                        AND A1.TRD_CD    = @[f_trd_cd]  
+#end
+#if(${f_rlane_cd} !='') 
+                        AND A1.RLANE_CD  = @[f_rlane_cd]
+#end
+#if(${f_dir_cd} !='')   
+                        AND A1.DIR_CD    = @[f_dir_cd] 
+#end
+#if(${f_vsl_cd} !='') 
+                        AND A1.VSL_CD    = @[f_vsl_cd] 
+#end
+#if(${f_skd_voy_no} !='')  
+                        AND A1.SKD_VOY_NO    = @[f_skd_voy_no] 
+#end
+#if(${f_skd_dir_cd} !='') 
+                        AND A1.DIR_CD     = @[f_skd_dir_cd] 
+#end
+#if(${f_sub_trd_cd} !='') 
+                        AND A1.SUB_TRD_CD = @[f_sub_trd_cd] 
+#end
+#if(${f_ias_rgn_cd} !='') 
+                        AND L1.IAS_RGN_CD = @[f_ias_rgn_cd] 
+#end
+#if(${f_trd_dir_cd} !='') 
+                        AND L1.HUL_BND_CD = @[f_trd_dir_cd] 
+#end
+                      GROUP BY  
+                               A1.COST_YRMON 
+                              ,A1.SLS_YRMON 
+                              ,A1.COST_WK 
+                              ,A1.TRD_CD 
+                              ,A1.SUB_TRD_CD 
+                              ,A1.RLANE_CD 
+                              ,A1.IOC_CD 
+                              ,A1.VSL_CD 
+                              ,A1.SKD_VOY_NO 
+                              ,A1.DIR_CD 
+                              ,L1.HUL_BND_CD
+                              ,R.STATUS  
+    
+                      UNION ALL     
+                     /* General Expense */
+                     SELECT  A1.COST_YRMON  
+                            ,A1.SLS_YRMON  
+                            ,A1.COST_WK
+                            ,A1.TRD_CD 
+                            ,A1.SUB_TRD_CD 
+                            ,A1.RLANE_CD 
+                            ,A1.IOC_CD 
+                            ,A1.VSL_CD 
+                            ,A1.SKD_VOY_NO 
+                            ,A1.DIR_CD 
+                            ,L1.HUL_BND_CD
+                            ,R.STATUS                                                		
+                            ,0 AS VOYAGE
+                            ,0 AS TOT_QTY 
+                            ,0 AS FREIGTH_REV 
+                            ,0 AS MISC_REV 
+                            ,0 AS SUPPLY
+                            ,0 SPC_CHTR
+                            ,0 AS DMDT_COST                      
+                            ,0 AS BASIC_STEVEDORAGE 
+                            ,0 AS OTHER_CY_EXPENSE 
+                            ,0 AS TS_STEVEDORAGE 
+                            ,0 AS ON_DOCK_CY_EXPENSE 
+                            ,0 AS CARGO_HANDLING_EXPENSE 
+                            ,0 AS STORAGE 
+                            ,0 AS MISC_CARGO_HANDLING_EXPENSE 
+                            ,0 AS EXCLUSIVE_TERMINAL_ADD_COST 
+                            ,0 AS CARGO_VARIABLE_VOLUME_DISCOUNT 
+                            ,0 AS RAIL_DIRECT 
+                            ,0 AS RAIL_TRUCK 
+                            ,0 AS TRUCK_DIRCET 
+                            ,0 AS WATER_DIRECT 
+                            ,0 AS WATER_RAIL 
+                            ,0 AS WATER_TRUCK 
+                            ,0 AS OTHER_TRANSPORT_EXPENSE 
+                            ,0 AS CARRIERS_HAULAGE_SVG_CHG
+                            ,0 AS EMPTY_TERMINAL_EXPENSE 
+                            ,0 AS EMPTY_TRANSPORT_EXPENSE 
+                            ,0 AS AGENT_COMMISSION                              
+                            ,0 AS CM_COST_TOTAL 
+                            ,0 AS CM 
+                            ,0 AS US_DOMESTIC_SAV_CREDIT
+                            ,0 AS CNTR_STERM_RNTL_LAND_AMT  
+                            ,0 AS CNTR_LTERM_RNTL_LAND_AMT  
+                            ,0 AS CNTR_MNR_LAND_AMT  
+                            ,0 AS CNTR_DPC_LAND_AMT  
+                            ,0 AS CNTR_INSUR_LAND_AMT  
+                            
+                            ,0 AS CNTR_STERM_RNTL_OTR_AMT  
+                            ,0 AS CNTR_LTERM_RNTL_OTR_AMT  
+                            ,0 AS CNTR_MNR_OTR_AMT  
+                            ,0 AS CNTR_DPC_OTR_AMT  
+                            ,0 AS CNTR_INSUR_OTR_AMT   
+                            ,0 AS CHSS_AMT  
+                            ,0 AS ONE_WY_SAV_PFIT_ANAL_AMT   
+                            ,0 AS ONE_WY_SAV_RESPB_ANAL_AMT   
+                            ,0 AS BUSINESS_ACTIVITY_COST                          
+                            ,0 AS OP_COST
+                            ,SUM(DECODE(A3.STND_COST_CD, '65010001', DECODE (@[f_pro_vw], 'P', A2.ESTM_PL_AMT, 'R', A2.RA_PL_AMT), 0)) * MAX(NVL(R.RTO, 0)) AS GEN_EXPN
+                            ,0 AS INTERNAL_EXPN
+                            ,0 AS VSL_INT_EXP
+                       FROM MAS_MON_VVD A1 
+                           ,MAS_PFIT_LSS_GEN_EXPN A2 
+                           ,MAS_PFIT_LSS_RPT_ITM A3 
+                           ,MAS_OFC_LVL A4 
+                           ,MAS_LANE_RGST L1
+                           ,COMM_RTO R
+                      WHERE A1.VSL_CD        = A2.VSL_CD 
+                        AND A1.SKD_VOY_NO    = A2.SKD_VOY_NO 
+                        AND A1.DIR_CD        = A2.SKD_DIR_CD 
+                        AND A1.TRD_CD        = A2.TRD_CD 
+                        AND A1.RLANE_CD      = A2.RLANE_CD 
+                        AND A1.IOC_CD        = A2.IOC_CD 
+                      
+                        AND A1.RLANE_CD      = L1.RLANE_CD
+                        AND A1.DIR_CD        = L1.DIR_CD
+                        AND A1.TRD_CD        = L1.TRD_CD
+                        AND A1.IOC_CD        = L1.IOC_CD
+                        			
+                        AND A1.VSL_CD       = R.VSL_CD 
+                        AND A1.SKD_VOY_NO   = R.SKD_VOY_NO 
+                        AND A1.DIR_CD       = R.SKD_DIR_CD 
+                        AND A1.TRD_CD       = R.TRD_CD 
+                        AND A1.RLANE_CD     = R.RLANE_CD 
+    
+#if(${f_chkprd} =='M')
+                        AND A1.COST_YRMON    BETWEEN A4.OFC_APLY_FM_YRMON AND A4.OFC_APLY_TO_YRMON
+#elseif (${f_chkprd} =='W')
+                        AND A1.SLS_YRMON     BETWEEN A4.OFC_APLY_FM_YRMON AND A4.OFC_APLY_TO_YRMON
+#end /*ofc_월별 관리*/
+		
+                        AND A2.STND_COST_CD  = '65010001' 
+                        AND A2.STND_COST_CD  = A3.STND_COST_CD 
+                        AND A1.DELT_FLG      <> 'Y' 
+                        AND A2.OFC_VW_CD     = @[f_ofc_vw] /* Office view code 별로 expense 관리 */
+
+#if(${f_chkprd} =='M')
+                        AND A1.COST_YRMON    BETWEEN @[f_year]||@[f_fm_mon] AND @[f_year]||@[f_to_mon] 
+#elseif (${f_chkprd} =='W')
+                        AND A1.SLS_YRMON     LIKE @[f_year]||@[f_sls_mon]||'%'  
+                        AND A1.COST_WK       BETWEEN @[f_fm_wk] AND @[f_to_wk]
+#end
+		
+#if(${f_trd_cd} !='') 
+                        AND A1.TRD_CD    = @[f_trd_cd]  
+#end
+#if(${f_rlane_cd} !='') 
+                        AND A1.RLANE_CD  = @[f_rlane_cd]
+#end
+#if(${f_dir_cd} !='')   
+                        AND A1.DIR_CD    = @[f_dir_cd] 
+#end
+#if(${f_vsl_cd} !='') 
+                        AND A1.VSL_CD    = @[f_vsl_cd] 
+#end
+#if(${f_skd_voy_no} !='')  
+                        AND A1.SKD_VOY_NO    = @[f_skd_voy_no] 
+#end
+#if(${f_skd_dir_cd} !='') 
+                        AND A1.DIR_CD     = @[f_skd_dir_cd] 
+#end 
+#if(${f_sub_trd_cd} !='') 
+                        AND A1.SUB_TRD_CD = @[f_sub_trd_cd] 
+#end           
+#if(${f_ias_rgn_cd} !='') 
+                        AND L1.IAS_RGN_CD = @[f_ias_rgn_cd] 
+#end
+#if(${f_trd_dir_cd} !='') 
+                        AND L1.HUL_BND_CD = @[f_trd_dir_cd] 
+#end		
+								
+                        AND A3.RPT_VW_CD     = @[f_pro_vw]  
+                        AND DECODE (@[f_ofc_vw], 'C', A2.AGMT_SGN_OFC_CD, 'L', A2.SLS_OFC_CD) = A4.OFC_CD  
+
+#if(${f_ofc_cd} !='')
+	#if(${f_excl_sts} =='')
+                        AND DECODE (@[f_ofc_lvl] ,'1', A4.OFC_N1ST_LVL_CD,'2', A4.OFC_N2ND_LVL_CD,'3', A4.OFC_N3RD_LVL_CD,'4', A4.OFC_N4TH_LVL_CD,'5', A4.OFC_N5TH_LVL_CD,'6', A4.OFC_N6TH_LVL_CD,'7', A4.OFC_N7TH_LVL_CD) = @[f_ofc_cd]  
+	#else
+                        AND A4.OFC_CD  = @[f_ofc_cd]  
+	#end
+#else
+		
+                        AND DECODE (@[f_ofc_lvl],'1', A4.OFC_N1ST_LVL_CD,'2', A4.OFC_N2ND_LVL_CD,'3', A4.OFC_N3RD_LVL_CD,'4', A4.OFC_N4TH_LVL_CD,'5', A4.OFC_N5TH_LVL_CD,'6', A4.OFC_N6TH_LVL_CD,'7', A4.OFC_N7TH_LVL_CD) IS NOT NULL 
+                        AND DECODE (@[f_ofc_lvl],'1', A4.OFC_N1ST_LVL_CD,'2', A4.OFC_N2ND_LVL_TP_CD,'3', A4.OFC_N3RD_LVL_TP_CD
+                        			            ,'4', DECODE(SUBSTR(DECODE(@[f_chkprd], 'M', A1.COST_YRMON, A1.SLS_YRMON), 1, 4), '2008', DECODE(A4.OFC_N4TH_LVL_CD, 'NYCRA', A4.OFC_N4TH_LVL_CD, A4.OFC_N4TH_LVL_TP_CD)
+                        				                                                                                        , '2007', DECODE(A4.OFC_N4TH_LVL_CD, 'NYCRA', A4.OFC_N4TH_LVL_CD, A4.OFC_N4TH_LVL_TP_CD)
+                        				                                                                                        , DECODE(A4.OFC_N4TH_LVL_CD, 'SZPDC', A4.OFC_N4TH_LVL_TP_CD, A4.OFC_N4TH_LVL_CD)) /* SHADSC만 AREA */
+                        			            ,'5', A4.OFC_N5TH_LVL_TP_CD,'6', A4.OFC_N6TH_LVL_TP_CD,'7', A4.OFC_N7TH_LVL_TP_CD) IS NOT NULL  
+#end
+
+#if(${f_pro_vw} =='P' && ${f_pro_lvl} =='O')
+                        AND (A3.STND_COST_TP_CD IN ('S','C','O',@[str_display])  /* f_pro_obj P->O,A,B */
+                             OR A3.STND_COST_CD IN ('OPCTOTAL','OPB00000','BOPTOTAL','BOPB0000')) 
+#else
+                        AND A3.STND_COST_TP_CD IN ('S','C','O')  
+#end
+                      GROUP BY  
+                            A1.COST_YRMON 
+                           ,A1.SLS_YRMON 
+                           ,A1.COST_WK 
+                           ,A1.TRD_CD 
+                           ,A1.SUB_TRD_CD 
+                           ,A1.RLANE_CD 
+                           ,A1.IOC_CD 
+                           ,A1.VSL_CD 
+                           ,A1.SKD_VOY_NO 
+                           ,A1.DIR_CD 
+                           ,L1.HUL_BND_CD
+                           ,R.STATUS 
+				
+                      UNION ALL
+                      /* Internal Expense */ 
+                     SELECT  /*+ ORDERED */ 
+                            A1.COST_YRMON  
+                           ,A1.SLS_YRMON  
+                           ,A1.COST_WK
+                           ,A1.TRD_CD 
+                           ,A1.SUB_TRD_CD 
+                           ,A1.RLANE_CD 
+                           ,A1.IOC_CD 
+                           ,A1.VSL_CD 
+                           ,A1.SKD_VOY_NO 
+                           ,A1.DIR_CD 
+                           ,L1.HUL_BND_CD
+                           ,R.STATUS
+                                               		
+                           ,0 AS VOYAGE
+                           ,0 AS TOT_QTY 
+                           ,0 AS FREIGTH_REV 
+                           ,0 AS MISC_REV 
+                           ,0 AS SUPPLY
+                           ,0 SPC_CHTR
+                           ,0 AS DMDT_COST                      
+                           ,0 AS BASIC_STEVEDORAGE 
+                           ,0 AS OTHER_CY_EXPENSE 
+                           ,0 AS TS_STEVEDORAGE 
+                           ,0 AS ON_DOCK_CY_EXPENSE 
+                           ,0 AS CARGO_HANDLING_EXPENSE 
+                           ,0 AS STORAGE 
+                           ,0 AS MISC_CARGO_HANDLING_EXPENSE 
+                           ,0 AS EXCLUSIVE_TERMINAL_ADD_COST
+                           ,0 AS CARGO_VARIABLE_VOLUME_DISCOUNT 
+                           ,0 AS RAIL_DIRECT 
+                           ,0 AS RAIL_TRUCK 
+                           ,0 AS TRUCK_DIRCET 
+                           ,0 AS WATER_DIRECT 
+                           ,0 AS WATER_RAIL 
+                           ,0 AS WATER_TRUCK 
+                           ,0 AS OTHER_TRANSPORT_EXPENSE 
+                           ,0 AS CARRIERS_HAULAGE_SVG_CHG
+                           ,0 AS EMPTY_TERMINAL_EXPENSE 
+                           ,0 AS EMPTY_TRANSPORT_EXPENSE 
+                           ,0 AS AGENT_COMMISSION                             
+                           ,0 AS CM_COST_TOTAL 
+                           ,0 AS CM
+                           
+                           
+                           ,0 AS US_DOMESTIC_SAV_CREDIT
+                           ,0 AS CNTR_STERM_RNTL_LAND_AMT  
+                            ,0 AS CNTR_LTERM_RNTL_LAND_AMT  
+                            ,0 AS CNTR_MNR_LAND_AMT  
+                            ,0 AS CNTR_DPC_LAND_AMT  
+                            ,0 AS CNTR_INSUR_LAND_AMT  
+                            
+                            ,0 AS CNTR_STERM_RNTL_OTR_AMT  
+                            ,0 AS CNTR_LTERM_RNTL_OTR_AMT  
+                            ,0 AS CNTR_MNR_OTR_AMT  
+                            ,0 AS CNTR_DPC_OTR_AMT  
+                            ,0 AS CNTR_INSUR_OTR_AMT   
+                            ,0 AS CHSS_AMT  
+                            ,0 AS ONE_WY_SAV_PFIT_ANAL_AMT   
+                            ,0 AS ONE_WY_SAV_RESPB_ANAL_AMT   
+                           ,0 AS BUSINESS_ACTIVITY_COST                          
+                           ,0 AS OP_COST
+                           ,0 AS GEN_EXPN
+                           ,SUM (DECODE (@[f_pro_vw]
+                                                 ,'P', DECODE(@[f_pro_lvl]||'|'||@[f_chtbiz]
+                                                              , 'O|CHT', A2.N5TH_CO_AMT
+                                                              , 'O|BIZ', A2.N5TH_HJS_SLS_AMT
+                                                              , A2.N5TH_ESTM_PL_AMT)
+                                       	         ,'R', A2.RA_PL_AMT)) * MAX(NVL(R.RTO, 0)) AS INTERNAL_EXPN
+                          ,0 AS VSL_INT_EXP
+                       FROM MAS_MON_VVD A1 
+                           ,MAS_PFIT_LSS_SMRY A2 
+                           ,MAS_PFIT_LSS_RPT_ITM A3 
+                           ,MAS_OFC_LVL A4 
+                           ,MAS_LANE_RGST L1
+                           ,COMM_RTO R
+                      WHERE A1.VSL_CD        = A2.VSL_CD 
+                        AND A1.SKD_VOY_NO    = A2.SKD_VOY_NO 
+                        AND A1.DIR_CD        = A2.SKD_DIR_CD 
+                        AND A1.TRD_CD        = A2.TRD_CD 
+                        AND A1.RLANE_CD      = A2.RLANE_CD 
+                        AND A1.IOC_CD        = A2.IOC_CD 
+                        
+                        AND A1.RLANE_CD = L1.RLANE_CD
+                        AND A1.DIR_CD = L1.DIR_CD
+                        AND A1.TRD_CD = L1.TRD_CD
+                        AND A1.IOC_CD = L1.IOC_CD
+
+                        AND A1.VSL_CD       = R.VSL_CD 
+                        AND A1.SKD_VOY_NO   = R.SKD_VOY_NO 
+                        AND A1.DIR_CD       = R.SKD_DIR_CD 
+                        AND A1.TRD_CD       = R.TRD_CD 
+                        AND A1.RLANE_CD     = R.RLANE_CD
+    
+#if(${f_chkprd} =='M')
+                        AND A1.COST_YRMON    BETWEEN A4.OFC_APLY_FM_YRMON AND A4.OFC_APLY_TO_YRMON
+#elseif (${f_chkprd} =='W')
+                        AND A1.SLS_YRMON     BETWEEN A4.OFC_APLY_FM_YRMON AND A4.OFC_APLY_TO_YRMON
+#end /*ofc_월별 관리*/
+    		
+                        AND A2.STND_COST_CD  = '54600000'
+                        AND A2.STND_COST_CD  = A3.STND_COST_CD 
+                        AND A1.DELT_FLG      <> 'Y' 
+    				
+#if(${f_chkprd} =='M')
+                        AND A1.COST_YRMON    BETWEEN @[f_year]||@[f_fm_mon] AND @[f_year]||@[f_to_mon] 
+#elseif (${f_chkprd} =='W')
+                        AND A1.SLS_YRMON     LIKE @[f_year]||@[f_sls_mon]||'%'  
+                        AND A1.COST_WK       BETWEEN @[f_fm_wk] AND @[f_to_wk]
+#end
+    				
+#if(${f_trd_cd} !='') 
+                        AND A1.TRD_CD    = @[f_trd_cd]  
+#end
+#if(${f_rlane_cd} !='') 
+                        AND A1.RLANE_CD  = @[f_rlane_cd]
+#end
+#if(${f_dir_cd} !='')   
+                        AND A1.DIR_CD    = @[f_dir_cd] 
+#end
+#if(${f_vsl_cd} !='') 
+                        AND A1.VSL_CD    = @[f_vsl_cd] 
+#end
+#if(${f_skd_voy_no} !='')  
+                        AND A1.SKD_VOY_NO    = @[f_skd_voy_no] 
+#end
+#if(${f_skd_dir_cd} !='') 
+                        AND A1.DIR_CD     = @[f_skd_dir_cd] 
+#end
+#if(${f_sub_trd_cd} !='') 
+                        AND A1.SUB_TRD_CD = @[f_sub_trd_cd] 
+#end
+#if(${f_ias_rgn_cd} !='') 
+                        AND L1.IAS_RGN_CD = @[f_ias_rgn_cd] 
+#end
+#if(${f_trd_dir_cd} !='') 
+                        AND L1.HUL_BND_CD = @[f_trd_dir_cd] 
+#end
+    		
+                        AND A3.RPT_VW_CD     = @[f_pro_vw]
+                        AND DECODE (@[f_ofc_vw], 'C', A2.AGMT_SGN_OFC_CD, 'L', A2.SLS_OFC_CD) = A4.OFC_CD  
+    				
+#if(${f_ofc_cd} !='')
+   #if(${f_excl_sts} =='')
+                        /*N200902110080   MAS_SINWA 실적 조회 권한 관련 DECODE(SUBSTR(?, 1, 4), 'SHAR', 'SINRS', '') */
+                        AND DECODE (@[f_ofc_lvl] ,'1', A4.OFC_N1ST_LVL_CD,'2', A4.OFC_N2ND_LVL_CD,'3', A4.OFC_N3RD_LVL_CD,'4', A4.OFC_N4TH_LVL_CD,'5', A4.OFC_N5TH_LVL_CD,'6', A4.OFC_N6TH_LVL_CD,'7', A4.OFC_N7TH_LVL_CD) = @[f_ofc_cd]  
+   #else
+                        AND A4.OFC_CD  = @[f_ofc_cd]  
+   #end
+#else
+                        /*N200902110080   MAS_SINWA 실적 조회 권한 관련 DECODE(SUBSTR(?, 1, 4), 'SHAR', 'SINRS', '')*/
+                        AND DECODE (@[f_ofc_lvl],'1', A4.OFC_N1ST_LVL_CD,'2', A4.OFC_N2ND_LVL_CD,'3', A4.OFC_N3RD_LVL_CD,'4', A4.OFC_N4TH_LVL_CD,'5', A4.OFC_N5TH_LVL_CD,'6', A4.OFC_N6TH_LVL_CD,'7', A4.OFC_N7TH_LVL_CD) IS NOT NULL 
+                        AND DECODE (@[f_ofc_lvl],'1', A4.OFC_N1ST_LVL_CD,'2', A4.OFC_N2ND_LVL_TP_CD,'3', A4.OFC_N3RD_LVL_TP_CD
+    					                        ,'4', DECODE(SUBSTR(DECODE(@[f_chkprd], 'M', A1.COST_YRMON, A1.SLS_YRMON), 1, 4), '2008', DECODE(A4.OFC_N4TH_LVL_CD, 'NYCRA', A4.OFC_N4TH_LVL_CD, A4.OFC_N4TH_LVL_TP_CD)
+    					                                                                                                        , '2007', DECODE(A4.OFC_N4TH_LVL_CD, 'NYCRA', A4.OFC_N4TH_LVL_CD, A4.OFC_N4TH_LVL_TP_CD)
+    					                                                                                                        , DECODE(A4.OFC_N4TH_LVL_CD, 'SZPDC', A4.OFC_N4TH_LVL_TP_CD, A4.OFC_N4TH_LVL_CD)) /* SHADSC만 AREA */
+    					                        ,'5', A4.OFC_N5TH_LVL_TP_CD,'6', A4.OFC_N6TH_LVL_TP_CD,'7', A4.OFC_N7TH_LVL_TP_CD) IS NOT NULL  
+#end
+    				
+#if(${f_pro_vw} =='P' && ${f_pro_lvl} =='O')
+                        AND (A3.STND_COST_TP_CD IN ('S','C','O',@[str_display])  /* f_pro_obj P->O,A,B */
+                             OR A3.STND_COST_CD IN ('OPCTOTAL','OPB00000','BOPTOTAL','BOPB0000')) 
+#else
+                        AND A3.STND_COST_TP_CD IN ('S','C','O')  
+#end
+                      GROUP BY  
+                            A1.COST_YRMON 
+                           ,A1.SLS_YRMON 
+                           ,A1.COST_WK 
+                           ,A1.TRD_CD 
+                           ,A1.SUB_TRD_CD 
+                           ,A1.RLANE_CD 
+                           ,A1.IOC_CD 
+                           ,A1.VSL_CD 
+                           ,A1.SKD_VOY_NO 
+                           ,A1.DIR_CD 
+                           ,L1.HUL_BND_CD
+                           ,R.STATUS 
+                    )
+             GROUP BY  COST_YRMON
+                      ,SLS_YRMON
+                      ,COST_WK
+                      ,TRD_CD
+                      ,SUB_TRD_CD
+                      ,RLANE_CD
+                      ,IOC_CD       
+                      ,VSL_CD 
+                      ,SKD_VOY_NO 
+                      ,DIR_CD 
+                      ,HUL_BND_CD
+                      ,STATUS 
+               ) B1 
+            	, (SELECT CPY_NO AS RNUM 
+            	     FROM COM_CPY_NO 
+                     WHERE CPY_NO BETWEEN 1 AND 59
+               ) B2
+               
+    -- 계정별 OP COST
+    UNION ALL
+    SELECT A1.COST_YRMON  
+    		,A1.SLS_YRMON  
+    		,A1.COST_WK
+    		,A1.TRD_CD 
+    		,A1.SUB_TRD_CD 
+    		,A1.RLANE_CD 
+    		,A1.IOC_CD 
+    		,A1.VSL_CD 
+    		,A1.SKD_VOY_NO 
+    		,A1.DIR_CD 
+    		,L1.HUL_BND_CD
+    		,R.STATUS
+    		,A2.STND_COST_CD
+    --		,MAX(NVL(R.RTO, 1)) RTO
+    		,SUM(NTWK_HIR_COST_AMT) * MAX(NVL(R.RTO, 0)) AS AMT
+      FROM MAS_MON_VVD A1 
+           ,MAS_VVD_HIR A2 
+    	   ,MAS_LANE_RGST L1
+    	   ,COMM_RTO R
+      WHERE A1.VSL_CD       = A2.VSL_CD 
+        AND A1.SKD_VOY_NO   = A2.SKD_VOY_NO 
+        AND A1.DIR_CD       = A2.DIR_CD 
+        AND A1.TRD_CD       = A2.TRD_CD 
+        AND A1.RLANE_CD     = A2.RLANE_CD 
+        AND A1.IOC_CD       = A2.IOC_CD 
+        
+        AND A1.RLANE_CD = L1.RLANE_CD
+        AND A1.DIR_CD = L1.DIR_CD
+        AND A1.TRD_CD = L1.TRD_CD
+        AND A1.IOC_CD = L1.IOC_CD
+        AND A1.DELT_FLG     <> 'Y'     				
+        AND A1.VSL_CD       = R.VSL_CD 
+        AND A1.SKD_VOY_NO   = R.SKD_VOY_NO 
+        AND A1.DIR_CD       = R.SKD_DIR_CD 
+        AND A1.TRD_CD       = R.TRD_CD 
+        AND A1.RLANE_CD     = R.RLANE_CD  
+#if(${f_chkprd} =='M')
+        AND A1.COST_YRMON    BETWEEN @[f_year]||@[f_fm_mon] AND @[f_year]||@[f_to_mon]   
+#elseif (${f_chkprd} =='W')
+        AND A1.SLS_YRMON     LIKE @[f_year]||@[f_sls_mon]||'%'    
+        AND A1.COST_WK       BETWEEN @[f_fm_wk] AND @[f_to_wk]   
+#end	
+
+#if(${f_trd_cd} !='') 
+        AND A1.TRD_CD    = @[f_trd_cd]  
+#end
+#if(${f_rlane_cd} !='') 
+        AND A1.RLANE_CD  = @[f_rlane_cd]
+#end
+#if(${f_dir_cd} !='')   
+        AND A1.DIR_CD    = @[f_dir_cd] 
+#end
+#if(${f_vsl_cd} !='') 
+        AND A1.VSL_CD    = @[f_vsl_cd] 
+#end
+#if(${f_skd_voy_no} !='')  
+        AND A1.SKD_VOY_NO    = @[f_skd_voy_no] 
+#end
+#if(${f_skd_dir_cd} !='') 
+        AND A1.DIR_CD     = @[f_skd_dir_cd] 
+#end
+#if(${f_sub_trd_cd} !='') 
+        AND A1.SUB_TRD_CD = @[f_sub_trd_cd] 
+#end
+#if(${f_ias_rgn_cd} !='') 
+        AND L1.IAS_RGN_CD = @[f_ias_rgn_cd] 
+#end
+#if(${f_trd_dir_cd} !='') 
+         AND L1.HUL_BND_CD = @[f_trd_dir_cd] 
+#end
+    GROUP BY  
+             A1.COST_YRMON 
+            ,A1.SLS_YRMON 
+            ,A1.COST_WK 
+            ,A1.TRD_CD 
+            ,A1.SUB_TRD_CD 
+            ,A1.RLANE_CD 
+            ,A1.IOC_CD 
+            ,A1.VSL_CD 
+            ,A1.SKD_VOY_NO 
+            ,A1.DIR_CD 
+            ,L1.HUL_BND_CD
+            ,R.STATUS
+            ,A2.STND_COST_CD
+    ) A 
+GROUP BY A.COST_YRMON 
+        ,A.SLS_YRMON 
+        ,A.COST_WK 
+        ,A.TRD_CD 
+        ,A.SUB_TRD_CD 
+        ,A.RLANE_CD 
+        ,A.IOC_CD 
+        ,A.VSL_CD 
+        ,A.SKD_VOY_NO 
+        ,A.DIR_CD
+        ,A.HUL_BND_CD
+        ,A.STATUS
+        		
+ORDER BY COST_YRMON 
+        ,SLS_YRMON 
+        ,COST_WK 
+        ,TRD_CD 
+        ,SUB_TRD_CD 
+        ,RLANE_CD 
+        ,IOC_CD 
+        ,VSL_CD 
+        ,SKD_VOY_NO 
+        ,DIR_CD 
+        ,HUL_BND_CD
+        ,DECODE(STATUS, 'L/C', 0, 'T/S', 1, 2)			]]></sql>
+			<params>
+				<param name="f_year" type="12" value="" out="N"/>
+				<param name="f_fm_mon" type="12" value="" out="N"/>
+				<param name="f_to_mon" type="12" value="" out="N"/>
+				<param name="f_sls_mon" type="12" value="" out="N"/>
+				<param name="f_fm_wk" type="12" value="" out="N"/>
+				<param name="f_to_wk" type="12" value="" out="N"/>
+				<param name="f_trd_cd" type="12" value="" out="N"/>
+				<param name="f_rlane_cd" type="12" value="" out="N"/>
+				<param name="f_dir_cd" type="12" value="" out="N"/>
+				<param name="f_vsl_cd" type="12" value="" out="N"/>
+				<param name="f_skd_voy_no" type="12" value="" out="N"/>
+				<param name="f_skd_dir_cd" type="12" value="" out="N"/>
+				<param name="f_sub_trd_cd" type="12" value="" out="N"/>
+				<param name="f_ias_rgn_cd" type="12" value="" out="N"/>
+				<param name="f_trd_dir_cd" type="12" value="" out="N"/>
+				<param name="f_pro_vw" type="12" value="" out="N"/>
+				<param name="f_ofc_vw" type="12" value="" out="N"/>
+				<param name="f_ofc_lvl" type="12" value="" out="N"/>
+				<param name="f_ofc_cd" type="12" value="" out="N"/>
+				<param name="f_chkprd" type="12" value="" out="N"/>
+				<param name="str_display" type="12" value="" out="N"/>
+				<param name="f_pro_lvl" type="12" value="" out="N"/>
+				<param name="f_chtbiz" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

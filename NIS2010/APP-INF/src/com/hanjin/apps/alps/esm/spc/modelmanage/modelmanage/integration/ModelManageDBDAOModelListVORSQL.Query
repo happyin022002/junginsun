@@ -1,0 +1,1017 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ModelManageDBDAOModelListVORSQL">
+			<desc><![CDATA[[CHM-201322502-01] SPC 프로젝트 - 성수기 선복운영 개선을 위한 T/F추진
+--2014.08 이전 주석 쿼리안으로
+2015.06.09 이혜민 쿼리튜닝 1) QTA Data에 힌트 추가 2) MAS_MON_VVD Index 타도록 수정
+2015.06.24 이혜민 [CHM-201536449] SMP Load Guide Summary 오류 수정(RHQ Guide 물량을 delete된 노선을 0으로 만들어 결국 제외하고 가지고 오도록 수정)]]></desc>
+			<sql><![CDATA[
+WITH SPC_MDL_CUST_CTRL_V AS(
+    SELECT DISTINCT 
+           M.COST_YRWK    ,
+           M.VER_SEQ      ,
+           V.PERF_ST_YRWK ,
+           V.PERF_END_YRWK,
+           M.CUST_GRP_ID  ,
+           M.CUST_CNT_CD  ,
+           M.CUST_SEQ     ,
+           M.SC_NO        ,
+           M.RFA_NO       ,
+           M.CUST_CTRL_CD ,
+           M.WK_MQC_QTY   ,
+           M.TRD_CD       ,
+           V.CFM_FLG      ,
+           (SELECT COUNT(1)
+              FROM MAS_WK_PRD CWP
+             WHERE CWP.COST_YR||CWP.COST_WK BETWEEN V.PERF_ST_YRWK AND V.PERF_END_YRWK) NUM
+      FROM SPC_MDL_CUST_CTRL M,
+           SPC_MDL_VER_MST   V,
+           MDM_CUSTOMER      C
+     WHERE M.TRD_CD = V.TRD_CD
+       AND M.COST_YRWK = V.COST_YRWK
+       AND M.VER_SEQ   = V.VER_SEQ
+       AND M.CUST_CNT_CD = C.CUST_CNT_CD
+       AND M.CUST_SEQ  = C.CUST_SEQ
+       AND M.DELT_FLG  = 'N'
+       AND C.DELT_FLG  = 'N'
+       AND M.TRD_CD    = @[trade]
+       AND M.COST_YRWK = @[season]
+       AND M.VER_SEQ   = @[version]
+#if (${acct_cd} != '') 
+       AND M.CUST_CNT_CD||TRIM(TO_CHAR(M.CUST_SEQ, '000009')) IN ($acct_cd)
+#end
+#if (${acct_clss} == 'CC') 
+       AND (NVL(C.NEW_KEY_ACCT_FLG,'N') = 'Y' OR NVL(C.GLO_ACCT_FLG,'N') = 'Y')
+#elseif (${acct_clss} == 'RC')
+       AND NVL(C.RGN_ACCT_FLG,'N') = 'Y'
+#elseif (${acct_clss} == 'LC')
+       AND 'Y' NOT IN (NVL(C.NEW_KEY_ACCT_FLG,'N'),  NVL(C.GLO_ACCT_FLG,'N'), NVL(C.RGN_ACCT_FLG, 'N'))
+#end
+)
+, REV_SMPL_PFMC AS (
+    SELECT COST_YRWK   ,
+           VER_SEQ       ,
+           CUST_CNT_CD   ,
+           CUST_SEQ      ,
+           CTRT_OFC_CD   ,
+           SC_NO         ,
+           RFA_NO        ,
+--           WK_MQC_QTY    ,
+--           CUST_CTRL_CD  ,
+           TRD_CD        ,
+           SLS_RHQ_CD    ,
+           SUB_TRD_CD    ,
+           SLS_RGN_OFC_CD,
+           RLANE_CD      ,
+           SUM(RLANE_AVG_QTY) OVER (PARTITION BY CUST_CNT_CD, CUST_SEQ, RFA_NO, SC_NO, WK_MQC_QTY, CTRT_OFC_CD, CUST_CTRL_CD, TRD_CD)                                         AS SC_AVG_QTY      ,
+           SUM(RLANE_AVG_QTY) OVER (PARTITION BY CUST_CNT_CD, CUST_SEQ, RFA_NO, SC_NO, WK_MQC_QTY, CTRT_OFC_CD, CUST_CTRL_CD, TRD_CD, SLS_RHQ_CD, SUB_TRD_CD)                 AS STRD_AVG_TTL_QTY,
+           SUM(RLANE_AVG_QTY) OVER (PARTITION BY CUST_CNT_CD, CUST_SEQ, RFA_NO, SC_NO, WK_MQC_QTY, CTRT_OFC_CD, CUST_CTRL_CD, TRD_CD, SLS_RHQ_CD, SUB_TRD_CD, SLS_RGN_OFC_CD) AS STRD_AVG_QTY    ,
+           
+--           SUM(RLANE_CMPB * RLANE_AVG_QTY) OVER (PARTITION BY CUST_CNT_CD, CUST_SEQ, SC_NO, WK_MQC_QTY, CUST_CTRL_CD, TRD_CD, SLS_RHQ_CD, SUB_TRD_CD, SLS_RGN_OFC_CD) AS STRD_CM         ,
+           RLANE_QTY    ,
+           RLANE_AVG_QTY--,
+--           RLANE_CM     ,
+--           RLANE_CMPB   ,
+--           'N' AS CHK_FLG
+      FROM (
+              SELECT V_COST_YRWK AS COST_YRWK,
+                     VER_SEQ       ,
+                     TRD_CD        ,
+                     SUB_TRD_CD    ,
+                     SLS_RHQ_CD    ,
+                     RLANE_CD      ,
+                     SLS_RGN_OFC_CD,
+                     CTRT_OFC_CD   ,
+                     CUST_CNT_CD   ,
+                     CUST_SEQ      ,
+                     SC_NO         ,
+                     RFA_NO        ,
+                     WK_MQC_QTY    ,
+                     CUST_CTRL_CD  ,
+                     SUM(RLANE_CM)  AS RLANE_CM ,
+                     SUM(RLANE_QTY) AS RLANE_QTY,
+                     SUM(RLANE_CM) / SUM(RLANE_QTY) AS RLANE_CMPB   ,
+                     ROUND((SUM(RLANE_QTY)/MAX(NUM)), 0)       AS RLANE_AVG_QTY -- AVG로 변경 20130629 신혜성차장요청
+                     --ROUND(AVG(RLANE_QTY), 0)       AS RLANE_AVG_QTY
+                FROM (
+                        SELECT V_COST_YRWK   ,
+                               VER_SEQ       ,
+                               TRD_CD        ,
+                               SUB_TRD_CD    ,
+                               SLS_RHQ_CD    ,
+                               RLANE_CD      ,
+                               SLS_RGN_OFC_CD,
+                               MAX(DECODE(COST_YRWK, MAX_COST_YRWK, CTRT_OFC_CD, '')) OVER (PARTITION BY TRD_CD, CUST_CNT_CD, CUST_SEQ, RFA_NO, SC_NO) AS CTRT_OFC_CD,
+                               CUST_CNT_CD   ,
+                               CUST_SEQ      ,
+                               SC_NO         ,
+                               RFA_NO        ,
+                               WK_MQC_QTY    ,
+                               CUST_CTRL_CD  ,
+                               RLANE_CM      ,
+                               RLANE_QTY     ,
+                               NUM
+                          FROM (
+                                  SELECT LV.COST_YRWK AS V_COST_YRWK,
+                                         LV.VER_SEQ        ,
+                                         MCP.COST_YRWK     ,
+                                         MCP.TRD_CD        ,
+                                         MCP.SUB_TRD_CD    ,
+                                         MCP.SLS_RHQ_CD    ,
+                                         MCP.RLANE_CD      ,
+                                         MCP.SLS_RGN_OFC_CD,
+                                         MCP.CTRT_OFC_CD   ,
+                                         MCP.CUST_CNT_CD   ,
+                                         MCP.CUST_SEQ      ,
+                                         SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.SC_NO)  AS SC_NO ,
+                                         SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.RFA_NO) AS RFA_NO,
+                                         LV.CUST_CTRL_CD   ,
+                                         LV.WK_MQC_QTY     ,
+                                         SUM(MCP.RLANE_CMPB_AMT) AS RLANE_CM ,
+                                         SUM(MCP.RLANE_BKG_QTY)  AS RLANE_QTY,
+                                         MAX(MCP.COST_YRWK)      OVER (PARTITION BY MCP.TRD_CD,MCP.CUST_CNT_CD, MCP.CUST_SEQ, SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.RFA_NO), SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.SC_NO)) AS MAX_COST_YRWK,
+                                         MAX(LV.NUM) AS NUM 
+                                    FROM SPC_MDL_CUST_PERF   MCP,
+                                         SPC_MDL_CUST_CTRL_V LV 
+                                   WHERE MCP.COST_YRWK   BETWEEN LV.PERF_ST_YRWK AND LV.PERF_END_YRWK
+                                     AND MCP.TRD_CD      = LV.TRD_CD
+                                     AND MCP.CUST_CNT_CD = LV.CUST_CNT_CD
+                                     AND MCP.CUST_SEQ    = LV.CUST_SEQ
+                                     AND NVL(SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.SC_NO) , ' ') = NVL(LV.SC_NO , ' ')
+                                     AND NVL(SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.RFA_NO), ' ') = NVL(LV.RFA_NO, ' ')
+                                GROUP BY LV.COST_YRWK      ,
+                                         LV.VER_SEQ        ,
+                                         MCP.COST_YRWK     ,
+                                         MCP.TRD_CD        ,
+                                         MCP.SUB_TRD_CD    ,
+                                         MCP.SLS_RHQ_CD    ,
+                                         MCP.RLANE_CD      ,
+                                         MCP.SLS_RGN_OFC_CD,
+                                         MCP.CTRT_OFC_CD   ,
+                                         MCP.CUST_CNT_CD   ,
+                                         MCP.CUST_SEQ      ,
+                                         SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.SC_NO),
+                                         SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.RFA_NO),
+                                         LV.CUST_CTRL_CD   ,
+                                         LV.WK_MQC_QTY
+                               )
+                    )
+           GROUP BY V_COST_YRWK   ,
+                    VER_SEQ       ,
+                    TRD_CD        ,
+                    SUB_TRD_CD    ,
+                    SLS_RHQ_CD    ,
+                    RLANE_CD      ,
+                    SLS_RGN_OFC_CD,
+                    CTRT_OFC_CD   ,
+                    CUST_CNT_CD   ,
+                    CUST_SEQ      ,
+                    SC_NO         ,
+                    RFA_NO        ,
+                    WK_MQC_QTY    ,
+                    CUST_CTRL_CD 
+           )
+)
+, REV_PFMC AS (
+    SELECT COST_YRWK   ,
+           VER_SEQ       ,
+           CUST_CNT_CD   ,
+           CUST_SEQ      ,
+           CTRT_OFC_CD   ,
+           SC_NO         ,
+           RFA_NO        ,
+           WK_MQC_QTY    ,
+           CUST_CTRL_CD  ,
+           TRD_CD        ,
+           SLS_RHQ_CD    ,
+           SUB_TRD_CD    ,
+           SLS_RGN_OFC_CD,
+           RLANE_CD      ,
+           SUM(RLANE_AVG_QTY) OVER (PARTITION BY CUST_CNT_CD, CUST_SEQ, RFA_NO, SC_NO, WK_MQC_QTY, CTRT_OFC_CD, CUST_CTRL_CD, TRD_CD)                                                      AS SC_AVG_QTY      ,
+           SUM(RLANE_AVG_QTY) OVER (PARTITION BY CUST_CNT_CD, CUST_SEQ, RFA_NO, SC_NO, WK_MQC_QTY, CTRT_OFC_CD, CUST_CTRL_CD, TRD_CD, SLS_RHQ_CD, SUB_TRD_CD)                              AS STRD_AVG_TTL_QTY,
+           SUM(RLANE_AVG_QTY) OVER (PARTITION BY CUST_CNT_CD, CUST_SEQ, RFA_NO, SC_NO, WK_MQC_QTY, CTRT_OFC_CD, CUST_CTRL_CD, TRD_CD, SLS_RHQ_CD, SUB_TRD_CD, SLS_RGN_OFC_CD)              AS STRD_AVG_QTY    ,
+           SUM(RLANE_CMPB * RLANE_AVG_QTY) OVER (PARTITION BY CUST_CNT_CD, CUST_SEQ, RFA_NO, SC_NO, WK_MQC_QTY, CTRT_OFC_CD, CUST_CTRL_CD, TRD_CD, SLS_RHQ_CD, SUB_TRD_CD, SLS_RGN_OFC_CD) AS STRD_CM         ,
+           RLANE_QTY    ,
+           RLANE_AVG_QTY,
+           RLANE_CM     ,
+           RLANE_CMPB   ,
+           'N' AS CHK_FLG
+      FROM (
+              SELECT V_COST_YRWK AS COST_YRWK,
+                     VER_SEQ       ,
+                     TRD_CD        ,
+                     SUB_TRD_CD    ,
+                     SLS_RHQ_CD    ,
+                     RLANE_CD      ,
+                     SLS_RGN_OFC_CD,
+                     CTRT_OFC_CD   ,
+                     CUST_CNT_CD   ,
+                     CUST_SEQ      ,
+                     SC_NO         ,
+                     RFA_NO        ,
+                     WK_MQC_QTY    ,
+                     CUST_CTRL_CD  ,
+                     SUM(RLANE_CM)  AS RLANE_CM ,
+                     SUM(RLANE_QTY) AS RLANE_QTY,
+                     SUM(RLANE_CM) / SUM(RLANE_QTY) AS RLANE_CMPB   ,
+                     --ROUND((SUM(RLANE_QTY)/MAX(NUM)), 0)       AS RLANE_AVG_QTY -- AVG로 변경 20130629 신혜성차장요청
+                     ROUND(AVG(RLANE_QTY), 0)       AS RLANE_AVG_QTY
+                FROM (
+                        SELECT V_COST_YRWK   ,
+                               VER_SEQ       ,
+                               TRD_CD        ,
+                               SUB_TRD_CD    ,
+                               SLS_RHQ_CD    ,
+                               RLANE_CD      ,
+                               SLS_RGN_OFC_CD,
+                               MAX(DECODE(COST_YRWK, MAX_COST_YRWK, CTRT_OFC_CD, '')) OVER (PARTITION BY TRD_CD, CUST_CNT_CD, CUST_SEQ, RFA_NO, SC_NO) AS CTRT_OFC_CD,
+                               CUST_CNT_CD   ,
+                               CUST_SEQ      ,
+                               SC_NO         ,
+                               RFA_NO        ,
+                               WK_MQC_QTY    ,
+                               CUST_CTRL_CD  ,
+                               RLANE_CM      ,
+                               RLANE_QTY     ,
+                               NUM
+                          FROM (
+                                  SELECT LV.COST_YRWK AS V_COST_YRWK,
+                                         LV.VER_SEQ        ,
+                                         MCP.COST_YRWK     ,
+                                         MCP.TRD_CD        ,
+                                         MCP.SUB_TRD_CD    ,
+                                         MCP.SLS_RHQ_CD    ,
+                                         MCP.RLANE_CD      ,
+                                         MCP.SLS_RGN_OFC_CD,
+                                         MCP.CTRT_OFC_CD   ,
+                                         MCP.CUST_CNT_CD   ,
+                                         MCP.CUST_SEQ      ,
+                                         SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.SC_NO)  AS SC_NO ,
+                                         SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.RFA_NO) AS RFA_NO,
+                                         LV.CUST_CTRL_CD   ,
+                                         LV.WK_MQC_QTY     ,
+                                         SUM(MCP.RLANE_CMPB_AMT) AS RLANE_CM ,
+                                         SUM(MCP.RLANE_BKG_QTY)  AS RLANE_QTY,
+                                         MAX(MCP.COST_YRWK)      OVER (PARTITION BY MCP.TRD_CD,MCP.CUST_CNT_CD, MCP.CUST_SEQ, SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.RFA_NO), SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.SC_NO)) AS MAX_COST_YRWK,
+                                         MAX(LV.NUM) AS NUM 
+                                    FROM SPC_MDL_CUST_PERF   MCP,
+                                         SPC_MDL_CUST_CTRL_V LV 
+                                   WHERE MCP.COST_YRWK   BETWEEN LV.PERF_ST_YRWK AND LV.PERF_END_YRWK
+                                     AND MCP.TRD_CD      = LV.TRD_CD
+                                     AND MCP.CUST_CNT_CD = LV.CUST_CNT_CD
+                                     AND MCP.CUST_SEQ    = LV.CUST_SEQ
+                                     AND NVL(SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.SC_NO) , ' ') = NVL(LV.SC_NO , ' ')
+                                     AND NVL(SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.RFA_NO), ' ') = NVL(LV.RFA_NO, ' ')
+                                     --AND LV.CFM_FLG      = 'N'--2013.09.09
+                                GROUP BY LV.COST_YRWK      ,
+                                         LV.VER_SEQ        ,
+                                         MCP.COST_YRWK     ,
+                                         MCP.TRD_CD        ,
+                                         MCP.SUB_TRD_CD    ,
+                                         MCP.SLS_RHQ_CD    ,
+                                         MCP.RLANE_CD      ,
+                                         MCP.SLS_RGN_OFC_CD,
+                                         MCP.CTRT_OFC_CD   ,
+                                         MCP.CUST_CNT_CD   ,
+                                         MCP.CUST_SEQ      ,
+                                         SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.SC_NO),
+                                         SPC_GET_SMP_AMEND_FNC(MCP.TRD_CD, LV.COST_YRWK, LV.VER_SEQ, MCP.RFA_NO),
+                                         LV.CUST_CTRL_CD   ,
+                                         LV.WK_MQC_QTY
+                               )
+                    )
+           GROUP BY V_COST_YRWK   ,
+                    VER_SEQ       ,
+                    TRD_CD        ,
+                    SUB_TRD_CD    ,
+                    SLS_RHQ_CD    ,
+                    RLANE_CD      ,
+                    SLS_RGN_OFC_CD,
+                    CTRT_OFC_CD   ,
+                    CUST_CNT_CD   ,
+                    CUST_SEQ      ,
+                    SC_NO         ,
+                    RFA_NO        ,
+                    WK_MQC_QTY    ,
+                    CUST_CTRL_CD 
+           )
+)
+, REV_LANE AS (
+    SELECT RL.COST_YRWK     ,
+           RL.VER_SEQ       ,
+           RL.TRD_CD        ,
+           RL.RLANE_CD      ,
+           RL.SUB_TRD_CD    ,
+           RL.SLS_RHQ_CD    ,
+           RL.SLS_RGN_OFC_CD,
+           RL.CTRT_OFC_CD   ,
+           RL.CUST_CNT_CD   ,
+           RL.CUST_SEQ      ,
+           RL.SC_NO         ,
+           RL.RFA_NO        ,
+           LV.WK_MQC_QTY    ,
+           LV.CUST_CTRL_CD  ,
+           RL.CUST_BKG_QTY     AS STRD_TTL_QTY    ,
+           RL.SUB_TRD_BKG_QTY  AS STRD_QTY        ,
+           RL.RLANE_BKG_QTY    AS RLANE_QTY       ,
+           RL.CUST_ADJ_QTY     AS STRD_ADJ_TTL_QTY,
+           RL.SUB_TRD_ADJ_QTY  AS STRD_ADJ_QTY    ,
+           RL.RLANE_ADJ_QTY    AS RLANE_ADJ_QTY   ,
+           RL.SUB_TRD_CMPB_AMT AS STRD_CMPB       ,
+           RL.RLANE_CMPB_AMT   AS RLANE_CMPB      ,
+           'Y'                 AS CHK_FLG         ,
+ 
+           NVL((SELECT 'Y'
+                  FROM COM_USER         U,
+                       MDM_ORGANIZATION M
+                 WHERE U.USR_ID   = RL.LANE_UPD_USR_ID
+                   AND U.OFC_CD   = M.OFC_CD
+                   AND M.OFC_KND_CD = 1
+                   AND U.OFC_CD <> 'SELCTY'--TEMP
+               ), 'N') AS LANE_HO,
+           RL.SPC_CTRL_MDL_MNL_CD   AS O_ADD      ,--2013.02.22
+           RL.SPC_CTRL_MDL_MNL_RMK  AS R_RMK      ,--2013.02.22
+           RL.SPC_CTRL_MDL_RMK      AS SPC_CTRL_MDL_RMK,
+ 
+           RL.DELT_FLG AS R_DELT_FLG              ,--2013.02.20
+           MAX(RL.DELT_FLG) OVER(PARTITION BY RL.COST_YRWK, RL.VER_SEQ, RL.CUST_CNT_CD, RL.CUST_SEQ, RL.CTRT_OFC_CD, RL.RFA_NO, RL.SC_NO, RL.SUB_TRD_CD, RL.SLS_RHQ_CD, RL.SLS_RGN_OFC_CD)  AS O_DELT_MAX_FLG,  --ofc level delt_flg
+           MIN(RL.DELT_FLG) OVER(PARTITION BY RL.COST_YRWK, RL.VER_SEQ, RL.CUST_CNT_CD, RL.CUST_SEQ, RL.CTRT_OFC_CD, RL.RFA_NO, RL.SC_NO, RL.SUB_TRD_CD, RL.SLS_RHQ_CD, RL.SLS_RGN_OFC_CD)  AS O_DELT_MIN_FLG,  --ofc level delt_flg
+           MAX(RL.DELT_FLG) OVER(PARTITION BY RL.COST_YRWK, RL.VER_SEQ, RL.CUST_CNT_CD, RL.CUST_SEQ, RL.CTRT_OFC_CD, RL.RFA_NO, RL.SC_NO, RL.SUB_TRD_CD, RL.SLS_RHQ_CD)  AS S_DELT_MAX_FLG,  --rhq level delt_flg
+           MIN(RL.DELT_FLG) OVER(PARTITION BY RL.COST_YRWK, RL.VER_SEQ, RL.CUST_CNT_CD, RL.CUST_SEQ, RL.CTRT_OFC_CD, RL.RFA_NO, RL.SC_NO, RL.SUB_TRD_CD, RL.SLS_RHQ_CD)  AS S_DELT_MIN_FLG   --rhq level delt_flg
+      FROM SPC_MDL_CUST_REV_LANE RL,
+           SPC_MDL_CUST_CTRL_V   LV
+     WHERE RL.TRD_CD           = LV.TRD_CD
+       AND RL.COST_YRWK        = LV.COST_YRWK
+       AND RL.VER_SEQ          = LV.VER_SEQ
+       AND RL.CUST_CNT_CD      = LV.CUST_CNT_CD
+       AND RL.CUST_SEQ         = LV.CUST_SEQ
+       AND NVL(RL.SC_NO , ' ') = NVL(LV.SC_NO , NVL(RL.SC_NO, ' '))
+       AND NVL(RL.RFA_NO, ' ') = NVL(LV.RFA_NO, ' ')
+)
+, BASE_DATA AS (
+    SELECT DISTINCT
+           COST_YRWK     ,
+           VER_SEQ       ,
+           CUST_CNT_CD   ,
+           CUST_SEQ      ,
+           CTRT_OFC_CD   ,
+           SC_NO         ,
+           RFA_NO        ,
+           WK_MQC_QTY    ,
+           MAX(CUST_CTRL_CD) OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO) AS CUST_CTRL_CD,
+           TRD_CD        ,
+           SLS_RHQ_CD    ,
+           SUB_TRD_CD    ,
+           SLS_RGN_OFC_CD,
+		   --해당 level의 REV_LANE 데이터가 있으면 Y, REV_PFMC에만 데이터가 있으면 N
+           MAX(DECODE(CHK_FLG1, 'Y', STRD_AVG_TTL_QTY, PF_STRD_AVG_TTL_QTY)) OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD) AS CUST_QTY     ,
+           MAX(DECODE(CHK_FLG1, 'Y', STRD_ADJ_TTL_QTY, PF_STRD_ADJ_TTL_QTY)) OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD) AS CUST_ADJ_QTY ,
+           MAX(DECODE(CHK_FLG2, 'Y', STRD_AVG_QTY    , PF_STRD_AVG_QTY))     OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD) AS STRD_AVG_QTY ,
+           MAX(DECODE(CHK_FLG2, 'Y', STRD_ADJ_QTY    , PF_STRD_ADJ_QTY))     OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD) AS STRD_ADJ_QTY ,
+           MAX(DECODE(CHK_FLG2, 'Y', STRD_CMPB       , PF_STRD_CMPB))        OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD) AS STRD_CMPB    ,
+ 
+           RLANE_CD      ,
+           MAX(DECODE(CHK_FLG3, 'Y', DECODE(R_DELT_FLG,'Y',RLANE_AVG_QTY, PF_RLANE_AVG_QTY) , PF_RLANE_AVG_QTY))    OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD, RLANE_CD) AS RLANE_AVG_QTY,
+           MAX(DECODE(CHK_FLG3, 'Y', RLANE_ADJ_QTY   , PF_RLANE_ADJ_QTY))    OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD, RLANE_CD) AS RLANE_ADJ_QTY,
+           MAX(DECODE(CHK_FLG3, 'Y', DECODE(R_DELT_FLG,'Y',RLANE_CMPB, PF_RLANE_CMPB), PF_RLANE_CMPB))       OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD, RLANE_CD) AS RLANE_CMPB   ,
+           DECODE(SUM(RLANE_ADJ_QTY) OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO),0,'N','Y') AS RLAN_FLAG,   -- 신규 추가 RHQ용
+ 
+           '' T,
+ 
+           LANE_HO,
+           DECODE(O_DELT_FLG, 'Y', 'Y', R_DELT_FLG) AS R_DELT_FLG, --2013.02.20
+           O_ADD, --2013.02.22
+           R_RMK, --2013.02.22
+           SPC_CTRL_MDL_RMK
+ 
+      FROM (
+            SELECT COST_YRWK     ,
+                   VER_SEQ       ,
+                   CUST_CNT_CD   ,
+                   CUST_SEQ      ,
+                   CTRT_OFC_CD   ,
+                   SC_NO         ,
+                   RFA_NO        ,
+                   WK_MQC_QTY    ,
+                   CUST_CTRL_CD  ,
+                   TRD_CD        ,
+                   SLS_RHQ_CD    ,
+                   SUB_TRD_CD    ,
+                   SLS_RGN_OFC_CD,
+                   
+                   -- sub trade 별
+                   STRD_AVG_TTL_QTY, 
+                   PF_STRD_AVG_TTL_QTY,
+                   STRD_ADJ_TTL_QTY, 
+                   PF_STRD_ADJ_TTL_QTY,
+                   
+                   -- sub trade/office 별
+                   STRD_AVG_QTY    , 
+                   PF_STRD_AVG_QTY,
+                   STRD_ADJ_QTY    , 
+                   PF_STRD_ADJ_QTY,
+                   STRD_CMPB       , 
+                   PF_STRD_CMPB,
+                   
+                   -- sub trade/office/lane 별
+                   RLANE_CD      ,
+                   RLANE_AVG_QTY   , 
+                   PF_RLANE_AVG_QTY,
+                   RLANE_ADJ_QTY   , 
+                   PF_RLANE_ADJ_QTY,           
+                   RLANE_CMPB      , 
+                   PF_RLANE_CMPB,
+                   MAX(CHK_FLG) OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD) CHK_FLG1,
+                   MAX(CHK_FLG) OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD) CHK_FLG2,
+                   MAX(CHK_FLG) OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD, RLANE_CD) CHK_FLG3,
+                   CHK_FLG ,
+ 
+                   MAX(LANE_HO) OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD, RLANE_CD) AS LANE_HO  ,--2013.09.04
+                   MIN(O_DELT_FLG) OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD) AS O_DELT_FLG,
+                   MAX(R_DELT_FLG) OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD, RLANE_CD) AS R_DELT_FLG, --2013.02.20
+                   MAX(O_ADD)      OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD)           AS O_ADD, --2013.02.22
+                   MAX(R_RMK)      OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD, RLANE_CD) AS R_RMK, --2013.02.22
+                   MAX(SPC_CTRL_MDL_RMK) OVER(PARTITION BY COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CTRT_OFC_CD, RFA_NO, SC_NO, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD, RLANE_CD) AS SPC_CTRL_MDL_RMK  --2013.02.22
+              FROM (
+
+
+
+                      SELECT CHK_FLG       ,
+                             COST_YRWK     ,
+                             VER_SEQ       ,
+                             CUST_CNT_CD   ,
+                             CUST_SEQ      ,
+                             CTRT_OFC_CD   ,
+                             SC_NO         ,
+                             RFA_NO        ,
+                             WK_MQC_QTY    ,
+                             CUST_CTRL_CD  ,
+                             TRD_CD        ,
+                             SLS_RHQ_CD    ,
+                             SUB_TRD_CD    ,
+                             RLANE_CD      ,
+                             SLS_RGN_OFC_CD,
+                             STRD_AVG_TTL_QTY                 AS PF_STRD_AVG_TTL_QTY,
+                             0                                AS PF_STRD_ADJ_TTL_QTY,
+                             STRD_AVG_QTY                     AS PF_STRD_AVG_QTY    ,
+                             0                                AS PF_STRD_ADJ_QTY    ,
+                             ROUND(DECODE(STRD_AVG_QTY, 0, 0,STRD_CM / STRD_AVG_QTY), 0) AS PF_STRD_CMPB       ,
+                             RLANE_AVG_QTY                    AS PF_RLANE_AVG_QTY   ,
+                             0                                AS PF_RLANE_ADJ_QTY   ,
+                             ROUND(RLANE_CMPB, 0)             AS PF_RLANE_CMPB      ,
+                             0                                AS STRD_AVG_TTL_QTY   ,
+                             0                                AS STRD_ADJ_TTL_QTY   ,
+                             0                                AS STRD_AVG_QTY       ,
+                             0                                AS STRD_ADJ_QTY       ,
+                             0                                AS STRD_CMPB          ,
+                             0                                AS RLANE_AVG_QTY      ,
+                             0                                AS RLANE_ADJ_QTY      ,
+                             0                                AS RLANE_CMPB         ,
+ 
+                             'N'                              AS LANE_HO             ,
+                             'N'                              AS R_DELT_FLG         ,
+                             ''                               AS O_DELT_FLG ,
+                             ''                               AS O_ADD,              --2013.02.22
+                             ''                               AS R_RMK,              --2013.02.22
+                             ''                               AS SPC_CTRL_MDL_RMK
+                        FROM REV_PFMC P
+
+ 
+                       WHERE (TRD_CD, COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, NVL(RFA_NO, ' '), NVL(SC_NO, ' '), SLS_RHQ_CD, SUB_TRD_CD, SLS_RGN_OFC_CD, RLANE_CD, CTRT_OFC_CD) 
+                           NOT IN (SELECT TRD_CD, COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, NVL(RFA_NO, ' '), NVL(SC_NO, ' '), SLS_RHQ_CD, SUB_TRD_CD, SLS_RGN_OFC_CD, RLANE_CD, CTRT_OFC_CD
+                                     FROM REV_LANE L
+                                    WHERE 'Y' = DECODE(@[incl_del], 'Y', 'N', L.R_DELT_FLG)) 
+ 
+                      UNION ALL
+                      SELECT A.CHK_FLG       ,
+                             A.COST_YRWK     ,
+                             A.VER_SEQ       ,
+                             A.CUST_CNT_CD   ,
+                             A.CUST_SEQ      ,
+                             A.CTRT_OFC_CD   ,
+                             A.SC_NO         ,
+                             A.RFA_NO        ,
+                             A.WK_MQC_QTY    ,
+                             A.CUST_CTRL_CD  ,
+                             A.TRD_CD        ,
+                             A.SLS_RHQ_CD    ,
+                             A.SUB_TRD_CD    ,
+                             A.RLANE_CD      ,
+                             A.SLS_RGN_OFC_CD,
+                             0                AS PF_STRD_AVG_TTL_QTY,
+                             0                AS PF_STRD_ADJ_TTL_QTY,
+                             0                AS PF_STRD_AVG_QTY    ,
+                             0                AS PF_STRD_ADJ_QTY    ,
+                             0                AS PF_STRD_CMPB       ,
+                             0                AS PF_RLANE_AVG_QTY   ,
+                             0                AS PF_RLANE_ADJ_QTY   ,
+                             0                AS PF_RLANE_CMPB      , 
+                             A.STRD_TTL_QTY   AS STRD_AVG_TTL_QTY   ,
+                             DECODE(A.S_DELT_MIN_FLG, 'Y', 0, A.STRD_ADJ_TTL_QTY) AS STRD_ADJ_TTL_QTY,
+                             A.STRD_QTY         AS STRD_AVG_QTY       ,
+                             DECODE(A.O_DELT_MIN_FLG, 'Y', 0, A.STRD_ADJ_QTY)     AS STRD_ADJ_QTY,
+                             NVL(ROUND(DECODE(B.STRD_AVG_QTY, 0, 0,B.STRD_CM / B.STRD_AVG_QTY), 0), A.STRD_CMPB) AS STRD_CMPB,
+                             A.RLANE_QTY        AS RLANE_AVG_QTY      ,
+                             A.RLANE_ADJ_QTY    AS RLANE_ADJ_QTY      ,
+                             NVL(ROUND(B.RLANE_CMPB, 0), A.RLANE_CMPB) AS RLANE_CMPB,
+ 
+                             LANE_HO        ,
+                             R_DELT_FLG    , --2013.02.20
+                             R_DELT_FLG AS O_DELT_FLG ,
+                             O_ADD         , --2013.02.22
+                             R_RMK         , --2013.02.22
+                             SPC_CTRL_MDL_RMK
+
+                        FROM REV_LANE A
+                            ,REV_PFMC B
+                       WHERE A.COST_YRWK        = B.COST_YRWK      (+)
+                         AND A.VER_SEQ          = B.VER_SEQ        (+)
+                         AND A.TRD_CD           = B.TRD_CD         (+)
+                         AND A.RLANE_CD         = B.RLANE_CD       (+)
+                         AND A.SUB_TRD_CD       = B.SUB_TRD_CD     (+)
+                         AND A.SLS_RHQ_CD       = B.SLS_RHQ_CD     (+)
+                         AND A.SLS_RGN_OFC_CD   = B.SLS_RGN_OFC_CD (+)
+                         AND A.CTRT_OFC_CD      = B.CTRT_OFC_CD    (+)
+                         AND A.CUST_CNT_CD      = B.CUST_CNT_CD    (+)
+                         AND A.CUST_CTRL_CD     = B.CUST_CTRL_CD   (+)
+                         AND NVL(A.SC_NO , 'X') = NVL(B.SC_NO  (+), NVL(A.SC_NO, 'X'))
+                         AND NVL(A.RFA_NO, 'X') = NVL(B.RFA_NO (+), 'X')
+                   ) T
+
+           ) T
+
+)
+
+, MAS_MON_VVD_LV AS(
+         SELECT M.TRD_CD
+              , M.SUB_TRD_CD
+              , M.RLANE_CD
+              , M.DIR_CD
+              , SUBSTR(M.SLS_YRMON, 1, 4)  AS COST_YR
+              , M.COST_WK
+              , SUBSTR(M.SLS_YRMON, 1, 4) || M.COST_WK       AS COST_YRWK
+              , TO_CHAR(M.N1ST_LODG_PORT_ETD_DT, 'YYYYMMDD') AS N1ST_LODG_PORT_ETD_DT
+              , M.VSL_CD
+              , M.SKD_VOY_NO
+              , H.DIR_CD AS SKD_DIR_CD
+              , SUBSTR(M.COST_YRMON, 1, 4) AS BSE_YR
+              , CASE WHEN M.COST_YRMON >= '201501' 
+                     THEN CEIL(TO_NUMBER(SUBSTR(M.COST_YRMON, -2))/3)||'Q' 
+                     ELSE CEIL(TO_NUMBER(DECODE(M.COST_WK, '00', '01', '53', '52', M.COST_WK))/13)||'Q' 
+                      END BSE_QTR_CD
+          FROM  MAS_MON_VVD M
+              , SPC_HD_HUL_MST H
+          WHERE SUBSTR(M.SLS_YRMON, 1, 4)||COST_WK LIKE TO_CHAR(SYSDATE, 'YYYY')||'%'
+            AND M.TRD_CD     = @[trade]
+            AND M.TRD_CD     = H.TRD_CD
+            AND M.SUB_TRD_CD = H.SUB_TRD_CD
+            AND M.RLANE_CD   = H.RLANE_CD
+            AND M.DIR_CD     = H.DIR_CD
+            AND M.DELT_FLG   = 'N' 
+
+
+)
+
+, QTA AS (     
+            SELECT OFC_CD,
+                   TRD_CD,
+                   SUB_TRD_CD,
+                   RLANE_CD,
+                   ROUND(SUM(LOAD)) AS LOAD_QTA
+              FROM (
+                   SELECT 
+                          OFC_CD,
+                          TRD_CD,
+                          SUB_TRD_CD,
+                          RLANE_CD,
+                          COST_YRWK,
+                          VSL_CD,
+                          SKD_VOY_NO,
+                          SKD_DIR_CD,
+                          MAX_CNT,
+                          SUM(LOD_QTY) OVER(PARTITION BY OFC_CD, TRD_CD, SUB_TRD_CD,RLANE_CD,COST_YRWK, VSL_CD,SKD_VOY_NO, SKD_DIR_CD)    AS LOAD,
+                          RANK() OVER(PARTITION BY OFC_CD, TRD_CD, SUB_TRD_CD, RLANE_CD ORDER BY OFC_CD, TRD_CD, SUB_TRD_CD,RLANE_CD,MAX_CNT DESC, COST_YRWK ASC, N1ST_LODG_PORT_ETD_DT ASC) AS CNT
+                     FROM (     
+                           SELECT /*+ LEADING(B T1 C LV) */ 
+                                  T2.SAQ_RGN_OFC_CD      AS OFC_CD,
+                                  T1.TRD_CD,
+                                  LV.SUB_TRD_CD,
+                                  T1.RLANE_CD,
+                                  LV.COST_YRWK,
+                                  LV.N1ST_LODG_PORT_ETD_DT,
+                                  T1.VSL_CD,
+                                  T1.SKD_VOY_NO,
+                                  T1.SKD_DIR_CD,
+                                  T1.LOD_QTY,
+                                  COUNT(1) OVER(PARTITION BY C.FNL_BSA_CAPA,C.DIR_CD) AS MAX_CNT  -- 동일 BSA가 가장 많은것 선택
+                             FROM SQM_CFM_QTA      T1 ,
+                                  SQM_QTA_RLSE_VER MQR,
+                                  MAS_MON_VVD_LV   LV,
+                                  SQM_CFM_TGT_VVD  C,
+                                  SPC_OFC_LVL      T2
+                            WHERE 1 = 1
+                              AND MQR.BSE_YR           = LV.BSE_YR
+                              AND MQR.BSE_QTR_CD       = LV.BSE_QTR_CD
+                              AND MQR.SQM_VER_STS_CD   = 'R' 
+                              AND MQR.BSE_TP_CD        = 'Q'
+                              AND T1.QTA_RLSE_VER_NO   = MQR.QTA_RLSE_VER_NO
+                              AND T1.BSE_TP_CD         = MQR.BSE_TP_CD
+                              AND T1.BSE_YR            = MQR.BSE_YR
+                              AND T1.BSE_QTR_CD        = MQR.BSE_QTR_CD
+                              AND T1.QTA_TGT_CD        = 'D'
+                              AND T1.OFC_VW_CD         = 'L' 
+                              AND SPC_SCR_OFC_CONV_FNC(T1.RGN_OFC_CD,'') = T2.OFC_CD
+                              AND LV.COST_YRWK BETWEEN T2.OFC_APLY_FM_YRWK AND T2.OFC_APLY_TO_YRWK
+                              AND T2.DELT_FLG         = 'N'
+                              AND T1.TRD_CD           = LV.TRD_CD
+                              AND T1.RLANE_CD         = LV.RLANE_CD
+                              AND T1.DIR_CD           = LV.SKD_DIR_CD
+                              AND T1.VSL_CD           = LV.VSL_CD
+                              AND T1.SKD_VOY_NO       = LV.SKD_VOY_NO
+                              AND T1.SKD_DIR_CD       = LV.SKD_DIR_CD                               
+                              AND T1.QTA_RLSE_VER_NO  = C.QTA_RLSE_VER_NO
+                              AND T1.BSE_TP_CD        = C.BSE_TP_CD -- 분기 20131205추가
+                              AND T1.BSE_YR           = C.BSE_YR
+                              AND T1.BSE_QTR_CD       = C.BSE_QTR_CD
+                              AND T1.QTA_TGT_CD       = C.QTA_TGT_CD
+                              AND T1.TRD_CD           = C.TRD_CD
+                              AND T1.RLANE_CD         = C.RLANE_CD
+                              AND T1.DIR_CD           = C.DIR_CD
+                              AND T1.VSL_CD           = C.VSL_CD
+                              AND T1.SKD_VOY_NO       = C.SKD_VOY_NO
+                              AND T1.SKD_DIR_CD       = C.SKD_DIR_CD 
+                              AND EXISTS (
+                                          SELECT 1                                    
+                                            FROM SPC_MDL_CUST_REV_LANE   MCP
+                                           WHERE MCP.COST_YRWK      = @[season]
+                                             AND MCP.VER_SEQ        = @[version]
+                                             AND MCP.TRD_CD         = LV.TRD_CD
+                                             AND MCP.SUB_TRD_CD     = LV.SUB_TRD_CD
+                                             AND MCP.RLANE_CD       = LV.RLANE_CD
+                                             AND MCP.SLS_RGN_OFC_CD = T2.SAQ_RGN_OFC_CD               
+                                         )
+                              AND T1.LOD_QTY>0  
+                             )                        
+                   )
+             WHERE CNT = 1
+             GROUP BY OFC_CD,
+                   TRD_CD,
+                   SUB_TRD_CD,
+                   RLANE_CD
+             HAVING ROUND(SUM(LOAD)) <> 0   
+) 
+
+, RSLT AS (
+    SELECT COST_YRWK      ,
+           VER_SEQ        ,
+           CUST_CNT_CD    ,
+           CUST_SEQ       ,
+           CUST_LGL_ENG_NM,
+           CUST_GRP_NM,
+           ACCT_CLSS_CD,
+           CTRT_OFC_CD    ,
+           SC_NO     ,
+           RFA_NO    ,
+           WK_MQC_QTY  ,
+           CUST_CTRL_CD,
+           TRD_CD      ,
+           SUB_TRD_CD,
+           SLS_RHQ_CD,
+           CUST_QTY    ,
+           CUST_TTL_QTY    ,
+           CUST_ADJ_QTY    ,
+           CUST_ADJ_TTL_QTY    ,
+           SLS_RGN_OFC_CD  ,
+           STRD_QTY        ,
+           STRD_TTL_QTY    ,
+           STRD_PFMC_RATIO ,
+           STRD_ADJ_QTY    ,
+           STRD_ADJ_TTL_QTY    ,
+           STRD_CMPB,
+           RLANE_CD,
+ 
+           LOAD_QTA,  -- 2013.03.14
+           LOAD_TTL_QTA,
+           RLANE_QTY       ,
+           RLANE_TTL_QTY,
+           RLANE_PFMC_RATIO,
+           RLANE_ADJ_QTY   ,
+           RLANE_ADJ_TTL_QTY,
+           RLANE_CMPB,
+           DECODE(SLS_RGN_OFC_CD,'TTL','',O_ADD) AS O_ADD, -- 2013.02.22
+           DECODE(SLS_RGN_OFC_CD,'TTL','',R_RMK) AS R_RMK, -- 2013.02.22
+           DECODE(SLS_RGN_OFC_CD,'TTL','',SPC_CTRL_MDL_RMK) AS SPC_CTRL_MDL_RMK, -- 2013.02.22
+
+           (SELECT COUNT(*)
+              FROM SPC_MDL_CUST_REV_LANE T2
+             WHERE T2.TRD_CD           = T1.TRD_CD
+               AND T2.COST_YRWK        = T1.COST_YRWK
+               AND T2.VER_SEQ          = T1.VER_SEQ
+               AND T2.CUST_CNT_CD      = T1.CUST_CNT_CD
+               AND T2.CUST_SEQ         = T1.CUST_SEQ
+               AND NVL(T2.SC_NO , ' ') = NVL(T1.SC_NO , NVL(T2.SC_NO, ' '))
+               AND NVL(T2.RFA_NO, ' ') = NVL(T1.RFA_NO, ' ')
+               AND T2.CTRT_OFC_CD      = T1.CTRT_OFC_CD
+           ) AS REV_LANE_CUST_CNT,
+           LANE_HO,
+ 
+           T,
+           DELT_FLG
+      FROM (
+
+              SELECT COST_YRWK      ,
+                     VER_SEQ        ,
+                     CUST_CNT_CD    ,
+                     CUST_SEQ       ,
+                     CUST_LGL_ENG_NM,
+                     NVL(CUST_GRP_NM, CUST_LGL_ENG_NM) AS CUST_GRP_NM,
+                     ACCT_CLSS      AS ACCT_CLSS_CD,
+                     CTRT_OFC_CD    ,
+                     SC_NO          ,
+                     RFA_NO         ,
+                     MAX(WK_MQC_QTY) / DECODE(@[unit], 'T', 1, 2)  AS WK_MQC_QTY  ,
+                     MAX(CUST_CTRL_CD) AS CUST_CTRL_CD,
+                     MAX(TRD_CD)       AS TRD_CD      ,
+                     SUB_TRD_CD,
+                     SLS_RHQ_CD,
+                     CUST_QTY     / DECODE(@[unit], 'T', 1, 2)                           AS CUST_QTY    ,
+                     ROUND(SUM(CUST_QTY / CUST_CNT), 0)     / DECODE(@[unit], 'T', 1, 2) AS CUST_TTL_QTY    ,
+                     CUST_ADJ_QTY / DECODE(@[unit], 'T', 1, 2)                           AS CUST_ADJ_QTY    ,
+                     ROUND(SUM(CUST_ADJ_QTY / CUST_CNT), 0)     / DECODE(@[unit], 'T', 1, 2) AS CUST_ADJ_TTL_QTY    ,
+                     NVL(SLS_RGN_OFC_CD, 'TTL')                                      AS SLS_RGN_OFC_CD  ,
+ 
+                     STRD_AVG_QTY / DECODE(@[unit], 'T', 1, 2)                           AS STRD_QTY        ,
+                     ROUND(SUM(STRD_AVG_QTY / STRD_CNT), 0) / DECODE(@[unit], 'T', 1, 2) AS STRD_TTL_QTY    ,
+ 
+                     MAX(STRD_PFMC_RATIO)                                            AS STRD_PFMC_RATIO ,
+                     MAX(STRD_ADJ_QTY) / DECODE(@[unit], 'T', 1, 2)                      AS STRD_ADJ_QTY    ,
+                     ROUND(SUM(STRD_ADJ_QTY / STRD_CNT), 0)     / DECODE(@[unit], 'T', 1, 2) AS STRD_ADJ_TTL_QTY    ,
+                     STRD_CMPB * DECODE(@[unit], 'T', 1, 2) AS STRD_CMPB,
+                     RLANE_CD,
+ 
+                     MAX(LOAD_QTA) AS LOAD_QTA, -- 2013.03.14
+                     ROUND(SUM(LOAD_QTA / RLANE_CNT), 0) / DECODE(@[unit], 'T', 1, 2)  AS LOAD_TTL_QTA,
+                     MAX(RLANE_AVG_QTY) / DECODE(@[unit], 'T', 1, 2)                     AS RLANE_QTY       ,
+                     ROUND(SUM(RLANE_AVG_QTY / RLANE_CNT), 0) / DECODE(@[unit], 'T', 1, 2) AS RLANE_TTL_QTY,
+                     RLANE_PFMC_RATIO,
+                     MAX(RLANE_ADJ_QTY) / DECODE(@[unit], 'T', 1, 2)                     AS RLANE_ADJ_QTY   ,
+                     ROUND(SUM(RLANE_ADJ_QTY / RLANE_CNT), 0)     / DECODE(@[unit], 'T', 1, 2)  AS RLANE_ADJ_TTL_QTY,
+                     RLANE_CMPB * DECODE(@[unit], 'T', 1, 2) AS RLANE_CMPB,
+                     O_ADD, -- 2013.02.22
+                     R_RMK, -- 2013.02.22
+                     SPC_CTRL_MDL_RMK,
+                     MAX(LANE_HO) AS LANE_HO,
+ 
+                     DELT_FLG,
+                     @[view_type] T
+                FROM (
+                        SELECT DTL.COST_YRWK  ,
+                               DTL.VER_SEQ    ,
+                               DTL.CUST_CNT_CD,
+                               DTL.CUST_SEQ   ,
+                               (SELECT A.CUST_LGL_ENG_NM
+                                  FROM MDM_CUSTOMER A
+                                 WHERE A.CUST_CNT_CD = DTL.CUST_CNT_CD
+                                   AND A.CUST_SEQ    = DTL.CUST_SEQ
+                               ) AS CUST_LGL_ENG_NM,
+                               (SELECT B.CUST_GRP_NM
+                                  FROM MDM_CUSTOMER      A,
+                                       MDM_CUST_PERF_GRP B
+                                 WHERE A.CUST_CNT_CD = DTL.CUST_CNT_CD
+                                   AND A.CUST_SEQ    = DTL.CUST_SEQ
+                                   AND A.CUST_GRP_ID = B.CUST_GRP_ID 
+                               ) AS CUST_GRP_NM,
+/* ACCT_CLSS를 더이상 사용하지 않는다.
+                               (SELECT CASE WHEN NVL(NEW_KEY_ACCT_FLG,'N') = 'Y' THEN 'CC'
+                                            WHEN NVL(GLO_ACCT_FLG,'N') = 'Y' THEN 'CC'
+                                            WHEN NVL(RGN_ACCT_FLG,'N') = 'Y' THEN 'RC'
+                                            ELSE 'LC'
+                                       END
+                                  FROM MDM_CUSTOMER A
+                                 WHERE A.CUST_CNT_CD = DTL.CUST_CNT_CD
+                                   AND A.CUST_SEQ    = DTL.CUST_SEQ
+                               ) AS ACCT_CLSS,
+*/
+							    'XX' AS ACCT_CLSS,
+                               DTL.CTRT_OFC_CD   ,
+                               DTL.SC_NO         ,
+                               DTL.RFA_NO        ,
+                               DTL.WK_MQC_QTY    ,
+                               DTL.CUST_QTY      ,
+                               COUNT(1) OVER (PARTITION BY DTL.COST_YRWK, DTL.VER_SEQ, DTL.CUST_CNT_CD, DTL.CUST_SEQ, DTL.CTRT_OFC_CD, DTL.RFA_NO, DTL.SC_NO, DTL.WK_MQC_QTY, DTL.CUST_QTY, DTL.CUST_ADJ_QTY, DTL.CUST_CTRL_CD, DTL.TRD_CD, DTL.SUB_TRD_CD, DTL.SLS_RHQ_CD) AS CUST_CNT,
+                               DTL.CUST_ADJ_QTY  ,
+                               DTL.CUST_CTRL_CD  ,
+                               DTL.TRD_CD        ,
+                               DTL.SLS_RHQ_CD    ,
+                               DTL.SUB_TRD_CD    ,
+                               DTL.SLS_RGN_OFC_CD,
+                               DTL.STRD_AVG_QTY  ,
+                               ROUND((RATIO_TO_REPORT(DTL.STRD_AVG_QTY) OVER (PARTITION BY DTL.CUST_CNT_CD,DTL.CUST_SEQ, DTL.CTRT_OFC_CD, DTL.RFA_NO, DTL.SC_NO, DTL.SUB_TRD_CD, DTL.SLS_RHQ_CD)) * 100, 2) AS STRD_PFMC_RATIO,
+                               COUNT(1) OVER (PARTITION BY DTL.COST_YRWK, DTL.VER_SEQ, DTL.CUST_CNT_CD, DTL.CUST_SEQ, DTL.CTRT_OFC_CD, DTL.RFA_NO, DTL.SC_NO, DTL.WK_MQC_QTY, DTL.CUST_QTY, DTL.CUST_ADJ_QTY, DTL.CUST_CTRL_CD, DTL.TRD_CD, DTL.SUB_TRD_CD, DTL.SLS_RHQ_CD, DTL.SLS_RGN_OFC_CD) AS STRD_CNT,
+                               COUNT(1) OVER (PARTITION BY DTL.COST_YRWK, DTL.VER_SEQ, DTL.CUST_CNT_CD, DTL.CUST_SEQ, DTL.CTRT_OFC_CD, DTL.RFA_NO, DTL.SC_NO, DTL.WK_MQC_QTY, DTL.CUST_QTY, DTL.CUST_ADJ_QTY, DTL.CUST_CTRL_CD, DTL.TRD_CD, DTL.SUB_TRD_CD, DTL.SLS_RHQ_CD, DTL.SLS_RGN_OFC_CD, DTL.RLANE_CD) AS RLANE_CNT,
+                               DTL.STRD_ADJ_QTY  ,
+                               DTL.STRD_CMPB     ,
+                               DTL.RLANE_CD      ,
+ 
+                               NVL(Q.LOAD_QTA,0) AS LOAD_QTA,
+                               DTL.RLANE_AVG_QTY ,
+                               ROUND((RATIO_TO_REPORT(DTL.RLANE_AVG_QTY) OVER (PARTITION BY DTL.CUST_CNT_CD,DTL.CUST_SEQ, DTL.CTRT_OFC_CD, DTL.RFA_NO, DTL.SC_NO, DTL.SUB_TRD_CD, DTL.SLS_RHQ_CD, DTL.SLS_RGN_OFC_CD)) * 100, 2) AS RLANE_PFMC_RATIO,
+                               DTL.RLANE_ADJ_QTY ,
+                               DTL.RLANE_CMPB    ,
+                               DTL.RLAN_FLAG,   -- 신규 추가 RHQ용
+                               LANE_HO        ,                
+                                '' T,
+ 
+                               DTL.R_DELT_FLG AS DELT_FLG,--2013.02.20
+                               DTL.O_ADD,  --2013.02.22
+                               DTL.R_RMK,  --2013.02.22
+                               DTL.SPC_CTRL_MDL_RMK
+ 
+                          FROM BASE_DATA DTL,
+                               QTA Q
+                         WHERE DTL.SLS_RGN_OFC_CD = Q.OFC_CD(+)
+                           AND DTL.TRD_CD         = Q.TRD_CD(+)
+                           AND DTL.SUB_TRD_CD     = Q.SUB_TRD_CD(+)
+                           AND DTL.RLANE_CD       = Q.RLANE_CD(+)
+    #if (${incl_del} != 'Y')
+ 
+                           AND DTL.R_DELT_FLG = 'N'--2013.02.20
+    #end
+                     )
+            GROUP BY GROUPING SETS (
+                                      (COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CUST_LGL_ENG_NM, CUST_GRP_NM, ACCT_CLSS, CTRT_OFC_CD, SC_NO, RFA_NO),
+                                      (COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CUST_LGL_ENG_NM, CUST_GRP_NM, ACCT_CLSS, CTRT_OFC_CD, SC_NO, RFA_NO, SUB_TRD_CD, SLS_RHQ_CD),
+
+
+                                      (COST_YRWK, VER_SEQ, CUST_CNT_CD, CUST_SEQ, CUST_LGL_ENG_NM, CUST_GRP_NM, ACCT_CLSS, CTRT_OFC_CD, SC_NO, RFA_NO, WK_MQC_QTY, CUST_QTY, CUST_ADJ_QTY, CUST_CTRL_CD, TRD_CD, SUB_TRD_CD, SLS_RHQ_CD, SLS_RGN_OFC_CD, STRD_AVG_QTY, STRD_CMPB, RLANE_CD, RLANE_CMPB, RLANE_PFMC_RATIO, DELT_FLG, O_ADD, R_RMK, SPC_CTRL_MDL_RMK)
+            
+                                   )
+
+      ) T1
+)
+
+SELECT COST_YRWK      ,
+       VER_SEQ        ,
+       CUST_CNT_CD    ,
+       CUST_SEQ       ,
+       CUST_LGL_ENG_NM,
+       CUST_GRP_NM,
+       ACCT_CLSS_CD,
+       CTRT_OFC_CD    ,
+       SC_NO     ,
+       NVL(RFA_NO, SC_NO) AS RFA_NO,
+       WK_MQC_QTY  ,
+       CUST_CTRL_CD,
+       TRD_CD      ,
+       SUB_TRD_CD,
+       SLS_RHQ_CD,
+       CUST_QTY    ,
+       CUST_TTL_QTY    ,
+       (SELECT SUM(T2.RLANE_AVG_QTY)--DECODE(T1.SUB_TRD_CD, NULL, T2.SC_AVG_QTY, STRD_AVG_TTL_QTY) 
+          FROM REV_SMPL_PFMC T2
+         WHERE T1.COST_YRWK        = T2.COST_YRWK
+           AND T1.VER_SEQ          = T2.VER_SEQ
+           AND T1.CUST_CNT_CD      = T2.CUST_CNT_CD
+           AND T1.CUST_SEQ         = T2.CUST_SEQ
+           AND NVL(T1.SC_NO , ' ') = NVL(T2.SC_NO , NVL(T1.SC_NO, ' '))
+           AND NVL(T1.RFA_NO, ' ') = NVL(T2.RFA_NO, ' ')
+           AND T1.TRD_CD           = T2.TRD_CD
+           AND DECODE(T1.SUB_TRD_CD, NULL, T2.SLS_RHQ_CD, T1.SLS_RHQ_CD) = T2.SLS_RHQ_CD
+           AND DECODE(T1.SUB_TRD_CD, NULL, T2.SUB_TRD_CD, T1.SUB_TRD_CD) = T2.SUB_TRD_CD
+           AND T1.CTRT_OFC_CD      = T2.CTRT_OFC_CD
+           AND SLS_RGN_OFC_CD IN (SELECT SLS_RGN_OFC_CD
+                                    FROM RSLT R
+                                   WHERE R.COST_YRWK        = T2.COST_YRWK
+                                     AND R.VER_SEQ          = T2.VER_SEQ
+                                     AND R.CUST_CNT_CD      = T2.CUST_CNT_CD
+                                     AND R.CUST_SEQ         = T2.CUST_SEQ
+                                     AND NVL(R.SC_NO , ' ') = NVL(T2.SC_NO , NVL(R.SC_NO, ' '))
+                                     AND NVL(R.RFA_NO, ' ') = NVL(T2.RFA_NO, ' ')
+                                     AND R.TRD_CD           = T2.TRD_CD
+                                     AND R.SUB_TRD_CD       = T2.SUB_TRD_CD
+                                     AND R.SLS_RHQ_CD       = T2.SLS_RHQ_CD
+                                     AND R.CTRT_OFC_CD      = T2.CTRT_OFC_CD)
+       ) AS SMPL_CUST_QTY,
+       CUST_ADJ_QTY    ,
+       CUST_ADJ_TTL_QTY    ,
+       SLS_RGN_OFC_CD  ,
+       STRD_QTY        ,
+       STRD_TTL_QTY    ,
+       (SELECT SUM(T2.RLANE_AVG_QTY)
+          FROM REV_SMPL_PFMC T2
+         WHERE T1.COST_YRWK        = T2.COST_YRWK
+           AND T1.VER_SEQ          = T2.VER_SEQ
+           AND T1.CUST_CNT_CD      = T2.CUST_CNT_CD
+           AND T1.CUST_SEQ         = T2.CUST_SEQ
+           AND NVL(T1.SC_NO , ' ') = NVL(T2.SC_NO , NVL(T1.SC_NO, ' '))
+           AND NVL(T1.RFA_NO, ' ') = NVL(T2.RFA_NO, ' ')
+           AND T1.TRD_CD           = T2.TRD_CD
+           AND DECODE(T1.SUB_TRD_CD, NULL, T2.SLS_RHQ_CD, T1.SLS_RHQ_CD) = T2.SLS_RHQ_CD
+           AND DECODE(T1.SUB_TRD_CD, NULL, T2.SUB_TRD_CD, T1.SUB_TRD_CD) = T2.SUB_TRD_CD
+           AND DECODE(T1.SLS_RGN_OFC_CD,'TTL',T2.SLS_RGN_OFC_CD,T1.SLS_RGN_OFC_CD) = T2.SLS_RGN_OFC_CD
+           AND T1.CTRT_OFC_CD      = T2.CTRT_OFC_CD
+           AND SLS_RGN_OFC_CD IN (SELECT SLS_RGN_OFC_CD
+                                    FROM RSLT R
+                                   WHERE R.COST_YRWK        = T2.COST_YRWK
+                                     AND R.VER_SEQ          = T2.VER_SEQ
+                                     AND R.CUST_CNT_CD      = T2.CUST_CNT_CD
+                                     AND R.CUST_SEQ         = T2.CUST_SEQ
+                                     AND NVL(R.SC_NO , ' ') = NVL(T2.SC_NO , NVL(R.SC_NO, ' '))
+                                     AND NVL(R.RFA_NO, ' ') = NVL(T2.RFA_NO, ' ')
+                                     AND R.TRD_CD           = T2.TRD_CD
+                                     AND R.SUB_TRD_CD       = T2.SUB_TRD_CD
+                                     AND R.SLS_RHQ_CD       = T2.SLS_RHQ_CD
+                                     AND R.CTRT_OFC_CD      = T2.CTRT_OFC_CD)
+       ) AS SMPL_STRD_QTY,
+       STRD_PFMC_RATIO ,
+       STRD_ADJ_QTY    ,
+       STRD_ADJ_TTL_QTY    ,
+       STRD_CMPB,
+       RLANE_CD,
+ 
+       LOAD_QTA,
+       LOAD_TTL_QTA,
+       RLANE_QTY       ,
+       RLANE_TTL_QTY,
+       (SELECT SUM(T2.RLANE_AVG_QTY)
+          FROM REV_SMPL_PFMC T2
+         WHERE T1.COST_YRWK        = T2.COST_YRWK
+           AND T1.VER_SEQ          = T2.VER_SEQ
+           AND T1.CUST_CNT_CD      = T2.CUST_CNT_CD
+           AND T1.CUST_SEQ         = T2.CUST_SEQ
+           AND NVL(T1.SC_NO , ' ') = NVL(T2.SC_NO , NVL(T1.SC_NO, ' '))
+           AND NVL(T1.RFA_NO, ' ') = NVL(T2.RFA_NO, ' ')
+           AND T1.TRD_CD           = T2.TRD_CD
+           AND DECODE(T1.SUB_TRD_CD, NULL, T2.SLS_RHQ_CD, T1.SLS_RHQ_CD) = T2.SLS_RHQ_CD
+           AND DECODE(T1.SUB_TRD_CD, NULL, T2.SUB_TRD_CD, T1.SUB_TRD_CD) = T2.SUB_TRD_CD
+           AND DECODE(T1.SLS_RGN_OFC_CD, 'TTL', T2.SLS_RGN_OFC_CD,T1.SLS_RGN_OFC_CD) = T2.SLS_RGN_OFC_CD
+           AND DECODE(T1.RLANE_CD, NULL, T2.RLANE_CD, T1.RLANE_CD) = T2.RLANE_CD
+           AND T1.CTRT_OFC_CD      = T2.CTRT_OFC_CD
+           AND (SLS_RGN_OFC_CD, RLANE_CD) IN (SELECT SLS_RGN_OFC_CD, RLANE_CD
+                                                FROM RSLT R
+                                               WHERE R.COST_YRWK        = T2.COST_YRWK
+                                                 AND R.VER_SEQ          = T2.VER_SEQ
+                                                 AND R.CUST_CNT_CD      = T2.CUST_CNT_CD
+                                                 AND R.CUST_SEQ         = T2.CUST_SEQ
+                                                 AND NVL(R.SC_NO , ' ') = NVL(T2.SC_NO , NVL(R.SC_NO, ' '))
+                                                 AND NVL(R.RFA_NO, ' ') = NVL(T2.RFA_NO, ' ')
+                                                 AND R.TRD_CD           = T2.TRD_CD
+                                                 AND R.SUB_TRD_CD       = T2.SUB_TRD_CD
+                                     			 AND R.SLS_RHQ_CD       = T2.SLS_RHQ_CD
+                                     			 AND R.CTRT_OFC_CD      = T2.CTRT_OFC_CD)
+       ) AS SMPL_RLANE_QTY,
+       RLANE_PFMC_RATIO,
+       RLANE_ADJ_QTY   ,
+       RLANE_ADJ_TTL_QTY,
+       RLANE_CMPB,
+       O_ADD,
+       R_RMK,
+       SPC_CTRL_MDL_RMK,
+       REV_LANE_CUST_CNT,
+       LANE_HO,
+ 
+       T,
+       DELT_FLG,
+       NVL2(SC_NO, 'SC', 'RFA') AS SC_RFA_FLG
+  FROM RSLT T1
+ ORDER BY COST_YRWK     ,
+          VER_SEQ       ,
+          DECODE(ACCT_CLSS_CD, 'CC', 1, 'RC', 2, 'LC', 3),
+          CUST_GRP_NM   ,
+          CUST_LGL_ENG_NM,
+          CTRT_OFC_CD   ,
+          SC_NO         ,
+          RFA_NO        ,
+          SUB_TRD_CD    ,
+          SLS_RHQ_CD    ,
+          DECODE(SLS_RGN_OFC_CD, 'TTL', 'ZZZZZ', SLS_RGN_OFC_CD)
+          , RLANE_CD
+ 
+/*
+2013.06.25 진마리아 [선처리] CRM Customer Flag 정보 개편에 따른 작업
+2013.06.29 김시몬 [CHM-201325016] PFMC AVG 기준 변경 수정
+2013.07.04 김시몬 [CHM-201325089] 하나의 LANE을 물고 있는 OFC에 대해 LANE삭제시
+                                                      SUB TRD/RHQ GUIDE 초기화가 안되어 잘못된 물량을 보여주는것 보완
+2013.07.05 김시몬 [CHM-201325631] 하나의 OFC/LANE에 대한 LANE삭제시 조회관련 오류로 긴급 형상 반영 요청
+2013.09.04 [Trouble Shooting] HO_FLG 로 인해 DISTINCT가 되지 않으면서 RATIO가 잘못 산출됨
+2013.09.09 [Trouble Shooting] PFMC AVG 컬럼 추가(1/N 한 값)
+2013.12.05 김시몬 [CHM-201326854] SAQ project로 인한 SPC 변경건_테이블 변경
+2014.02.04 [CHM-201428383-01] RFA 로직 추가
+2014.03.17 [CHM-20142960] SMP/Allocation control보완 요청 - SPC_GET_SMP_AMEND_FNC 적용
+2014.05.16 [CHM-201430353] SMP / AES 보완요청 - SC 입력 기능 추가
+2014.06.12 ofc CRUD 체크용 flag 추가
+2014.08.27 CMPB 계산시 FEU는 * 2를 해서 보여주도록 변경
+2018.04.02 CSR3462에 의해 수정됨(H/O,HRQ,L.OFC통합)
+*/			]]></sql>
+			<params>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="season" type="12" value="201308" out="N"/>
+				<param name="version" type="12" value="3" out="N"/>
+				<param name="incl_del" type="12" value="" out="N"/>
+				<param name="unit" type="12" value="" out="N"/>
+				<param name="view_type" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

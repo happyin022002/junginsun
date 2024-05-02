@@ -1,0 +1,586 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="MarineTerminalInvoiceManageDBDAOVerifyTerminalInvoiceContainerListTrunkRSQL">
+			<desc><![CDATA[VerifyTerminalInvoiceContainerListTrunk
+2011.06.21 이일민 [CHM-201111697] TES INV 생성시 T/S 구분자 참조로직 변경 요청 (PRD IO BND 구분)
+2011.06.21 이일민 [CHM-201111699] [TES] Auto-Calcualtion의 CNTR Verification 보완 (BB CGO / AWK CGO 기준 변경)]]></desc>
+			<sql><![CDATA[
+#if (${vrfy_tml_cd} != '' and ${yd_cd} != '' and ${tml_port_cd} != '' and ${vrfy_tml_cd} != ${tml_port_cd})
+SELECT X.*  --// 구주 털보 아저씨 (2014-05-20)
+FROM (
+#else 
+#end
+
+SELECT   /*+ NO_QUERY_TRANSFORMATION */ A.CNTR_NO
+			,A.CNTR_TPSZ_CD
+			,A.CNTR_STY_CD
+			,SUBSTR(A.VVD,1,4) VSL_CD
+			,SUBSTR(A.VVD,5,4) SKD_VOY_NO
+			,SUBSTR(A.VVD,9,1) SKD_DIR_CD
+			,A.VNDR_SEQ
+			,A.YD_CD
+			,A.RCV_DT
+			,A.WRK_DT
+			,A.CNTR_RMK
+			,@[atb_dt] ATB_DT
+--  데이타 정제 작업으로 인한 Logic 수정  - CNTR LIST DSCR_IND_CD에 CO값 코드 부정합 ( 2009-09-16 )
+--			,SUBSTR(A.DSCR_IND_CD,0,2)  DSCR_IND_CD
+			, DECODE( SUBSTR(A.DSCR_IND_CD,0,2), 'CO', '', SUBSTR(A.DSCR_IND_CD,0,2) )  DSCR_IND_CD
+			,DECODE(LENGTH(A.DSCR_IND_CD),3, SUBSTR(A.DSCR_IND_CD,3,1),'') DSCR_DTL_IND_CD
+			,B.BKG_NO
+			--,B.BKG_NO_SPLIT
+			,B.BL_NO
+			--,B.BL_NO_CHK
+			,B.BL_NO_TP
+			,A.IO_BND_CD
+			,B.IPC          IOC_CD
+			,B.LANE         LANE_CD
+			,B.TS           LOCL_TS_IND_CD
+			,B.RCVDE_TERM_IND_CD
+			,DECODE(B.DCGO_CLSS_CD,null,'N',B.DCGO_CLSS_CD) DCGO_CLSS_CD
+			,NVL(B.BB_CGO_FLG,'N')		BB_CGO_FLG
+			,NVL(B.AWK_CGO_FLG,'N')	AWK_CGO_FLG
+			,NVL(B.RC_FLG,'N')			RC_FLG
+			,B.REMARK
+			,B.TML_TRNS_MOD_CD
+			,CASE WHEN SUBSTR(A.DSCR_IND_CD,0,2) IN  ('DD','DP','HO','PD','NH','DB','DF') THEN 'DC' ELSE 'CO' END VRFY_RSLT_IND_CD
+			,CASE WHEN SUBSTR(A.DSCR_IND_CD,0,2) IN  ('DD','DP','HO','PD','NH','DB','DF') THEN ''   ELSE 'Y'  END CO_FLG
+			,CASE WHEN SUBSTR(A.DSCR_IND_CD,0,2) IN  ('DD','DP','HO','PD','NH','DB','DF') THEN 'Y'  ELSE  ''  END DC_FLG
+			,@[clpt_ind_seq] CLPT_IND_SEQ
+			,@[call_yd_ind_seq] CALL_YD_IND_SEQ
+	FROM    ( SELECT P.CNTR_NO          CNTR_NO
+					,C.CNTR_TPSZ_CD     CNTR_TPSZ_CD
+					,P.CNTR_STY_CD      CNTR_STY_CD
+					,P.VVD_CD           VVD
+					,P.VNDR_SEQ         VNDR_SEQ
+					,P.YD_CD            YD_CD
+					,P.RCV_DT           RCV_DT
+					,P.WRK_DT           WRK_DT
+					,P.IO_BND_CD        IO_BND_CD
+					,P.TML_SO_TMP_SEQ   TMP_SEQ
+					,DB.CNTR_RMK
+					,CASE WHEN LENGTH(DB.CNTR_RMK) > 1   THEN 'DB'	   -- 'Double Bill' Check
+					 ELSE DECODE(( SELECT DECODE(MIN(NVL(H.COP_STS_CD,'N')),'X',0,COUNT(*)) CNT
+								   FROM   ( SELECT C.CNTR_NO CNTR_NO,
+												   V.BKG_NO BKG_NO --,
+												   --V.BKG_NO_SPLIT BKG_NO_SPLIT
+											FROM   BKG_VVD V, BKG_CONTAINER C,BKG_BOOKING B,  BKG_DG_CGO D, MDM_LOCATION BR, MDM_LOCATION BD
+											WHERE  V.VSL_CD           = SUBSTR(@[vvd],1,4)
+											AND    V.SKD_VOY_NO       = SUBSTR(@[vvd],5,4)
+											AND    V.SKD_DIR_CD       = SUBSTR(@[vvd],9,1)
+											AND    DECODE(@[io_bnd_cd],'I',V.POD_CD,V.POL_CD) = SUBSTR(@[yd_cd],1, 5)
+-- [CHM-201640637]MR Invoice에 Calling Sequence추가하고 CNTR List가져올 때 Verify로직 추가 (2016.03.28)
+-- [CHM-201642766]INV Booking No.관련 yard calling Sequence검색로직 변경(2016.08.09)
+#if(${call_yd_seq_chk} == 'Y')
+											AND    DECODE(@[io_bnd_cd],'I',V.POD_CLPT_IND_SEQ,V.POL_CLPT_IND_SEQ) = @[clpt_ind_seq] 
+#else
+#end
+-- 남중국 Barge 적용을 위해 BKG_BKG_VVD의 Yard 적용방법을 수정함... 아래는 수정전.   -- 2008.05.29
+--			                                        AND    ( V.POL_CD = SUBSTR(?,1,5) OR V.POD_CD = SUBSTR(?,1,5) )
+											AND    V.BKG_NO           = C.BKG_NO(+)
+											--AND    V.BKG_NO_SPLIT     = C.BKG_NO_SPLIT(+)
+											AND    C.BKG_NO           = B.BKG_NO(+)
+											--AND    C.BKG_NO_SPLIT     = B.BKG_NO_SPLIT(+)
+											AND    B.BKG_STS_CD IN ('F','W')
+											AND    B.BKG_NO           = D.BKG_NO(+)
+											--AND    B.BKG_NO_SPLIT     = D.BKG_NO_SPLIT(+)
+											AND    B.POR_CD           = BR.LOC_CD
+											AND    B.POD_CD           = BD.LOC_CD ) B,
+										  SCE_COP_HDR H, PRD_PROD_CTL_ROUT_DTL G
+								   WHERE  P.CNTR_NO             = B.CNTR_NO(+)
+								   AND    B.CNTR_NO             = H.CNTR_NO(+)
+								   AND    B.BKG_NO              = H.BKG_NO(+)
+								   --AND    B.BKG_NO_SPLIT        = H.BKG_NO_SPLIT(+)
+								   AND    H.COP_STS_CD(+) <> 'X'
+								   AND    H.PCTL_NO              = G.PCTL_NO(+)
+								   AND    G.NOD_LNK_DIV_CD(+)   = 'N'
+									--AND    G.ORG_NOD_CD(+)       = [yd_cd]  --vvd, sce, prd 에서 값을제대로 못가지고 와서 밑에쿼리로 변경
+									AND    SUBSTR(G.ORG_NOD_CD(+),1,5)       = SUBSTR(@[yd_cd],1,5)
+								   AND    ROWNUM = 1 ),
+								  0, 'NH',  -- 'Not in SML Souce' Check
+								 (SELECT DISTINCT DECODE(L.FM,
+											P.CNTR_STY_CD,DECODE(DECODE(L.FM,
+																'M',DECODE(SUBSTR(P.YD_CD,1,5),L.POL,'O','I'),
+																DECODE(NVL(R.TRSP_MOD_CD,'N')||NVL(O.TRSP_MOD_CD,'N'),
+																	'WDTD','I',     'WDRD','I',     'VDTD','I',
+																	'VDRD','I',     'RDWD','O',     'RDVD','O',
+																	'TDWD','O',     'TDVD','O',     'WDN','I',
+																	'VDN','I',      'NVD','O',      'NWD','O',
+																	'WDVD',DECODE(P.VVD_CD,R.VSL_CD||R.SKD_VOY_NO||R.SKD_DIR_CD,'I','O'),
+																	'VDWD',DECODE(P.VVD_CD,R.VSL_CD||R.SKD_VOY_NO||R.SKD_DIR_CD,'I','O'),
+																	'WDWD',DECODE(P.VVD_CD,R.VSL_CD||R.SKD_VOY_NO||R.SKD_DIR_CD,'I','O'),
+																	'VDVD',DECODE(P.VVD_CD,R.VSL_CD||R.SKD_VOY_NO||R.SKD_DIR_CD,'I','O'))),
+											  P.IO_BND_CD,'CO', 'DDI'),'DDF') -- 'Discrepancy by Detail Data' Check
+								  FROM ( SELECT P.CNTR_NO       CNTR_NO,
+												B.TPSZ          TPSZ,
+												B.FM            FM,
+												MIN(B.BKG_NO)   BKG_NO,
+												--MIN(B.BKG_NO_SPLIT) BKG_NO_SPLIT,
+												MAX(G.PCTL_NO)   COP_NO,
+												MAX(B.POL)      POL,
+												MIN(( SELECT MAX(PCTL_SEQ)
+													  FROM   SCE_COP_HDR HD, PRD_PROD_CTL_ROUT_DTL GD
+													  WHERE  H.CNTR_NO         = HD.CNTR_NO
+													  AND    HD.PCTL_NO         = GD.PCTL_NO
+													  AND    H.BKG_NO          = HD.BKG_NO
+													  --AND    H.BKG_NO_SPLIT    = HD.BKG_NO_SPLIT
+													  AND    GD.NOD_LNK_DIV_CD = 'L'
+													  AND    GD.PCTL_SEQ < G.PCTL_SEQ )) R_SEQ,
+												MAX(( SELECT MIN(PCTL_SEQ)
+													  FROM   SCE_COP_HDR OD, PRD_PROD_CTL_ROUT_DTL OG
+													  WHERE  OD.CNTR_NO        = H.CNTR_NO
+													  AND    OD.BKG_NO         = H.BKG_NO
+													  --AND    OD.BKG_NO_SPLIT   = H.BKG_NO_SPLIT
+													  AND    OD.PCTL_NO         = OG.PCTL_NO
+													  AND    OG.NOD_LNK_DIV_CD = 'L'
+													  AND    OG.PCTL_SEQ > G.PCTL_SEQ )) O_SEQ
+										 FROM   ( SELECT C.CNTR_NO CNTR_NO,
+														 C.CNTR_TPSZ_CD TPSZ,
+														 DECODE(B.BKG_CGO_TP_CD,'F','F','B','F','R','R','M') FM,
+														 V.BKG_NO BKG_NO,
+														 --V.BKG_NO_SPLIT BKG_NO_SPLIT,
+														 B.POL_CD        POL
+												  FROM   BKG_VVD V, BKG_CONTAINER C,BKG_BOOKING B,  BKG_DG_CGO D, MDM_LOCATION BR, MDM_LOCATION BD
+												  WHERE  V.VSL_CD           = SUBSTR(@[vvd],1,4)
+												  AND    V.SKD_VOY_NO       = SUBSTR(@[vvd],5,4)
+												  AND    V.SKD_DIR_CD       = SUBSTR(@[vvd],9,1)
+												  AND    DECODE(@[io_bnd_cd],'I',V.POD_CD,V.POL_CD) = SUBSTR(@[yd_cd],1, 5)
+-- [CHM-201640637]MR Invoice에 Calling Sequence추가하고 CNTR List가져올 때 Verify로직 추가 (2016.03.28)
+-- [CHM-201642766]INV Booking No.관련 yard calling Sequence검색로직 변경(2016.08.09)
+#if(${call_yd_seq_chk} == 'Y')
+												  AND    DECODE(@[io_bnd_cd],'I',V.POD_CLPT_IND_SEQ,V.POL_CLPT_IND_SEQ) = @[clpt_ind_seq] 		
+#else
+#end										  
+-- 남중국 Barge 적용을 위해 BKG_BKG_VVD의 Yard 적용방법을 수정함... 아래는 수정전.   -- 2008.05.29
+--			                                              AND    ( V.POL_CD = SUBSTR(?,1,5) OR V.POD_CD = SUBSTR(?,1,5) )
+												  AND    V.BKG_NO           = C.BKG_NO(+)
+												  --AND    V.BKG_NO_SPLIT     = C.BKG_NO_SPLIT(+)
+												  AND    C.BKG_NO           = B.BKG_NO(+)
+												  --AND    C.BKG_NO_SPLIT     = B.BKG_NO_SPLIT(+)
+												  AND    B.BKG_STS_CD IN ('F','W')
+												  AND    B.BKG_NO           = D.BKG_NO(+)
+												  --AND    B.BKG_NO_SPLIT     = D.BKG_NO_SPLIT(+)
+												  AND    B.POR_CD           = BR.LOC_CD
+												  AND    B.POD_CD           = BD.LOC_CD ) B,
+												  SCE_COP_HDR H, PRD_PROD_CTL_ROUT_DTL G, TES_FILE_IMP_TMP P
+										 WHERE  B.CNTR_NO             = H.CNTR_NO(+)
+										 AND    B.BKG_NO              = H.BKG_NO(+)
+										 --AND    B.BKG_NO_SPLIT        = H.BKG_NO_SPLIT(+)
+										 AND    H.COP_STS_CD(+) <> 'X'
+										 AND    H.PCTL_NO              = G.PCTL_NO(+)
+										 AND    G.NOD_LNK_DIV_CD(+)   = 'N'
+										--AND    G.ORG_NOD_CD(+)       = [yd_cd]  --vvd, sce, prd 에서 값을제대로 못가지고 와서 밑에쿼리로 변경
+										AND    SUBSTR(G.ORG_NOD_CD(+),1,5)       = SUBSTR(@[yd_cd],1,5)
+	-- 본래는 Booking 정보만을 기준으로 Verify 결과(DDI, DDF, CO)를 가져오게 되어 있었다. (TES_FILE_IMP_TMP Table은 Join 되어 있지 않았었음)
+	-- Full/MT 여부는 아래 구문에서 확인하게 되어 있었지만 (L, TES_FILE_IMP_TMP 의 Full/MT를 비교)
+	-- Empty Repo Booking을 가진 MT Container를 Full CNTR라고 입력 후 Verify시 Verify 결과값(DDF)를 정상적으로 가져오지 못함.
+	-- (CO, DD도 아닌 공란이 결과로 나옴. Discrepancy Type 결정시 사용할 Subquery L 의 값이 F/M 값 때문에 걸러졌기 때문)
+	-- 원래보다 한 단계 전에 Full MT를 비교하도록 Logic 수정하여 반영함.                                          --- 2008.01.16
+	-- CNTR_NO도 조건절에 추가.                                                                                   --- 2008.01.29
+										 AND    P.TML_SO_OFC_CTY_CD   = @[tml_so_ofc_cty_cd]
+										 AND    P.TML_SO_SEQ          = @[tml_so_seq]
+										 AND    P.CNTR_NO             = B.CNTR_NO(+)
+										 AND    P.CNTR_STY_CD         = B.FM(+)
+                                         AND    G.PCTL_SEQ = ( SELECT --//2011-11-24 추가
+                                                                    CASE
+                                                                    WHEN ORG_NOD_CD = @[yd_cd] 
+                                                                    THEN PCTL_SEQ-1
+                                                                    WHEN DEST_NOD_CD = @[yd_cd] 
+                                                                    THEN PCTL_SEQ+1
+                                                                    END CUR_PCTL_SEQ
+                                                                FROM PRD_PROD_CTL_ROUT_DTL X
+                                                                WHERE 1=1
+                                                                AND X.PCTL_NO = G.PCTL_NO
+                                                                AND X.VSL_CD = SUBSTR(@[vvd],1,4)
+                                                                AND X.SKD_VOY_NO = SUBSTR(@[vvd],5,4)
+                                                                AND X.SKD_DIR_CD = SUBSTR(@[vvd],9,1)
+                                                                AND ROWNUM = 1 )
+										 GROUP BY B.BKG_NO, P.CNTR_NO, B.TPSZ, B.FM ) L, PRD_PROD_CTL_ROUT_DTL R, PRD_PROD_CTL_ROUT_DTL O
+								 WHERE  L.CNTR_NO             = P.CNTR_NO
+-- 이미 L 부분의 SQL 안에서 Booking의 Full/MT 여부를 확인했기 때문에 아래의 Full/MT 비교구문은 사용하지 않도록 수정함.  --- 2008.01.16
+--			                             AND    L.FM(+)               = P.CNTR_STY_CD
+								 AND    L.COP_NO              = R.PCTL_NO(+)
+								 AND    R.NOD_LNK_DIV_CD(+)   = 'L'
+								 AND    L.R_SEQ               = R.PCTL_SEQ(+)
+								 AND    L.COP_NO              = O.PCTL_NO(+)
+								 AND    O.NOD_LNK_DIV_CD(+)   = 'L'
+								 AND    L.O_SEQ               = O.PCTL_SEQ(+)
+                                 AND    ROWNUM = 1 
+                                 ) )
+					 END  DSCR_IND_CD
+			 FROM  TES_FILE_IMP_TMP P, MST_CONTAINER C,
+-- [CHM-201640867]EDI 전송건 인보이스 UPLOAD 시간 과다 발생 (SQL Tunning 받은 결과 반영) - 2016.03.28
+				   (SELECT /*+ LEADING(B) USE_NL(A) */ B.CNTR_NO, 'Double billing Inv : '||MAX(A.INV_NO) CNTR_RMK
+					FROM   TES_TML_SO_HDR A, TES_TML_SO_CNTR_LIST B
+					WHERE  A.TML_SO_OFC_CTY_CD  = B.TML_SO_OFC_CTY_CD
+					AND    A.TML_SO_SEQ         = B.TML_SO_SEQ
+-- [CHM-201539158]Invoice CNTR Verify로직 수정 요청(Double Billing비교 부분) 2015.12.10 속도개선을 위해 수정
+--					AND    ( A.VNDR_SEQ, A.YD_CD ) IN ( SELECT DISTINCT VNDR_SEQ, YD_CD
+--														FROM   TES_FILE_IMP_TMP
+--														WHERE  TML_SO_OFC_CTY_CD  = [tml_so_ofc_cty_cd]
+--														AND    TML_SO_SEQ         = [tml_so_seq] )					
+					AND    A.VNDR_SEQ 			= @[vndr_seq]
+					AND	   A.YD_CD				= @[yd_cd]
+					AND    B.VSL_CD             = SUBSTR(@[vvd],1,4)
+					AND    B.SKD_VOY_NO         = SUBSTR(@[vvd],5,4)
+					AND    B.SKD_DIR_CD         = SUBSTR(@[vvd],9,1)
+					AND    B.IO_BND_CD          = @[io_bnd_cd]
+-- [CHM-201640637]MR Invoice에 Calling Sequence추가하고 CNTR List가져올 때 Verify로직 추가 (2016.03.28)
+-- [CHM-201642766]INV Booking No.관련 yard calling Sequence검색로직 변경(2016.08.09)
+#if(${call_yd_seq_chk} == 'Y')
+					AND	   NVL(B.CLPT_IND_SEQ,'1') = NVL(@[clpt_ind_seq],'1')
+					AND	   NVL(B.CALL_YD_IND_SEQ,'1') = NVL(@[call_yd_ind_seq],'1')
+#else
+#end
+					AND    NVL(A.DELT_FLG,'N')  <> 'Y'
+					AND    A.TML_INV_TP_CD      = 'TM'
+-- 김기영 부장님 요청으로 double billing checking period를 현재 3개월에서 (+/-)7일로 수정 - 2007.07.16
+-- 김기영 부장님 요청으로 receive date 비교로직 삭제함. - 2008.04.17
+--			                AND    MONTHS_BETWEEN(TO_DATE(?,'YYYY/MM/DD'),A.RCV_DT ) <= 0.25
+					GROUP BY B.CNTR_NO
+					) DB
+			 WHERE P.TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]
+			 AND   P.TML_SO_SEQ        = @[tml_so_seq]
+			 AND   P.CNTR_NO           = DB.CNTR_NO(+)
+			 AND   P.CNTR_NO           = C.CNTR_NO(+) ) A,
+		   ( SELECT L.CNTR_NO,
+					L.TPSZ,
+					L.FM,
+					L.IPC,
+					L.LANE,
+					DECODE(L.SPCL_FDR_FLG,'N',DECODE(L.PCTL_IO_BND_CD,'T',DECODE(R.TRSP_MOD_CD||O.TRSP_MOD_CD,
+																	   'WDVD','T','VDWD','T','WDWD','T','VDVD','T',DECODE(L.FM,'M','L','L')),'L'),
+											  DECODE(L.IO,'I',DECODE(L.VSL_POD_CD,L.POD_CD,DECODE(L.VSL_POL_CD,L.POL_CD,'L','T'),'T'),
+														  'O',DECODE(L.VSL_POL_CD,L.POL_CD,DECODE(L.VSL_POD_CD,L.POD_CD,'L','T'),'T'))) TS,
+--			                                          DECODE(L.IO,'I',DECODE(L.VSL_POD_CD, L.POD_CD,'L','T'),'O',DECODE(L.VSL_POL_CD, L.POL_CD,'L','T'))) TS,
+--			                DECODE(R.TRSP_MOD_CD||O.TRSP_MOD_CD,'WDVD','T','VDWD','T','WDWD','T','VDVD','T',DECODE(L.FM,'M','L','L')) TS,
+					CASE WHEN L.SPCL_FDR_FLG = 'N'
+						 THEN DECODE(DECODE(L.PCTL_IO_BND_CD,'T',DECODE(R.TRSP_MOD_CD||O.TRSP_MOD_CD,
+											'WDVD','T', 'VDWD','T', 'WDWD','T','VDVD','T', DECODE(L.FM,'M','L','L')),'L'),
+									 'L', DECODE(L.FM, 'F',DECODE(@[io_bnd_cd], 'O',DECODE(R.TRSP_MOD_CD,'TD','T','RD','R','WD','B','O'),
+																		   DECODE(RL,0,DECODE(TR,'RD','R','WD','B','TD','T','T'),'R')),
+													   'M',DECODE(O.TRSP_MOD_CD,'TD','T','RD','R','WD','B','O')),
+									 VSL_TP) --TML_TRNS_MOD_CD,
+						 ELSE DECODE(
+							  DECODE(L.VSL_PRE_PST_CD,'T','V',NULL,'O','','O',
+											DECODE(L.IO,'I',DECODE(VSL_TP,'F',DECODE(L.VSL_POL_CD,L.FDR_POL_CD,'B','F'),VSL_TP),
+															DECODE(VSL_TP,'F',DECODE(L.VSL_POD_CD,L.FDR_POD_CD,'B','F'),VSL_TP)))
+							  ||DECODE(L.BY_VSL_PRE_PST_CD,'T','V',NULL,'O','','O',
+											DECODE(L.IO,'I',DECODE(BY_VSL_TP,'F',DECODE(L.BY_VSL_POD_CD,L.BY_FDR_POD_CD,'B','F'),BY_VSL_TP),
+														   DECODE(BY_VSL_TP,'F',DECODE(L.BY_VSL_POL_CD,L.BY_FDR_POL_CD,'B','F'),BY_VSL_TP)))
+							  ,'VV','V',    'VB','B',   'VF','F',   'BV','B',   'FV','F',   VSL_TP)
+
+-- 남중국 BARGE 재적용 전  -- 2008.05.29
+--			                     ELSE DECODE(L.VSL_PRE_PST_CD,'T','V',NULL,'O','','O',
+--			                                        DECODE(L.IO,'I',DECODE(VSL_TP,'F',DECODE(L.VSL_POL_CD,L.FDR_POL_CD,'B','F'),VSL_TP),
+--			                                                        DECODE(VSL_TP,'F',DECODE(L.VSL_POD_CD,L.FDR_POD_CD,'B','F'),VSL_TP)))
+					END TML_TRNS_MOD_CD,
+					L.RCVDE_TERM_IND_CD,
+					L.BKG_NO,
+					--L.BKG_NO_SPLIT ,
+					L.BL_NO,
+					--L.BL_NO_CHK,
+					L.BL_NO_TP,
+					DECODE(L.FM,'M',DECODE(SUBSTR(L.YD_CD,1,5),L.POL,'O','I'),
+									DECODE(NVL(R.TRSP_MOD_CD,'N')||NVL(O.TRSP_MOD_CD,'N'),
+										'WDTD','I',       'WDRD','I',     'VDTD','I',
+										'VDRD','I',       'RDWD','O',     'RDVD','O',
+										'TDWD','O',       'TDVD','O',     'WDN','I',
+										'VDN','I',        'NVD','O',      'NWD','O',
+										'WDVD',DECODE(L.VVD_CD,R.VSL_CD||R.SKD_VOY_NO||R.SKD_DIR_CD,'I','O'),
+										'VDWD',DECODE(L.VVD_CD,R.VSL_CD||R.SKD_VOY_NO||R.SKD_DIR_CD,'I','O'),
+										'WDWD',DECODE(L.VVD_CD,R.VSL_CD||R.SKD_VOY_NO||R.SKD_DIR_CD,'I','O'),
+										'VDVD',DECODE(L.VVD_CD,R.VSL_CD||R.SKD_VOY_NO||R.SKD_DIR_CD,'I','O'))) IO,
+					L.DCGO_CLSS_CD,
+					L.BB_CGO_FLG,
+					L.AWK_CGO_FLG,
+					L.RC_FLG,
+					L.REMARK,
+--			                DECODE(DECODE(R.TRSP_MOD_CD||O.TRSP_MOD_CD,
+--			                                'WDVD','T',     'VDWD','T',     'WDWD','T',
+--			                                'VDVD','T',     DECODE(L.FM,'M','L','L')),'L',
+--			                                DECODE(L.FM,
+--			                                        'F',DECODE(?,
+--			                                                    'O',DECODE(R.TRSP_MOD_CD,'TD','T','RD','R','WD','B','O'),
+--			                                                    DECODE(RL,0,DECODE(TR,'RD','R','WD','B','TD','T','T'),'R')),
+--			                                        'M',DECODE(O.TRSP_MOD_CD,'TD','T','RD','R','WD','B','O')),              VSL_TP) TML_TRNS_MOD_CD,
+					L.TMP_SEQ
+			 FROM (SELECT   B.CNTR_NO           CNTR_NO,
+							B.TPSZ              TPSZ,
+							B.FM                FM,
+							B.IPC               IPC,
+							B.LANE              LANE,
+							MIN(B.RCVDE_TERM_IND_CD) RCVDE_TERM_IND_CD,
+							MIN(B.BKG_NO)       BKG_NO,
+							--MIN(B.BKG_NO_SPLIT) BKG_NO_SPLIT,
+							MIN(B.BL_NO)        BL_NO,
+							--MIN(B.BL_NO_CHK)    BL_NO_CHK,
+							MIN(B.BL_NO_TP)     BL_NO_TP,
+							MIN(G.PCTL_NO)       COP_NO,
+							B.TP_CD             TP_CD,
+							B.POL               POL,
+							MIN(B.DCGO_CLSS_CD) DCGO_CLSS_CD,
+							MIN(B.BB_CGO_FLG)   BB_CGO_FLG,
+							MIN(B.AWK_CGO_FLG)  AWK_CGO_FLG,
+							MIN(B.RC_FLG)       RC_FLG,
+							B.RM                REMARK,
+							B.VSL_TP            VSL_TP,
+							B.BY_VSL_TP,
+							B.TR                TR,
+							B.RL                RL,
+							B.YD_CD             YD_CD,
+							B.TMP_SEQ           TMP_SEQ,
+							B.VVD_CD            VVD_CD,
+							B.IO                IO,
+							B.SPCL_FDR_FLG,
+							B.POL_CD AS VSL_POL_CD,
+							B.POD_CD AS VSL_POD_CD,
+							B.BY_VSL_POL_CD,
+							B.BY_VSL_POD_CD,
+							B.POL_CD,
+							B.POD_CD,
+							B.FDR_POL_CD,
+							B.FDR_POD_CD,
+							B.VSL_PRE_PST_CD,
+							B.BY_FDR_POL_CD,
+							B.BY_FDR_POD_CD,
+							B.BY_VSL_PRE_PST_CD,
+							MIN(( SELECT  MAX(PCTL_SEQ)
+								  FROM    SCE_COP_HDR HD, PRD_PROD_CTL_ROUT_DTL GD
+								  WHERE   H.CNTR_NO         = HD.CNTR_NO
+								  AND     H.BKG_NO          = HD.BKG_NO
+								  --AND     H.BKG_NO_SPLIT    = HD.BKG_NO_SPLIT
+								  AND     HD.PCTL_NO         = GD.PCTL_NO
+								  AND     GD.NOD_LNK_DIV_CD = 'L'
+								  AND     GD.PCTL_SEQ < G.PCTL_SEQ )) R_SEQ,
+							MAX(( SELECT MIN(PCTL_SEQ)
+								  FROM    SCE_COP_HDR OD, PRD_PROD_CTL_ROUT_DTL OG
+								  WHERE   OD.CNTR_NO        = H.CNTR_NO
+								  AND     OD.BKG_NO         = H.BKG_NO
+								  --AND     OD.BKG_NO_SPLIT   = H.BKG_NO_SPLIT
+								  AND     OD.PCTL_NO         = OG.PCTL_NO
+								  AND     OG.NOD_LNK_DIV_CD = 'L'
+								  AND     OG.PCTL_SEQ > G.PCTL_SEQ )) O_SEQ
+                            --, G.PCTL_IO_BND_CD
+                              ,MAX((SELECT NVL(X.PCTL_IO_BND_CD,'') PCTL_IO_BND_CD
+                                FROM PRD_PROD_CTL_ROUT_DTL X
+                                WHERE 1=1
+                                AND X.PCTL_NO = G.PCTL_NO
+                                AND X.PCTL_SEQ = ( SELECT 
+                                                        CASE
+                                                        WHEN ORG_NOD_CD = @[yd_cd] 
+                                                        THEN PCTL_SEQ-1
+                                                        WHEN DEST_NOD_CD = @[yd_cd] 
+                                                        THEN PCTL_SEQ+1
+                                                        END CUR_PCTL_SEQ
+                                                    FROM PRD_PROD_CTL_ROUT_DTL X
+                                                    WHERE 1=1
+                                                    AND X.PCTL_NO = G.PCTL_NO
+                                                    AND X.VSL_CD = SUBSTR(@[vvd],1,4)
+                                                    AND X.SKD_VOY_NO = SUBSTR(@[vvd],5,4)
+                                                    AND X.SKD_DIR_CD = SUBSTR(@[vvd],9,1)
+                                                    AND ROWNUM = 1 ))) PCTL_IO_BND_CD
+				   FROM   ( SELECT X.* FROM ( SELECT  /*+ NO_EXPAND */  C.CNTR_NO CNTR_NO,
+									C.CNTR_TPSZ_CD TPSZ,
+									DECODE(B.BKG_CGO_TP_CD,'F','F','B','F','R','R','M') FM,
+									DECODE(BR.CONTI_CD,BD.CONTI_CD,'I','O') IPC,
+									V.SLAN_CD LANE,
+									B.RCV_TERM_CD||'/'||B.DE_TERM_CD RCVDE_TERM_IND_CD,
+									V.BKG_NO        BKG_NO,
+									--V.BKG_NO_SPLIT  BKG_NO_SPLIT,
+									--V.EAI_EVNT_DT, 
+									DENSE_RANK() OVER (PARTITION BY C.CNTR_NO ORDER BY V.CRE_DT DESC) BKG_RANK,
+									--'' BKG_RANK,
+									B.BL_NO 		BL_NO,
+									--B.BL_NO_CHK 	BL_NO_CHK,
+									B.BL_NO_TP 	BL_NO_TP,
+									B.POL_CD       POL,
+									B.BKG_CGO_TP_CD TP_CD,
+									CASE WHEN D.CNTR_NO = C.CNTR_NO  THEN NVL(SUBSTR(D.IMDG_CLSS_CD,1,1),'N') ELSE 'N' END DCGO_CLSS_CD,
+									NVL(C.BB_CGO_FLG,'N') BB_CGO_FLG,
+									--DECODE(NVL(A.OVR_VOID_SLT_QTY,0),0,'N','Y') AWK_CGO_FLG,
+									NVL(C.AWK_CGO_FLG,'N') AWK_CGO_FLG,
+									NVL(C.RC_FLG,'N') RC_FLG,
+									DECODE(NVL(C.BB_CGO_FLG,'N'),'Y','Break Bulk') RM,
+									DECODE(L.VSL_SVC_TP_CD,'O',DECODE( (SELECT CRR_CD FROM MDM_VSL_CNTR  WHERE VSL_CD = S.VSL_CD),'SML','V','F'),'V') VSL_TP,
+									DECODE(BL.VSL_SVC_TP_CD,'O',DECODE((SELECT CRR_CD FROM MDM_VSL_CNTR  WHERE VSL_CD = S.VSL_CD),'SML','V','F'),'V') BY_VSL_TP,
+									CASE WHEN FDR.FDR_POL_CD is not null THEN 'Y' ELSE 'N' END SPCL_FDR_FLG,
+									V.POL_CD VSL_POL_CD,
+									V.POD_CD VSL_POD_CD,
+									V.VSL_PRE_PST_CD,
+									BV.POL_CD  BY_VSL_POL_CD,
+									BV.POD_CD  BY_VSL_POD_CD,
+									BV.VSL_PRE_PST_CD  BY_VSL_PRE_PST_CD,
+									B.POL_CD,
+									B.POD_CD,
+									F.FDR_POL_CD,
+									F.FDR_POD_CD,
+									BF.FDR_POL_CD  BY_FDR_POL_CD,
+									BF.FDR_POD_CD  BY_FDR_POD_CD,
+									P.YD_CD  YD_CD,
+									P.VVD_CD VVD_CD,
+									P.IO_BND_CD IO,
+									P.TML_SO_TMP_SEQ TMP_SEQ,
+								  ( SELECT MIN(TRSP_CRR_MOD_CD)
+									FROM   TRS_TRSP_SVC_ORD
+									WHERE  ( FM_NOD_CD = P.YD_CD OR TO_NOD_CD = P.YD_CD )
+									AND    EQ_NO = C.CNTR_NO
+									AND    NVL(DELT_FLG,'N') <> 'Y'
+									AND    CRE_DT < P.ATB_DT + 15 ) TR,
+								  ( SELECT COUNT(*)
+									FROM   TRS_TRSP_RAIL_BIL_ORD
+									WHERE  ( FM_NOD_CD = P.YD_CD OR TO_NOD_CD = P.YD_CD )
+									AND    EQ_NO = C.CNTR_NO
+									AND    NVL(DELT_FLG,'N') <> 'Y'
+									AND    CRE_DT < P.ATB_DT + 15 ) RL
+							 FROM   TES_FILE_IMP_TMP P, BKG_VVD V,  (SELECT BV.*
+																		FROM BKG_VVD V, BKG_VVD BV
+																		WHERE V.VSL_CD = SUBSTR(@[vvd],1,4)
+																		AND V.SKD_VOY_NO = SUBSTR(@[vvd],5,4)
+																		AND V.SKD_DIR_CD = SUBSTR(@[vvd],9,1)
+																		AND DECODE(@[io_bnd_cd],'I',V.POD_CD,V.POL_CD) = SUBSTR(@[yd_cd], 1, 5)
+-- [CHM-201640637]MR Invoice에 Calling Sequence추가하고 CNTR List가져올 때 Verify로직 추가 (2016.03.28)
+-- [CHM-201642766]INV Booking No.관련 yard calling Sequence검색로직 변경(2016.08.09)
+#if(${call_yd_seq_chk} == 'Y')
+																		AND DECODE(@[io_bnd_cd],'I',V.POD_CLPT_IND_SEQ,V.POL_CLPT_IND_SEQ) = @[clpt_ind_seq] 
+#else
+#end
+																		AND V.BKG_NO = BV.BKG_NO
+																		--AND V.BKG_NO_SPLIT = BV.BKG_NO_SPLIT
+																		AND DECODE(@[io_bnd_cd],'I',BV.POL_CD,BV.POD_CD) = SUBSTR(@[yd_cd], 1, 5)
+-- [CHM-201640637]MR Invoice에 Calling Sequence추가하고 CNTR List가져올 때 Verify로직 추가 (2016.03.28)
+-- [CHM-201642766]INV Booking No.관련 yard calling Sequence검색로직 변경(2016.08.09)
+#if(${call_yd_seq_chk} == 'Y')
+																		AND DECODE(@[io_bnd_cd],'I',BV.POD_CLPT_IND_SEQ,BV.POL_CLPT_IND_SEQ) = @[clpt_ind_seq] 
+
+#else
+#end
+                                                                        AND V.VSL_SEQ < BV.VSL_SEQ) BV,
+									BKG_CONTAINER C, BKG_BOOKING B, BKG_DG_CGO D, BKG_AWK_CGO A,
+									MDM_LOCATION BR, MDM_LOCATION BD, TES_TML_SPCL_FDR F, TES_TML_SPCL_FDR BF, TES_TML_SPCL_FDR FDR,
+									VSK_VSL_SKD S, VSK_VSL_SKD BS, MDM_VSL_SVC_LANE L, MDM_VSL_SVC_LANE BL
+							 WHERE  P.TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]
+							 AND    P.TML_SO_SEQ        = @[tml_so_seq]
+							 AND    V.VSL_CD           = SUBSTR(@[vvd],1,4)
+							 AND    V.SKD_VOY_NO       = SUBSTR(@[vvd],5,4)
+							 AND    V.SKD_DIR_CD       = SUBSTR(@[vvd],9,1)
+							 AND    DECODE(@[io_bnd_cd],'I',V.POD_CD,V.POL_CD) = SUBSTR(P.YD_CD, 1, 5)
+-- [CHM-201640637]MR Invoice에 Calling Sequence추가하고 CNTR List가져올 때 Verify로직 추가 (2016.03.28)
+-- [CHM-201642766]INV Booking No.관련 yard calling Sequence검색로직 변경(2016.08.09)
+#if(${call_yd_seq_chk} == 'Y')
+							 AND    NVL(DECODE(@[io_bnd_cd],'I',V.POD_CLPT_IND_SEQ,V.POL_CLPT_IND_SEQ),'1') = NVL(@[clpt_ind_seq],'1') 
+#else
+#end
+							 AND    V.BKG_NO           = BV.BKG_NO(+)
+							 --AND    V.BKG_NO_SPLIT     = BV.BKG_NO_SPLIT(+)
+							 AND    V.BKG_NO           = C.BKG_NO(+)
+							 --AND    V.BKG_NO_SPLIT     = C.BKG_NO_SPLIT(+)
+							 AND    C.CNTR_NO          = P.CNTR_NO
+							 AND    C.BKG_NO           = B.BKG_NO(+)
+							 --AND    C.BKG_NO_SPLIT     = B.BKG_NO_SPLIT(+)
+							 AND    B.BKG_STS_CD IN ('F','W')
+							 AND    B.BKG_NO           = D.BKG_NO(+)
+							 --AND    B.BKG_NO_SPLIT     = D.BKG_NO_SPLIT(+)
+							 AND    C.CNTR_NO          = A.CNTR_NO(+)
+							 AND    C.BKG_NO           = A.BKG_NO(+)
+							 --AND    C.BKG_NO_SPLIT     = A.BKG_NO_SPLIT(+)
+							 AND    B.POR_CD           = BR.LOC_CD
+							 AND    B.POD_CD           = BD.LOC_CD
+							 AND    V.POD_CD       = F.FDR_POD_CD(+)
+							 AND    V.POL_CD       = F.FDR_POL_CD(+)
+							 AND    BV.POD_CD       = BF.FDR_POD_CD(+)
+							 AND    BV.POL_CD       = BF.FDR_POL_CD(+)
+							 AND    DECODE(@[io_bnd_cd],'I',V.POD_CD,V.POL_CD) = DECODE(@[io_bnd_cd], 'I',FDR.FDR_POD_CD(+), FDR.FDR_POL_CD(+))
+							 AND    V.VSL_CD           = S.VSL_CD(+)
+							 AND    V.SKD_VOY_NO       = S.SKD_VOY_NO(+)
+							 AND    V.SKD_DIR_CD       = S.SKD_DIR_CD(+)
+							 AND    S.VSL_SLAN_CD          = L.VSL_SLAN_CD(+)
+							 AND    BV.VSL_CD          = BS.VSL_CD(+)
+							 AND    BV.SKD_VOY_NO      = BS.SKD_VOY_NO(+)
+							 AND    BV.SKD_DIR_CD      = BS.SKD_DIR_CD(+)
+							 AND    BS.VSL_SLAN_CD      = BL.VSL_SLAN_CD(+)
+--			                         ) B, SCE_COP_HDR H, PRD_PROD_CTL_ROUT_DTL G
+							 ) X WHERE BKG_RANK = 1 ) B, SCE_COP_HDR H, PRD_PROD_CTL_ROUT_DTL G
+					WHERE  B.CNTR_NO             = H.CNTR_NO(+)
+					AND    B.BKG_NO              = H.BKG_NO(+)
+					--AND    B.BKG_NO_SPLIT        = H.BKG_NO_SPLIT(+)
+					AND    H.COP_STS_CD(+) <> 'X'
+					AND    H.PCTL_NO              = G.PCTL_NO(+)
+					AND    G.NOD_LNK_DIV_CD(+)   = 'N'
+					--AND    G.ORG_NOD_CD(+)       = [yd_cd]  --vvd, sce, prd 에서 값을제대로 못가지고 와서 밑에쿼리로 변경
+					AND    SUBSTR(G.ORG_NOD_CD(+),1,5)       = SUBSTR(@[yd_cd],1,5)
+					GROUP BY B.CNTR_NO,B.TPSZ,B.FM,B.IPC,B.LANE,B.TP_CD,B.POL,
+							 B.SPCL_FDR_FLG, B.VSL_POL_CD, B.VSL_POD_CD, B.POL_CD,B.POD_CD, B.FDR_POL_CD, B.FDR_POD_CD, B.VSL_PRE_PST_CD,
+							 B.BY_VSL_TP, B.BY_VSL_POL_CD, B.BY_VSL_POD_CD, B.BY_FDR_POL_CD, B.BY_FDR_POD_CD, B.BY_VSL_PRE_PST_CD,
+							 B.RM,B.VSL_TP,B.TR,B.RL,B.YD_CD,B.TMP_SEQ,B.VVD_CD,B.IO--,G.PCTL_IO_BND_CD 
+					) L, PRD_PROD_CTL_ROUT_DTL R, PRD_PROD_CTL_ROUT_DTL O
+			 WHERE  L.COP_NO              = R.PCTL_NO(+)
+			 AND    R.NOD_LNK_DIV_CD(+)   = 'L'
+			 AND    L.R_SEQ               = R.PCTL_SEQ(+)
+			 AND    L.COP_NO              = O.PCTL_NO(+)
+			 AND    O.NOD_LNK_DIV_CD(+)   = 'L'
+			 AND    L.O_SEQ               = O.PCTL_SEQ(+)
+	--2007.08.16
+	--Verify 결과가 DDI(Discrepancy By Detail Data + I/O BND)인경우 아래 조건에 걸려 BKG 관련 Data(BKG No, DG 등등)가 조회되지 않음
+	--COP 가 생성되지 않은 Data나 실제 I/O Bound가 다른 경우들이 아래에 해당함.
+	--DDI 라도 BKG 관련 Data를 화면에 보여주기 위해 아래 조건을 삭제함
+--			         AND    DECODE(L.FM,
+--			                        'M',DECODE(SUBSTR(L.YD_CD,1,5),L.POL,'O','I'),
+--			                        DECODE(NVL(R.TRSP_MOD_CD,'N')||NVL(O.TRSP_MOD_CD,'N'),
+--			                                'WDTD','I',     'WDRD','I',     'VDTD','I',
+--			                                'VDRD','I',     'RDWD','O',     'RDVD','O',
+--			                                'TDWD','O',     'TDVD','O',     'WDN','I',
+--			                                'VDN','I',      'NVD','O',      'NWD','O',
+--			                                'WDVD',DECODE(L.VVD_CD,R.VSL_CD||R.SKD_VOY_NO||R.SKD_DIR_CD,'I','O'),
+--			                                'VDWD',DECODE(L.VVD_CD,R.VSL_CD||R.SKD_VOY_NO||R.SKD_DIR_CD,'I','O'),
+--			                                'WDWD',DECODE(L.VVD_CD,R.VSL_CD||R.SKD_VOY_NO||R.SKD_DIR_CD,'I','O'),
+--			                                'VDVD',DECODE(L.VVD_CD,R.VSL_CD||R.SKD_VOY_NO||R.SKD_DIR_CD,'I','O'))) = L.IO ) B
+			 ) B
+	WHERE   A.CNTR_NO = B.CNTR_NO(+)
+	AND     A.TMP_SEQ = B.TMP_SEQ(+)
+	-- Subquery B 부분에서는 Import한 File의 F/M값을 상관하지 않고 보여주게 되어 있었음.
+	-- A와 B부분으니 F/M 이 같은값만 보여주도록 수정함
+	-- ( Booking 정보상의 F/M과 import 한 파일의 F/M 을  비교하는 구문 추가 )-- 2007.09.03
+	AND     A.CNTR_STY_CD = B.FM(+)
+
+
+#if (${all_tp} == 'N' and ${fm_tp_length} == '1') 
+	AND     A.CNTR_STY_CD = @[fm_tp]
+#else 
+#end
+
+#if (${all_tp} == 'N' and ${ts_tp_length} == '1') 
+	AND     B.TS = @[ts_tp]
+#else 
+#end
+
+#if (${vrfy_tml_cd} != '' and ${yd_cd} != '' and ${tml_port_cd} != '' and ${vrfy_tml_cd} != ${tml_port_cd})
+--//invoice의 port(yard의 5자리)와 vrfy_tml_cd가 같다는것은 vrfy_tml_cd가 port라는 의미로 이전 CNTR verify와 동일하므로 yard별로 구별할 필요가 없다.
+) X , CTM_MOVEMENT M --// 구주 털보 아찌 (2014-05-20)
+WHERE 1=1
+AND     X.CNTR_NO = M.CNTR_NO
+AND     M.ORG_YD_CD LIKE DECODE(@[vrfy_tml_cd],NULL,SUBSTR(@[yd_cd],1,5),'',SUBSTR(@[yd_cd],1,5),@[vrfy_tml_cd])||'%'
+AND     M.CRNT_VSL_CD           = X.VSL_CD
+AND     M.CRNT_SKD_VOY_NO       = X.SKD_VOY_NO
+AND     M.CRNT_SKD_DIR_CD       = X.SKD_DIR_CD
+AND     M.FCNTR_FLG             = DECODE(X.CNTR_STY_CD,'F','Y','N')
+#else 
+#end			]]></sql>
+			<params>
+				<param name="atb_dt" type="12" value="" out="N"/>
+				<param name="clpt_ind_seq" type="12" value="" out="N"/>
+				<param name="call_yd_ind_seq" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="io_bnd_cd" type="12" value="" out="N"/>
+				<param name="yd_cd" type="12" value="" out="N"/>
+				<param name="tml_so_ofc_cty_cd" type="12" value="" out="N"/>
+				<param name="tml_so_seq" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="12" value="" out="N"/>
+				<param name="fm_tp" type="12" value="" out="N"/>
+				<param name="ts_tp" type="12" value="" out="N"/>
+				<param name="vrfy_tml_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

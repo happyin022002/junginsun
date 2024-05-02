@@ -1,0 +1,1025 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SpacecontrolinquiryDBDAOSearchSpaceUtilizationLaneListRSQL">
+			<desc><![CDATA[2014.01.13 김시몬 [선반영] BKG CMPB계산시 BKG_VVD의 Trunk VVD기준 pol, pod를 이용하여 구한다.
+2014.01.16 김시몬 [선반영] BKG CMPB계산시 Office Profit기준 CM(RA_CM_COST_AMT)를 이용하여 구한다. 
+2015.07.16 Arie [CHM-201537094] MAS CMB 산출 로직 변경 적용 - dem/det 추가 CM = REV+DEM/DET-COST TTL
+2016.05.18 최성민 Double Callling Route(Port/Tmnl)에 대한 물량집계 및 병목상 Logic 보완 사항 요청
+2017.1.23 SM상선 전환에 따른 소스변경]]></desc>
+			<sql><![CDATA[
+WITH VSL_PORT AS (
+    SELECT DISTINCT
+           VP.VSL_CD
+          ,VP.SKD_VOY_NO
+          ,VP.SKD_DIR_CD
+          ,VP.VSL_CD || VP.SKD_VOY_NO || VP.SKD_DIR_CD AS VVD
+          ,MV.RLANE_CD
+          ,VP.VSL_SLAN_CD
+          ,VP.CLPT_SEQ
+          ,VP.POL_PORT
+          ,VP.POL_YD_CD
+          ,DECODE(VP.POL_YD_CD, NULL, '', SUBSTR(VP.POL_YD_CD, 6, 2)) AS POL_TML_CD
+          ,TO_CHAR(VP.POL_ETA, 'YYYY-MM-DD HH24:MI') AS POL_ETA
+          ,TO_CHAR(VP.POL_ETD, 'YYYY-MM-DD HH24:MI') AS POL_ETD
+          ,VP.POD_PORT
+          ,VP.POD_YD_CD
+          ,DECODE(VP.POD_YD_CD, NULL, '', SUBSTR(VP.POD_YD_CD, 6, 2)) AS POD_TML_CD
+          ,TO_CHAR(VP.POD_ETA, 'YYYY-MM-DD HH24:MI') AS POD_ETA
+          ,TO_CHAR(VP.POD_ETD, 'YYYY-MM-DD HH24:MI') AS POD_ETD
+          ,VP.CARRIER_CD
+      FROM (
+              SELECT T1.VSL_CD
+                    ,T1.SKD_VOY_NO
+                    ,T1.SKD_DIR_CD
+                    ,T1.VSL_SLAN_CD
+                    ,T2.CLPT_SEQ
+                    ,T2.VPS_PORT_CD AS POL_PORT
+                    ,T2.YD_CD       AS POL_YD_CD
+                    ,T2.VPS_ETA_DT  AS POL_ETA
+                    ,T2.VPS_ETB_DT  AS POL_ETB
+                    ,T2.VPS_ETD_DT  AS POL_ETD
+                    ,LEAD(T2.VPS_PORT_CD) OVER (PARTITION BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD ORDER BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD, CLPT_SEQ) AS POD_PORT
+                    ,LEAD(T2.YD_CD      ) OVER (PARTITION BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD ORDER BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD, CLPT_SEQ) AS POD_YD_CD
+                    ,LEAD(T2.VPS_ETA_DT ) OVER (PARTITION BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD ORDER BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD, CLPT_SEQ) AS POD_ETA
+                    ,LEAD(T2.VPS_ETB_DT ) OVER (PARTITION BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD ORDER BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD, CLPT_SEQ) AS POD_ETB
+                    ,LEAD(T2.PF_ETB_DT  ) OVER (PARTITION BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD ORDER BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD, CLPT_SEQ) AS POD_PF_ETB
+                    ,LEAD(T2.VPS_ETD_DT ) OVER (PARTITION BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD ORDER BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD, CLPT_SEQ) AS POD_ETD
+                    ,NVL(T1.ACT_CRR_CD, T3.CRR_CD) AS CARRIER_CD
+                FROM VSK_VSL_SKD      T1
+                    ,VSK_VSL_PORT_SKD T2
+                    ,MDM_VSL_CNTR     T3
+               WHERE T1.VSL_CD      = T2.VSL_CD
+                 AND T1.SKD_VOY_NO  = T2.SKD_VOY_NO
+                 AND T1.SKD_DIR_CD  = T2.SKD_DIR_CD
+                 AND T1.VSL_CD      = T3.VSL_CD
+                 AND T1.VSL_SLAN_CD = SUBSTR(@[lane], 1, 3)
+                 AND EXISTS (SELECT 'X'
+                               FROM VSK_VSL_PORT_SKD VP
+                              WHERE VSL_CD      = T1.VSL_CD
+                                AND SKD_VOY_NO  = T1.SKD_VOY_NO
+                                AND SKD_DIR_CD  = T1.SKD_DIR_CD
+                                AND VSL_SLAN_CD = SUBSTR(@[lane], 1, 3)
+                                AND TURN_PORT_IND_CD IN ('Y', 'N')
+                                AND NVL(VP.SKD_CNG_STS_CD, 'X') <> 'S'
+                                AND VP.CLPT_SEQ = (SELECT MIN(VP2.CLPT_SEQ)
+                                                     FROM VSK_VSL_PORT_SKD VP2
+                                                    WHERE VP2.VSL_CD            = VP.VSL_CD
+                                                      AND VP2.SKD_VOY_NO        = VP.SKD_VOY_NO
+                                                      AND VP2.SKD_DIR_CD        = VP.SKD_DIR_CD
+                                                      AND VP2.SLAN_CD           = VP.SLAN_CD
+                                                      AND VP2.TURN_PORT_IND_CD IN ('Y', 'N')
+                                                      AND NVL(VP2.SKD_CNG_STS_CD, 'X') <> 'S'
+                                                  )
+                               AND VP.VPS_ETA_DT BETWEEN TO_DATE(@[sDate], 'YYYY-MM-DD') AND  TO_DATE(@[eDate], 'YYYY-MM-DD') + 0.99999
+                            )
+                 AND NVL(T2.SKD_CNG_STS_CD, 'X') <> 'S'
+           ) VP
+          ,MAS_MON_VVD  MV
+          ,MDM_REV_LANE RL
+     WHERE 1 = 1
+       AND MV.RLANE_CD    = @[lane] 
+       AND VP.VSL_CD      = MV.VSL_CD
+       AND VP.SKD_VOY_NO  = MV.SKD_VOY_NO
+       AND VP.SKD_DIR_CD  = MV.DIR_CD
+       AND VP.VSL_SLAN_CD = MV.SLAN_CD
+       AND MV.DELT_FLG    = 'N'
+       AND MV.RLANE_CD    = RL.RLANE_CD
+       AND RL.REP_TRD_CD  = SAQ_GET_REP_TRD_FNC (MV.RLANE_CD)
+       AND RL.VSL_TP_CD   = 'C' 
+       AND MV.RLANE_CD IS NOT NULL
+  ORDER BY VP.VSL_CD
+          ,VP.SKD_VOY_NO
+          ,VP.SKD_DIR_CD
+          ,MV.RLANE_CD
+          ,VP.CLPT_SEQ
+)
+,PARAMS AS (
+    SELECT DISTINCT 
+           RLANE_CD
+          ,VSL_CD
+          ,SKD_VOY_NO
+          ,SKD_DIR_CD
+      FROM VSL_PORT VP
+)
+, CUR_PORTS AS (
+    SELECT RLANE_CD
+          ,VSL_CD
+          ,SKD_VOY_NO
+          ,SKD_DIR_CD
+          ,VSL_CD || SKD_VOY_NO || SKD_DIR_CD AS BASE_VVD
+          ,PORT_CD
+          ,YD_CD
+          ,CLPT_SEQ
+          ,CLPT_IND_SEQ
+          ,TURN_SKD_VOY_NO
+          ,TURN_SKD_DIR_CD
+          ,TURN_CLPT_IND_SEQ
+          ,FLG
+          ,BSA
+          ,WGT_BSA
+          ,STS
+      FROM (
+              SELECT P.RLANE_CD
+                    ,S1.VSL_CD
+                    ,S1.SKD_VOY_NO
+                    ,S1.SKD_DIR_CD
+                    ,S1.VPS_PORT_CD AS PORT_CD
+                    ,S1.YD_CD
+                    ,S1.CLPT_SEQ
+                    ,S1.CLPT_IND_SEQ
+                    ,S1.TURN_SKD_VOY_NO
+                    ,S1.TURN_SKD_DIR_CD
+                    ,S1.TURN_CLPT_IND_SEQ
+                    ,(
+                       CASE 
+                            WHEN TRIM(S1.TURN_SKD_VOY_NO) IS NULL  THEN 2
+                            WHEN S1.TURN_PORT_IND_CD IN ('Y', 'N') THEN 1
+                                                                   ELSE 3
+                        END
+                     ) AS FLG
+                    ,(
+                        SELECT (
+                                  SELECT NVL(MAX(DECODE(B.STUP_FLG, 'Y', DECODE(A.PORT_BSA_CAPA, 0, NULL, A.PORT_BSA_CAPA))), C.CRR_BSA_CAPA) BSA
+                                    FROM BSA_VVD_PORT_DWN A
+                                        ,MAS_LANE_RGST    B
+                                   WHERE B.RLANE_CD        = C.RLANE_CD
+                                     AND B.TRD_CD          = C.TRD_CD
+                                     AND B.DIR_CD          = C.SKD_DIR_CD
+                                     AND A.TRD_CD      (+) = C.TRD_CD
+                                     AND A.RLANE_CD    (+) = C.RLANE_CD
+                                     AND A.VSL_CD      (+) = C.VSL_CD
+                                     AND A.SKD_VOY_NO  (+) = C.SKD_VOY_NO
+                                     AND A.SKD_DIR_CD  (+) = C.SKD_DIR_CD
+                                     AND A.BSA_OP_JB_CD(+) = '007'
+                                     AND A.CRR_CD      (+) = C.CRR_CD
+                                     AND A.PORT_CD     (+) = NVL(SUBSTR(S1.YD_CD, 1, 5), S1.VPS_PORT_CD)
+                               ) AS BSA
+                          FROM BSA_VVD_OTR_CRR C
+                         WHERE C.RLANE_CD     = P.RLANE_CD
+                           AND C.VSL_CD       = P.VSL_CD
+                           AND C.SKD_VOY_NO   = P.SKD_VOY_NO
+                           AND C.SKD_DIR_CD   = P.SKD_DIR_CD
+                           AND C.BSA_OP_JB_CD = '007'
+                           AND C.CRR_CD       = 'SML'
+                     ) AS BSA
+                    ,(
+                        SELECT (
+                                  SELECT NVL(MAX(DECODE(B.STUP_FLG, 'Y', DECODE(A.PORT_BSA_CAPA, 0, NULL, A.PORT_BSA_CAPA))), C.CRR_BSA_CAPA) BSA
+                                    FROM BSA_VVD_PORT_DWN A
+                                        ,MAS_LANE_RGST    B
+                                   WHERE B.RLANE_CD        = C.RLANE_CD
+                                     AND B.TRD_CD          = C.TRD_CD
+                                     AND B.DIR_CD          = C.SKD_DIR_CD
+                                     AND A.TRD_CD      (+) = C.TRD_CD
+                                     AND A.RLANE_CD    (+) = C.RLANE_CD
+                                     AND A.VSL_CD      (+) = C.VSL_CD
+                                     AND A.SKD_VOY_NO  (+) = C.SKD_VOY_NO
+                                     AND A.SKD_DIR_CD  (+) = C.SKD_DIR_CD
+                                     AND A.BSA_OP_JB_CD(+) = '016'
+                                     AND A.CRR_CD      (+) = C.CRR_CD
+                                     AND A.PORT_CD     (+) = NVL(SUBSTR(S1.YD_CD, 1, 5), S1.VPS_PORT_CD)
+                               ) AS BSA
+                          FROM BSA_VVD_OTR_CRR C
+                         WHERE C.RLANE_CD     = P.RLANE_CD
+                           AND C.VSL_CD       = P.VSL_CD
+                           AND C.SKD_VOY_NO   = P.SKD_VOY_NO
+                           AND C.SKD_DIR_CD   = P.SKD_DIR_CD
+                           AND C.BSA_OP_JB_CD = '009'
+                           AND C.CRR_CD       = 'SML'
+                     ) AS WGT_BSA
+                    ,1  AS STS
+                FROM VSK_VSL_PORT_SKD S1
+                    ,PARAMS           P
+               WHERE (S1.SKD_CNG_STS_CD IS NULL OR S1.SKD_CNG_STS_CD <> 'S')
+                 AND S1.VSL_CD     = P.VSL_CD
+                 AND S1.SKD_VOY_NO = P.SKD_VOY_NO
+                 AND S1.SKD_DIR_CD = P.SKD_DIR_CD
+                 AND S1.VPS_PORT_CD NOT IN ('EGSUZ')
+           )
+)
+, VVD_BASE AS (
+    SELECT RLANE_CD
+          ,VSL_CD
+          ,SKD_VOY_NO
+          ,SKD_DIR_CD
+          ,BASE_VVD
+          ,MAX(STS) AS STS
+          ,MIN(DECODE(FLG, '1', TURN_SKD_VOY_NO)) AS PRE_SKD_VOY_NO
+          ,MIN(DECODE(FLG, '1', TURN_SKD_DIR_CD)) AS PRE_SKD_DIR_CD
+          ,MIN(DECODE(FLG, '3', TURN_SKD_VOY_NO)) AS PST_SKD_VOY_NO
+          ,MIN(DECODE(FLG, '3', TURN_SKD_DIR_CD)) AS PST_SKD_DIR_CD
+      FROM (
+              SELECT S1.RLANE_CD
+                    ,S1.VSL_CD
+                    ,S1.SKD_VOY_NO
+                    ,S1.SKD_DIR_CD
+                    ,S1.BASE_VVD
+                    ,S1.TURN_SKD_VOY_NO
+                    ,S1.TURN_SKD_DIR_CD
+                    ,DECODE(S2.SKD_VOY_NO, NULL, '', S1.FLG) AS FLG
+                    ,S1.STS
+                FROM CUR_PORTS        S1
+                    ,VSK_VSL_PORT_SKD S2
+               WHERE S1.VSL_CD          = S2.VSL_CD    (+)
+                 AND S1.TURN_SKD_VOY_NO = S2.SKD_VOY_NO(+)
+                 AND S1.TURN_SKD_DIR_CD = S2.SKD_DIR_CD(+)
+                 AND S1.YD_CD           = S2.YD_CD     (+)
+           )
+  GROUP BY RLANE_CD
+          ,VSL_CD
+          ,SKD_VOY_NO
+          ,SKD_DIR_CD
+          ,BASE_VVD
+)
+, PORT_SKD AS (
+    SELECT B.RLANE_CD
+          ,B.BASE_VVD
+          ,(
+             DECODE(S1.SKD_VOY_NO||S1.SKD_DIR_CD, B.PRE_SKD_VOY_NO||B.PRE_SKD_DIR_CD, '1',
+                                                  B.SKD_VOY_NO||B.SKD_DIR_CD        , '2',
+                                                  B.PST_SKD_VOY_NO||B.PST_SKD_DIR_CD, '3'  )
+           ) AS TP
+          ,S1.VSL_CD||S1.SKD_VOY_NO||S1.SKD_DIR_CD AS VVD
+          ,S1.VSL_CD
+          ,S1.SKD_VOY_NO
+          ,S1.SKD_DIR_CD
+          ,S1.VPS_PORT_CD
+          ,S1.YD_CD
+          ,S1.CALL_YD_IND_SEQ
+          ,S1.CLPT_SEQ
+          ,S1.CLPT_IND_SEQ
+          ,S1.TURN_CLPT_IND_SEQ
+          ,SPC_CONTI_CONV_FNC(LOC.CONTI_CD, B.RLANE_CD) AS PORT_CONTI
+          ,S1.TURN_PORT_IND_CD
+          ,NVL(S1.SKD_CNG_STS_CD, ' ') AS CNG_STS_CD
+          ,S1.TURN_SKD_VOY_NO
+          ,S1.TURN_SKD_DIR_CD
+          ,S1.VSL_CD||S1.TURN_SKD_VOY_NO||S1.TURN_SKD_DIR_CD AS TURN_VVD
+          ,B.PRE_SKD_VOY_NO
+          ,B.PRE_SKD_DIR_CD
+          ,B.PST_SKD_VOY_NO
+          ,B.PST_SKD_DIR_CD
+          --,(
+          --   SELECT PRD.COST_YR||LPAD(CEIL((TO_CHAR(S1.VPS_ETD_DT, 'DDD') + 7 - TO_CHAR(TO_DATE(PRD.SLS_TO_DT, 'YYYYMMDD'), 'DDD')) / 7), 2, '0')
+          --     FROM MAS_WK_PRD PRD
+          --    WHERE PRD.COST_YR = TO_CHAR(S1.VPS_ETD_DT, 'YYYY')
+          --      AND PRD.COST_WK = '01'
+          -- ) AS COST_YRWK
+          ,MAX(S1.CLPT_SEQ) OVER (PARTITION BY S1.VSL_CD||S1.SKD_VOY_NO||S1.SKD_DIR_CD||S1.YD_CD) AS MAX_SEQ
+          ,MIN(S1.CLPT_SEQ) OVER (PARTITION BY S1.VSL_CD||S1.SKD_VOY_NO||S1.SKD_DIR_CD||S1.YD_CD) AS MIN_SEQ
+          ,B.STS          
+      FROM MDM_LOCATION     LOC
+          ,VSK_VSL_PORT_SKD S1
+          ,VVD_BASE         B
+     WHERE LOC.LOC_CD = S1.VPS_PORT_CD
+       AND S1.VSL_CD  = B.VSL_CD
+       AND ((S1.SKD_VOY_NO, S1.SKD_DIR_CD) IN ((B.SKD_VOY_NO, B.SKD_DIR_CD), (B.PRE_SKD_VOY_NO, B.PRE_SKD_DIR_CD), (B.PST_SKD_VOY_NO, B.PST_SKD_DIR_CD)))
+)
+, PORT_SEQ AS (
+    SELECT TP
+          ,VVD
+          ,BASE_VVD
+          ,RLANE_CD
+          ,VSL_CD
+          ,SKD_VOY_NO
+          ,SKD_DIR_CD
+          ,POL_CD
+          ,POD_CD
+          ,POL_SEQ
+          ,POL_CLPT_IND_SEQ
+          ,POL_CLPT_IND_SEQ1
+          ,POD_SEQ
+          ,POD_CLPT_IND_SEQ
+          ,POD_CLPT_IND_SEQ1
+          ,POL_CONTI
+          ,POD_CONTI
+          --,POL_YRWK
+          --,POD_YRWK
+          ,(
+              SELECT ( DECODE(S1.STS, '1', CASE WHEN VPS_ETD_DT < GLOBALDATE_PKG.TIME_CONV_FNC('GMT', SYS_EXTRACT_UTC(SYSTIMESTAMP), VPS_PORT_CD ) THEN 'Y'
+                                                                                                                                                   ELSE 'N'
+                                           END, '2', 'N', '3', 'Y')
+                     )
+                FROM VSK_VSL_PORT_SKD
+               WHERE VSL_CD     = S1.VSL_CD
+                 AND SKD_VOY_NO = S1.SKD_VOY_NO
+                 AND SKD_DIR_CD = S1.SKD_DIR_CD
+                 AND CLPT_SEQ   = S1.CLPT_SEQ
+           ) AS PAST
+          ,POL_YD_SEQ
+          ,POD_YD_SEQ
+          ,PL_VPS_PORT_CD
+          ,PD_VPS_PORT_CD
+          ,PL_CLPT_IND_SEQ
+          ,PD_CLPT_IND_SEQ
+          ,MAX(POL_YD_SEQ) OVER (PARTITION BY VVD, POL_CD) AS MAX_POL_PORT_SEQ
+          ,MAX(POD_YD_SEQ) OVER (PARTITION BY VVD, POD_CD) AS MAX_POD_PORT_SEQ
+      FROM (
+              SELECT S1.TP
+                    ,S1.BASE_VVD
+                    ,S1.RLANE_CD
+                    ,S1.VVD
+                    ,S1.VSL_CD
+                    ,S1.SKD_VOY_NO
+                    ,S1.SKD_DIR_CD
+                    ,S1.CLPT_SEQ
+                    ,S1.STS
+                    ,NVL(S1.YD_CD, S1.VPS_PORT_CD) AS POL_CD
+                    ,NVL(S2.YD_CD, S2.VPS_PORT_CD) AS POD_CD
+                    ,S1.CLPT_SEQ   AS POL_SEQ
+                    ,S1.TURN_PORT_IND_CD
+                    ,S1.CLPT_IND_SEQ AS POL_CLPT_IND_SEQ
+                    ,DECODE(S1.BASE_VVD, S1.TURN_VVD, S1.TURN_CLPT_IND_SEQ, S1.CLPT_IND_SEQ) AS POL_CLPT_IND_SEQ1
+                    ,S2.CLPT_SEQ   AS POD_SEQ
+                    ,S2.TURN_PORT_IND_CD
+                    ,S2.CLPT_IND_SEQ AS POD_CLPT_IND_SEQ
+                    ,DECODE(S2.BASE_VVD, S2.TURN_VVD, S2.TURN_CLPT_IND_SEQ, S2.CLPT_IND_SEQ) AS POD_CLPT_IND_SEQ1
+                    ,S1.PORT_CONTI AS POL_CONTI
+                    ,S2.PORT_CONTI AS POD_CONTI
+                    ,S1.CALL_YD_IND_SEQ AS POL_YD_SEQ
+                    ,S2.CALL_YD_IND_SEQ AS POD_YD_SEQ
+                    ,S1.VPS_PORT_CD     AS PL_VPS_PORT_CD
+                    ,S2.VPS_PORT_CD     AS PD_VPS_PORT_CD
+                    ,S1.CLPT_IND_SEQ    AS PL_CLPT_IND_SEQ
+                    ,S2.CLPT_IND_SEQ    AS PD_CLPT_IND_SEQ
+                FROM PORT_SKD S1
+                    ,PORT_SKD S2
+               WHERE S1.VSL_CD     = S2.VSL_CD
+                 AND S1.SKD_VOY_NO = S2.SKD_VOY_NO
+                 AND S1.SKD_DIR_CD = S2.SKD_DIR_CD
+                 AND S1.CLPT_SEQ   < S2.CLPT_SEQ
+                 AND S1.TURN_PORT_IND_CD IN ('Y', 'N')
+                 AND S1.CNG_STS_CD <> 'S'
+                 AND ( S1.CLPT_SEQ = DECODE(S1.PORT_CONTI, S2.PORT_CONTI, S1.MIN_SEQ, S1.MAX_SEQ)
+                    OR S2.CLPT_SEQ < S1.MAX_SEQ )
+                 AND DECODE(S1.TP, 1, S2.TURN_VVD, 2, S1.VVD, 3, S1.TURN_VVD) = S1.BASE_VVD
+                 AND S1.BASE_VVD = S2.BASE_VVD
+                 AND S1.RLANE_CD = S2.RLANE_CD
+           ) S1
+  ORDER BY BASE_VVD
+          ,RLANE_CD
+          ,TP
+          ,POL_SEQ
+          ,POD_SEQ
+)
+, VVD_LD_PORT AS (
+    SELECT S1.BASE_VVD
+          ,S1.VSL_CD
+          ,S1.SKD_VOY_NO
+          ,S1.SKD_DIR_CD
+          ,SUBSTR(MAX(LTRIM(TO_CHAR(S1.POD_SEQ, 'FM000'))|| S1.POD_CD), 4) AS LD_PORT
+      FROM PORT_SEQ S1
+  GROUP BY S1.BASE_VVD
+          ,S1.VSL_CD
+          ,S1.SKD_VOY_NO
+          ,S1.SKD_DIR_CD
+)
+, COPY AS (
+    SELECT LEVEL SEQ
+      FROM DUAL
+CONNECT BY LEVEL <= 5
+)
+, BKG_DATA AS (
+    SELECT 2 AS SRC
+          ,Z.BASE_VVD
+          ,Z.RLANE_CD
+          ,Z.TP
+          ,Z.POL_CD
+          ,Z.POL_SEQ
+          ,Z.POL_CLPT_IND_SEQ
+          ,Z.POD_CD
+          ,Z.POD_SEQ
+          ,Z.POD_CLPT_IND_SEQ
+          ,Z.IOC_CD
+          ,Z.BKG_CGO_TP_CD
+          ,Z.QTY_TTL
+          ,Z.WGT_TTL
+      FROM (
+              SELECT Z.BASE_VVD
+                    ,Z.RLANE_CD
+                    ,Z.TP
+                    ,Z.POL_CD
+                    ,Z.POL_SEQ
+                    ,Z.POL_CLPT_IND_SEQ
+                    ,Z.POD_CD
+                    ,Z.POD_SEQ
+                    ,Z.POD_CLPT_IND_SEQ
+                    ,Z.IOC_CD
+                    ,Z.BKG_CGO_TP_CD
+                    ,SUM(TO_NUMBER(NVL(SUBSTR(Z.VAL, 1, 14), 0))) AS QTY_TTL
+                    ,SUM(TO_NUMBER(NVL(SUBSTR(Z.VAL, 15),    0))) AS WGT_TTL
+                FROM (
+                        SELECT B.TP
+                              ,B.BASE_VVD
+                              ,B.RLANE_CD
+                              ,B.POL_CD
+                              ,B.POL_SEQ
+                              ,B.POL_CLPT_IND_SEQ
+                              ,B.POD_CD
+                              ,B.POD_SEQ
+                              ,B.POD_CLPT_IND_SEQ
+                              ,DECODE(BK.BKG_CGO_TP_CD, 'P', 'M', 'F') AS BKG_CGO_TP_CD
+                              ,DECODE(BV.VSL_PRE_PST_CD, 'T', DECODE(B.POL_CONTI, B.POD_CONTI, 2, 1), 3) AS IOC_CD
+                              ,(
+                                 SELECT    TO_CHAR(SUM(DECODE(SAQ_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '2', 1, 2) * Q.OP_CNTR_QTY), 'FM0000000000.000')
+                                        || TO_CHAR((MAX(D.ACT_WGT) * DECODE(MAX(D.WGT_UT_CD), 'LBS', 0.00045, 0.001)) + SUM(Q.OP_CNTR_QTY * ( SELECT TS.CNTR_TPSZ_TARE_WGT
+                                                                                                                                                FROM MDM_CNTR_TP_SZ TS
+                                                                                                                                               WHERE TS.CNTR_TPSZ_CD = Q.CNTR_TPSZ_CD)) * 0.001, 'FM0000000000.000')
+                                   FROM BKG_QUANTITY Q
+                                  WHERE BK.BKG_NO     = Q.BKG_NO
+                                    AND Q.OP_CNTR_QTY > 0
+                               ) AS VAL
+                          FROM BKG_BOOKING BK
+                              ,BKG_VVD     BV
+                              ,PORT_SEQ    B
+                              ,VVD_LD_PORT LD
+                              ,BKG_BL_DOC  D
+                         WHERE BV.VSL_CD           = B.VSL_CD
+                           AND BV.SKD_VOY_NO       = B.SKD_VOY_NO
+                           AND BV.SKD_DIR_CD       = B.SKD_DIR_CD
+                           AND BV.VSL_CD           = LD.VSL_CD
+                           AND BV.SKD_VOY_NO       = LD.SKD_VOY_NO
+                           AND BV.SKD_DIR_CD       = LD.SKD_DIR_CD
+                           AND B.BASE_VVD          = LD.BASE_VVD
+                           AND ((BV.POL_CD = B.PL_VPS_PORT_CD AND BV.POL_CLPT_IND_SEQ = B.PL_CLPT_IND_SEQ) OR (BV.POL_YD_CD = B.POL_CD AND BV.POL_CLPT_IND_SEQ > 1 AND B.MAX_POL_PORT_SEQ = 1))
+                           AND ((BV.POD_CD = B.PD_VPS_PORT_CD AND BV.POD_CLPT_IND_SEQ = B.PD_CLPT_IND_SEQ) OR (BV.POD_YD_CD = B.POD_CD AND BV.POD_CLPT_IND_SEQ > 1 AND B.MAX_POD_PORT_SEQ = 1))
+                                                   
+                           AND BK.BKG_NO           = BV.BKG_NO
+                           AND BK.BKG_STS_CD      IN ('F', 'W')
+                           AND BK.BKG_NO           = D.BKG_NO
+                     ) Z
+            GROUP BY Z.TP
+                    ,Z.BASE_VVD
+                    ,Z.RLANE_CD
+                    ,Z.POL_CD
+                    ,Z.POL_SEQ
+                    ,Z.POL_CLPT_IND_SEQ 
+                    ,Z.POD_CD
+                    ,Z.POD_SEQ
+                    ,Z.POD_CLPT_IND_SEQ
+                    ,Z.IOC_CD
+                    ,Z.BKG_CGO_TP_CD
+           ) Z
+  ORDER BY Z.TP
+          ,Z.BASE_VVD
+          ,Z.RLANE_CD
+          ,Z.POL_CD
+          ,Z.POL_CLPT_IND_SEQ
+          ,Z.POD_CD
+          ,Z.POD_CLPT_IND_SEQ
+          ,Z.IOC_CD
+          ,Z.BKG_CGO_TP_CD
+)
+, ALC_DATA AS (
+    SELECT 1 AS SRC
+          ,B.TP
+          ,B.BASE_VVD
+          ,B.RLANE_CD
+          ,B.POL_CD
+          ,B.POL_SEQ
+          ,B.POL_CLPT_IND_SEQ
+          ,B.POD_CD
+          ,B.POD_SEQ
+          ,B.POD_CLPT_IND_SEQ
+          ,DECODE(M.TS_FLG, 'Y', 3, DECODE(M.IOC_CD, 'I', 2, 'O', 1, 5)) AS IOC_CD
+          ,SUM(M.ASGN_TTL_QTY) AS QTY_TTL
+          ,SUM(M.ASGN_TTL_WGT) AS WGT_TTL
+      FROM SPC_ALOC_POL_POD M
+          ,PORT_SEQ         B
+          ,PARAMS           P
+     WHERE M.VSL_CD     = B.VSL_CD
+       AND M.SKD_VOY_NO = B.SKD_VOY_NO
+       AND M.SKD_DIR_CD = B.SKD_DIR_CD
+       AND M.POL_YD_CD = B.POL_CD
+       AND M.POD_YD_CD = B.POD_CD
+       AND M.POL_YD_IND_SEQ = B.POL_YD_SEQ
+       AND M.POD_YD_IND_SEQ = B.POD_YD_SEQ
+       AND M.RLANE_CD   LIKE DECODE(SUBSTR(P.RLANE_CD, 1, 3), 'PSG', 'PSG', P.RLANE_CD)||'%'	-- R.Lane 조건 추가
+       AND (M.TS_FLG = 'N' OR M.SLS_RHQ_CD = 'SHARC' OR M.SLS_RHQ_CD = 'SINRS' OR M.SLS_RGN_OFC_CD IS NULL)
+       AND B.BASE_VVD = P.VSL_CD||P.SKD_VOY_NO||P.SKD_DIR_CD
+  GROUP BY B.TP
+          ,B.BASE_VVD
+          ,B.RLANE_CD
+          ,B.POL_CD
+          ,B.POL_SEQ
+          ,B.POL_CLPT_IND_SEQ
+          ,B.POD_CD
+          ,B.POD_SEQ
+          ,B.POD_CLPT_IND_SEQ
+          ,DECODE(M.TS_FLG, 'Y', 3, DECODE(M.IOC_CD, 'I', 2, 'O', 1, 5))
+)
+, MT_DATA AS (
+    SELECT T.SEQ SRC
+          ,Z.BASE_VVD
+          ,Z.RLANE_CD
+          ,Z.TP
+          ,Z.POL_CD
+          ,Z.POL_SEQ
+          ,Z.POL_CLPT_IND_SEQ
+          ,Z.POD_CD
+          ,Z.POD_SEQ
+          ,Z.POD_CLPT_IND_SEQ
+          ,Z.IOC_CD
+          ,SUM(Z.QTY_TTL) AS QTY_TTL
+          ,SUM(Z.WGT_TTL) AS WGT_TTL
+      FROM (
+              SELECT TP
+                    ,BASE_VVD
+                    ,RLANE_CD
+                    ,POL_CD
+                    ,POL_SEQ
+                    ,POL_CLPT_IND_SEQ
+                    ,POD_CD
+                    ,POD_SEQ
+                    ,POD_CLPT_IND_SEQ
+                    ,4 AS IOC_CD
+                    ,QTY_TTL
+                    ,WGT_TTL
+                FROM BKG_DATA
+               WHERE BKG_CGO_TP_CD = 'M'
+           ) Z
+          ,COPY T
+     WHERE T.SEQ <= 3
+  GROUP BY T.SEQ
+          ,Z.BASE_VVD
+          ,Z.RLANE_CD
+          ,Z.TP
+          ,Z.POL_CD
+          ,Z.POL_SEQ
+          ,Z.POL_CLPT_IND_SEQ
+          ,Z.POD_CD
+          ,Z.POD_SEQ
+          ,Z.POD_CLPT_IND_SEQ
+          ,Z.IOC_CD
+)
+, ALL_DATA AS (
+    SELECT Z.BASE_VVD
+          ,Z.RLANE_CD
+          ,1 AS SRC
+          ,Z.TP
+          ,Z.POL_CD
+          ,Z.POL_SEQ
+          ,P.POL_CLPT_IND_SEQ1
+          ,Z.POD_CD
+          ,Z.POD_SEQ
+          ,P.POD_CLPT_IND_SEQ1
+          ,Z.IOC_CD
+           --SUM(DECODE(P.PAST, 'Y', DECODE(Z.SRC, 2, Z.QTY_TTL), DECODE(Z.SRC, 1, Z.QTY_TTL))) AS QTY_TTL
+           -- 이미 지난경우는 BKG물량 사용, 나머지의 경우 OCEAN이고 이전항차와 겹치면 BKG물량, 나머지의 경우 ALLOCATION 물량
+          ,SUM(
+                 CASE
+                      WHEN P.PAST = 'Y'  
+                      THEN DECODE(Z.SRC, 2, Z.QTY_TTL, 0)
+                      ELSE DECODE(Z.IOC_CD || '' || P.TP, '11', DECODE(Z.SRC, 2, Z.QTY_TTL, 0), DECODE(Z.SRC, 1, Z.QTY_TTL, 0))
+                  END
+           ) AS QTY_TTL
+          ,SUM(
+                 CASE 
+                      WHEN P.PAST = 'Y' 
+                      THEN DECODE(Z.SRC, 2, Z.WGT_TTL,0)
+                      ELSE DECODE(Z.IOC_CD || '' || P.TP, '11', DECODE(Z.SRC, 2, Z.WGT_TTL, 0), DECODE(Z.SRC, 1, Z.WGT_TTL, 0))
+                  END
+           ) AS WGT_TTL
+          ,MAX(P.PAST) AS PAST
+      FROM (
+              SELECT SRC
+                    ,BASE_VVD
+                    ,RLANE_CD
+                    ,TP
+                    ,POL_CD
+                    ,POL_SEQ
+                    ,POL_CLPT_IND_SEQ
+                    ,POD_CD
+                    ,POD_SEQ
+                    ,POD_CLPT_IND_SEQ
+                    ,IOC_CD
+                    ,QTY_TTL
+                    ,WGT_TTL
+                FROM ALC_DATA
+              UNION ALL
+              SELECT SRC
+                    ,BASE_VVD
+                    ,RLANE_CD
+                    ,TP
+                    ,POL_CD
+                    ,POL_SEQ
+                    ,POL_CLPT_IND_SEQ
+                    ,POD_CD
+                    ,POD_SEQ
+                    ,POD_CLPT_IND_SEQ
+                    ,IOC_CD
+                    ,QTY_TTL
+                    ,WGT_TTL 
+                FROM BKG_DATA
+               WHERE BKG_CGO_TP_CD = 'F'
+           ) Z
+          ,PORT_SEQ P
+     WHERE P.TP               = Z.TP
+       AND P.BASE_VVD         = Z.BASE_VVD
+       AND P.RLANE_CD         = Z.RLANE_CD
+       AND P.POL_CD           = Z.POL_CD
+       AND P.POL_CLPT_IND_SEQ = Z.POL_CLPT_IND_SEQ
+       AND P.POD_CD           = Z.POD_CD
+       AND P.POD_CLPT_IND_SEQ = Z.POD_CLPT_IND_SEQ
+  GROUP BY Z.TP
+          ,Z.BASE_VVD
+          ,Z.RLANE_CD
+          ,Z.POL_CD
+          ,Z.POL_SEQ
+          ,P.POL_CLPT_IND_SEQ1
+          ,Z.POD_CD
+          ,Z.POD_SEQ
+          ,P.POD_CLPT_IND_SEQ1
+          ,Z.IOC_CD
+
+    UNION ALL  -- BKG 추가 20131211
+    
+    SELECT Z.BASE_VVD,
+           Z.RLANE_CD,
+           Z.SRC    ,
+           Z.TP     ,
+           Z.POL_CD,
+           Z.POL_SEQ,
+           P.POL_CLPT_IND_SEQ1,
+           Z.POD_CD,
+           Z.POD_SEQ,
+           P.POD_CLPT_IND_SEQ1,
+           Z.IOC_CD ,
+           SUM(Z.QTY_TTL) AS QTY_TTL ,
+           SUM(Z.WGT_TTL) AS WGT_TTL ,
+           MAX(P.PAST) AS PAST
+      FROM BKG_DATA Z,
+           PORT_SEQ P
+     WHERE Z.BKG_CGO_TP_CD = 'F'
+       AND P.BASE_VVD = Z.BASE_VVD
+       AND P.TP       = Z.TP
+       AND P.POL_CD   = Z.POL_CD
+       AND P.POL_CLPT_IND_SEQ = Z.POL_CLPT_IND_SEQ
+       AND P.POD_CD = Z.POD_CD
+       AND P.POD_CLPT_IND_SEQ = Z.POD_CLPT_IND_SEQ
+  GROUP BY Z.BASE_VVD,
+           Z.RLANE_CD,
+           Z.SRC    ,
+           Z.TP     ,
+           Z.POL_CD,
+           Z.POL_SEQ,
+           P.POL_CLPT_IND_SEQ1,
+           Z.POD_CD,
+           Z.POD_SEQ,
+           P.POD_CLPT_IND_SEQ1,
+           Z.IOC_CD    
+
+    UNION ALL
+
+    SELECT Z.BASE_VVD
+          ,Z.RLANE_CD
+          ,Z.SRC
+          ,Z.TP
+          ,Z.POL_CD
+          ,Z.POL_SEQ
+          ,P.POL_CLPT_IND_SEQ1
+          ,Z.POD_CD
+          ,Z.POD_SEQ
+          ,P.POD_CLPT_IND_SEQ1
+          ,Z.IOC_CD
+          ,SUM(Z.QTY_TTL) AS QTY_TTL
+          ,SUM(Z.WGT_TTL) AS WGT_TTL
+          ,MAX(P.PAST)    AS PAST
+      FROM MT_DATA  Z
+          ,PORT_SEQ P
+     WHERE P.TP               = Z.TP
+       AND P.BASE_VVD         = Z.BASE_VVD
+       AND P.RLANE_CD         = Z.RLANE_CD
+       AND P.POL_CD           = Z.POL_CD
+       AND P.POL_CLPT_IND_SEQ = Z.POL_CLPT_IND_SEQ
+       AND P.POD_CD           = Z.POD_CD
+       AND P.POD_CLPT_IND_SEQ = Z.POD_CLPT_IND_SEQ
+  GROUP BY Z.BASE_VVD
+          ,Z.RLANE_CD
+          ,Z.SRC
+          ,Z.TP
+          ,Z.POL_CD
+          ,Z.POL_SEQ
+          ,P.POL_CLPT_IND_SEQ1
+          ,Z.POD_CD
+          ,Z.POD_SEQ
+          ,P.POD_CLPT_IND_SEQ1
+          ,Z.IOC_CD
+)
+, PORT_MAP AS (
+    SELECT DISTINCT
+           P.BASE_VVD,
+           P.RLANE_CD,
+           C1.SEQ AS SRC   ,
+           C2.SEQ AS IOC_CD,
+           P.PORT_CD ,
+           P.YD_CD   ,
+           P.CLPT_SEQ,
+           P.CLPT_IND_SEQ,
+           P.FLG     ,
+           P.BSA     ,
+           P.WGT_BSA
+      FROM CUR_PORTS P ,
+           COPY      C1,
+           COPY      C2
+     WHERE C1.SEQ <= 2
+       AND C2.SEQ <= 5     
+)
+, LOAD_CAPA AS (
+    SELECT Z.BASE_VVD
+          ,Z.RLANE_CD
+          ,Z.SRC
+          ,Z.IOC_CD
+          ,Z.PORT_CD
+          ,Z.PORT_SEQ
+          ,Z.FLG
+          ,Z.LOD_TTL
+          ,Z.DIS_TTL
+          ,Z.ON_TTL
+          ,Z.LOAD_TEU_TTL
+          ,Z.LOD_WGT_TTL
+          ,Z.DIS_WGT_TTL
+          ,Z.ON_WGT_TTL
+          ,Z.LOAD_WGT_TTL
+          ,Z.PAST
+          ,Z.BSA
+          ,Z.WGT_BSA 
+      FROM (
+              SELECT Z.BASE_VVD
+                    ,Z.RLANE_CD
+                    ,Z.SRC
+                    ,Z.IOC_CD
+                    ,Z.PORT_CD
+                    ,Z.PORT_SEQ
+                    ,Z.FLG
+
+                    ,NVL(Z.LOD_TTL,0) AS LOD_TTL
+                    ,NVL(Z.DIS_TTL,0) + NVL(Z.PRE_TTL,0) AS DIS_TTL
+                    ,SUM(NVL(Z.ON_TTL,0) + NVL(Z.LOD_TTL,0) - NVL(Z.DIS_TTL,0) - NVL(Z.PRE_TTL,0)) OVER (PARTITION BY Z.BASE_VVD, Z.RLANE_CD, Z.SRC, Z.IOC_CD ORDER BY Z.BASE_VVD, Z.RLANE_CD, PORT_SEQ) AS ON_TTL
+                    ,NVL(Z.BSA,0) - SUM(NVL(Z.ON_TTL,0) + NVL(Z.LOD_TTL,0) - NVL(Z.DIS_TTL,0) - NVL(Z.PRE_TTL,0)) OVER (PARTITION BY Z.BASE_VVD, Z.RLANE_CD,Z.SRC, Z.IOC_CD ORDER BY Z.BASE_VVD, Z.RLANE_CD, PORT_SEQ) AS LOAD_TEU_TTL
+                   
+                    ,NVL(Z.LOD_WGT_TTL,0) AS LOD_WGT_TTL 
+                    ,NVL(Z.DIS_WGT_TTL,0) + NVL(Z.PRE_WGT_TTL,0) AS DIS_WGT_TTL
+                    ,SUM(NVL(Z.ON_WGT_TTL,0) + NVL(Z.LOD_WGT_TTL,0) - NVL(Z.DIS_WGT_TTL,0) - NVL(Z.PRE_WGT_TTL,0)) OVER (PARTITION BY Z.BASE_VVD, Z.RLANE_CD, Z.SRC, Z.IOC_CD ORDER BY Z.BASE_VVD, Z.RLANE_CD, PORT_SEQ) AS ON_WGT_TTL
+                   
+                    ,NVL(Z.WGT_BSA,0) - SUM(NVL(Z.ON_WGT_TTL,0) + NVL(Z.LOD_WGT_TTL,0) - NVL(Z.DIS_WGT_TTL,0) - NVL(Z.PRE_WGT_TTL,0)) OVER (PARTITION BY Z.BASE_VVD, Z.RLANE_CD, Z.SRC, Z.IOC_CD ORDER BY Z.BASE_VVD, Z.RLANE_CD, PORT_SEQ) AS LOAD_WGT_TTL
+                                     
+                    ,Z.PAST
+                    ,NVL(Z.BSA,0) AS BSA
+                    ,NVL(Z.WGT_BSA,0) AS WGT_BSA
+                    ,'' AS T
+                FROM (
+                        SELECT M.BASE_VVD
+                              ,M.RLANE_CD
+                              ,M.SRC
+                              ,M.IOC_CD
+                              ,NVL(NVL(M.YD_CD, M.PORT_CD), 'TOTAL') AS PORT_CD
+                              ,NVL(M.CLPT_SEQ, 0) AS PORT_SEQ
+                              ,M.FLG
+                              ,Z.PAST
+                              ,M.BSA
+                              ,M.WGT_BSA
+                              ,DECODE(NVL(M.YD_CD, M.PORT_CD), NULL, 0, SUM(Z.LOD_TTL))     AS LOD_TTL
+                              ,DECODE(NVL(M.YD_CD, M.PORT_CD), NULL, 0, SUM(Z.DIS_TTL))     AS DIS_TTL
+                              ,DECODE(NVL(M.YD_CD, M.PORT_CD), NULL, 0, SUM(Z.PRE_TTL))     AS PRE_TTL
+                              ,DECODE(NVL(M.YD_CD, M.PORT_CD), NULL, SUM(Z.PRE_TTL), 0)     AS ON_TTL
+                              ,DECODE(NVL(M.YD_CD, M.PORT_CD), NULL, 0, SUM(Z.LOD_WGT_TTL)) AS LOD_WGT_TTL
+                              ,DECODE(NVL(M.YD_CD, M.PORT_CD), NULL, 0, SUM(Z.DIS_WGT_TTL)) AS DIS_WGT_TTL
+                              ,DECODE(NVL(M.YD_CD, M.PORT_CD), NULL, 0, SUM(Z.PRE_WGT_TTL)) AS PRE_WGT_TTL
+                              ,DECODE(NVL(M.YD_CD, M.PORT_CD), NULL, SUM(Z.PRE_WGT_TTL), 0) AS ON_WGT_TTL
+                          FROM (
+                                  SELECT A.BASE_VVD
+                                        ,A.RLANE_CD
+                                        ,A.SRC
+                                        ,MIN(A.PAST) OVER (PARTITION BY A.BASE_VVD, A.RLANE_CD, A.SRC, A.IOC_CD, A.PORT_CD) AS PAST
+                                        ,A.IOC_CD
+                                        ,A.SEQ
+                                        ,A.PORT_CD
+                                        ,A.PORT_SEQ
+                                        ,A.CLPT_IND_SEQ
+                                        ,A.LOD_TTL
+                                        ,A.DIS_TTL
+                                        ,A.PRE_TTL
+                                        ,A.LOD_WGT_TTL
+                                        ,A.DIS_WGT_TTL
+                                        ,A.PRE_WGT_TTL
+                                        ,A.TP
+                                    FROM (
+                                            SELECT A.SRC
+                                                  ,A.BASE_VVD
+                                                  ,A.RLANE_CD
+                                                  ,A.PAST
+                                                  ,Q.SEQ
+                                                  ,DECODE(T.SEQ, 2, 5, A.IOC_CD)                              AS IOC_CD
+                                                  ,DECODE(Q.SEQ, 1, A.POL_CD, A.POD_CD)                       AS PORT_CD
+                                                  ,DECODE(Q.SEQ, 1, A.POL_SEQ, A.POD_SEQ)                     AS PORT_SEQ
+                                                  ,DECODE(Q.SEQ, 1, A.POL_CLPT_IND_SEQ1, A.POD_CLPT_IND_SEQ1) AS CLPT_IND_SEQ
+                                                  ,DECODE(Q.SEQ, 1, A.QTY_TTL, 0)                             AS LOD_TTL -- OCEN 이면 QTY 아니면 0
+                                                  ,DECODE(Q.SEQ, 2, DECODE(A.TP, '1', 0, A.QTY_TTL), 0)       AS DIS_TTL -- IPC  이고 PRE 이면 0, TRUNK/POST 이면 QTY
+                                                  ,DECODE(A.TP, '1', A.QTY_TTL, 0)                            AS PRE_TTL -- PRE  이면 QTY 아니면 0
+                                                  ,DECODE(Q.SEQ, 1, A.WGT_TTL, 0)                             AS LOD_WGT_TTL
+                                                  ,DECODE(Q.SEQ, 2, DECODE(A.TP, '1', 0, A.WGT_TTL), 0)       AS DIS_WGT_TTL
+                                                  ,DECODE(A.TP, '1', A.WGT_TTL, 0)                            AS PRE_WGT_TTL
+                                                  ,A.TP
+                                                  ,'' AS T
+                                              FROM ALL_DATA A
+                                                  ,COPY     Q  -- IOC 오 묶기 위한것(1 ~ 5)
+                                                  ,COPY     T  -- TOTAL 구하기 위한것(1,2 만 있음)
+                                             WHERE Q.SEQ IN (DECODE(A.TP, 1, '2', 2, '1'), DECODE(A.TP, 3, '1', 2, '2'))
+                                               AND T.SEQ <= 2
+                                               --AND A.SRC  = 1
+                                         ) A
+                               ) Z
+                              ,PORT_MAP M
+                         WHERE Z.SRC         (+) = M.SRC
+                           AND Z.BASE_VVD    (+) = M.BASE_VVD
+                           AND Z.IOC_CD      (+) = M.IOC_CD
+                           AND Z.PORT_CD     (+) = NVL(M.YD_CD, M.PORT_CD)
+                           AND Z.CLPT_IND_SEQ(+) = M.CLPT_IND_SEQ
+                           AND Z.RLANE_CD    (+) = M.RLANE_CD
+                      GROUP BY GROUPING SETS (
+                                               (M.BASE_VVD, M.RLANE_CD, M.SRC, M.IOC_CD, M.CLPT_SEQ, NVL(M.YD_CD, M.PORT_CD), M.FLG, Z.PAST, M.BSA, M.WGT_BSA),
+                                               (M.BASE_VVD, M.RLANE_CD, M.SRC, M.IOC_CD)
+                                             )
+                      ORDER BY M.BASE_VVD
+                              ,M.RLANE_CD
+                              ,M.SRC
+                              ,M.IOC_CD
+                              ,NVL(M.CLPT_SEQ, 0)
+                     ) Z
+           ) Z
+     WHERE Z.IOC_CD   = 5
+       AND Z.PORT_SEQ > 0
+       AND Z.SRC = NVL((SELECT 1  -- 20131211 추가
+                          FROM SPC_HD_HUL_MST HD
+                         WHERE HD.RLANE_CD = Z.RLANE_CD
+                           AND HD.DIR_CD   = SUBSTR(Z.BASE_VVD,9,1)
+                           AND ROWNUM      = 1
+                      ),2)
+)
+
+
+ SELECT VP.VVD
+       ,VP.RLANE_CD
+       ,VP.CLPT_SEQ
+       ,VP.POL_PORT
+       ,VP.POL_YD_CD
+       ,VP.POL_TML_CD
+       ,VP.POL_ETA
+       ,VP.POL_ETD
+       ,VP.POD_PORT
+       ,VP.POD_YD_CD
+       ,VP.POD_TML_CD
+       ,VP.POD_ETA
+       ,VP.POD_ETD
+       ,VP.CARRIER_CD
+       ,VP.LOAD_TEU_TTL
+       ,VP.LOAD_WGT_TTL
+       ,VP.AVG_CMPB
+       ,VP.VIEW_TYPE
+       ,R.IS_R01
+	   ,R1.IS_R02
+  FROM (
+ SELECT  VP.VVD
+        ,VP.RLANE_CD
+        ,VP.CLPT_SEQ
+        ,VP.POL_PORT
+        ,NVL(VP.POL_YD_CD,'TTL') AS POL_YD_CD
+        ,VP.POL_TML_CD
+        ,VP.POL_ETA
+        ,VP.POL_ETD
+        ,VP.POD_PORT
+        ,VP.POD_YD_CD
+        ,VP.POD_TML_CD
+        ,VP.POD_ETA
+        ,VP.POD_ETD
+        ,VP.CARRIER_CD
+        ,ROUND(LC.LOAD_TEU_TTL) AS LOAD_TEU_TTL
+        ,ROUND(LC.LOAD_WGT_TTL) AS LOAD_WGT_TTL
+        ,NVL(ROUND(AVG(VP.AVG_CMPB)),0) AS AVG_CMPB
+        ,@[view_type11] AS VIEW_TYPE
+   FROM (
+          SELECT VP.VSL_CD || VP.SKD_VOY_NO || VP.SKD_DIR_CD AS VVD
+                ,VP.RLANE_CD
+                ,VP.CLPT_SEQ
+                ,VP.POL_PORT
+                ,VP.POL_YD_CD
+                ,VP.POL_TML_CD
+                ,VP.POL_ETA
+                ,VP.POL_ETD
+                ,VP.POD_PORT
+                ,VP.POD_YD_CD
+                ,VP.POD_TML_CD
+                ,VP.POD_ETA
+                ,VP.POD_ETD
+                ,VP.CARRIER_CD
+                ,Z.AVG_CMPB
+            FROM VSL_PORT VP
+                ,(
+                    SELECT Z.TS_FLG
+                          ,Z.RLANE_CD
+                          ,Z.VSL_CD
+                          ,Z.SKD_VOY_NO
+                          ,Z.SKD_DIR_CD
+                          ,Z.POL_YD_CD
+                          ,Z.POD_YD_CD
+                          ,SUM(NVL(SUBSTR(Z.VAL,  1, 14), 0))              AS BKG_TTL_QTY
+                          ,SUM(NVL(SUBSTR(Z.VAL, 15, 14), 0))              AS BKG_TTL_WGT
+                          ,SUM(CM_COST)                                    AS ESTM_CM_COST_AMT
+                          ,SUM(CM_COST) /SUM(NVL(SUBSTR(Z.VAL, 1, 14), 0)) AS AVG_CMPB
+                      FROM (
+                              SELECT /*+ ORDERED NO_MERGE(VP)*/
+                                     VP.RLANE_CD
+                                    ,VP.VSL_CD
+                                    ,VP.SKD_VOY_NO
+                                    ,VP.SKD_DIR_CD
+                                    ,BV.POL_YD_CD AS POL_YD_CD
+                                    ,BV.POD_YD_CD AS POD_YD_CD
+                                    ,DECODE(BV.VSL_PRE_PST_CD, 'T', 'N', 'Y') AS TS_FLG
+                                    ,(
+                                        SELECT    TO_CHAR(SUM(DECODE(SUBSTR(Q.CNTR_TPSZ_CD, 2, 1), '2', 1, 2) * Q.OP_CNTR_QTY), 'FM0000000000.000')
+                                               || TO_CHAR((D.ACT_WGT * DECODE(D.WGT_UT_CD, 'LBS', 0.00045, 0.001))
+                                                                     + SUM(Q.OP_CNTR_QTY * ( SELECT TS.CNTR_TPSZ_TARE_WGT
+                                                                                               FROM MDM_CNTR_TP_SZ TS
+                                                                                              WHERE TS.CNTR_TPSZ_CD = Q.CNTR_TPSZ_CD)) * 0.001, 'FM0000000000.000')
+                                          FROM BKG_QUANTITY Q
+                                         WHERE B.BKG_NO = Q.BKG_NO
+                                     ) AS VAL
+                                    ,(
+                                        SELECT --SUM(NVL(Q.BKG_REV,0) + NVL(Q.BKG_OFT_REV,0) + NVL(Q.BKG_MISC_REV,0) + NVL(Q.SCR_CHG_REV,0)) - NVL(SUM(Q.RA_CM_COST_AMT),0)
+                                        		SUM(NVL(Q.BKG_REV,0) + NVL(Q.BKG_OFT_REV,0) + NVL(Q.BKG_MISC_REV,0) + NVL(Q.SCR_CHG_REV,0) + NVL(Q.DMDT_COM_AMT, 0) ) - NVL(SUM(Q.RA_CM_COST_TTL_AMT),0)
+                                          FROM MAS_BKG_EXPN_DTL Q --MAS_BKG_REV_DTL Q
+                                         WHERE B.BKG_NO = Q.BKG_NO
+                                     ) AS CM_COST
+                                FROM VSL_PORT    VP
+                                    ,BKG_VVD     BV
+                                    ,BKG_BOOKING B
+                                    ,BKG_BL_DOC  D
+                               WHERE 1 = 1
+                                 AND VP.POL_PORT      = BV.POL_CD
+                                 AND VP.POD_PORT      = BV.POD_CD
+                                 AND VP.POL_YD_CD     = BV.POL_YD_CD
+                                 AND VP.POD_YD_CD     = BV.POD_YD_CD
+                                 AND B.BKG_NO         = BV.BKG_NO
+                                 AND B.BKG_STS_CD    IN ('F')
+                                 AND B.BKG_CGO_TP_CD <> 'P'
+                                 AND BV.VSL_PRE_PST_CD = 'T' 
+                                 AND VP.VSL_CD        = BV.VSL_CD
+                                 AND VP.SKD_VOY_NO    = BV.SKD_VOY_NO
+                                 AND VP.SKD_DIR_CD    = BV.SKD_DIR_CD
+                                 AND VP.VSL_SLAN_CD   = BV.SLAN_CD
+                                 AND B.BKG_NO         = D.BKG_NO
+                           ) Z
+                  GROUP BY Z.TS_FLG
+                          ,Z.RLANE_CD
+                          ,Z.VSL_CD
+                          ,Z.SKD_VOY_NO
+                          ,Z.SKD_DIR_CD
+                          ,Z.POL_YD_CD
+                          ,Z.POD_YD_CD
+                 ) Z
+           WHERE 1 = 1
+             AND VP.RLANE_CD   = Z.RLANE_CD   (+)
+             AND VP.VSL_CD     = Z.VSL_CD     (+)
+             AND VP.SKD_VOY_NO = Z.SKD_VOY_NO (+)
+             AND VP.SKD_DIR_CD = Z.SKD_DIR_CD (+)
+             AND VP.POL_YD_CD  = Z.POL_YD_CD   (+) 
+             AND VP.POD_YD_CD  = Z.POD_YD_CD   (+)
+          ) VP
+          ,LOAD_CAPA LC
+   WHERE VP.VVD        = LC.BASE_VVD(+)
+     AND VP.POL_YD_CD  = LC.PORT_CD(+)
+     AND VP.RLANE_CD   = LC.RLANE_CD(+)
+   GROUP BY GROUPING SETS (
+                             (VP.VVD,VP.RLANE_CD,VP.CLPT_SEQ,VP.POL_PORT,VP.POL_YD_CD,VP.POL_TML_CD,VP.POL_ETA,VP.POL_ETD,VP.POD_PORT,VP.POD_YD_CD,VP.POD_TML_CD,VP.POD_ETA,VP.POD_ETD,VP.CARRIER_CD,ROUND(LC.LOAD_TEU_TTL),ROUND(LC.LOAD_WGT_TTL)),
+                             (VP.VVD)
+                          )
+         ) VP
+   ,(SELECT CASE WHEN COUNT(*)>0 THEN 'Y' ELSE 'N' END IS_R01 FROM COM_USR_ROLE_MTCH WHERE USR_ID = NVL(@[login_user_id], 'XX') AND USR_ROLE_CD='SPC01') R
+   ,(SELECT CASE WHEN COUNT(*)>0 THEN 'Y' ELSE 'N' END IS_R02 FROM COM_USR_ROLE_MTCH WHERE USR_ID = NVL(@[login_user_id], 'XX') AND USR_ROLE_CD IN ('SPC01','SPC02','SPC04')) R1
+
+   ORDER BY 
+         NVL((SELECT 1  -- 20131211 ???
+                        FROM SPC_HD_HUL_MST HD
+                       WHERE HD.RLANE_CD = @[lane]
+                         AND HD.DIR_CD   = SUBSTR(VP.VVD,9,1)
+                         AND ROWNUM      = 1
+                    ),2),
+         MIN(VP.POL_ETA) OVER(PARTITION BY VP.VVD),
+         VP.VVD,
+         NVL(VP.CLPT_SEQ,30)
+
+--   ORDER BY VP.VVD
+--        ,VP.RLANE_CD
+--        ,VP.CLPT_SEQ			]]></sql>
+			<params>
+				<param name="lane" type="12" value="" out="N"/>
+				<param name="sDate" type="12" value="" out="N"/>
+				<param name="eDate" type="12" value="" out="N"/>
+				<param name="view_type11" type="12" value="" out="N"/>
+				<param name="login_user_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

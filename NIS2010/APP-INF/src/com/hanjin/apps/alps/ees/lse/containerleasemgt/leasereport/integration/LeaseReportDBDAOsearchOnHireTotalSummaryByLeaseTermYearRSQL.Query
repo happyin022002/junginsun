@@ -1,0 +1,2321 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LeaseReportDBDAOsearchOnHireTotalSummaryByLeaseTermYearRSQL">
+			<desc><![CDATA[년도별/계약별 자가 및 장기 장비 인수 계획 대비 실적 조회]]></desc>
+			<sql><![CDATA[
+#if (${lstm_cd_str} == '' ) 
+--===================================================ALL end    
+WITH PARAM AS (
+    SELECT DISTINCT A.PLN_YRMON,
+      A.AGMT_CTY_CD,
+      A.AGMT_SEQ,
+      A.DEL_CD,
+      A.MFT_VNDR_SEQ,
+      A.CNTR_TPSZ_CD,
+      A.NEW_VAN_YRMON AS BASE_DE_YRMON   
+    FROM LSE_NEW_VAN_DE_PLN A
+    WHERE 1 = 1
+       AND A.PLN_YRMON BETWEEN @[period_stdt] AND @[period_eddt]
+      AND A.AGMT_CTY_CD = 'HHO' ),
+  INLINE_1 AS (
+    SELECT DISTINCT P.PLN_YRMON,
+      P.AGMT_CTY_CD,
+      P.AGMT_SEQ,
+      P.AGMT_CTY_CD||LPAD(P.AGMT_SEQ, 6, '0') AS AGMT_NO,
+      P.MFT_VNDR_SEQ,
+      P.DEL_CD,
+      P.CNTR_TPSZ_CD,
+      P.BASE_DE_YRMON,
+      1 AS RSLT_TP_SEQ,
+      NVL(PLAN.DE_QTY, 0) AS PLAN_DE_QTY,
+      0 AS PFMC_DE_QTY,
+	  C.RCC_CD, C.LCC_CD, C.SCC_CD
+    FROM PARAM P,
+      LSE_NEW_VAN_DE_PLN PLAN,
+	  MDM_EQ_ORZ_CHT C
+    WHERE 1 = 1
+      AND P.BASE_DE_YRMON = PLAN.NEW_VAN_YRMON(+)
+      AND P.CNTR_TPSZ_CD = PLAN.CNTR_TPSZ_CD(+)
+      AND P.DEL_CD = PLAN.DEL_CD(+)
+      AND P.MFT_VNDR_SEQ = PLAN.MFT_VNDR_SEQ(+)
+      AND P.AGMT_SEQ = PLAN.AGMT_SEQ(+)
+      AND P.AGMT_CTY_CD = PLAN.AGMT_CTY_CD(+)
+      AND P.PLN_YRMON = PLAN.PLN_YRMON(+) 
+	  AND P.DEL_CD = C.SCC_CD),
+  INLINE_2 AS (
+    SELECT AGMT_CTY_CD||LPAD(AGMT_SEQ, 6, '0') AS AGMT_NO,
+      AGMT_CTY_CD,
+      AGMT_SEQ,
+      MFT_VNDR_SEQ,
+      RCC_CD, LCC_CD, SCC_CD, 
+      CNTR_TPSZ_CD,
+      DE_YRMON AS BASE_DE_YRMON,
+      2 AS RSLT_TP_SEQ,
+      0 AS PLAN_DE_QTY,
+      NVL(COUNT(CNTR_NO), 0) AS PFMC_DE_QTY,
+      PLN_YRMON
+    FROM (
+        SELECT /*+ ORDERED USE_HASH(P HS CN) */
+          DISTINCT TO_CHAR(CN.ONH_DT, 'YYYYMM') AS DE_YRMON,
+          HS.AGMT_CTY_CD,
+          HS.AGMT_SEQ,
+          CN.MFTR_VNDR_SEQ AS MFT_VNDR_SEQ,
+          E.SCC_CD AS DEL_CD,
+          CN.CNTR_TPSZ_CD,
+          CN.CNTR_NO,
+          P.PLN_YRMON,
+		  E.RCC_CD, E.LCC_CD, E.SCC_CD
+        FROM PARAM P,
+          MST_CNTR_STS_HIS HS,
+          MST_CONTAINER CN,
+          (
+            SELECT A.YD_CD, A.LOC_CD, C.RCC_CD, C.LCC_CD, C.SCC_CD
+            FROM MDM_YARD A,
+              MDM_LOCATION B,
+              MDM_EQ_ORZ_CHT C
+            WHERE A.LOC_CD = B.LOC_CD
+              AND B.SCC_CD = C.SCC_CD) E
+        WHERE 1 = 1
+          AND CN.ONH_DT >= TO_DATE(P.BASE_DE_YRMON, 'YYYYMM')
+          AND SUBSTR(NVL(HS.CNTR_STS_RMK, ' '), 1, 6) <> 'SELLOE'
+          AND HS.CNTR_LSTM_CNG_FLG <> 'Y'
+          AND HS.CNTR_STS_CD IN ('LSI','OWN')
+          AND HS.CNTR_NO = CN.CNTR_NO
+--          AND CN.ONH_YD_CD <> 'KRSEL1H'
+          AND CN.LSTM_CD IN('OW','LP', 'OL')
+          AND CN.HJS_CRE_FLG = 'N'
+          AND CN.ONH_YD_CD = E.YD_CD
+          AND HS.AGMT_SEQ = P.AGMT_SEQ
+          AND HS.AGMT_CTY_CD = P.AGMT_CTY_CD )
+    GROUP BY DE_YRMON, AGMT_CTY_CD, AGMT_SEQ, MFT_VNDR_SEQ, RCC_CD, LCC_CD, SCC_CD, CNTR_TPSZ_CD, PLN_YRMON  ),
+  TEMP_DROP AS (
+    SELECT 
+      X.DE_YR AS YEAR_MONTH,
+      X.AGMT_NO,
+      Z.LSTM_CD,
+      X.DEL_CD AS LOC_CD,
+      X.CNTR_TPSZ_CD AS TYSZ,
+      SUBSTR(Y.VNDR_ABBR_NM, 0, 8) AS SUPPLIER,
+      DECODE(X.RSLT_TP_SEQ, 1, 'Plan', 2, 'PFMC', 3, 'Ratio') AS RESULT,   
+      X.RSLT_TP_SEQ, 
+      SUM(DECODE(X.DE_MON, '01', DE_QTY, 0)) AS JAN,
+      SUM(DECODE(X.DE_MON, '02', DE_QTY, 0)) AS FEB,
+      SUM(DECODE(X.DE_MON, '03', DE_QTY, 0)) AS MAR,
+      SUM(DECODE(X.DE_MON, '04', DE_QTY, 0)) AS APR,
+      SUM(DECODE(X.DE_MON, '05', DE_QTY, 0)) AS MAY,
+      SUM(DECODE(X.DE_MON, '06', DE_QTY, 0)) AS JUN,
+      SUM(DECODE(X.DE_MON, '07', DE_QTY, 0)) AS JUL,
+      SUM(DECODE(X.DE_MON, '08', DE_QTY, 0)) AS AUG,
+      SUM(DECODE(X.DE_MON, '09', DE_QTY, 0)) AS SEP,
+      SUM(DECODE(X.DE_MON, '10', DE_QTY, 0)) AS OCT,
+      SUM(DECODE(X.DE_MON, '11', DE_QTY, 0)) AS NOV,
+      SUM(DECODE(X.DE_MON, '12', DE_QTY, 0)) AS DEC,
+      CASE WHEN X.RSLT_TP_SEQ = 1
+      OR X.RSLT_TP_SEQ = 2 THEN SUM(DECODE(X.DE_MON, '01', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '02', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '03', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '04', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '05', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '06', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '07', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '08', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '09', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '10', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '11', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '12', DE_QTY, 0)) WHEN X.RSLT_TP_SEQ = 3 THEN 0 END AS DIV_TOTAL
+    FROM (
+        SELECT A.PLN_YRMON,
+          A.AGMT_NO,
+          A.AGMT_CTY_CD,
+          A.AGMT_SEQ,
+          A.MFT_VNDR_SEQ,
+          A.RCC_CD, A.LCC_CD, A.SCC_CD, A.LCC_CD AS DEL_CD,
+          A.CNTR_TPSZ_CD,
+          SUBSTR(A.BASE_DE_YRMON, 0, 4) AS DE_YR,
+          SUBSTR(A.BASE_DE_YRMON, 5, 2) AS DE_MON,
+          C.RSLT_TP_SEQ,
+          CASE C.RSLT_TP_SEQ WHEN 1 THEN A.PLAN_DE_QTY WHEN 2 THEN B.PFMC_DE_QTY WHEN 3 THEN DECODE(NVL(A.PLAN_DE_QTY, 0), 0, 0, ROUND(B.PFMC_DE_QTY/A.PLAN_DE_QTY*100)) END DE_QTY
+        FROM INLINE_1 A,
+          INLINE_2 B,
+          (
+            SELECT LEVEL AS RSLT_TP_SEQ
+            FROM DUAL CONNECT BY LEVEL <= 3) C
+        WHERE A.AGMT_NO = B.AGMT_NO(+)
+          AND A.MFT_VNDR_SEQ = B.MFT_VNDR_SEQ(+)
+		  AND A.SCC_CD = B.SCC_CD(+)
+          AND A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD(+)
+          AND A.BASE_DE_YRMON = B.BASE_DE_YRMON(+)
+        UNION ALL
+        SELECT NVL(A.PLN_YRMON, B.PLN_YRMON) AS PLN_YRMON,
+          B.AGMT_NO,
+          B.AGMT_CTY_CD,
+          B.AGMT_SEQ,
+          B.MFT_VNDR_SEQ,
+          B.RCC_CD, B.LCC_CD, B.SCC_CD, B.LCC_CD AS DEL_CD,
+          B.CNTR_TPSZ_CD,
+          SUBSTR(B.BASE_DE_YRMON, 0, 4) AS DE_YR,
+          SUBSTR(B.BASE_DE_YRMON, 5, 2) AS DE_MON,
+          C.RSLT_TP_SEQ,
+          CASE C.RSLT_TP_SEQ WHEN 1 THEN A.PLAN_DE_QTY WHEN 2 THEN B.PFMC_DE_QTY WHEN 3 THEN DECODE(NVL(A.PLAN_DE_QTY, 0), 0, 0, ROUND(B.PFMC_DE_QTY/A.PLAN_DE_QTY*100)) END DE_QTY
+        FROM INLINE_1 A,
+          INLINE_2 B,
+          (
+            SELECT LEVEL AS RSLT_TP_SEQ
+            FROM DUAL CONNECT BY LEVEL <= 3) C
+        WHERE A.AGMT_NO(+) = B.AGMT_NO
+          AND A.MFT_VNDR_SEQ(+) = B.MFT_VNDR_SEQ
+		  AND A.SCC_CD(+) = B.SCC_CD
+          AND A.CNTR_TPSZ_CD(+) = B.CNTR_TPSZ_CD
+          AND A.BASE_DE_YRMON(+) = B.BASE_DE_YRMON
+          AND A.PLAN_DE_QTY IS NULL ) X ,
+          MDM_VENDOR Y ,
+          LSE_AGREEMENT Z
+    WHERE Y.VNDR_SEQ = X.MFT_VNDR_SEQ
+      AND X.AGMT_CTY_CD = Z.AGMT_CTY_CD
+      AND X.AGMT_SEQ    = Z.AGMT_SEQ
+#if (${vndr_seq_str} != '' )
+    AND X.MFT_VNDR_SEQ IN( #foreach($key IN ${vndr_seq})
+                                      #if($velocityCount < $vndr_seq.size())
+                                          '$key',
+                                      #else
+                                          '$key'
+                                      #end
+                                  #end )
+#end
+
+#if (${cntr_tpsz_cd_str} != '' )
+    AND X.CNTR_TPSZ_CD  IN( #foreach($key IN ${cntr_tpsz_cd})
+                                      #if($velocityCount < $cntr_tpsz_cd.size())
+                                          '$key',
+                                      #else
+                                          '$key'
+                                      #end
+                                  #end )
+#end
+
+
+#if (${loc_cd} != '')
+	#if (${loc_tp} == 'R')
+        AND	X.RCC_CD IN ( #foreach($key IN ${loc_cd})
+                          		#if($velocityCount < $loc_cd.size())
+                                	'$key',
+                                #else
+                                    '$key'
+                                #end
+                          #end )
+	#elseif (${loc_tp} == 'L')
+        AND	X.LCC_CD IN ( #foreach($key IN ${loc_cd})
+                                #if($velocityCount < $loc_cd.size())
+                                    '$key',
+                                #else
+                                    '$key'
+                                #end
+                          #end )
+	#elseif (${loc_tp} == 'S')
+        AND	X.SCC_CD IN ( #foreach($key IN ${loc_cd})
+                                #if($velocityCount < $loc_cd.size())
+                                    '$key',
+                                #else
+                                    '$key'
+                                #end
+                          #end )
+	#end
+#end
+
+    GROUP BY X.DE_YR, X.AGMT_NO, Z.LSTM_CD, X.DEL_CD, X.CNTR_TPSZ_CD, Y.VNDR_ABBR_NM , X.RSLT_TP_SEQ 
+    ORDER BY X.DE_YR, X.AGMT_NO, Z.LSTM_CD, X.DEL_CD, X.CNTR_TPSZ_CD, Y.VNDR_ABBR_NM , X.RSLT_TP_SEQ ) ,
+--===================================================================
+  LT_VIEW AS (
+    SELECT 
+      DD.PLN_YR ,
+      DD.DE_YR AS YEAR_MONTH,
+      NVL(DD.AGMT_NO, 'G.TTL') AS AGMT_NO ,
+      NVL2(DD.MFT_VNDR_SEQ, SUBSTR(VNDR.VNDR_ABBR_NM, 0, 3), 'TTL') AS SUPPLIER ,
+      DD.DEL_CD AS LOC_CD,
+      DD.CNTR_TPSZ_CD AS TYSZ,
+      DD.TYPE_CD AS RSLT_TP_SEQ ,
+      DECODE(DD.TYPE_CD, 1, 'Plan', 2, 'PFMC', 3, 'Ratio') AS RESULT ,
+      SUM(DECODE(DD.DE_MON, '01', DD.VAL, 0)) AS JAN ,
+      SUM(DECODE(DD.DE_MON, '02', DD.VAL, 0)) AS FEB ,
+      SUM(DECODE(DD.DE_MON, '03', DD.VAL, 0)) AS MAR ,
+      SUM(DECODE(DD.DE_MON, '04', DD.VAL, 0)) AS APR ,
+      SUM(DECODE(DD.DE_MON, '05', DD.VAL, 0)) AS MAY ,
+      SUM(DECODE(DD.DE_MON, '06', DD.VAL, 0)) AS JUN ,
+      SUM(DECODE(DD.DE_MON, '07', DD.VAL, 0)) AS JUL ,
+      SUM(DECODE(DD.DE_MON, '08', DD.VAL, 0)) AS AUG ,
+      SUM(DECODE(DD.DE_MON, '09', DD.VAL, 0)) AS SEP ,
+      SUM(DECODE(DD.DE_MON, '10', DD.VAL, 0)) AS OCT ,
+      SUM(DECODE(DD.DE_MON, '11', DD.VAL, 0)) AS NOV ,
+      SUM(DECODE(DD.DE_MON, '12', DD.VAL, 0)) AS DEC ,
+      SUM(DECODE(DD.DE_MON, 'S.TTL', DD.VAL, 0)) AS DIV_TOTAL
+    FROM (
+        SELECT BB.PLN_YR ,
+          BB.DE_YR ,
+          BB.AGMT_NO ,
+          BB.MFT_VNDR_SEQ ,
+          BB.DEL_CD ,
+          BB.CNTR_TPSZ_CD ,
+          NVL(BB.DE_MON, 'S.TTL') AS DE_MON ,
+          TP.TYPE_CD ,
+          DECODE(TP.TYPE_CD, 1, BB.PLAN_DE_QTY, 2, BB.PFMC_DE_QTY, DECODE(BB.PLAN_DE_QTY, 0, 0, ROUND(BB.PFMC_DE_QTY/BB.PLAN_DE_QTY*100, 2)) ) AS VAL,
+          DECODE(BB.GRP_ID, 1, 0, GRP_ID) AS GRP_ID
+        FROM (
+            SELECT AA.PLN_YR ,
+              AA.DE_YR ,
+              AA.MFT_VNDR_SEQ ,
+              AA.AGMT_NO ,
+              AA.DEL_CD ,
+              AA.CNTR_TPSZ_CD ,
+              AA.DE_MON ,
+              SUM(AA.PLAN_DE_QTY) AS PLAN_DE_QTY ,
+              SUM(AA.PFMC_DE_QTY) AS PFMC_DE_QTY ,
+              GROUPING_ID ( AA.PLN_YR , AA.DE_YR , AA.MFT_VNDR_SEQ , AA.AGMT_NO , AA.DEL_CD , AA.CNTR_TPSZ_CD , AA.DE_MON ) GRP_ID
+            FROM (
+                SELECT A.PLN_YR ,
+                  SUBSTR(A.DE_YRMON, 0, 4) AS DE_YR ,
+                  A.MFT_VNDR_SEQ ,
+                  A.AGMT_NO ,
+                  A.DEL_CD ,
+                  A.CNTR_TPSZ_CD ,
+                  SUBSTR(A.DE_YRMON, 5, 2) AS DE_MON ,
+                  SUM(A.PLAN_DE_QTY) AS PLAN_DE_QTY ,
+                  SUM(A.PFMC_DE_QTY) AS PFMC_DE_QTY
+                FROM (
+                    SELECT PLN.PLN_YR ,
+                      PLN.DE_YRMON ,
+                      PLN.MFT_VNDR_SEQ ,
+                      PLN.AGMT_CTY_CD || LPAD(PLN.AGMT_SEQ, 6, '0') AS AGMT_NO ,
+                      C.LCC_CD AS DEL_CD ,
+                      PLN.CNTR_TPSZ_CD ,
+                      PLN.DE_QTY AS PLAN_DE_QTY ,
+                      0 AS PFMC_DE_QTY,
+					  C.RCC_CD, C.LCC_CD, C.SCC_CD
+                    FROM LSE_LONG_TERM_DE_PLN PLN,
+					     MDM_EQ_ORZ_CHT C
+                    WHERE 1 = 1
+					  AND PLN.DEL_CD = C.SCC_CD
+                      AND PLN.AGMT_CTY_CD = 'HHO'
+                      AND DE_YRMON BETWEEN @[period_stdt] AND @[period_eddt]
+#if (${cntr_tpsz_cd_str} != '' )
+                      AND PLN.CNTR_TPSZ_CD IN( #foreach($key IN ${cntr_tpsz_cd})
+                                      #if($velocityCount < $cntr_tpsz_cd.size())
+                                          '$key',
+                                      #else
+                                          '$key'
+                                      #end
+                                  #end )
+#end
+
+#if (${vndr_seq_str} != '' )
+          AND PLN.MFT_VNDR_SEQ IN( #foreach($key IN ${vndr_seq})
+                                      #if($velocityCount < $vndr_seq.size())
+                                          '$key',
+                                      #else
+                                          '$key'
+                                      #end
+                                  #end )
+#end
+
+
+#if (${loc_cd} != '')
+	#if (${loc_tp} == 'R')
+        AND C.RCC_CD  IN ( #foreach($key IN ${loc_cd})
+                           		#if($velocityCount < $loc_cd.size())
+                                	'$key',
+                                #else
+                                    '$key'
+                                #end
+                           #end )
+	#elseif (${loc_tp} == 'L')
+        AND	C.LCC_CD IN ( #foreach($key IN ${loc_cd})
+                                #if($velocityCount < $loc_cd.size())
+                                    '$key',
+                                #else
+                                    '$key'
+                                #end
+                          #end )
+	#elseif (${loc_tp} == 'S')
+        AND	C.SCC_CD IN ( #foreach($key IN ${loc_cd})
+                                #if($velocityCount < $loc_cd.size())
+                                    '$key',
+                                #else
+                                    '$key'
+                                #end
+                          #end )
+	#end
+#end
+
+
+
+                    UNION ALL 
+                    SELECT PLN.PLN_YR ,
+                      TO_CHAR(HS.CNTR_STS_EVNT_DT, 'YYYYMM') AS DE_YRMON ,
+                      CN.VNDR_SEQ AS MFT_VNDR_SEQ ,
+                      HS.AGMT_CTY_CD || LPAD(HS.AGMT_SEQ, 6, '0') AS AGMT_NO ,
+                      HS.LCC_CD AS DEL_CD ,
+                      CN.CNTR_TPSZ_CD ,
+                      0 AS PLAN_DE_QTY ,
+                      COUNT(CN.CNTR_NO) AS PFMC_DE_QTY,
+					  HS.RCC_CD, HS.LCC_CD, HS.SCC_CD
+                    FROM MST_CONTAINER CN ,
+                      MST_CNTR_STS_HIS HS ,
+                      (
+                        SELECT DISTINCT PLN_YR,
+                          AGMT_CTY_CD,
+                          AGMT_SEQ
+                        FROM LSE_LONG_TERM_DE_PLN
+                        WHERE 1 = 1
+                          AND AGMT_CTY_CD = 'HHO'
+                          AND DE_YRMON BETWEEN @[period_stdt] AND @[period_eddt]
+                          ) PLN
+                    WHERE 1 = 1
+                      AND CN.CNTR_NO = HS.CNTR_NO
+                      AND SUBSTR(nvl(HS.CNTR_STS_RMK, ' '), 1, 6) <> 'SELLOE'
+                      AND HS.CNTR_LSTM_CNG_FLG <> 'Y'
+                      AND HS.CNTR_STS_EVNT_DT BETWEEN TO_DATE(@[period_stdt] , 'YYYYMM' ) AND last_day(to_date(@[period_eddt],'YYYYMM'))+0.99999 
+                      AND HS.CNTR_STS_CD in ('LSI', 'DII')
+                      AND HS.AGMT_SEQ = PLN.AGMT_SEQ(+)
+                      AND HS.AGMT_CTY_CD = PLN.AGMT_CTY_CD(+)
+					  AND CN.LSTM_CD = 'LT'
+
+
+
+#if (${cntr_tpsz_cd_str} != '' )
+                      AND CN.CNTR_TPSZ_CD IN( #foreach($key IN ${cntr_tpsz_cd})
+                                      #if($velocityCount < $cntr_tpsz_cd.size())
+                                          '$key',
+                                      #else
+                                          '$key'
+                                      #end
+                                  #end )
+#end
+
+#if (${vndr_seq_str} != '' )
+          AND CN.VNDR_SEQ IN( #foreach($key IN ${vndr_seq})
+                                      #if($velocityCount < $vndr_seq.size())
+                                          '$key',
+                                      #else
+                                          '$key'
+                                      #end
+                                  #end )
+#end
+
+#if (${loc_cd} != '')
+	#if (${loc_tp} == 'R')
+        AND HS.RCC_CD  IN ( #foreach($key IN ${loc_cd})
+                            	#if($velocityCount < $loc_cd.size())
+                                	'$key',
+                                #else
+                                    '$key'
+                                #end
+                            #end )
+	#elseif (${loc_tp} == 'L')
+        AND	HS.LCC_CD IN ( #foreach($key IN ${loc_cd})
+                                #if($velocityCount < $loc_cd.size())
+                                    '$key',
+                                #else
+                                    '$key'
+                                #end
+                           #end )
+	#elseif (${loc_tp} == 'S')
+        AND	HS.SCC_CD IN ( #foreach($key IN ${loc_cd})
+                                #if($velocityCount < $loc_cd.size())
+                                    '$key',
+                                #else
+                                    '$key'
+                                #end
+                           #end )
+	#end
+#end
+                    GROUP BY PLN.PLN_YR , TO_CHAR(HS.CNTR_STS_EVNT_DT, 'YYYYMM') , HS.AGMT_CTY_CD , HS.AGMT_SEQ , CN.VNDR_SEQ , HS.RCC_CD, HS.LCC_CD, HS.SCC_CD, CN.CNTR_TPSZ_CD ) A
+                GROUP BY A.PLN_YR , SUBSTR(A.DE_YRMON, 0, 4) , A.MFT_VNDR_SEQ , A.AGMT_NO , A.DEL_CD , A.CNTR_TPSZ_CD , SUBSTR(A.DE_YRMON, 5, 2) ) AA
+            GROUP BY CUBE ( AA.PLN_YR , AA.DE_YR , AA.MFT_VNDR_SEQ , AA.AGMT_NO , AA.DEL_CD , AA.CNTR_TPSZ_CD , AA.DE_MON )
+            ORDER BY GRP_ID ) BB ,
+          (
+            SELECT LEVEL TYPE_CD
+            FROM DUAL CONNECT BY LEVEL <= 3 ) TP
+        WHERE GRP_ID IN (0,
+              1) ) DD ,
+      MDM_VENDOR VNDR
+    WHERE DD.MFT_VNDR_SEQ = VNDR.VNDR_SEQ(+)
+    GROUP BY DD.PLN_YR , DD.DE_YR , DD.MFT_VNDR_SEQ , VNDR.VNDR_ABBR_NM , DD.AGMT_NO , DD.DEL_CD , DD.CNTR_TPSZ_CD , DD.TYPE_CD
+    ORDER BY DD.PLN_YR , DD.DE_YR , DD.AGMT_NO , DD.MFT_VNDR_SEQ , DD.DEL_CD , DD.CNTR_TPSZ_CD , DD.TYPE_CD )
+   SELECT YEAR_MONTH,
+      AGMT_NO ,
+      LSTM_CD,
+      LOC_CD,
+      TYSZ,
+      SUPPLIER,
+      RESULT,
+      RSLT_TP_SEQ,
+      JAN,
+      FEB ,
+      MAR,
+      APR,
+      MAY,
+      JUN,
+      JUL,
+      AUG,
+      SEP,
+      OCT,
+      NOV,
+      DEC,
+      DIV_TOTAL
+    FROM (
+    SELECT YEAR_MONTH,
+      AGMT_NO ,
+      LSTM_CD,
+      LOC_CD,
+      TYSZ,
+      SUPPLIER,
+      RESULT,
+      RSLT_TP_SEQ,
+      JAN,
+      FEB ,
+      MAR,
+      APR,
+      MAY,
+      JUN,
+      JUL,
+      AUG,
+      SEP,
+      OCT,
+      NOV,
+      DEC,
+      DIV_TOTAL
+    FROM (
+        SELECT YEAR_MONTH,
+          AGMT_NO ,
+          LSTM_CD,
+          LOC_CD,
+          TYSZ,
+          SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          JAN,
+          FEB ,
+          MAR,
+          APR,
+          MAY,
+          JUN,
+          JUL,
+          AUG,
+          SEP,
+          OCT,
+          NOV,
+          DEC,
+          DIV_TOTAL
+        FROM TEMP_DROP
+        UNION ALL
+        SELECT YEAR_MONTH,
+          AGMT_NO ,
+          'LT' LSTM_CD,
+          LOC_CD,
+          TYSZ,
+          SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          JAN,
+          FEB ,
+          MAR,
+          APR,
+          MAY,
+          JUN,
+          JUL,
+          AUG,
+          SEP,
+          OCT,
+          NOV,
+          DEC,
+          DIV_TOTAL
+        FROM LT_VIEW )
+    UNION ALL
+    SELECT YEAR_MONTH,
+      'S.TTL' AGMT_NO ,
+      NULL LSTM_CD,
+      NULL LOC_CD,
+      NULL TYSZ,
+      NULL SUPPLIER,
+      RESULT,
+      RSLT_TP_SEQ,
+      SUM(JAN) JAN,
+      SUM(FEB) FEB,
+      SUM(MAR) MAR,
+      SUM(APR) APR,
+      SUM(MAY) MAY,
+      SUM(JUN) JUN,
+      SUM(JUL) JUL,
+      SUM(AUG) AUG,
+      SUM(SEP) SEP,
+      SUM(OCT) OCT,
+      SUM(NOV) NOV,
+      SUM(DEC) DEC,
+      SUM(DIV_TOTAL) DIV_TOTAL
+    FROM (
+        SELECT YEAR_MONTH,
+          AGMT_NO ,
+          LSTM_CD,
+          LOC_CD,
+          TYSZ,
+          SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          JAN,
+          FEB ,
+          MAR,
+          APR,
+          MAY,
+          JUN,
+          JUL,
+          AUG,
+          SEP,
+          OCT,
+          NOV,
+          DEC,
+          DIV_TOTAL
+        FROM TEMP_DROP
+        WHERE RSLT_TP_SEQ < 3
+        UNION ALL
+        SELECT YEAR_MONTH,
+          AGMT_NO ,
+          'LT' LSTM_CD,
+          LOC_CD,
+          TYSZ,
+          SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          JAN,
+          FEB ,
+          MAR,
+          APR,
+          MAY,
+          JUN,
+          JUL,
+          AUG,
+          SEP,
+          OCT,
+          NOV,
+          DEC,
+          DIV_TOTAL
+        FROM LT_VIEW
+        WHERE RSLT_TP_SEQ < 3 )
+    GROUP BY YEAR_MONTH, RESULT, RSLT_TP_SEQ
+    UNION ALL
+    SELECT P.YEAR_MONTH,
+      'S.TTL' AGMT_NO ,
+      NULL LSTM_CD,
+      NULL LOC_CD,
+      NULL TYSZ,
+      NULL SUPPLIER,
+      'Ratio' RESULT,
+      3 RSLT_TP_SEQ,
+      CASE WHEN P.JAN > 0
+      AND F.JAN > 0 THEN ROUND((F.JAN / P.JAN) * 100 ) ELSE 0 END JAN ,
+      CASE WHEN P.FEB > 0
+      AND F.FEB > 0 THEN ROUND((F.FEB / P.FEB) * 100 ) ELSE 0 END FEB ,
+      CASE WHEN P.MAR > 0
+      AND F.MAR > 0 THEN ROUND((F.MAR / P.MAR) * 100 ) ELSE 0 END MAR ,
+      CASE WHEN P.APR > 0
+      AND F.APR > 0 THEN ROUND((F.APR / P.APR) * 100 ) ELSE 0 END APR ,
+      CASE WHEN P.MAY > 0
+      AND F.MAY > 0 THEN ROUND((F.MAY / P.MAY) * 100 ) ELSE 0 END MAY ,
+      CASE WHEN P.JUN > 0
+      AND F.JUN > 0 THEN ROUND((F.JUN / P.JUN) * 100 ) ELSE 0 END JUN ,
+      CASE WHEN P.JUL > 0
+      AND F.JUL > 0 THEN ROUND((F.JUL / P.JUL) * 100 ) ELSE 0 END JUL ,
+      CASE WHEN P.AUG > 0
+      AND F.AUG > 0 THEN ROUND((F.AUG / P.AUG) * 100 ) ELSE 0 END AUG ,
+      CASE WHEN P.SEP > 0
+      AND F.SEP > 0 THEN ROUND((F.SEP / P.SEP) * 100 ) ELSE 0 END SEP ,
+      CASE WHEN P.OCT > 0
+      AND F.OCT > 0 THEN ROUND((F.OCT / P.OCT) * 100 ) ELSE 0 END OCT ,
+      CASE WHEN P.NOV > 0
+      AND F.NOV > 0 THEN ROUND((F.NOV / P.NOV) * 100 ) ELSE 0 END NOV ,
+      CASE WHEN P.DEC > 0
+      AND F.DEC > 0 THEN ROUND((F.DEC / P.DEC) * 100 ) ELSE 0 END DEC ,
+      CASE WHEN P.DIV_TOTAL > 0
+      AND F.DIV_TOTAL > 0 THEN ROUND((F.DIV_TOTAL / P.DIV_TOTAL) * 100 ) ELSE 0 END DIV_TOTAL
+    FROM (
+        SELECT YEAR_MONTH,
+          NULL AGMT_NO ,
+          NULL LSTM_CD,
+          NULL LOC_CD,
+          NULL TYSZ,
+          NULL SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          SUM(JAN) JAN,
+          SUM(FEB) FEB,
+          SUM(MAR) MAR,
+          SUM(APR) APR,
+          SUM(MAY) MAY,
+          SUM(JUN) JUN,
+          SUM(JUL) JUL,
+          SUM(AUG) AUG,
+          SUM(SEP) SEP,
+          SUM(OCT) OCT,
+          SUM(NOV) NOV,
+          SUM(DEC) DEC,
+          SUM(DIV_TOTAL) DIV_TOTAL
+        FROM (
+            SELECT YEAR_MONTH,
+              AGMT_NO ,
+              LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM TEMP_DROP
+            WHERE RSLT_TP_SEQ = 1
+            UNION ALL
+            SELECT YEAR_MONTH,
+              AGMT_NO ,
+              'LT' LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM LT_VIEW
+            WHERE RSLT_TP_SEQ = 1 )
+        GROUP BY YEAR_MONTH, RESULT, RSLT_TP_SEQ ) P ,
+      (
+        SELECT YEAR_MONTH,
+          NULL AGMT_NO ,
+          NULL LSTM_CD,
+          NULL LOC_CD,
+          NULL TYSZ,
+          NULL SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          SUM(JAN) JAN,
+          SUM(FEB) FEB,
+          SUM(MAR) MAR,
+          SUM(APR) APR,
+          SUM(MAY) MAY,
+          SUM(JUN) JUN,
+          SUM(JUL) JUL,
+          SUM(AUG) AUG,
+          SUM(SEP) SEP,
+          SUM(OCT) OCT,
+          SUM(NOV) NOV,
+          SUM(DEC) DEC,
+          SUM(DIV_TOTAL) DIV_TOTAL
+        FROM (
+            SELECT YEAR_MONTH,
+              AGMT_NO ,
+              LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM TEMP_DROP
+            WHERE RSLT_TP_SEQ = 2
+            UNION ALL
+            SELECT YEAR_MONTH,
+              AGMT_NO ,
+              'LT' LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM LT_VIEW
+            WHERE RSLT_TP_SEQ = 2 )
+        GROUP BY YEAR_MONTH, RESULT, RSLT_TP_SEQ ) F
+    WHERE P.YEAR_MONTH = F.YEAR_MONTH 
+
+
+
+    UNION ALL
+    SELECT 
+      'G.TTL' YEAR_MONTH,
+      NULL AGMT_NO ,
+      NULL LSTM_CD,
+      NULL LOC_CD,
+      NULL TYSZ,
+      NULL SUPPLIER,
+      RESULT,
+      RSLT_TP_SEQ,
+      SUM(JAN) JAN,
+      SUM(FEB) FEB,
+      SUM(MAR) MAR,
+      SUM(APR) APR,
+      SUM(MAY) MAY,
+      SUM(JUN) JUN,
+      SUM(JUL) JUL,
+      SUM(AUG) AUG,
+      SUM(SEP) SEP,
+      SUM(OCT) OCT,
+      SUM(NOV) NOV,
+      SUM(DEC) DEC,
+      SUM(DIV_TOTAL) DIV_TOTAL
+    FROM (
+        SELECT YEAR_MONTH,
+          AGMT_NO ,
+          LSTM_CD,
+          LOC_CD,
+          TYSZ,
+          SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          JAN,
+          FEB ,
+          MAR,
+          APR,
+          MAY,
+          JUN,
+          JUL,
+          AUG,
+          SEP,
+          OCT,
+          NOV,
+          DEC,
+          DIV_TOTAL
+        FROM TEMP_DROP
+        WHERE RSLT_TP_SEQ < 3
+        UNION ALL
+        SELECT YEAR_MONTH,
+          AGMT_NO ,
+          'LT' LSTM_CD,
+          LOC_CD,
+          TYSZ,
+          SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          JAN,
+          FEB ,
+          MAR,
+          APR,
+          MAY,
+          JUN,
+          JUL,
+          AUG,
+          SEP,
+          OCT,
+          NOV,
+          DEC,
+          DIV_TOTAL
+        FROM LT_VIEW
+        WHERE RSLT_TP_SEQ < 3 )
+    GROUP BY RESULT, RSLT_TP_SEQ
+    
+    
+    
+    UNION ALL
+    SELECT
+      'G.TTL' YEAR_MONTH,
+      NULL AGMT_NO ,
+      NULL LSTM_CD,
+      NULL LOC_CD,
+      NULL TYSZ,
+      NULL SUPPLIER,
+      'Ratio' RESULT,
+      3 RSLT_TP_SEQ,
+      CASE WHEN P.JAN > 0
+      AND F.JAN > 0 THEN ROUND((F.JAN / P.JAN) * 100 ) ELSE 0 END JAN ,
+      CASE WHEN P.FEB > 0
+      AND F.FEB > 0 THEN ROUND((F.FEB / P.FEB) * 100 ) ELSE 0 END FEB ,
+      CASE WHEN P.MAR > 0
+      AND F.MAR > 0 THEN ROUND((F.MAR / P.MAR) * 100 ) ELSE 0 END MAR ,
+      CASE WHEN P.APR > 0
+      AND F.APR > 0 THEN ROUND((F.APR / P.APR) * 100 ) ELSE 0 END APR ,
+      CASE WHEN P.MAY > 0
+      AND F.MAY > 0 THEN ROUND((F.MAY / P.MAY) * 100 ) ELSE 0 END MAY ,
+      CASE WHEN P.JUN > 0
+      AND F.JUN > 0 THEN ROUND((F.JUN / P.JUN) * 100 ) ELSE 0 END JUN ,
+      CASE WHEN P.JUL > 0
+      AND F.JUL > 0 THEN ROUND((F.JUL / P.JUL) * 100 ) ELSE 0 END JUL ,
+      CASE WHEN P.AUG > 0
+      AND F.AUG > 0 THEN ROUND((F.AUG / P.AUG) * 100 ) ELSE 0 END AUG ,
+      CASE WHEN P.SEP > 0
+      AND F.SEP > 0 THEN ROUND((F.SEP / P.SEP) * 100 ) ELSE 0 END SEP ,
+      CASE WHEN P.OCT > 0
+      AND F.OCT > 0 THEN ROUND((F.OCT / P.OCT) * 100 ) ELSE 0 END OCT ,
+      CASE WHEN P.NOV > 0
+      AND F.NOV > 0 THEN ROUND((F.NOV / P.NOV) * 100 ) ELSE 0 END NOV ,
+      CASE WHEN P.DEC > 0
+      AND F.DEC > 0 THEN ROUND((F.DEC / P.DEC) * 100 ) ELSE 0 END DEC ,
+      CASE WHEN P.DIV_TOTAL > 0
+      AND F.DIV_TOTAL > 0 THEN ROUND((F.DIV_TOTAL / P.DIV_TOTAL) * 100 ) ELSE 0 END DIV_TOTAL
+    FROM (
+        SELECT 
+          'G.TTL' YEAR_MONTH,
+          NULL AGMT_NO ,
+          NULL LSTM_CD,
+          NULL LOC_CD,
+          NULL TYSZ,
+          NULL SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          SUM(JAN) JAN,
+          SUM(FEB) FEB,
+          SUM(MAR) MAR,
+          SUM(APR) APR,
+          SUM(MAY) MAY,
+          SUM(JUN) JUN,
+          SUM(JUL) JUL,
+          SUM(AUG) AUG,
+          SUM(SEP) SEP,
+          SUM(OCT) OCT,
+          SUM(NOV) NOV,
+          SUM(DEC) DEC,
+          SUM(DIV_TOTAL) DIV_TOTAL
+        FROM (
+            SELECT 
+              YEAR_MONTH,
+              AGMT_NO ,
+              LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM TEMP_DROP
+            WHERE RSLT_TP_SEQ = 1
+            UNION ALL
+            SELECT 
+              YEAR_MONTH,
+              AGMT_NO ,
+              'LT' LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM LT_VIEW
+            WHERE RSLT_TP_SEQ = 1 )
+        GROUP BY RESULT, RSLT_TP_SEQ ) P ,
+      (
+        SELECT 
+          'G.TTL' YEAR_MONTH,
+          NULL AGMT_NO ,
+          NULL LSTM_CD,
+          NULL LOC_CD,
+          NULL TYSZ,
+          NULL SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          SUM(JAN) JAN,
+          SUM(FEB) FEB,
+          SUM(MAR) MAR,
+          SUM(APR) APR,
+          SUM(MAY) MAY,
+          SUM(JUN) JUN,
+          SUM(JUL) JUL,
+          SUM(AUG) AUG,
+          SUM(SEP) SEP,
+          SUM(OCT) OCT,
+          SUM(NOV) NOV,
+          SUM(DEC) DEC,
+          SUM(DIV_TOTAL) DIV_TOTAL
+        FROM (
+            SELECT 
+              'G.TTL' YEAR_MONTH,
+              AGMT_NO ,
+              LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM TEMP_DROP
+            WHERE RSLT_TP_SEQ = 2
+            UNION ALL
+            SELECT 
+              'G.TTL' YEAR_MONTH,
+              AGMT_NO ,
+              'LT' LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM LT_VIEW
+            WHERE RSLT_TP_SEQ = 2 )
+        GROUP BY RESULT, RSLT_TP_SEQ ) F
+    WHERE P.YEAR_MONTH = F.YEAR_MONTH )
+ORDER BY YEAR_MONTH ,AGMT_NO,LSTM_CD,LOC_CD,TYSZ,SUPPLIER,RSLT_TP_SEQ
+
+
+--===================================================ALL end    
+#elseif (${lstm_cd_str} == 'LT' ) 
+---========================================================LT start
+WITH LT_VIEW AS (
+    SELECT 
+      DD.PLN_YR ,
+      DD.DE_YR AS YEAR_MONTH,
+      NVL(DD.AGMT_NO, 'G.TTL') AS AGMT_NO ,
+     'LT' LSTM_CD,
+      NVL2(DD.MFT_VNDR_SEQ, SUBSTR(VNDR.VNDR_ABBR_NM, 0, 3), 'TTL') AS SUPPLIER ,
+      DD.DEL_CD AS LOC_CD,
+      DD.CNTR_TPSZ_CD AS TYSZ,
+      DD.TYPE_CD AS RSLT_TP_SEQ ,
+      DECODE(DD.TYPE_CD, 1, 'Plan', 2, 'PFMC', 3, 'Ratio') AS RESULT ,
+      SUM(DECODE(DD.DE_MON, '01', DD.VAL, 0)) AS JAN ,
+      SUM(DECODE(DD.DE_MON, '02', DD.VAL, 0)) AS FEB ,
+      SUM(DECODE(DD.DE_MON, '03', DD.VAL, 0)) AS MAR ,
+      SUM(DECODE(DD.DE_MON, '04', DD.VAL, 0)) AS APR ,
+      SUM(DECODE(DD.DE_MON, '05', DD.VAL, 0)) AS MAY ,
+      SUM(DECODE(DD.DE_MON, '06', DD.VAL, 0)) AS JUN ,
+      SUM(DECODE(DD.DE_MON, '07', DD.VAL, 0)) AS JUL ,
+      SUM(DECODE(DD.DE_MON, '08', DD.VAL, 0)) AS AUG ,
+      SUM(DECODE(DD.DE_MON, '09', DD.VAL, 0)) AS SEP ,
+      SUM(DECODE(DD.DE_MON, '10', DD.VAL, 0)) AS OCT ,
+      SUM(DECODE(DD.DE_MON, '11', DD.VAL, 0)) AS NOV ,
+      SUM(DECODE(DD.DE_MON, '12', DD.VAL, 0)) AS DEC ,
+      SUM(DECODE(DD.DE_MON, 'S.TTL', DD.VAL, 0)) AS DIV_TOTAL
+    FROM (
+        SELECT BB.PLN_YR ,
+          BB.DE_YR ,
+          BB.AGMT_NO ,
+          BB.MFT_VNDR_SEQ ,
+          BB.DEL_CD ,
+          BB.CNTR_TPSZ_CD ,
+          NVL(BB.DE_MON, 'S.TTL') AS DE_MON ,
+          TP.TYPE_CD ,
+          DECODE(TP.TYPE_CD, 1, BB.PLAN_DE_QTY, 2, BB.PFMC_DE_QTY, DECODE(BB.PLAN_DE_QTY, 0, 0, ROUND(BB.PFMC_DE_QTY/BB.PLAN_DE_QTY*100, 2)) ) AS VAL,
+          DECODE(BB.GRP_ID, 1, 0, GRP_ID) AS GRP_ID
+        FROM (
+            SELECT AA.PLN_YR ,
+              AA.DE_YR ,
+              AA.MFT_VNDR_SEQ ,
+              AA.AGMT_NO ,
+              AA.DEL_CD ,
+              AA.CNTR_TPSZ_CD ,
+              AA.DE_MON ,
+              SUM(AA.PLAN_DE_QTY) AS PLAN_DE_QTY ,
+              SUM(AA.PFMC_DE_QTY) AS PFMC_DE_QTY ,
+              GROUPING_ID ( AA.PLN_YR , AA.DE_YR , AA.MFT_VNDR_SEQ , AA.AGMT_NO , AA.DEL_CD , AA.CNTR_TPSZ_CD , AA.DE_MON ) GRP_ID
+            FROM (
+                SELECT A.PLN_YR ,
+                  SUBSTR(A.DE_YRMON, 0, 4) AS DE_YR ,
+                  A.MFT_VNDR_SEQ ,
+                  A.AGMT_NO ,
+                  A.DEL_CD ,
+                  A.CNTR_TPSZ_CD ,
+                  SUBSTR(A.DE_YRMON, 5, 2) AS DE_MON ,
+                  SUM(A.PLAN_DE_QTY) AS PLAN_DE_QTY ,
+                  SUM(A.PFMC_DE_QTY) AS PFMC_DE_QTY
+                FROM (
+                    SELECT PLN.PLN_YR ,
+                      PLN.DE_YRMON ,
+                      PLN.MFT_VNDR_SEQ ,
+                      PLN.AGMT_CTY_CD || LPAD(PLN.AGMT_SEQ, 6, '0') AS AGMT_NO ,
+                      C.LCC_CD AS DEL_CD ,
+                      PLN.CNTR_TPSZ_CD ,
+                      PLN.DE_QTY AS PLAN_DE_QTY ,
+                      0 AS PFMC_DE_QTY,
+					  C.RCC_CD, C.LCC_CD, C.SCC_CD
+                    FROM LSE_LONG_TERM_DE_PLN PLN,
+						 MDM_EQ_ORZ_CHT C
+                    WHERE 1 = 1
+					  AND PLN.DEL_CD = C.SCC_CD
+                      AND PLN.AGMT_CTY_CD = 'HHO'
+                      AND DE_YRMON BETWEEN @[period_stdt] AND @[period_eddt]
+#if (${cntr_tpsz_cd_str} != '' )
+                      AND PLN.CNTR_TPSZ_CD IN( #foreach($key IN ${cntr_tpsz_cd})
+                                      #if($velocityCount < $cntr_tpsz_cd.size())
+                                          '$key',
+                                      #else
+                                          '$key'
+                                      #end
+                                  #end )
+#end
+
+#if (${vndr_seq_str} != '' )
+          AND PLN.MFT_VNDR_SEQ IN( #foreach($key IN ${vndr_seq})
+                                      #if($velocityCount < $vndr_seq.size())
+                                          '$key',
+                                      #else
+                                          '$key'
+                                      #end
+                                  #end )
+#end
+
+
+#if (${loc_cd} != '')
+	#if (${loc_tp} == 'R')
+        AND C.RCC_CD  IN ( #foreach($key IN ${loc_cd})
+                           		#if($velocityCount < $loc_cd.size())
+                                	'$key',
+                                #else
+                                    '$key'
+                                #end
+                           #end )
+	#elseif (${loc_tp} == 'L')
+        AND	C.LCC_CD IN ( #foreach($key IN ${loc_cd})
+                                #if($velocityCount < $loc_cd.size())
+                                    '$key',
+                                #else
+                                    '$key'
+                                #end
+                          #end )
+	#elseif (${loc_tp} == 'S')
+        AND	C.SCC_CD IN ( #foreach($key IN ${loc_cd})
+                                #if($velocityCount < $loc_cd.size())
+                                    '$key',
+                                #else
+                                    '$key'
+                                #end
+                          #end )
+	#end
+#end
+
+                    UNION ALL 
+                    SELECT PLN.PLN_YR ,
+                      TO_CHAR(HS.CNTR_STS_EVNT_DT, 'YYYYMM') AS DE_YRMON ,
+                      CN.VNDR_SEQ AS MFT_VNDR_SEQ ,
+                      HS.AGMT_CTY_CD || LPAD(HS.AGMT_SEQ, 6, '0') AS AGMT_NO ,
+                      HS.LCC_CD AS DEL_CD ,
+                      CN.CNTR_TPSZ_CD ,
+                      0 AS PLAN_DE_QTY ,
+                      COUNT(CN.CNTR_NO) AS PFMC_DE_QTY,
+					  HS.RCC_CD, HS.LCC_CD, HS.SCC_CD
+                    FROM MST_CONTAINER CN ,
+                      MST_CNTR_STS_HIS HS ,
+                      (
+                        SELECT DISTINCT PLN_YR,
+                          AGMT_CTY_CD,
+                          AGMT_SEQ
+                        FROM LSE_LONG_TERM_DE_PLN
+                        WHERE 1 = 1
+                          AND AGMT_CTY_CD = 'HHO'
+                          AND DE_YRMON BETWEEN @[period_stdt] AND @[period_eddt]
+                          ) PLN
+                    WHERE 1 = 1
+                      AND CN.CNTR_NO = HS.CNTR_NO
+                      AND SUBSTR(nvl(HS.CNTR_STS_RMK, ' '), 1, 6) <> 'SELLOE'
+                      AND HS.CNTR_LSTM_CNG_FLG <> 'Y'
+                      AND HS.CNTR_STS_EVNT_DT BETWEEN TO_DATE(@[period_stdt] , 'YYYYMM' ) AND last_day(to_date(@[period_eddt],'YYYYMM'))+0.99999 
+                      AND HS.CNTR_STS_CD in ('LSI', 'DII')
+                      AND HS.AGMT_SEQ = PLN.AGMT_SEQ(+)
+                      AND HS.AGMT_CTY_CD = PLN.AGMT_CTY_CD(+)
+					  AND CN.LSTM_CD = 'LT'
+#if (${cntr_tpsz_cd_str} != '' )
+                      AND CN.CNTR_TPSZ_CD IN( #foreach($key IN ${cntr_tpsz_cd})
+                                      #if($velocityCount < $cntr_tpsz_cd.size())
+                                          '$key',
+                                      #else
+                                          '$key'
+                                      #end
+                                  #end )
+#end
+
+#if (${vndr_seq_str} != '' )
+          AND CN.VNDR_SEQ IN( #foreach($key IN ${vndr_seq})
+                                      #if($velocityCount < $vndr_seq.size())
+                                          '$key',
+                                      #else
+                                          '$key'
+                                      #end
+                                  #end )
+#end
+
+
+#if (${loc_cd} != '')
+	#if (${loc_tp} == 'R')
+        AND HS.SCC_CD  IN ( #foreach($key IN ${loc_cd})
+                            	#if($velocityCount < $loc_cd.size())
+                                	'$key',
+                                #else
+                                    '$key'
+                                #end
+                            #end )
+	#elseif (${loc_tp} == 'L')
+        AND	HS.SCC_CD IN ( #foreach($key IN ${loc_cd})
+                                #if($velocityCount < $loc_cd.size())
+                                    '$key',
+                                #else
+                                    '$key'
+                                #end
+                           #end )
+	#elseif (${loc_tp} == 'S')
+        AND	HS.SCC_CD IN ( #foreach($key IN ${loc_cd})
+                                #if($velocityCount < $loc_cd.size())
+                                    '$key',
+                                #else
+                                    '$key'
+                                #end
+                           #end )
+	#end
+#end
+
+                    GROUP BY PLN.PLN_YR , TO_CHAR(HS.CNTR_STS_EVNT_DT, 'YYYYMM') , HS.AGMT_CTY_CD , HS.AGMT_SEQ , CN.VNDR_SEQ , HS.RCC_CD, HS.LCC_CD, HS.SCC_CD , CN.CNTR_TPSZ_CD ) A
+                GROUP BY A.PLN_YR , SUBSTR(A.DE_YRMON, 0, 4) , A.MFT_VNDR_SEQ , A.AGMT_NO , A.DEL_CD , A.CNTR_TPSZ_CD , SUBSTR(A.DE_YRMON, 5, 2) ) AA
+            GROUP BY CUBE ( AA.PLN_YR , AA.DE_YR , AA.MFT_VNDR_SEQ , AA.AGMT_NO , AA.DEL_CD , AA.CNTR_TPSZ_CD , AA.DE_MON )
+            ORDER BY GRP_ID ) BB ,
+          (
+            SELECT LEVEL TYPE_CD
+            FROM DUAL CONNECT BY LEVEL <= 3 ) TP
+        WHERE GRP_ID IN (0,
+              1) ) DD ,
+      MDM_VENDOR VNDR
+    WHERE DD.MFT_VNDR_SEQ = VNDR.VNDR_SEQ(+)
+    GROUP BY DD.PLN_YR , DD.DE_YR , DD.MFT_VNDR_SEQ , VNDR.VNDR_ABBR_NM , DD.AGMT_NO , DD.DEL_CD , DD.CNTR_TPSZ_CD , DD.TYPE_CD
+    ORDER BY DD.PLN_YR , DD.DE_YR , DD.AGMT_NO , DD.MFT_VNDR_SEQ , DD.DEL_CD , DD.CNTR_TPSZ_CD , DD.TYPE_CD )
+SELECT YEAR_MONTH,
+  AGMT_NO ,
+  LSTM_CD,
+  LOC_CD,
+  TYSZ,
+  SUPPLIER,
+  RESULT,
+  RSLT_TP_SEQ,
+  JAN,
+  FEB ,
+  MAR,
+  APR,
+  MAY,
+  JUN,
+  JUL,
+  AUG,
+  SEP,
+  OCT,
+  NOV,
+  DEC,
+  DIV_TOTAL
+FROM (
+    SELECT YEAR_MONTH,
+      AGMT_NO ,
+      LSTM_CD,
+      LOC_CD,
+      TYSZ,
+      SUPPLIER,
+      RESULT,
+      RSLT_TP_SEQ,
+      JAN,
+      FEB ,
+      MAR,
+      APR,
+      MAY,
+      JUN,
+      JUL,
+      AUG,
+      SEP,
+      OCT,
+      NOV,
+      DEC,
+      DIV_TOTAL
+    FROM (
+        SELECT YEAR_MONTH,
+          AGMT_NO ,
+          'LT' LSTM_CD,
+          LOC_CD,
+          TYSZ,
+          SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          JAN,
+          FEB ,
+          MAR,
+          APR,
+          MAY,
+          JUN,
+          JUL,
+          AUG,
+          SEP,
+          OCT,
+          NOV,
+          DEC,
+          DIV_TOTAL
+        FROM LT_VIEW )
+    UNION ALL
+    SELECT YEAR_MONTH,
+      'S.TTL' AGMT_NO ,
+      NULL LSTM_CD,
+      NULL LOC_CD,
+      NULL TYSZ,
+      NULL SUPPLIER,
+      RESULT,
+      RSLT_TP_SEQ,
+      SUM(JAN) JAN,
+      SUM(FEB) FEB,
+      SUM(MAR) MAR,
+      SUM(APR) APR,
+      SUM(MAY) MAY,
+      SUM(JUN) JUN,
+      SUM(JUL) JUL,
+      SUM(AUG) AUG,
+      SUM(SEP) SEP,
+      SUM(OCT) OCT,
+      SUM(NOV) NOV,
+      SUM(DEC) DEC,
+      SUM(DIV_TOTAL) DIV_TOTAL
+    FROM (
+        SELECT YEAR_MONTH,
+          AGMT_NO ,
+          'LT' LSTM_CD,
+          LOC_CD,
+          TYSZ,
+          SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          JAN,
+          FEB ,
+          MAR,
+          APR,
+          MAY,
+          JUN,
+          JUL,
+          AUG,
+          SEP,
+          OCT,
+          NOV,
+          DEC,
+          DIV_TOTAL
+        FROM LT_VIEW
+        WHERE RSLT_TP_SEQ < 3 )
+    GROUP BY YEAR_MONTH, RESULT, RSLT_TP_SEQ
+    UNION ALL
+    SELECT P.YEAR_MONTH,
+      'S.TTL' AGMT_NO ,
+      NULL LSTM_CD,
+      NULL LOC_CD,
+      NULL TYSZ,
+      NULL SUPPLIER,
+      'Ratio' RESULT,
+      3 RSLT_TP_SEQ,
+      CASE WHEN P.JAN > 0
+      AND F.JAN > 0 THEN ROUND((F.JAN / P.JAN) * 100 ) ELSE 0 END JAN ,
+      CASE WHEN P.FEB > 0
+      AND F.FEB > 0 THEN ROUND((F.FEB / P.FEB) * 100 ) ELSE 0 END FEB ,
+      CASE WHEN P.MAR > 0
+      AND F.MAR > 0 THEN ROUND((F.MAR / P.MAR) * 100 ) ELSE 0 END MAR ,
+      CASE WHEN P.APR > 0
+      AND F.APR > 0 THEN ROUND((F.APR / P.APR) * 100 ) ELSE 0 END APR ,
+      CASE WHEN P.MAY > 0
+      AND F.MAY > 0 THEN ROUND((F.MAY / P.MAY) * 100 ) ELSE 0 END MAY ,
+      CASE WHEN P.JUN > 0
+      AND F.JUN > 0 THEN ROUND((F.JUN / P.JUN) * 100 ) ELSE 0 END JUN ,
+      CASE WHEN P.JUL > 0
+      AND F.JUL > 0 THEN ROUND((F.JUL / P.JUL) * 100 ) ELSE 0 END JUL ,
+      CASE WHEN P.AUG > 0
+      AND F.AUG > 0 THEN ROUND((F.AUG / P.AUG) * 100 ) ELSE 0 END AUG ,
+      CASE WHEN P.SEP > 0
+      AND F.SEP > 0 THEN ROUND((F.SEP / P.SEP) * 100 ) ELSE 0 END SEP ,
+      CASE WHEN P.OCT > 0
+      AND F.OCT > 0 THEN ROUND((F.OCT / P.OCT) * 100 ) ELSE 0 END OCT ,
+      CASE WHEN P.NOV > 0
+      AND F.NOV > 0 THEN ROUND((F.NOV / P.NOV) * 100 ) ELSE 0 END NOV ,
+      CASE WHEN P.DEC > 0
+      AND F.DEC > 0 THEN ROUND((F.DEC / P.DEC) * 100 ) ELSE 0 END DEC ,
+      CASE WHEN P.DIV_TOTAL > 0
+      AND F.DIV_TOTAL > 0 THEN ROUND((F.DIV_TOTAL / P.DIV_TOTAL) * 100 ) ELSE 0 END DIV_TOTAL
+    FROM (
+        SELECT YEAR_MONTH,
+          NULL AGMT_NO ,
+          NULL LSTM_CD,
+          NULL LOC_CD,
+          NULL TYSZ,
+          NULL SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          SUM(JAN) JAN,
+          SUM(FEB) FEB,
+          SUM(MAR) MAR,
+          SUM(APR) APR,
+          SUM(MAY) MAY,
+          SUM(JUN) JUN,
+          SUM(JUL) JUL,
+          SUM(AUG) AUG,
+          SUM(SEP) SEP,
+          SUM(OCT) OCT,
+          SUM(NOV) NOV,
+          SUM(DEC) DEC,
+          SUM(DIV_TOTAL) DIV_TOTAL
+        FROM (
+            SELECT YEAR_MONTH,
+              AGMT_NO ,
+              'LT' LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM LT_VIEW
+            WHERE RSLT_TP_SEQ = 1 )
+        GROUP BY YEAR_MONTH, RESULT, RSLT_TP_SEQ ) P ,
+      (
+        SELECT YEAR_MONTH,
+          NULL AGMT_NO ,
+          NULL LSTM_CD,
+          NULL LOC_CD,
+          NULL TYSZ,
+          NULL SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          SUM(JAN) JAN,
+          SUM(FEB) FEB,
+          SUM(MAR) MAR,
+          SUM(APR) APR,
+          SUM(MAY) MAY,
+          SUM(JUN) JUN,
+          SUM(JUL) JUL,
+          SUM(AUG) AUG,
+          SUM(SEP) SEP,
+          SUM(OCT) OCT,
+          SUM(NOV) NOV,
+          SUM(DEC) DEC,
+          SUM(DIV_TOTAL) DIV_TOTAL
+        FROM (
+            SELECT YEAR_MONTH,
+              AGMT_NO ,
+              'LT' LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM LT_VIEW
+            WHERE RSLT_TP_SEQ = 2 )
+        GROUP BY YEAR_MONTH, RESULT, RSLT_TP_SEQ ) F
+    WHERE P.YEAR_MONTH = F.YEAR_MONTH
+    UNION ALL
+    SELECT 'G.TTL' YEAR_MONTH,
+      NULL AGMT_NO ,
+      NULL LSTM_CD,
+      NULL LOC_CD,
+      NULL TYSZ,
+      NULL SUPPLIER,
+      RESULT,
+      RSLT_TP_SEQ,
+      SUM(JAN) JAN,
+      SUM(FEB) FEB,
+      SUM(MAR) MAR,
+      SUM(APR) APR,
+      SUM(MAY) MAY,
+      SUM(JUN) JUN,
+      SUM(JUL) JUL,
+      SUM(AUG) AUG,
+      SUM(SEP) SEP,
+      SUM(OCT) OCT,
+      SUM(NOV) NOV,
+      SUM(DEC) DEC,
+      SUM(DIV_TOTAL) DIV_TOTAL
+    FROM (
+        SELECT YEAR_MONTH,
+          AGMT_NO ,
+          'LT' LSTM_CD,
+          LOC_CD,
+          TYSZ,
+          SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          JAN,
+          FEB ,
+          MAR,
+          APR,
+          MAY,
+          JUN,
+          JUL,
+          AUG,
+          SEP,
+          OCT,
+          NOV,
+          DEC,
+          DIV_TOTAL
+        FROM LT_VIEW
+        WHERE RSLT_TP_SEQ < 3 )
+    GROUP BY RESULT, RSLT_TP_SEQ
+    UNION ALL
+    SELECT 'G.TTL' YEAR_MONTH,
+      NULL AGMT_NO ,
+      NULL LSTM_CD,
+      NULL LOC_CD,
+      NULL TYSZ,
+      NULL SUPPLIER,
+      'Ratio' RESULT,
+      3 RSLT_TP_SEQ,
+      CASE WHEN P.JAN > 0
+      AND F.JAN > 0 THEN ROUND((F.JAN / P.JAN) * 100 ) ELSE 0 END JAN ,
+      CASE WHEN P.FEB > 0
+      AND F.FEB > 0 THEN ROUND((F.FEB / P.FEB) * 100 ) ELSE 0 END FEB ,
+      CASE WHEN P.MAR > 0
+      AND F.MAR > 0 THEN ROUND((F.MAR / P.MAR) * 100 ) ELSE 0 END MAR ,
+      CASE WHEN P.APR > 0
+      AND F.APR > 0 THEN ROUND((F.APR / P.APR) * 100 ) ELSE 0 END APR ,
+      CASE WHEN P.MAY > 0
+      AND F.MAY > 0 THEN ROUND((F.MAY / P.MAY) * 100 ) ELSE 0 END MAY ,
+      CASE WHEN P.JUN > 0
+      AND F.JUN > 0 THEN ROUND((F.JUN / P.JUN) * 100 ) ELSE 0 END JUN ,
+      CASE WHEN P.JUL > 0
+      AND F.JUL > 0 THEN ROUND((F.JUL / P.JUL) * 100 ) ELSE 0 END JUL ,
+      CASE WHEN P.AUG > 0
+      AND F.AUG > 0 THEN ROUND((F.AUG / P.AUG) * 100 ) ELSE 0 END AUG ,
+      CASE WHEN P.SEP > 0
+      AND F.SEP > 0 THEN ROUND((F.SEP / P.SEP) * 100 ) ELSE 0 END SEP ,
+      CASE WHEN P.OCT > 0
+      AND F.OCT > 0 THEN ROUND((F.OCT / P.OCT) * 100 ) ELSE 0 END OCT ,
+      CASE WHEN P.NOV > 0
+      AND F.NOV > 0 THEN ROUND((F.NOV / P.NOV) * 100 ) ELSE 0 END NOV ,
+      CASE WHEN P.DEC > 0
+      AND F.DEC > 0 THEN ROUND((F.DEC / P.DEC) * 100 ) ELSE 0 END DEC ,
+      CASE WHEN P.DIV_TOTAL > 0
+      AND F.DIV_TOTAL > 0 THEN ROUND((F.DIV_TOTAL / P.DIV_TOTAL) * 100 ) ELSE 0 END DIV_TOTAL
+    FROM (
+        SELECT 'G.TTL' YEAR_MONTH,
+          NULL AGMT_NO ,
+          NULL LSTM_CD,
+          NULL LOC_CD,
+          NULL TYSZ,
+          NULL SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          SUM(JAN) JAN,
+          SUM(FEB) FEB,
+          SUM(MAR) MAR,
+          SUM(APR) APR,
+          SUM(MAY) MAY,
+          SUM(JUN) JUN,
+          SUM(JUL) JUL,
+          SUM(AUG) AUG,
+          SUM(SEP) SEP,
+          SUM(OCT) OCT,
+          SUM(NOV) NOV,
+          SUM(DEC) DEC,
+          SUM(DIV_TOTAL) DIV_TOTAL
+        FROM (
+            SELECT YEAR_MONTH,
+              AGMT_NO ,
+              'LT' LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM LT_VIEW
+            WHERE RSLT_TP_SEQ = 1 )
+        GROUP BY RESULT, RSLT_TP_SEQ ) P ,
+      (
+        SELECT 'G.TTL' YEAR_MONTH,
+          NULL AGMT_NO ,
+          NULL LSTM_CD,
+          NULL LOC_CD,
+          NULL TYSZ,
+          NULL SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          SUM(JAN) JAN,
+          SUM(FEB) FEB,
+          SUM(MAR) MAR,
+          SUM(APR) APR,
+          SUM(MAY) MAY,
+          SUM(JUN) JUN,
+          SUM(JUL) JUL,
+          SUM(AUG) AUG,
+          SUM(SEP) SEP,
+          SUM(OCT) OCT,
+          SUM(NOV) NOV,
+          SUM(DEC) DEC,
+          SUM(DIV_TOTAL) DIV_TOTAL
+        FROM (
+            SELECT 'G.TTL' YEAR_MONTH,
+              AGMT_NO ,
+              'LT' LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM LT_VIEW
+            WHERE RSLT_TP_SEQ = 2 )
+        GROUP BY RESULT, RSLT_TP_SEQ ) F
+    WHERE P.YEAR_MONTH = F.YEAR_MONTH )
+ORDER BY YEAR_MONTH , AGMT_NO, LSTM_CD, LOC_CD, TYSZ, SUPPLIER, RSLT_TP_SEQ 
+
+---========================================================LT end
+#else
+---========================================================New Van start
+WITH PARAM AS (
+    SELECT DISTINCT A.PLN_YRMON,
+      A.AGMT_CTY_CD,
+      A.AGMT_SEQ,
+      A.DEL_CD,
+      A.MFT_VNDR_SEQ,
+      A.CNTR_TPSZ_CD,
+      A.NEW_VAN_YRMON AS BASE_DE_YRMON     
+    FROM LSE_NEW_VAN_DE_PLN A
+    WHERE 1 = 1
+       AND A.PLN_YRMON BETWEEN @[period_stdt] AND @[period_eddt]
+      AND A.AGMT_CTY_CD = 'HHO' ),
+  INLINE_1 AS (
+    SELECT DISTINCT P.PLN_YRMON,
+      P.AGMT_CTY_CD,
+      P.AGMT_SEQ,
+      P.AGMT_CTY_CD||LPAD(P.AGMT_SEQ, 6, '0') AS AGMT_NO,
+      P.MFT_VNDR_SEQ,
+      P.DEL_CD,
+      P.CNTR_TPSZ_CD,
+      P.BASE_DE_YRMON,
+      1 AS RSLT_TP_SEQ,
+      NVL(PLAN.DE_QTY, 0) AS PLAN_DE_QTY,
+      0 AS PFMC_DE_QTY,
+	  C.RCC_CD, C.LCC_CD, C.SCC_CD
+    FROM PARAM P,
+      	 LSE_NEW_VAN_DE_PLN PLAN,
+		 MDM_EQ_ORZ_CHT C
+    WHERE 1 = 1
+      AND P.BASE_DE_YRMON = PLAN.NEW_VAN_YRMON(+)
+      AND P.CNTR_TPSZ_CD = PLAN.CNTR_TPSZ_CD(+)
+      AND P.DEL_CD = PLAN.DEL_CD(+)
+      AND P.MFT_VNDR_SEQ = PLAN.MFT_VNDR_SEQ(+)
+      AND P.AGMT_SEQ = PLAN.AGMT_SEQ(+)
+      AND P.AGMT_CTY_CD = PLAN.AGMT_CTY_CD(+)
+      AND P.PLN_YRMON = PLAN.PLN_YRMON(+) 
+	  AND P.DEL_CD = C.SCC_CD),
+  INLINE_2 AS (
+    SELECT AGMT_CTY_CD||LPAD(AGMT_SEQ, 6, '0') AS AGMT_NO,
+      AGMT_CTY_CD,
+      AGMT_SEQ,
+      MFT_VNDR_SEQ,
+      RCC_CD, LCC_CD, SCC_CD,
+      CNTR_TPSZ_CD,
+      DE_YRMON AS BASE_DE_YRMON,
+      2 AS RSLT_TP_SEQ,
+      0 AS PLAN_DE_QTY,
+      NVL(COUNT(CNTR_NO), 0) AS PFMC_DE_QTY,
+      PLN_YRMON
+    FROM (
+        SELECT /*+ ORDERED USE_HASH(P HS CN) */
+          DISTINCT TO_CHAR(CN.ONH_DT, 'YYYYMM') AS DE_YRMON,
+          HS.AGMT_CTY_CD,
+          HS.AGMT_SEQ,
+          CN.MFTR_VNDR_SEQ AS MFT_VNDR_SEQ,
+          CN.CNTR_TPSZ_CD,
+          CN.CNTR_NO,
+          P.PLN_YRMON,
+		  E.RCC_CD, E.LCC_CD, E.SCC_CD
+        FROM PARAM P,
+          MST_CNTR_STS_HIS HS,
+          MST_CONTAINER CN,
+          (
+            SELECT A.YD_CD, A.LOC_CD, C.RCC_CD, C.LCC_CD, C.SCC_CD
+            FROM MDM_YARD A,
+              MDM_LOCATION B,
+              MDM_EQ_ORZ_CHT C
+            WHERE A.LOC_CD = B.LOC_CD
+              AND B.SCC_CD = C.SCC_CD) E
+        WHERE 1 = 1
+          AND CN.ONH_DT >= TO_DATE(P.BASE_DE_YRMON, 'YYYYMM')
+          AND SUBSTR(NVL(HS.CNTR_STS_RMK, ' '), 1, 6) <> 'SELLOE'
+          AND HS.CNTR_LSTM_CNG_FLG <> 'Y'
+          AND HS.CNTR_STS_CD IN ('LSI','OWN')
+          AND HS.CNTR_NO = CN.CNTR_NO
+--          AND CN.ONH_YD_CD <> 'KRSEL1H'
+
+#if (${lstm_cd_str} != '' )
+          AND CN.LSTM_CD IN( #foreach($key IN ${lstm_cd})
+                                 #if($velocityCount < $lstm_cd.size())
+                                     '$key',
+                                 #else
+                                     '$key'
+                                 #end
+                             #end )
+#end
+          AND CN.HJS_CRE_FLG = 'N'
+          AND CN.ONH_YD_CD = E.YD_CD
+          AND HS.AGMT_SEQ = P.AGMT_SEQ
+          AND HS.AGMT_CTY_CD = P.AGMT_CTY_CD )
+    GROUP BY DE_YRMON, AGMT_CTY_CD, AGMT_SEQ, MFT_VNDR_SEQ, RCC_CD, LCC_CD, SCC_CD, CNTR_TPSZ_CD, PLN_YRMON  ),
+  TEMP_DROP AS (
+    SELECT 
+      X.DE_YR AS YEAR_MONTH,
+      X.AGMT_NO,
+      Z.LSTM_CD,
+      X.DEL_CD AS LOC_CD,
+      X.CNTR_TPSZ_CD AS TYSZ,
+      SUBSTR(Y.VNDR_ABBR_NM, 0, 8) AS SUPPLIER,
+      DECODE(X.RSLT_TP_SEQ, 1, 'Plan', 2, 'PFMC', 3, 'Ratio') AS RESULT, 
+      X.RSLT_TP_SEQ,   
+      SUM(DECODE(X.DE_MON, '01', DE_QTY, 0)) AS JAN,
+      SUM(DECODE(X.DE_MON, '02', DE_QTY, 0)) AS FEB,
+      SUM(DECODE(X.DE_MON, '03', DE_QTY, 0)) AS MAR,
+      SUM(DECODE(X.DE_MON, '04', DE_QTY, 0)) AS APR,
+      SUM(DECODE(X.DE_MON, '05', DE_QTY, 0)) AS MAY,
+      SUM(DECODE(X.DE_MON, '06', DE_QTY, 0)) AS JUN,
+      SUM(DECODE(X.DE_MON, '07', DE_QTY, 0)) AS JUL,
+      SUM(DECODE(X.DE_MON, '08', DE_QTY, 0)) AS AUG,
+      SUM(DECODE(X.DE_MON, '09', DE_QTY, 0)) AS SEP,
+      SUM(DECODE(X.DE_MON, '10', DE_QTY, 0)) AS OCT,
+      SUM(DECODE(X.DE_MON, '11', DE_QTY, 0)) AS NOV,
+      SUM(DECODE(X.DE_MON, '12', DE_QTY, 0)) AS DEC,
+      CASE WHEN X.RSLT_TP_SEQ = 1
+      OR X.RSLT_TP_SEQ = 2 THEN SUM(DECODE(X.DE_MON, '01', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '02', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '03', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '04', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '05', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '06', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '07', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '08', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '09', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '10', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '11', DE_QTY, 0)) + SUM(DECODE(X.DE_MON, '12', DE_QTY, 0)) WHEN X.RSLT_TP_SEQ = 3 THEN 0 END AS DIV_TOTAL
+    FROM (
+        SELECT A.PLN_YRMON,
+          A.AGMT_NO,
+          A.AGMT_CTY_CD,
+          A.AGMT_SEQ,
+          A.MFT_VNDR_SEQ,
+          A.RCC_CD, A.LCC_CD, A.SCC_CD, A.LCC_CD AS DEL_CD,
+          A.CNTR_TPSZ_CD,
+          SUBSTR(A.BASE_DE_YRMON, 0, 4) AS DE_YR,
+          SUBSTR(A.BASE_DE_YRMON, 5, 2) AS DE_MON,
+          C.RSLT_TP_SEQ,
+          CASE C.RSLT_TP_SEQ WHEN 1 THEN A.PLAN_DE_QTY WHEN 2 THEN B.PFMC_DE_QTY WHEN 3 THEN DECODE(NVL(A.PLAN_DE_QTY, 0), 0, 0, ROUND(B.PFMC_DE_QTY/A.PLAN_DE_QTY*100)) END DE_QTY
+        FROM INLINE_1 A,
+          INLINE_2 B,
+          (
+            SELECT LEVEL AS RSLT_TP_SEQ
+            FROM DUAL CONNECT BY LEVEL <= 3) C
+        WHERE A.AGMT_NO = B.AGMT_NO(+)
+          AND A.MFT_VNDR_SEQ = B.MFT_VNDR_SEQ(+)
+          AND A.SCC_CD = B.SCC_CD(+)
+          AND A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD(+)
+          AND A.BASE_DE_YRMON = B.BASE_DE_YRMON(+)
+        UNION ALL
+        SELECT NVL(A.PLN_YRMON, B.PLN_YRMON) AS PLN_YRMON,
+          B.AGMT_NO,
+          B.AGMT_CTY_CD,
+          B.AGMT_SEQ,
+          B.MFT_VNDR_SEQ,
+          B.RCC_CD, B.LCC_CD, B.SCC_CD, B.LCC_CD AS DEL_CD,
+          B.CNTR_TPSZ_CD,
+          SUBSTR(B.BASE_DE_YRMON, 0, 4) AS DE_YR,
+          SUBSTR(B.BASE_DE_YRMON, 5, 2) AS DE_MON,
+          C.RSLT_TP_SEQ,
+          CASE C.RSLT_TP_SEQ WHEN 1 THEN A.PLAN_DE_QTY WHEN 2 THEN B.PFMC_DE_QTY WHEN 3 THEN DECODE(NVL(A.PLAN_DE_QTY, 0), 0, 0, ROUND(B.PFMC_DE_QTY/A.PLAN_DE_QTY*100)) END DE_QTY
+        FROM INLINE_1 A,
+          INLINE_2 B,
+          (
+            SELECT LEVEL AS RSLT_TP_SEQ
+            FROM DUAL CONNECT BY LEVEL <= 3) C
+        WHERE A.AGMT_NO(+) = B.AGMT_NO
+          AND A.MFT_VNDR_SEQ(+) = B.MFT_VNDR_SEQ
+          AND A.SCC_CD(+) = B.SCC_CD
+          AND A.CNTR_TPSZ_CD(+) = B.CNTR_TPSZ_CD
+          AND A.BASE_DE_YRMON(+) = B.BASE_DE_YRMON
+          AND A.PLAN_DE_QTY IS NULL ) X ,
+      MDM_VENDOR Y , 
+      LSE_AGREEMENT Z
+    WHERE Y.VNDR_SEQ = X.MFT_VNDR_SEQ
+      AND X.AGMT_CTY_CD = Z.AGMT_CTY_CD
+      AND X.AGMT_SEQ    = Z.AGMT_SEQ
+#if (${vndr_seq_str} != '' )
+    AND X.MFT_VNDR_SEQ IN( #foreach($key IN ${vndr_seq})
+                                      #if($velocityCount < $vndr_seq.size())
+                                          '$key',
+                                      #else
+                                          '$key'
+                                      #end
+                                  #end )
+#end
+
+#if (${cntr_tpsz_cd_str} != '' )
+    AND X.CNTR_TPSZ_CD  IN( #foreach($key IN ${cntr_tpsz_cd})
+                                      #if($velocityCount < $cntr_tpsz_cd.size())
+                                          '$key',
+                                      #else
+                                          '$key'
+                                      #end
+                                  #end )
+#end
+
+#if (${loc_cd} != '')
+	#if (${loc_tp} == 'R')
+        AND	X.RCC_CD IN ( #foreach($key IN ${loc_cd})
+                          	  #if($velocityCount < $loc_cd.size())
+                            	  '$key',
+                              #else
+                                  '$key'
+                          	  #end
+                          #end )
+	#elseif (${loc_tp} == 'L')
+        AND	X.LCC_CD IN ( #foreach($key IN ${loc_cd})
+                              #if($velocityCount < $loc_cd.size())
+                                  '$key',
+                              #else
+                                  '$key'
+                              #end
+                          #end )
+	#elseif (${loc_tp} == 'S')
+        AND	X.SCC_CD IN ( #foreach($key IN ${loc_cd})
+                              #if($velocityCount < $loc_cd.size())
+                                  '$key',
+                              #else
+                                  '$key'
+                              #end
+                          #end )
+	#end
+#end
+    GROUP BY X.DE_YR, X.AGMT_NO, Z.LSTM_CD, X.DEL_CD, X.CNTR_TPSZ_CD, Y.VNDR_ABBR_NM , X.RSLT_TP_SEQ 
+    ORDER BY X.DE_YR, X.AGMT_NO, Z.LSTM_CD, X.DEL_CD, X.CNTR_TPSZ_CD, Y.VNDR_ABBR_NM , X.RSLT_TP_SEQ ) 
+ SELECT YEAR_MONTH,
+  AGMT_NO ,
+  LSTM_CD,
+  LOC_CD,
+  TYSZ,
+  SUPPLIER,
+  RESULT,
+  RSLT_TP_SEQ,
+  JAN,
+  FEB ,
+  MAR,
+  APR,
+  MAY,
+  JUN,
+  JUL,
+  AUG,
+  SEP,
+  OCT,
+  NOV,
+  DEC,
+  DIV_TOTAL
+FROM (
+    SELECT YEAR_MONTH,
+      AGMT_NO ,
+      LSTM_CD,
+      LOC_CD,
+      TYSZ,
+      SUPPLIER,
+      RESULT,
+      RSLT_TP_SEQ,
+      JAN,
+      FEB ,
+      MAR,
+      APR,
+      MAY,
+      JUN,
+      JUL,
+      AUG,
+      SEP,
+      OCT,
+      NOV,
+      DEC,
+      DIV_TOTAL
+    FROM (
+        SELECT YEAR_MONTH,
+          AGMT_NO ,
+          LSTM_CD,
+          LOC_CD,
+          TYSZ,
+          SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          JAN,
+          FEB ,
+          MAR,
+          APR,
+          MAY,
+          JUN,
+          JUL,
+          AUG,
+          SEP,
+          OCT,
+          NOV,
+          DEC,
+          DIV_TOTAL
+        FROM TEMP_DROP )
+    UNION ALL
+    SELECT YEAR_MONTH,
+      'S.TTL' AGMT_NO ,
+      NULL LSTM_CD,
+      NULL LOC_CD,
+      NULL TYSZ,
+      NULL SUPPLIER,
+      RESULT,
+      RSLT_TP_SEQ,
+      SUM(JAN) JAN,
+      SUM(FEB) FEB,
+      SUM(MAR) MAR,
+      SUM(APR) APR,
+      SUM(MAY) MAY,
+      SUM(JUN) JUN,
+      SUM(JUL) JUL,
+      SUM(AUG) AUG,
+      SUM(SEP) SEP,
+      SUM(OCT) OCT,
+      SUM(NOV) NOV,
+      SUM(DEC) DEC,
+      SUM(DIV_TOTAL) DIV_TOTAL
+    FROM (
+        SELECT YEAR_MONTH,
+          AGMT_NO ,
+          LSTM_CD,
+          LOC_CD,
+          TYSZ,
+          SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          JAN,
+          FEB ,
+          MAR,
+          APR,
+          MAY,
+          JUN,
+          JUL,
+          AUG,
+          SEP,
+          OCT,
+          NOV,
+          DEC,
+          DIV_TOTAL
+        FROM TEMP_DROP
+        WHERE RSLT_TP_SEQ < 3 )
+    GROUP BY YEAR_MONTH, RESULT, RSLT_TP_SEQ
+    UNION ALL
+    SELECT P.YEAR_MONTH,
+      'S.TTL' AGMT_NO ,
+      NULL LSTM_CD,
+      NULL LOC_CD,
+      NULL TYSZ,
+      NULL SUPPLIER,
+      'Ratio' RESULT,
+      3 RSLT_TP_SEQ,
+      CASE WHEN P.JAN > 0
+      AND F.JAN > 0 THEN ROUND((F.JAN / P.JAN) * 100 ) ELSE 0 END JAN ,
+      CASE WHEN P.FEB > 0
+      AND F.FEB > 0 THEN ROUND((F.FEB / P.FEB) * 100 ) ELSE 0 END FEB ,
+      CASE WHEN P.MAR > 0
+      AND F.MAR > 0 THEN ROUND((F.MAR / P.MAR) * 100 ) ELSE 0 END MAR ,
+      CASE WHEN P.APR > 0
+      AND F.APR > 0 THEN ROUND((F.APR / P.APR) * 100 ) ELSE 0 END APR ,
+      CASE WHEN P.MAY > 0
+      AND F.MAY > 0 THEN ROUND((F.MAY / P.MAY) * 100 ) ELSE 0 END MAY ,
+      CASE WHEN P.JUN > 0
+      AND F.JUN > 0 THEN ROUND((F.JUN / P.JUN) * 100 ) ELSE 0 END JUN ,
+      CASE WHEN P.JUL > 0
+      AND F.JUL > 0 THEN ROUND((F.JUL / P.JUL) * 100 ) ELSE 0 END JUL ,
+      CASE WHEN P.AUG > 0
+      AND F.AUG > 0 THEN ROUND((F.AUG / P.AUG) * 100 ) ELSE 0 END AUG ,
+      CASE WHEN P.SEP > 0
+      AND F.SEP > 0 THEN ROUND((F.SEP / P.SEP) * 100 ) ELSE 0 END SEP ,
+      CASE WHEN P.OCT > 0
+      AND F.OCT > 0 THEN ROUND((F.OCT / P.OCT) * 100 ) ELSE 0 END OCT ,
+      CASE WHEN P.NOV > 0
+      AND F.NOV > 0 THEN ROUND((F.NOV / P.NOV) * 100 ) ELSE 0 END NOV ,
+      CASE WHEN P.DEC > 0
+      AND F.DEC > 0 THEN ROUND((F.DEC / P.DEC) * 100 ) ELSE 0 END DEC ,
+      CASE WHEN P.DIV_TOTAL > 0
+      AND F.DIV_TOTAL > 0 THEN ROUND((F.DIV_TOTAL / P.DIV_TOTAL) * 100 ) ELSE 0 END DIV_TOTAL
+    FROM (
+        SELECT YEAR_MONTH,
+          NULL AGMT_NO ,
+          NULL LSTM_CD,
+          NULL LOC_CD,
+          NULL TYSZ,
+          NULL SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          SUM(JAN) JAN,
+          SUM(FEB) FEB,
+          SUM(MAR) MAR,
+          SUM(APR) APR,
+          SUM(MAY) MAY,
+          SUM(JUN) JUN,
+          SUM(JUL) JUL,
+          SUM(AUG) AUG,
+          SUM(SEP) SEP,
+          SUM(OCT) OCT,
+          SUM(NOV) NOV,
+          SUM(DEC) DEC,
+          SUM(DIV_TOTAL) DIV_TOTAL
+        FROM (
+            SELECT YEAR_MONTH,
+              AGMT_NO ,
+              LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM TEMP_DROP
+            WHERE RSLT_TP_SEQ = 1 )
+        GROUP BY YEAR_MONTH, RESULT, RSLT_TP_SEQ ) P ,
+      (
+        SELECT YEAR_MONTH,
+          NULL AGMT_NO ,
+          NULL LSTM_CD,
+          NULL LOC_CD,
+          NULL TYSZ,
+          NULL SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          SUM(JAN) JAN,
+          SUM(FEB) FEB,
+          SUM(MAR) MAR,
+          SUM(APR) APR,
+          SUM(MAY) MAY,
+          SUM(JUN) JUN,
+          SUM(JUL) JUL,
+          SUM(AUG) AUG,
+          SUM(SEP) SEP,
+          SUM(OCT) OCT,
+          SUM(NOV) NOV,
+          SUM(DEC) DEC,
+          SUM(DIV_TOTAL) DIV_TOTAL
+        FROM (
+            SELECT YEAR_MONTH,
+              AGMT_NO ,
+              LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM TEMP_DROP
+            WHERE RSLT_TP_SEQ = 2 )
+        GROUP BY YEAR_MONTH, RESULT, RSLT_TP_SEQ ) F
+    WHERE P.YEAR_MONTH = F.YEAR_MONTH
+    UNION ALL
+    SELECT 'G.TTL' YEAR_MONTH,
+      NULL AGMT_NO ,
+      NULL LSTM_CD,
+      NULL LOC_CD,
+      NULL TYSZ,
+      NULL SUPPLIER,
+      RESULT,
+      RSLT_TP_SEQ,
+      SUM(JAN) JAN,
+      SUM(FEB) FEB,
+      SUM(MAR) MAR,
+      SUM(APR) APR,
+      SUM(MAY) MAY,
+      SUM(JUN) JUN,
+      SUM(JUL) JUL,
+      SUM(AUG) AUG,
+      SUM(SEP) SEP,
+      SUM(OCT) OCT,
+      SUM(NOV) NOV,
+      SUM(DEC) DEC,
+      SUM(DIV_TOTAL) DIV_TOTAL
+    FROM (
+        SELECT YEAR_MONTH,
+          AGMT_NO ,
+          LSTM_CD,
+          LOC_CD,
+          TYSZ,
+          SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          JAN,
+          FEB ,
+          MAR,
+          APR,
+          MAY,
+          JUN,
+          JUL,
+          AUG,
+          SEP,
+          OCT,
+          NOV,
+          DEC,
+          DIV_TOTAL
+        FROM TEMP_DROP
+        WHERE RSLT_TP_SEQ < 3 )
+    GROUP BY RESULT, RSLT_TP_SEQ
+    UNION ALL
+    SELECT 'G.TTL' YEAR_MONTH,
+      NULL AGMT_NO ,
+      NULL LSTM_CD,
+      NULL LOC_CD,
+      NULL TYSZ,
+      NULL SUPPLIER,
+      'Ratio' RESULT,
+      3 RSLT_TP_SEQ,
+      CASE WHEN P.JAN > 0
+      AND F.JAN > 0 THEN ROUND((F.JAN / P.JAN) * 100 ) ELSE 0 END JAN ,
+      CASE WHEN P.FEB > 0
+      AND F.FEB > 0 THEN ROUND((F.FEB / P.FEB) * 100 ) ELSE 0 END FEB ,
+      CASE WHEN P.MAR > 0
+      AND F.MAR > 0 THEN ROUND((F.MAR / P.MAR) * 100 ) ELSE 0 END MAR ,
+      CASE WHEN P.APR > 0
+      AND F.APR > 0 THEN ROUND((F.APR / P.APR) * 100 ) ELSE 0 END APR ,
+      CASE WHEN P.MAY > 0
+      AND F.MAY > 0 THEN ROUND((F.MAY / P.MAY) * 100 ) ELSE 0 END MAY ,
+      CASE WHEN P.JUN > 0
+      AND F.JUN > 0 THEN ROUND((F.JUN / P.JUN) * 100 ) ELSE 0 END JUN ,
+      CASE WHEN P.JUL > 0
+      AND F.JUL > 0 THEN ROUND((F.JUL / P.JUL) * 100 ) ELSE 0 END JUL ,
+      CASE WHEN P.AUG > 0
+      AND F.AUG > 0 THEN ROUND((F.AUG / P.AUG) * 100 ) ELSE 0 END AUG ,
+      CASE WHEN P.SEP > 0
+      AND F.SEP > 0 THEN ROUND((F.SEP / P.SEP) * 100 ) ELSE 0 END SEP ,
+      CASE WHEN P.OCT > 0
+      AND F.OCT > 0 THEN ROUND((F.OCT / P.OCT) * 100 ) ELSE 0 END OCT ,
+      CASE WHEN P.NOV > 0
+      AND F.NOV > 0 THEN ROUND((F.NOV / P.NOV) * 100 ) ELSE 0 END NOV ,
+      CASE WHEN P.DEC > 0
+      AND F.DEC > 0 THEN ROUND((F.DEC / P.DEC) * 100 ) ELSE 0 END DEC ,
+      CASE WHEN P.DIV_TOTAL > 0
+      AND F.DIV_TOTAL > 0 THEN ROUND((F.DIV_TOTAL / P.DIV_TOTAL) * 100 ) ELSE 0 END DIV_TOTAL
+    FROM (
+        SELECT 'G.TTL' YEAR_MONTH,
+          NULL AGMT_NO ,
+          NULL LSTM_CD,
+          NULL LOC_CD,
+          NULL TYSZ,
+          NULL SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          SUM(JAN) JAN,
+          SUM(FEB) FEB,
+          SUM(MAR) MAR,
+          SUM(APR) APR,
+          SUM(MAY) MAY,
+          SUM(JUN) JUN,
+          SUM(JUL) JUL,
+          SUM(AUG) AUG,
+          SUM(SEP) SEP,
+          SUM(OCT) OCT,
+          SUM(NOV) NOV,
+          SUM(DEC) DEC,
+          SUM(DIV_TOTAL) DIV_TOTAL
+        FROM (
+            SELECT YEAR_MONTH,
+              AGMT_NO ,
+              LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM TEMP_DROP
+            WHERE RSLT_TP_SEQ = 1 )
+        GROUP BY RESULT, RSLT_TP_SEQ ) P ,
+      (
+        SELECT 'G.TTL' YEAR_MONTH,
+          NULL AGMT_NO ,
+          NULL LSTM_CD,
+          NULL LOC_CD,
+          NULL TYSZ,
+          NULL SUPPLIER,
+          RESULT,
+          RSLT_TP_SEQ,
+          SUM(JAN) JAN,
+          SUM(FEB) FEB,
+          SUM(MAR) MAR,
+          SUM(APR) APR,
+          SUM(MAY) MAY,
+          SUM(JUN) JUN,
+          SUM(JUL) JUL,
+          SUM(AUG) AUG,
+          SUM(SEP) SEP,
+          SUM(OCT) OCT,
+          SUM(NOV) NOV,
+          SUM(DEC) DEC,
+          SUM(DIV_TOTAL) DIV_TOTAL
+        FROM (
+            SELECT 'G.TTL' YEAR_MONTH,
+              AGMT_NO ,
+              LSTM_CD,
+              LOC_CD,
+              TYSZ,
+              SUPPLIER,
+              RESULT,
+              RSLT_TP_SEQ,
+              JAN,
+              FEB ,
+              MAR,
+              APR,
+              MAY,
+              JUN,
+              JUL,
+              AUG,
+              SEP,
+              OCT,
+              NOV,
+              DEC,
+              DIV_TOTAL
+            FROM TEMP_DROP
+            WHERE RSLT_TP_SEQ = 2 )
+        GROUP BY RESULT, RSLT_TP_SEQ ) F
+    WHERE P.YEAR_MONTH = F.YEAR_MONTH )
+ORDER BY YEAR_MONTH , AGMT_NO, LSTM_CD, LOC_CD, TYSZ, SUPPLIER, RSLT_TP_SEQ
+--===================================================New Van end    
+#end			]]></sql>
+			<params>
+				<param name="period_stdt" type="12" value="" out="N"/>
+				<param name="period_eddt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

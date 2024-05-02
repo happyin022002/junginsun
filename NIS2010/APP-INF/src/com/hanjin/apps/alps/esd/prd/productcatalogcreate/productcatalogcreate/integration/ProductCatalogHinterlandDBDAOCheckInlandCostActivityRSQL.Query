@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ProductCatalogHinterlandDBDAOCheckInlandCostActivityRSQL">
+			<desc><![CDATA[Inland(Hinterland) Cost Activity가 생성되었는지 점검한다.]]></desc>
+			<sql><![CDATA[
+SELECT DECODE(BOUND, 'O', 'Outbound', 'I', 'Inbound') 
+                 || '[' || REGEXP_REPLACE(PRD_GET_INLND_ROUT_STR_FNC(ORIGIN, DEST, ROUT_SEQ), '-.-', '-') || ']' ERR_MSG
+FROM (
+    select l.* , LEAD(DEST_CHK) OVER (PARTITION BY PCTL_NO, BOUND ORDER BY ACT1) nx_DEST_CHK
+    from (
+            SELECT PCTL_NO, COST_ACT_GRP_SEQ ACT1, NXT_COST_ACT_GRP_SEQ ACT2, COST_ACT_GRP_CD ACT_CD1, NXT_COST_ACT_GRP_CD ACT_CD2
+                , PCTL_IO_BND_CD BOUND, ROUT_ORG_NOD_CD ORIGIN, ROUT_DEST_NOD_CD DEST
+                , N1ST_NOD_CD N1, N2ND_NOD_CD N2, N3RD_NOD_CD N3, N4TH_NOD_CD N4 
+                , DECODE(ROUT_ORG_NOD_CD
+                       , CASE WHEN SUBSTR(COST_ACT_GRP_CD,1,2) = 'OD' THEN N2ND_NOD_CD
+                              ELSE N1ST_NOD_CD END
+                       , 'Y','N') ORIGIN_CHK
+                , DECODE(ROUT_DEST_NOD_CD
+                       , CASE WHEN SUBSTR(COST_ACT_GRP_CD,1,2) = 'ID' OR SUBSTR(NXT_COST_ACT_GRP_CD,1,2) = 'ID' THEN
+                              CASE WHEN N4TH_NOD_CD IS NOT NULL THEN N3RD_NOD_CD
+                                   WHEN N3RD_NOD_CD IS NOT NULL THEN N2ND_NOD_CD
+                                   END
+                             ELSE
+                              CASE WHEN N4TH_NOD_CD IS NOT NULL THEN N4TH_NOD_CD
+                                   WHEN N3RD_NOD_CD IS NOT NULL THEN N3RD_NOD_CD
+                                   WHEN N2ND_NOD_CD IS NOT NULL THEN N2ND_NOD_CD
+                                   END
+                             END
+                       , 'Y', 'N') AS DEST_CHK
+                 ,ROUT_SEQ , rn
+                 ,nvl((select 'N' 
+                         from prd_inlnd_rout_dtl i 
+                        where i.ROUT_ORG_NOD_CD =a.ROUT_ORG_NOD_CD 
+                          and  i.ROUT_DEST_NOD_CD = a.ROUT_DEST_NOD_CD
+                          and  i.ROUT_SEQ = a.rout_seq
+                          and  a.PCTL_IO_BND_CD in ('I','O')
+                          and  i.ROUT_DTL_SEQ > decode (substr(i.ROUT_ORG_NOD_CD,1,2) ,'US',5,'CA',5,'MX',5, 2 )
+                          and  rownum =1 
+                      ),'Y') optm_irg_lnk_cnt
+            FROM (    ----------a
+                select i.*, LEAD(rn) OVER (PARTITION BY PCTL_NO, PCTL_IO_BND_CD ORDER BY COST_ACT_GRP_SEQ) nx_rn
+                  from (
+                        SELECT PCTL_NO
+                             , COST_ACT_GRP_SEQ
+                             , LEAD(COST_ACT_GRP_SEQ) OVER (PARTITION BY PCTL_NO, PCTL_IO_BND_CD ORDER BY COST_ACT_GRP_SEQ) NXT_COST_ACT_GRP_SEQ
+                             , COST_ACT_GRP_CD
+                             , LEAD(COST_ACT_GRP_CD) OVER (PARTITION BY PCTL_NO, PCTL_IO_BND_CD ORDER BY COST_ACT_GRP_SEQ) NXT_COST_ACT_GRP_CD
+                             , PCTL_IO_BND_CD, ROUT_ORG_NOD_CD, ROUT_DEST_NOD_CD
+                             , N1ST_NOD_CD, N2ND_NOD_CD
+                             , NVL(N3RD_NOD_CD
+                                        , DECODE(DECODE(NULL, N3RD_NOD_CD, 1, N4TH_NOD_CD, 2)
+                                              , 1,LEAD(N2ND_NOD_CD) OVER (PARTITION BY PCTL_NO, PCTL_IO_BND_CD ORDER BY COST_ACT_GRP_SEQ))
+                                  ) N3RD_NOD_CD
+                             , NVL(N4TH_NOD_CD
+                                        , DECODE(DECODE(NULL, N3RD_NOD_CD, 1, N4TH_NOD_CD, 2)
+                                              , 1,LEAD(N3RD_NOD_CD) OVER (PARTITION BY PCTL_NO, PCTL_IO_BND_CD ORDER BY COST_ACT_GRP_SEQ)
+                                              , 2,LEAD(N2ND_NOD_CD) OVER (PARTITION BY PCTL_NO, PCTL_IO_BND_CD ORDER BY COST_ACT_GRP_SEQ)) 
+                                  ) N4TH_NOD_CD
+                             , ROW_NUMBER() OVER (PARTITION BY PCTL_NO, PCTL_IO_BND_CD ORDER BY COST_ACT_GRP_SEQ) RN
+                             , ROUT_SEQ
+                        FROM PRD_PROD_CTL_ACT_GRP_DTL
+                        WHERE SUBSTR(@[hd_pctl_no],1,1) = 'H'
+                        AND PCTL_NO LIKE DECODE(@[hd_pctl_no], null, null, @[hd_pctl_no] || '%')
+                        AND PCTL_IO_BND_CD IN ('O', 'I')
+                        AND COST_ACT_GRP_TP_CD = 'L'
+                       ) i
+                       where rn =1 or NXT_COST_ACT_GRP_SEQ is null
+                ) A
+        --    WHERE RN = 1
+         ) l
+   )
+WHERE  (ORIGIN_CHK = 'N' OR nvl(NX_DEST_CHK,DEST_CHK) = 'N'  OR optm_irg_lnk_cnt = 'N')
+and rn = 1
+AND ROWNUM = 1
+
+UNION ALL
+SELECT DECODE(PCTL_IO_BND_CD, 'O', 'Outbound', 'I', 'Inbound') 
+                 || '[' || REGEXP_REPLACE(PRD_GET_INLND_ROUT_STR_FNC(ROUT_ORG_NOD_CD, ROUT_DEST_NOD_CD, ROUT_SEQ), '-.-', '-') || ']' ERR_MSG
+FROM PRD_PROD_CTL_ROUT_DTL 
+WHERE PCTL_NO LIKE 
+       ( SELECT DECODE(COUNT(1), 0, @[hd_pctl_no] || '%')
+        FROM PRD_PROD_CTL_ACT_GRP_DTL A
+        WHERE SUBSTR(@[hd_pctl_no],1,1) = 'H' 
+          AND PCTL_NO LIKE DECODE(@[hd_pctl_no], null, null, @[hd_pctl_no] || '%')
+          AND PCTL_IO_BND_CD IN ('O', 'I')
+          AND COST_ACT_GRP_TP_CD = 'L' )
+AND PCTL_IO_BND_CD IN ('O', 'I')
+AND ROUT_SEQ > 0
+AND ROWNUM = 1			]]></sql>
+			<params>
+				<param name="hd_pctl_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

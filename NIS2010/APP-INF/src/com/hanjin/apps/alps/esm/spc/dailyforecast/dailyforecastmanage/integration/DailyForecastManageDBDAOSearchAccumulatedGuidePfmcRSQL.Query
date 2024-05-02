@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="DailyForecastManageDBDAOSearchAccumulatedGuidePfmcRSQL">
+			<desc><![CDATA[[CHM-201322502-01] SPC 프로젝트 - 성수기 선복운영 개선을 위한 T/F추진
+2013.08.14 [Trouble shooting] Accum 팝업 내 Period 변경 가능하도록 수정
+[Trouble Shooting] 진마리아 SC Join 오류 수정
+2013.11.26 진마리아 [CHM-201326854] SAQ project로 인한 SPC 변경건_FNC 우선제거
+2014.02.04 [CHM-201428383-01] RFA 로직 추가
+2014.03.13 김시몬 [선처리] BKG RFA NULL 관련 보완
+2014.03.17 [CHM-20142960] SMP/Allocation control보완 요청 - SPC_GET_SMP_AMEND_FNC 적용
+2014.05.22 [선반영] AES-SC관련 로직 추가]]></desc>
+			<sql><![CDATA[
+WITH PARAM AS (
+    SELECT @[year1]||@[week1] AS FM_YRWK,
+           @[year2]||@[week2] AS TO_YRWK        ,
+           @[trade]         AS TRD_CD         ,
+           @[rhq]           AS SLS_RHQ_CD     ,
+           @[ofc_cd]        AS SLS_RGN_OFC_CD
+      FROM DUAL
+)
+, VVDS AS (
+    SELECT P.FM_YRWK       ,
+           P.TO_YRWK       ,
+           MV.TRD_CD       ,
+           MV.SUB_TRD_CD   ,
+           MV.RLANE_CD     ,
+           SUBSTR(MV.SLS_YRMON, 1, 4)||MV.COST_WK AS COST_WK,
+           MV.VSL_CD       ,
+           MV.SKD_VOY_NO   ,
+           MV.DIR_CD       ,
+           P.SLS_RHQ_CD    ,
+           P.SLS_RGN_OFC_CD,
+           (SELECT /*+ INDEX_DESC ( V XPKSPC_MDL_VER_MST ) */
+                   DECODE(Q.DIR_CD, NULL, '200001-1', COST_YRWK||'-'||VER_SEQ)
+              FROM SPC_MDL_VER_MST V 
+             WHERE SUBSTR(MV.SLS_YRMON, 1, 4)||MV.COST_WK BETWEEN VER_ST_YRWK AND VER_END_YRWK
+               AND TRD_CD    = P.TRD_CD
+               AND CFM_FLG = 'Y'
+               AND ROWNUM  = 1) AS SEASON
+      FROM MAS_MON_VVD       MV,
+           PARAM             P ,
+           SPC_HD_HUL_MST    Q
+     WHERE SUBSTR(MV.SLS_YRMON, 1, 4)||MV.COST_WK BETWEEN P.FM_YRWK AND P.TO_YRWK
+       AND MV.DELT_FLG     = 'N'
+       AND MV.TRD_CD       = P.TRD_CD
+       AND Q.TRD_CD        = MV.TRD_CD
+       AND Q.RLANE_CD      = MV.RLANE_CD
+       AND Q.DIR_CD        = MV.DIR_CD
+)       
+, MODEL_DATA AS (
+    SELECT R.COST_YRWK     ,
+           R.VER_SEQ       ,
+           P.FM_YRWK       ,
+           P.TO_YRWK       ,
+           R.TRD_CD        ,
+           R.SUB_TRD_CD    ,
+           P.RLANE_CD      ,
+           P.COST_WK       ,
+           P.VSL_CD        ,
+           P.SKD_VOY_NO    ,
+           P.DIR_CD        ,
+           R.CUST_CNT_CD   ,
+           R.CUST_SEQ      ,
+           R.CUST_CTRL_CD  ,
+           R.SC_NO         ,
+           R.RFA_NO        ,
+           R.SLS_RGN_OFC_CD,
+           SUM(R.RLANE_ADJ_QTY) AS GUIDE
+      FROM SPC_MDL_CUST_REV_LANE R,
+           SPC_MDL_CUST_CTRL     C,
+           VVDS                  P
+     WHERE R.COST_YRWK      = SUBSTR(P.SEASON, 1, 6)
+       AND R.VER_SEQ        = SUBSTR(P.SEASON, 8)
+       AND R.TRD_CD         = P.TRD_CD
+       AND R.SUB_TRD_CD     = P.SUB_TRD_CD
+       AND R.RLANE_CD       = P.RLANE_CD
+#if(${ofc_cd} != '')
+       AND R.SLS_RGN_OFC_CD = P.SLS_RGN_OFC_CD
+#else
+#if(${rhq} != '')
+       AND R.SLS_RHQ_CD     = P.SLS_RHQ_CD
+#else
+       AND R.SLS_RHQ_CD     IN ('SHARC', 'SINRS')
+#end
+#end
+       AND R.TRD_CD         = C.TRD_CD
+       AND R.COST_YRWK      = C.COST_YRWK
+       AND R.VER_SEQ        = C.VER_SEQ
+       AND R.CUST_CNT_CD    = C.CUST_CNT_CD
+       AND R.CUST_SEQ       = C.CUST_SEQ
+       AND NVL(R.SC_NO,NVL(R.RFA_NO, 'X')) = NVL(C.SC_NO,NVL(C.RFA_NO, 'X'))
+       --AND DECODE(R.TRD_CD, 'AES', NVL(R.RFA_NO, 'X'), NVL(R.SC_NO, 'X')) = DECODE(R.TRD_CD, 'AES', NVL(C.RFA_NO, 'X'), NVL(C.SC_NO, NVL(R.SC_NO, 'X')))
+       AND R.DELT_FLG       = 'N'
+       AND R.RLANE_ADJ_QTY  > 0
+       AND SUBSTR(P.SEASON, 1, 6) <> '200001'
+  GROUP BY R.COST_YRWK     ,
+           R.VER_SEQ       ,
+           P.FM_YRWK       ,
+           P.TO_YRWK       ,
+           R.TRD_CD        ,
+           R.SUB_TRD_CD    ,
+           P.RLANE_CD      ,
+           P.COST_WK       ,
+           P.VSL_CD        ,
+           P.SKD_VOY_NO    ,
+           P.DIR_CD        ,
+           R.CUST_CNT_CD   ,
+           R.CUST_SEQ      ,
+           R.CUST_CTRL_CD  ,
+           R.SC_NO         ,
+           R.RFA_NO        ,
+           R.SLS_RGN_OFC_CD
+)
+, BKG_DATA AS (
+    SELECT C.COST_YRWK     ,
+           C.VER_SEQ       ,
+           P.FM_YRWK       ,
+           P.TO_YRWK       ,
+           P.TRD_CD        ,
+           P.SUB_TRD_CD    ,
+           P.RLANE_CD      ,
+           P.COST_WK       ,
+           V.VSL_CD        ,
+           V.SKD_VOY_NO    ,
+           V.SKD_DIR_CD    ,
+           C.CUST_CNT_CD   ,
+           C.CUST_SEQ      ,
+           
+           CASE WHEN P.TRD_CD = 'AES' AND DECODE(SUBSTR(B.RFA_NO, 1, 3), 'DUM', '', B.RFA_NO) IS NULL AND BC.CUST_CNT_CD = 'CN' AND B.SC_NO IS NULL THEN
+                     SPC_GET_SMP_RFA_FNC('C',P.SEASON,  BC.CUST_CNT_CD||LPAD(BC.CUST_SEQ,6,'0'), B.POL_CD,B.POD_CD)
+ 
+           ELSE   
+                      C.CUST_CTRL_CD
+           END AS CUST_CTRL_CD,
+           
+           SPC_GET_SMP_AMEND_FNC(C.TRD_CD, C.COST_YRWK, C.VER_SEQ, B.SC_NO) AS SC_NO,
+           
+           CASE WHEN P.TRD_CD = 'AES' AND DECODE(SUBSTR(B.RFA_NO, 1, 3), 'DUM', '', B.RFA_NO) IS NULL AND BC.CUST_CNT_CD = 'CN' AND B.SC_NO IS NULL THEN
+                     SPC_GET_SMP_RFA_FNC('R',P.SEASON,  BC.CUST_CNT_CD||LPAD(BC.CUST_SEQ,6,'0'), B.POL_CD,B.POD_CD)
+                     
+           ELSE   
+                     SPC_GET_SMP_AMEND_FNC(C.TRD_CD, C.COST_YRWK, C.VER_SEQ, DECODE(SUBSTR(B.RFA_NO, 1, 3), 'DUM', '', B.RFA_NO))
+           END AS RFA_NO,
+           
+           P.SLS_RGN_OFC_CD,
+           (
+              SELECT SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '2', 1, 2) * Q.OP_CNTR_QTY)
+                FROM BKG_QUANTITY Q
+               WHERE B.BKG_NO      = Q.BKG_NO
+                 AND Q.OP_CNTR_QTY > 0
+           ) AS BKG_QTY
+      FROM BKG_BOOKING       B,
+           BKG_VVD           V,
+           VVDS              P,
+           SPC_MDL_CUST_CTRL C,
+           MDM_DTL_REV_LANE  L,
+           BKG_CUSTOMER      BC  --20140304 추가
+     WHERE B.BKG_NO           = V.BKG_NO
+       AND B.BKG_STS_CD      IN ('F', 'W')
+       AND B.BKG_CGO_TP_CD   <> 'P'
+       AND V.VSL_CD           = P.VSL_CD
+       AND V.SKD_VOY_NO       = P.SKD_VOY_NO
+       AND V.SKD_DIR_CD       = P.DIR_CD
+       AND V.VSL_PRE_PST_CD   = 'T'
+       AND L.RLANE_CD         = P.RLANE_CD
+       AND L.VSL_SLAN_DIR_CD  = P.DIR_CD
+       AND L.FM_CONTI_CD      = (SELECT SPC_CONTI_CONV_FNC(CONTI_CD, L.RLANE_CD, L.VSL_SLAN_DIR_CD)
+                                   FROM MDM_LOCATION
+                                  WHERE LOC_CD = V.POL_CD)
+       AND L.TO_CONTI_CD      = (SELECT SPC_CONTI_CONV_FNC(CONTI_CD, L.RLANE_CD, L.VSL_SLAN_DIR_CD)
+                                   FROM MDM_LOCATION
+                                  WHERE LOC_CD = V.POD_CD)
+       AND L.TRD_CD           = P.TRD_CD
+       AND L.SUB_TRD_CD       = P.SUB_TRD_CD
+       AND L.DELT_FLG         = 'N'
+       AND C.TRD_CD           = P.TRD_CD
+       AND C.COST_YRWK        = SUBSTR(P.SEASON, 1, 6)
+       AND C.VER_SEQ          = SUBSTR(P.SEASON, 8)
+       AND B.CTRT_CUST_CNT_CD = C.CUST_CNT_CD
+       AND B.CTRT_CUST_SEQ    = C.CUST_SEQ
+       AND B.BKG_NO           = BC.BKG_NO  --20140304 추가
+       AND BC.BKG_CUST_TP_CD  = 'S'        --20140304 추가
+       AND NVL(SPC_GET_SMP_AMEND_FNC(C.TRD_CD, C.COST_YRWK, C.VER_SEQ, B.SC_NO),NVL(SPC_GET_SMP_AMEND_FNC(C.TRD_CD, C.COST_YRWK, C.VER_SEQ, DECODE(SUBSTR(B.RFA_NO, 1, 3), 'DUM', '', B.RFA_NO)), 'X'))
+           = NVL(C.SC_NO,NVL(C.RFA_NO, 'X'))
+       --AND DECODE(P.TRD_CD, 'AES', NVL(SPC_GET_SMP_AMEND_FNC(C.TRD_CD, C.COST_YRWK, C.VER_SEQ, DECODE(SUBSTR(B.RFA_NO, 1, 3), 'DUM', '', B.RFA_NO)), 'X'), NVL(SPC_GET_SMP_AMEND_FNC(C.TRD_CD, C.COST_YRWK, C.VER_SEQ, B.SC_NO), 'X')) 
+       --    = DECODE(P.TRD_CD, 'AES', NVL(C.RFA_NO, 'X'), NVL(C.SC_NO, NVL(SPC_GET_SMP_AMEND_FNC(C.TRD_CD, C.COST_YRWK, C.VER_SEQ, B.SC_NO), 'X')))
+       AND SPC_SCR_OFC_CONV_FNC(B.OB_SLS_OFC_CD)   IN (SELECT OFC_CD
+                                                         FROM SPC_OFC_LVL
+                                                        WHERE P.COST_WK BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK
+                                                          AND DELT_FLG = 'N'
+#if(${ofc_cd} != '')
+                                                          AND N4TH_PRNT_OFC_CD = P.SLS_RGN_OFC_CD
+#else
+#if(${rhq} != '')
+                                                          AND N2ND_PRNT_OFC_CD = P.SLS_RHQ_CD
+#else
+                                                          AND N2ND_PRNT_OFC_CD IN ('SHARC', 'SINRS')
+#end
+#end
+                                                       )
+       AND SUBSTR(P.SEASON, 1, 6) <> '200001'
+)
+  SELECT FM_YRWK     ,
+         TO_YRWK     ,
+#if(${ofc_cd} != '')
+         SLS_RGN_OFC_CD,
+#else
+         'RHQ' AS SLS_RGN_OFC_CD,
+#end
+         CUST_CNT_CD ,
+         CUST_SEQ    ,         
+         NVL(CUST_NM, 'TTL') AS CUST_NM,
+         NVL(SC_NO, ' ')     AS SC_NO  ,
+         DECODE(TRD_CD,'AES',NVL(SC_NO,NVL(RFA_NO, ' ')),' ')    AS RFA_NO ,
+         CUST_CTRL_CD,
+         RLANE_CD    ,
+         SUB_TRD_CD  ,
+         SUM(GUIDE)   AS GUIDE  ,
+         SUM(BKG_QTY) AS BKG_QTY,
+         ROUND(DECODE(SUM(GUIDE), 0, 0, SUM(BKG_QTY) / SUM(GUIDE)), 2) * 100 ||' %' AS PERF
+    FROM (
+            SELECT COST_YRWK     ,
+                   VER_SEQ       ,
+                   FM_YRWK       ,
+                   TO_YRWK       ,
+                   TRD_CD        ,
+                   SUB_TRD_CD    ,
+                   RLANE_CD      ,
+                   COST_WK       ,
+                   VSL_CD        ,
+                   SKD_VOY_NO    ,
+                   DIR_CD        ,
+                   CUST_CNT_CD   ,
+                   CUST_SEQ      ,
+                   CUST_CTRL_CD  ,         
+                   (SELECT CUST_LGL_ENG_NM
+                      FROM MDM_CUSTOMER
+                     WHERE CUST_CNT_CD = A.CUST_CNT_CD
+                       AND CUST_SEQ    = A.CUST_SEQ) AS CUST_NM,
+                   SC_NO         ,
+                   RFA_NO        ,
+                   SLS_RGN_OFC_CD,
+                   GUIDE         ,
+                   0 AS BKG_QTY
+              FROM MODEL_DATA A
+            UNION ALL
+            SELECT COST_YRWK     ,
+                   VER_SEQ       ,
+                   FM_YRWK       ,
+                   TO_YRWK       ,
+                   TRD_CD        ,
+                   SUB_TRD_CD    ,
+                   RLANE_CD      ,
+                   COST_WK       ,
+                   VSL_CD        ,
+                   SKD_VOY_NO    ,
+                   SKD_DIR_CD AS DIR_CD,
+                   CUST_CNT_CD   ,
+                   CUST_SEQ      ,
+                   CUST_CTRL_CD  ,         
+                   (SELECT CUST_LGL_ENG_NM
+                      FROM MDM_CUSTOMER
+                     WHERE CUST_CNT_CD = A.CUST_CNT_CD
+                       AND CUST_SEQ    = A.CUST_SEQ) AS CUST_NM,
+                   SC_NO         ,
+                   RFA_NO        ,
+                   SLS_RGN_OFC_CD,
+                   0 AS GUIDE    ,
+                   BKG_QTY
+              FROM BKG_DATA A
+         )
+#if(${ofc_cd} != '')
+GROUP BY GROUPING SETS (
+                          (FM_YRWK, TO_YRWK, CUST_CNT_CD, CUST_SEQ, CUST_NM, CUST_CTRL_CD, SC_NO, DECODE(TRD_CD,'AES',NVL(SC_NO,NVL(RFA_NO, ' ')),' '), TRD_CD, SUB_TRD_CD, RLANE_CD,SLS_RGN_OFC_CD),
+                          (FM_YRWK, TO_YRWK, CUST_CNT_CD, CUST_SEQ, CUST_NM, CUST_CTRL_CD, SC_NO, DECODE(TRD_CD,'AES',NVL(SC_NO,NVL(RFA_NO, ' ')),' '), TRD_CD, SUB_TRD_CD, SLS_RGN_OFC_CD),
+                          (FM_YRWK, TO_YRWK, CUST_CNT_CD, CUST_SEQ, CUST_NM, CUST_CTRL_CD, SC_NO, DECODE(TRD_CD,'AES',NVL(SC_NO,NVL(RFA_NO, ' ')),' '), SLS_RGN_OFC_CD),
+                          (FM_YRWK, TO_YRWK, SLS_RGN_OFC_CD)
+                       )
+#else
+GROUP BY GROUPING SETS (
+                          (FM_YRWK, TO_YRWK, CUST_CNT_CD, CUST_SEQ, CUST_NM, CUST_CTRL_CD, SC_NO, DECODE(TRD_CD,'AES',NVL(SC_NO,NVL(RFA_NO, ' ')),' '), TRD_CD, SUB_TRD_CD, RLANE_CD),
+                          (FM_YRWK, TO_YRWK, CUST_CNT_CD, CUST_SEQ, CUST_NM, CUST_CTRL_CD, SC_NO, DECODE(TRD_CD,'AES',NVL(SC_NO,NVL(RFA_NO, ' ')),' '), TRD_CD, SUB_TRD_CD),
+                          (FM_YRWK, TO_YRWK, CUST_CNT_CD, CUST_SEQ, CUST_NM, CUST_CTRL_CD, SC_NO, DECODE(TRD_CD,'AES',NVL(SC_NO,NVL(RFA_NO, ' ')),' ')),
+                          (FM_YRWK, TO_YRWK)
+                       )
+#end
+ORDER BY DECODE(CUST_NM, 'TTL', 'ZZZZZ', CUST_NM), SC_NO, DECODE(TRD_CD,'AES',NVL(SC_NO,NVL(RFA_NO, ' ')),' '), SUB_TRD_CD,  RLANE_CD DESC			]]></sql>
+			<params>
+				<param name="year1" type="12" value="" out="N"/>
+				<param name="week1" type="12" value="" out="N"/>
+				<param name="year2" type="12" value="" out="N"/>
+				<param name="week2" type="12" value="" out="N"/>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="rhq" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

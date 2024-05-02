@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ProductCatalogHinterlandDBDAOSearchHinterlandInfoRSQL">
+			<desc><![CDATA[SearchHinterlandInfo]]></desc>
+			<sql><![CDATA[
+SELECT RUN_TM, PCTL_NO, TERM_CD--, IO_BND_CD
+     , REPLACE(SUBSTR(REGEXP_SUBSTR(ERR_VAL, '\\[P..-', 1), 2,3), 'P00', '') ERR_CD
+     , SUBSTR(REPLACE(REGEXP_REPLACE(ERR_VAL,'\\[P..-', ','), ']', ''),2) ERR_DESC
+--     , REPLACE ((SELECT INTG_CD_VAL_DP_DESC FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD10101' 
+--                   AND INTG_CD_VAL_CTNT = SUBSTR(REGEXP_SUBSTR(ERR_VAL, '\\[P..-', 1), 2,3)) -- ERR_CD
+--               , '%', SUBSTR(REPLACE(REGEXP_REPLACE(ERR_VAL,'\\[P..-', ','), ']', ''),2)
+--               ) ERR_DESC
+FROM (
+
+    SELECT RUN_TM, PCTL_NO, TERM_CD, IO_BND_CD
+         , CASE WHEN IO_BND_CD = 'T' THEN FDR_ROUT_ERR_CD
+                WHEN IO_BND_CD IN ('I','O') THEN
+                CASE WHEN INLND_OPTM_EXISTS = 'N' THEN '[P99-]' -- err_code에 정의되지 않은 코드
+                     WHEN TRANS_MODE_ERR IS NOT NULL THEN TRANS_MODE_ERR
+                     WHEN TERM_CD = 'D' AND MTY_YD_CD IS NULL THEN '[P36-' || DECODE(IO_BND_CD, 'O', @[fm_nod_cd], @[to_nod_cd])||']'
+                     ELSE NULLIF('[P01-' 
+                                ||(SELECT BKG_JOIN_FNC( CURSOR(
+                                    SELECT M.NOD_CD
+                                    FROM (
+                                       SELECT (CASE WHEN @[io_bnd_cd] = 'I' THEN
+                                                 CASE WHEN (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = @[to_nod_cd] AND ROWNUM = 1) = 'Z' THEN
+                                                           (SELECT REP_YD_CD FROM MDM_ZONE WHERE NVL(DELT_FLG,'N') = 'N' AND ZN_CD = @[to_nod_cd])
+                                                      END
+                                            WHEN @[io_bnd_cd] = 'O' THEN
+                                                 CASE WHEN (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = @[fm_nod_cd] AND ROWNUM = 1) = 'Z' THEN
+                                                           (SELECT REP_YD_CD FROM MDM_ZONE WHERE NVL(DELT_FLG,'N') = 'N' AND ZN_CD = @[fm_nod_cd])
+                                                      END
+                                            END) AS NOD_CD
+                                       FROM DUAL
+                                       UNION 
+                                       SELECT @[fm_nod_cd] FROM DUAL
+                                       UNION
+                                       SELECT B.LNK_DEST_NOD_CD
+                                       FROM PRD_INLND_ROUT_MST A
+                                          , PRD_INLND_ROUT_DTL B
+                                       WHERE A.ROUT_ORG_NOD_CD = @[fm_nod_cd] 
+                                       AND A.ROUT_DEST_NOD_CD = @[to_nod_cd] 
+                                       AND A.PCTL_IO_BND_CD = @[io_bnd_cd]
+                                       AND A.ROUT_ORG_NOD_CD = B.ROUT_ORG_NOD_CD
+                                       AND A.ROUT_DEST_NOD_CD = B.ROUT_DEST_NOD_CD
+                                       AND A.ROUT_SEQ = B.ROUT_SEQ
+                                       AND NVL(A.DELT_FLG, 'N') = 'N'
+                                       AND A.INLND_ROUT_OPTM_FLG = 'Y'
+                                       ) M
+                                    WHERE NOT EXISTS (SELECT 1 FROM PRD_NODE N WHERE N.NOD_CD = M.NOD_CD AND NVL(DELT_FLG,'N') = 'N')
+                                    ), ',') ERR_NOD_CD
+                                FROM DUAL) ||']' 
+                                , '[P01-]')
+                END
+           END AS ERR_VAL
+    FROM (
+    
+        SELECT TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS') RUN_TM
+             , (SELECT DECODE(NOD_TP_CD, 'Z', 'D', 'Y') FROM PRD_NODE WHERE NOD_CD = DECODE(@[io_bnd_cd], 'O', @[fm_nod_cd], 'I', @[to_nod_cd]) ) TERM_CD
+             , NVL((SELECT 'Y' 
+                  FROM PRD_INLND_ROUT_MST 
+                 WHERE @[io_bnd_cd] IN ('O','I')
+                   AND ROUT_ORG_NOD_CD = @[fm_nod_cd] 
+                   AND ROUT_DEST_NOD_CD = @[to_nod_cd] 
+                   AND PCTL_IO_BND_CD = @[io_bnd_cd]
+                   AND NVL(DELT_FLG, 'N') = 'N'
+                   AND INLND_ROUT_OPTM_FLG = 'Y'
+                   AND ROWNUM = 1
+                ), 'N') INLND_OPTM_EXISTS
+             , CASE WHEN @[io_bnd_cd] = 'I' THEN
+                         CASE WHEN (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = @[to_nod_cd] AND ROWNUM = 1) = 'Z' THEN
+                                   (SELECT REP_YD_CD FROM MDM_ZONE WHERE NVL(DELT_FLG,'N') = 'N' AND ZN_CD = @[to_nod_cd])
+                              END
+                    WHEN @[io_bnd_cd] = 'O' THEN
+                         CASE WHEN (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = @[fm_nod_cd] AND ROWNUM = 1) = 'Z' THEN
+                                   (SELECT REP_YD_CD FROM MDM_ZONE WHERE NVL(DELT_FLG,'N') = 'N' AND ZN_CD = @[fm_nod_cd])
+                              END
+                    END AS MTY_YD_CD
+             , (SELECT CASE WHEN COUNT(1) = 2 AND MAX(INLND_ROUT_CMB_FLG) = 'Y'  -- COMBINE MODE 이면서 OUTBOUND에서 TD가 뒤에 INBOUND에서 TD가 앖에 오는 것은 OPTIMUM으로 허용되지 않는다.
+                                 AND DECODE(@[io_bnd_cd], 'O', MAX(DECODE(ROUT_DTL_SEQ, 2, TRSP_MOD_CD)), MAX(DECODE(ROUT_DTL_SEQ, 1, TRSP_MOD_CD))) = 'TD'
+                                THEN '[P37-' || DECODE(@[io_bnd_cd], 'O', 'Outbound {', 'Inbound {') || REGEXP_REPLACE(PRD_GET_INLND_ROUT_STR_FNC(ROUT_ORG_NOD_CD, ROUT_DEST_NOD_CD, ROUT_SEQ), '-.-','-') || '}]'
+                       END
+                  FROM PRD_INLND_ROUT_DTL
+                 WHERE (ROUT_ORG_NOD_CD, ROUT_DEST_NOD_CD, ROUT_SEQ)
+                       IN (SELECT ROUT_ORG_NOD_CD, ROUT_DEST_NOD_CD, ROUT_SEQ
+                             FROM PRD_INLND_ROUT_MST A
+                            WHERE @[io_bnd_cd] IN ('O','I')
+                              AND ROUT_ORG_NOD_CD = @[fm_nod_cd]
+                              AND ROUT_DEST_NOD_CD = @[to_nod_cd]
+                              AND PCTL_IO_BND_CD = @[io_bnd_cd]
+                              AND NVL(DELT_FLG, 'N') = 'N'
+                              AND INLND_ROUT_OPTM_FLG = 'Y'
+                              AND ROWNUM = 1
+                           )
+                GROUP BY ROUT_ORG_NOD_CD, ROUT_DEST_NOD_CD, ROUT_SEQ
+               ) TRANS_MODE_ERR
+             -- FEEDER LINK (여기서 ERRCODE VALUE 모두 찾음)
+             , NVL((SELECT CASE WHEN LENGTH(@[fm_nod_cd]) = 7 AND POLT.TML_CD <> @[fm_nod_cd] AND LENGTH(@[to_nod_cd]) = 7 AND PODT.TML_CD <> @[to_nod_cd] THEN '[P62-' || @[fm_nod_cd] || ',' || @[to_nod_cd] || ']'
+                                WHEN LENGTH(@[fm_nod_cd]) = 7 AND POLT.TML_CD <> @[fm_nod_cd] THEN '[P62-' || @[fm_nod_cd] || ']'
+                                WHEN LENGTH(@[to_nod_cd]) = 7 AND PODT.TML_CD <> @[to_nod_cd] THEN '[P62-' || @[to_nod_cd] || ']'
+                                WHEN POLT.TML_CD IS NULL AND PODT.TML_CD IS NULL AND FLNK.LNK_ORG_LOC_CD = FLNK.LNK_DEST_LOC_CD THEN '[P62-' || FLNK.LNK_ORG_LOC_CD || ']'  -- BOTH TERMINAL MATRIX DOES NOT EXISTS
+                                WHEN POLT.TML_CD IS NULL AND PODT.TML_CD IS NULL THEN '[P62-' || FLNK.LNK_ORG_LOC_CD || ',' || FLNK.LNK_DEST_LOC_CD || ']'  -- BOTH TERMINAL MATRIX DOES NOT EXISTS
+                                WHEN POLT.TML_CD IS NULL THEN '[P62-' || FLNK.LNK_ORG_LOC_CD || ']' -- POL PORT TERMINAL MATRIX DOES NOT EXISTS
+                                WHEN PODT.TML_CD IS NULL THEN '[P62-' || FLNK.LNK_DEST_LOC_CD || ']'-- POD PORT TERMINAL MATRIX DOES NOT EXISTS
+                                ELSE NVL(DECODE((SELECT 1 FROM MDM_YARD WHERE YD_CD = POLT.TML_CD AND NVL(DELT_FLG, 'N') = 'N'), NULL, '[P01-' || POLT.TML_CD || ']')
+                                     || DECODE((SELECT 1 FROM MDM_YARD WHERE YD_CD = PODT.TML_CD AND NVL(DELT_FLG, 'N') = 'N'), NULL, '[P01-' || PODT.TML_CD || ']')
+                                    , '[P00]')
+                                END 
+                    FROM PRD_FDR_LNK FLNK
+                       , PRD_PORT_TML_MTX POLT
+                       , PRD_PORT_TML_MTX PODT
+                    WHERE @[io_bnd_cd] = 'T'
+                      AND FLNK.LNK_ORG_LOC_CD = SUBSTR(@[fm_nod_cd],1,5) 
+                      AND FLNK.LNK_DEST_LOC_CD = SUBSTR(@[to_nod_cd],1,5) 
+                      AND FLNK.VSL_SLAN_CD = 'FDR'
+                      AND NVL(FLNK.DELT_FLG, 'N')  = 'N'
+                      AND FLNK.LNK_ORG_LOC_CD = POLT.PORT_CD(+)
+                      AND FLNK.VSL_SLAN_CD = POLT.VSL_SLAN_CD(+)
+                      AND FLNK.SKD_DIR_CD = POLT.SKD_DIR_CD(+)
+                      AND FLNK.LNK_DEST_LOC_CD = PODT.PORT_CD(+)
+                      AND FLNK.VSL_SLAN_CD = PODT.VSL_SLAN_CD(+)
+                      AND FLNK.SKD_DIR_CD = PODT.SKD_DIR_CD(+))
+                 , '[P99-]') FDR_ROUT_ERR_CD -- RHQ LINK DOES NOT EXISTS
+             , (SELECT PCTL_NO FROM PRD_PROD_CTL_MST WHERE ROWNUM = 1 ) PCTL_NO
+             , @[io_bnd_cd] IO_BND_CD
+        FROM DUAL
+        )
+    )			]]></sql>
+			<params>
+				<param name="fm_nod_cd" type="12" value="" out="N"/>
+				<param name="to_nod_cd" type="12" value="" out="N"/>
+				<param name="io_bnd_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

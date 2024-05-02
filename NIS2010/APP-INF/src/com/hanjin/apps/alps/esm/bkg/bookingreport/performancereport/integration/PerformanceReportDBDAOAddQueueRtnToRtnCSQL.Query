@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PerformanceReportDBDAOAddQueueRtnToRtnCSQL">
+			<desc><![CDATA[PerformanceReportDBDAOAddQueueRtnToRtnCSQL]]></desc>
+			<sql><![CDATA[
+INSERT INTO BKG_SR_HIS
+    (       SR_KND_CD,
+            SR_NO,
+            BKG_NO,
+            SR_HIS_SEQ,
+            SR_STS_CD,
+            SR_PROC_STS_CD,
+            ATND_USR_ID,
+            SR_PROC_UPD_DT,  
+            ST_DT,
+            FNT_OFC_RTN_CD,
+            DIFF_RMK,
+            CRE_USR_ID,
+            CRE_DT,
+            UPD_USR_ID,
+            UPD_DT,
+            SR_PROC_HRS,
+            BL_DOC_WRK_HRS,
+            BL_DOC_OVT_HRS,
+            HOL_FLG
+    )
+    SELECT
+	@[src_cd],
+     @[sr_no],
+     @[bkg_no],
+     ( SELECT NVL(MAX(SR_HIS_SEQ) + 1,0)
+        FROM BKG_SR_HIS
+        WHERE SR_KND_CD = @[src_cd] /* 0421의 SRC_CD*/
+          AND  SR_NO    = @[sr_no]
+          AND  BKG_NO   = @[bkg_no]                
+     ) ,
+     'RT',
+     'T', /*상수 */
+     @[usr_id],
+	 AST_DT,
+     GLOBALDATE_PKG.TIME_LOCAL_FNC('MYPKG'),
+     RTN_FM_STS_CD,
+      @[message],
+      @[usr_id],
+      SYSDATE,
+      @[usr_id],
+      SYSDATE,
+	  T.SR_PROC_HRS,
+	  T.BIZ_ELT,     
+      T.OVT,
+      T.HOL_FLG
+    FROM BKG_SR_CRNT_RQST X,
+		 (SELECT  AST_DT, AEND_DT,
+	  T.AEND_DT - T.AST_DT SR_PROC_HRS,
+	  SUM(CASE WHEN TO_CHAR(T.ST_FM_DT,'D') IN (1,7) OR T.HOL_FLG = 'Y' THEN T.ST_FM_DT
+               WHEN T.AEND_DT BETWEEN T.ST_FM_DT AND T.ST_TO_DT THEN T.AEND_DT
+               WHEN T.ST_TO_DT < T.AEND_DT THEN T.ST_TO_DT
+               WHEN T.AEND_DT < T.ST_FM_DT THEN T.ST_FM_DT
+               ELSE T.ST_TO_DT + 1
+           END
+       -
+          CASE WHEN TO_CHAR(T.ST_FM_DT,'D') IN (1,7) OR T.HOL_FLG = 'Y' THEN T.ST_FM_DT
+               WHEN T.AST_DT BETWEEN T.ST_FM_DT AND T.ST_TO_DT THEN T.AST_DT 
+               WHEN T.ST_FM_DT > T.AST_DT THEN T.ST_FM_DT 
+               WHEN T.AST_DT > T.ST_TO_DT THEN T.ST_TO_DT 
+               ELSE T.ST_FM_DT -1
+          END) BIZ_ELT,     
+       T.AEND_DT - T.AST_DT -
+       SUM(CASE WHEN TO_CHAR(T.ST_FM_DT,'D') IN (1,7) OR T.HOL_FLG = 'Y' THEN T.ST_FM_DT
+               WHEN T.AEND_DT BETWEEN T.ST_FM_DT AND T.ST_TO_DT THEN T.AEND_DT
+               WHEN T.ST_TO_DT < T.AEND_DT THEN T.ST_TO_DT
+               WHEN T.AEND_DT < T.ST_FM_DT THEN T.ST_FM_DT
+               ELSE T.ST_TO_DT + 1
+          END
+       -
+          CASE WHEN TO_CHAR(T.ST_FM_DT,'D') IN (1,7) OR T.HOL_FLG = 'Y' THEN T.ST_FM_DT
+               WHEN T.AST_DT BETWEEN T.ST_FM_DT AND T.ST_TO_DT THEN T.AST_DT 
+               WHEN T.ST_FM_DT > T.AST_DT THEN T.ST_FM_DT 
+               WHEN T.AST_DT > T.ST_TO_DT THEN T.ST_TO_DT 
+               ELSE T.ST_FM_DT -1
+          END) OVT,
+      MAX(T.HOL_FLG) HOL_FLG
+
+		 FROM(SELECT AST_DT, AEND_DT, 
+                 ST_FM_DT, ST_TO_DT,
+              	 (SELECT DECODE(COUNT(DISTINCT HOL_DT),0,'N','Y')
+		            FROM DMT_HOLIDAY H, MDM_ORGANIZATION O,MDM_LOCATION L
+				   WHERE O.OFC_CD = (SELECT BKG_OFC_CD FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+                     AND O.LOC_CD = L.LOC_CD
+                     
+ 				     AND (H.CNT_CD = L.CNT_CD OR H.CNT_CD = ' ')
+                     AND (H.RGN_CD = L.RGN_CD OR H.RGN_CD = ' ')
+                     AND (H.STE_CD = L.STE_CD OR H.STE_CD = ' ')
+                     AND (H.LOC_CD = L.LOC_CD OR H.LOC_CD = ' ')
+
+                     AND HOL_DT BETWEEN TRUNC(ST_FM_DT) AND TRUNC(ST_TO_DT)) HOL_FLG
+		  FROM (SELECT T.AST_DT, T.AEND_DT,
+                       --SIGN(X.DPCS_DOC_FM_DT-TRUNC(X.DPCS_DOC_FM_DT)-0.5) 오전 : -1, 오후 : 1이 리턴
+                       --Overnigt인 경우만 Working time이 오전인 경우 하루 전으로 계산함
+                       TO_DATE(TO_CHAR(T.AST_DT,'YYYYMMDD')||W.DOC_WRK_ST_HRMNT,'YYYYMMDDHH24MI') 
+                         - DECODE(W.DOC_WRK_OVN_FLG,'Y',DECODE(SIGN(T.AST_DT- TO_DATE(TO_CHAR(T.AST_DT,'YYYYMMDD')||W.DOC_WRK_ST_HRMNT,'YYYYMMDDHH24MI')),-1,1,0),0) 
+                         + CNT -1 ST_FM_DT,
+                       TO_DATE(TO_CHAR(T.AST_DT+DECODE(W.DOC_WRK_OVN_FLG,'Y',1,0),'YYYYMMDD')||W.DOC_WRK_END_HRMNT,'YYYYMMDDHH24MI') 
+                         - DECODE(W.DOC_WRK_OVN_FLG,'Y',DECODE(SIGN(T.AST_DT- TO_DATE(TO_CHAR(T.AST_DT,'YYYYMMDD')||W.DOC_WRK_ST_HRMNT,'YYYYMMDDHH24MI')),-1,1,0),0) 
+                         + CNT -1 ST_TO_DT
+                 FROM BKG_DPCS_OFC_WRK_TM W, 
+                     (SELECT TO_DATE(@[wrk_st_tm],'YYYYMMDD HH24:MI:SS') AST_DT, 
+                             GLOBALDATE_PKG.TIME_LOCAL_FNC('MYPKG') AEND_DT FROM DUAL) T,
+                     (SELECT ROWNUM CNT FROM DICT) C
+                 WHERE W.BKG_OFC_CD = (SELECT BKG_OFC_CD FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+                 AND C.CNT < T.AEND_DT - T.AST_DT + 3))T
+          GROUP BY T.AEND_DT, T.AST_DT) T
+        WHERE SR_KND_CD   = @[src_cd] /* 0421의 SRC_CD*/
+         AND SR_NO        = @[sr_no]    
+         AND BKG_NO       = @[bkg_no]
+         AND SR_AMD_TP_CD = @[sr_knd_cd]/* 0421의 SR_KND_CD*/ 
+         AND SR_AMD_SEQ = (SELECT NVL(MAX(SR_AMD_SEQ),0)
+                             FROM  BKG_SR_CRNT_RQST
+                            WHERE SR_KND_CD = X.SR_KND_CD
+                              AND SR_AMD_TP_CD = X.SR_AMD_TP_CD
+                              AND BKG_NO = X.BKG_NO
+                              AND SR_NO = X.SR_NO
+                           )
+         AND ROWNUM = 1			]]></sql>
+			<params>
+				<param name="src_cd" type="12" value="" out="N"/>
+				<param name="sr_no" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="message" type="12" value="" out="N"/>
+				<param name="wrk_st_tm" type="12" value="" out="N"/>
+				<param name="sr_knd_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,138 @@
+--INSERT INTO PRD_BKG_COP_MAP (BKG_NO,PCTL_NO,COP_NO,COP_MAPG_SEQ,CRNT_FLG,CNTR_NO,CNTR_TPSZ_CD,COP_SO_KNT,MTY_PKUP_YD_CD,MTY_RTN_YD_CD,OB_TRO_FLG,IB_TRO_FLG,
+--       POR_NOD_CD,POL_NOD_CD,BKG_RCV_TERM_CD,BKG_DE_TERM_CD,OB_ITCHG_CTNT,IB_ITCHG_CTNT,OCN_ITCHG_CTNT,COP_PATT_ORD_NO,CRE_USR_ID,CRE_DT,UPD_USR_ID,UPD_DT )
+SELECT H2.BKG_NO,H2.PCTL_NO,P.COP_NO,:MAPG_SEQ,'Y',P.CNTR_NO,P.CNTR_TPSZ_CD,SO_CNT,MT_PU,MT_RTN,P.OB_TRO_FLG,P.IB_TRO_FLG,P.POR_NOD_CD,P.POL_NOD_CD,RCV_TERM_CD,DE_TERM_CD,OUT_BOUND,IN_BOUND,OCN,--FULL_RANK,
+       DENSE_RANK() OVER ( ORDER BY  FULL_RANK DESC,FULL_ROUT ) PATTERN,'SYSTEM',SYSDATE,'SYSTEM',SYSDATE
+FROM (
+    WITH PT AS
+    (
+        SELECT ROUT.COP_NO,ROUT.CNTR_NO,ROUT.CNTR_TPSZ_CD,ROUT.SO_CNT,ROUT.OUT_BOUND,ROUT.IN_BOUND,ROUT.OCN,
+              MT_PU,MT_RTN,OB_TRO_FLG,IB_TRO_FLG,POR_NOD_CD,POL_NOD_CD,RCV_TERM_CD,DE_TERM_CD,
+              ROW_NUMBER() OVER ( PARTITION BY MT_PU||MT_RTN||OB_TRO_FLG||IB_TRO_FLG||POR_NOD_CD||POL_NOD_CD||RCV_TERM_CD||DE_TERM_CD||ROUT.OUT_BOUND||ROUT.OCN||ROUT.IN_BOUND ORDER BY ROUT.COP_NO ) FULL_RK
+        FROM (    
+            SELECT B.COP_NO,B.CNTR_NO,B.CNTR_TPSZ_CD, SO_CNT,NVL(OB_TRO_FLG,'N') OB_TRO_FLG, NVL(IB_TRO_FLG,'N') IB_TRO_FLG,
+                POR_NOD_CD,POL_NOD_CD,RCV_TERM_CD,DE_TERM_CD,
+                NVL(MT_PU,FIRST_VALUE(MT_PU) OVER  (ORDER BY PU_CNT DESC ROWS UNBOUNDED PRECEDING)) MT_PU,
+                NVL(MT_RTN,FIRST_VALUE(MT_RTN) OVER  (ORDER BY RTN_CNT DESC ROWS UNBOUNDED PRECEDING)) MT_RTN,
+                PRD_GET_COP_BND_SO_STR_FNC (B.COP_NO,'O') OUT_BOUND,
+                PRD_GET_COP_BND_SO_STR_FNC (B.COP_NO,'I') IN_BOUND,
+                PRD_GET_COP_BND_SO_STR_FNC (B.COP_NO,'T') OCN
+            FROM 
+            (
+            SELECT rownum,H.COP_NO,H.CNTR_NO,H.CNTR_TPSZ_CD,SO_CNT,
+                  OB_TRO_FLG,IB_TRO_FLG,BC.POR_NOD_CD,BC.POL_YD_CD POL_NOD_CD,
+                  NVL(RCV_TERM_CD,:R_TERM) RCV_TERM_CD,NVL(DE_TERM_CD,:D_TERM) DE_TERM_CD,
+                  PU.NOD_CD MT_PU,RTN.NOD_CD MT_RTN,
+                  COUNT(H.COP_NO) OVER ( PARTITION BY PU.NOD_CD ) PU_CNT,
+                  COUNT(H.COP_NO) OVER ( PARTITION BY RTN.NOD_CD ) RTN_CNT                    
+            FROM (       
+                SELECT COP_NO,COUNT(*) SO_CNT
+                FROM (
+                    SELECT COP_NO,COST_ACT_GRP_SEQ
+                    FROM TRS_TRSP_SVC_ORD                                                                                                         
+                    WHERE BKG_NO = :BKG_NO 
+                    AND TRSP_SO_TP_CD <> 'S' 
+                    AND NVL(DELT_FLG,'N') <> 'Y' 
+                    UNION ALL 
+                    -- Rail So
+                    SELECT 
+                    A.COP_NO,A.COST_ACT_GRP_SEQ
+                    FROM TRS_TRSP_RAIL_BIL_ORD A 
+                    WHERE A.BKG_NO = :BKG_NO
+                    AND NVL(A.DELT_FLG,'N') <> 'Y' 
+                    ORDER BY 1,2 
+                    )
+                GROUP BY COP_NO
+             ) SO, SCE_COP_HDR H,SCE_COP_DTL PU, SCE_COP_DTL RTN, BKG_CONTAINER BC
+             WHERE H.COP_NO =SO.COP_NO(+)
+             AND H.BKG_NO = :BKG_NO
+             AND H.CNTR_NO = BC.CNTR_NO(+)
+             AND H.BKG_NO = BC.BKG_NO(+)
+             AND NVL(H.COP_STS_CD,'N') <> 'X' 
+             AND H.COP_NO = PU.COP_NO(+)
+             AND PU.ACT_CD(+) = 'MOTYDO'
+             AND PU.ACT_DT(+) IS NOT NULL
+             AND H.COP_NO = RTN.COP_NO(+)
+             AND RTN.ACT_CD(+) = 'MITYAD'
+             AND RTN.ACT_DT(+) IS NOT NULL 
+            ) B
+        ) ROUT
+    )
+    SELECT  A.COP_NO,A.CNTR_NO,A.CNTR_TPSZ_CD,A.SO_CNT,A.MT_PU,A.MT_RTN,A.OB_TRO_FLG,A.IB_TRO_FLG,A.POR_NOD_CD,A.POL_NOD_CD,A.RCV_TERM_CD,A.DE_TERM_CD,
+    (CASE WHEN A.FULL_RK <> B.FULL_RK AND A.OUT_BOUND <> B.OUT_BOUND AND SIGN(INSTR(B.OUT_BOUND,A.OUT_BOUND)) = 1 
+            THEN B.OUT_BOUND
+            ELSE A.OUT_BOUND
+            END)
+            OUT_BOUND,
+    (CASE WHEN A.FULL_RK <> B.FULL_RK AND A.IN_BOUND <> B.IN_BOUND AND SIGN(INSTR(B.IN_BOUND,A.IN_BOUND)) = 1 
+            THEN B.IN_BOUND
+            ELSE A.IN_BOUND
+            END)
+            IN_BOUND,
+    (CASE WHEN A.FULL_RK <> B.FULL_RK AND A.OCN <> B.OCN AND SIGN(INSTR(B.OCN,A.OCN)) = 1 
+            THEN B.OCN
+            ELSE A.OCN
+            END)
+            OCN,
+    A.MT_PU||A.MT_RTN||A.OB_TRO_FLG||A.IB_TRO_FLG||NVL(A.POR_NOD_CD,'XXXXXXX')||NVL(A.POL_NOD_CD,'XXXXXXX')||A.RCV_TERM_CD||A.DE_TERM_CD||
+    (CASE WHEN A.FULL_RK <> B.FULL_RK AND A.OUT_BOUND <> B.OUT_BOUND AND SIGN(INSTR(B.OUT_BOUND,A.OUT_BOUND)) = 1 
+            THEN B.OUT_BOUND
+            ELSE A.OUT_BOUND
+            END)
+    ||
+    (CASE WHEN A.FULL_RK <> B.FULL_RK AND A.IN_BOUND <> B.IN_BOUND AND SIGN(INSTR(B.IN_BOUND,A.IN_BOUND)) = 1 
+            THEN B.IN_BOUND
+            ELSE A.IN_BOUND
+            END)
+    ||
+    (CASE WHEN A.FULL_RK <> B.FULL_RK AND A.OCN <> B.OCN AND SIGN(INSTR(B.OCN,A.OCN)) = 1 
+            THEN B.OCN
+            ELSE A.OCN
+            END)
+    FULL_ROUT,        
+    COUNT(        
+    A.MT_PU||A.MT_RTN||A.OB_TRO_FLG||A.IB_TRO_FLG||NVL(A.POR_NOD_CD,'XXXXXXX')||NVL(A.POL_NOD_CD,'XXXXXXX')||A.RCV_TERM_CD||A.DE_TERM_CD||
+    (CASE WHEN A.FULL_RK <> B.FULL_RK AND A.OUT_BOUND <> B.OUT_BOUND AND SIGN(INSTR(B.OUT_BOUND,A.OUT_BOUND)) = 1 
+            THEN B.OUT_BOUND
+            ELSE A.OUT_BOUND
+            END)
+    ||
+    (CASE WHEN A.FULL_RK <> B.FULL_RK AND A.IN_BOUND <> B.IN_BOUND AND SIGN(INSTR(B.IN_BOUND,A.IN_BOUND)) = 1 
+            THEN B.IN_BOUND
+            ELSE A.IN_BOUND
+            END)
+    ||
+    (CASE WHEN A.FULL_RK <> B.FULL_RK AND A.OCN <> B.OCN AND SIGN(INSTR(B.OCN,A.OCN)) = 1 
+            THEN B.OCN
+            ELSE A.OCN
+            END)
+    ) OVER (
+    PARTITION BY 
+    A.MT_PU||A.MT_RTN||A.OB_TRO_FLG||A.IB_TRO_FLG||NVL(A.POR_NOD_CD,'XXXXXXX')||NVL(A.POL_NOD_CD,'XXXXXXX')||A.RCV_TERM_CD||A.DE_TERM_CD||
+    (CASE WHEN A.FULL_RK <> B.FULL_RK AND A.OUT_BOUND <> B.OUT_BOUND AND SIGN(INSTR(B.OUT_BOUND,A.OUT_BOUND)) = 1 
+            THEN B.OUT_BOUND
+            ELSE A.OUT_BOUND
+            END)
+    ||
+    (CASE WHEN A.FULL_RK <> B.FULL_RK AND A.IN_BOUND <> B.IN_BOUND AND SIGN(INSTR(B.IN_BOUND,A.IN_BOUND)) = 1 
+            THEN B.IN_BOUND
+            ELSE A.IN_BOUND
+            END)
+    ||
+    (CASE WHEN A.FULL_RK <> B.FULL_RK AND A.OCN <> B.OCN AND SIGN(INSTR(B.OCN,A.OCN)) = 1 
+            THEN B.OCN
+            ELSE A.OCN
+            END)
+    )
+    FULL_RANK
+    FROM PT A, PT B
+    WHERE B.COP_NO = (SELECT COP_NO 
+                      FROM (
+                            SELECT COP_NO 
+                            FROM PT C
+                            ORDER BY FULL_RK DESC
+                            ) 
+                      WHERE ROWNUM =1)
+) P, SCE_COP_HDR H2
+WHERE P.COP_NO = H2.COP_NO
+;
+

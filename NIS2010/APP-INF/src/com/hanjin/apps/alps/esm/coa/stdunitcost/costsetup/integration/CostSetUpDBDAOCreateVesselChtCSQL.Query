@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CostSetUpDBDAOCreateVesselChtCSQL">
+			<desc><![CDATA[대선수지]]></desc>
+			<sql><![CDATA[
+--================================================================================
+-- 파라미터
+-- 1. 유저id
+-- 2. yyyywk
+--================================================================================
+MERGE INTO COA_MNL_COST_STUP A
+USING (
+        SELECT SUBSTR(@[cost_yrweek], 1, 4)||MIN(eq_wk) cost_yrmon
+             , SUBSTR(@[cost_yrweek], 5, 2) cost_wk
+             , 'COM' trd_cd
+             , 'CDMCO' rlane_cd
+             , 'O' ioc_cd
+             , 'M' dir_cd
+             , 'OT' sub_trd_cd
+             , SUM(otr_expn_amt) otr_expn_amt 
+          FROM (
+                 SELECT vsl_cd
+                      , eq_wk
+                      --, SUM( DECODE(b.flet_ctrt_tp_cd, 'TI', rt_amt, 0 )) ti_rate
+                      --, SUM( DECODE(b.flet_ctrt_tp_cd, 'TO', rt_amt, 0 )) to_rate
+                      --, SUM( DECODE(b.flet_ctrt_tp_cd, 'TO', rt_amt, 0 )) - SUM( DECODE(b.flet_ctrt_tp_cd, 'TI', rt_amt, 0 )) diff
+                      ,((SUM( DECODE(b.flet_ctrt_tp_cd, 'TO', rt_amt, 0 )) - SUM( DECODE(b.flet_ctrt_tp_cd, 'TI', rt_amt, 0 ))) 
+                        * SUM(DECODE(b.flet_ctrt_tp_cd, 'TO', b.day_cnt))) otr_expn_amt
+                   FROM (
+                         SELECT a.flet_ctrt_tp_cd
+                              , a.vsl_cd
+                              , a.day_cnt
+                              , a.eq_wk
+                              , SUM(a.hir_rt_amt / DECODE (a.curr_cd, 'USD', 1, NVL (b.usd_locl_xch_rt, 0))) rt_amt
+                           FROM (
+                                 SELECT flet_ctrt_tp_cd
+                                      , vsl_cd
+                                      , flet_ctrt_no
+                                      , DECODE(no, 1, hir_rt_n1st_amt, hir_rt_n2nd_amt) hir_rt_amt
+                                      , DECODE(no, 1, hir_curr_n1st_cd, hir_curr_n2nd_cd) curr_cd
+                                      , eff_dt
+                                      , exp_dt
+                                      , start_dt
+                                      , end_dt
+                                      , (TO_DATE(end_dt, 'YYYYMMDD') - TO_DATE(start_dt, 'YYYYMMDD') + 1) day_cnt
+                                      , cost_wk
+                                      , eq_wk
+                                   FROM (
+                                        --대선수지 계산할때는 시간 상관하지 않고 2012.08.01 까지 USD 18720 2012.08.02 부터 18845
+                                        --        From Date		To Date			Daily Hire
+                                        --1	2011.08.01 09:24	2012.08.01 09:24	18720
+                                        --2	2012.08.01 09:24	2017.08.01 00:00	18845
+                                         SELECT fc.flet_ctrt_tp_cd
+                                              , fc.vsl_cd
+                                              , h.flet_ctrt_no
+                                              , h.eff_dt
+                                              , h.exp_dt
+                                              , h.hir_rt_n1st_amt
+                                              , h.hir_curr_n1st_cd
+                                              , h.hir_rt_n2nd_amt
+                                              , h.hir_curr_n2nd_cd
+                                              , DECODE(h.hir_curr_n2nd_cd, NULL, 1, 2) seq
+                                              , wk.cost_wk
+                                              , wk.sls_fm_dt
+                                              , wk.sls_to_dt
+                                              , wk.eq_wk
+                                              , CASE
+                                                        WHEN TO_CHAR(h.eff_dt, 'yyyymmdd') < wk.sls_fm_dt THEN wk.sls_fm_dt
+                                                        ELSE TO_CHAR(h.eff_dt, 'yyyymmdd')
+                                                END AS start_dt
+                                              , CASE
+                                                        WHEN TO_CHAR(h.exp_dt, 'yyyymmdd') > wk.sls_to_dt THEN wk.sls_to_dt
+                                                        ELSE TO_CHAR(h.exp_dt, 'yyyymmdd')
+                                                END AS end_dt
+                                           FROM fms_hire h
+                                              , fms_contract fc
+                                              , coa_vsl_rgst v
+                                              , COA_WK_PRD wk
+                                          WHERE h.flet_ctrt_no = fc.flet_ctrt_no
+                                            AND fc.vsl_cd = v.vsl_cd
+                                            AND wk.cost_yr = SUBSTR(@[cost_yrweek], 1, 4)
+                                            AND wk.cost_wk = SUBSTR(@[cost_yrweek], 5, 2)
+                                            AND NVL(fc.delt_flg,'N') = 'N'
+                                            AND NVL(v.delt_flg,'N') = 'N'
+                                            AND v.lst_flg ='Y'
+                                            AND v.vsl_tp_cd = 'C'
+                                            AND TO_DATE(TO_CHAR(h.eff_dt,'YYYYMMDD'),'YYYYMMDD') <= to_date(wk.sls_to_dt, 'yyyymmdd')
+                                            AND TO_DATE(TO_CHAR(h.exp_dt,'YYYYMMDD'),'YYYYMMDD') >= to_date(wk.sls_fm_dt, 'yyyymmdd')
+                                         --   AND fc.vsl_cd LIKE 'HJRD' || '%' --HNSA ,HNMD
+                                        )
+                                      , (
+                                         SELECT cpy_no no
+                                           FROM com_cpy_no
+                                          WHERE cpy_no BETWEEN 1 AND 2
+                                        )
+                                  WHERE seq >= no
+                                ) a
+                              , gl_mon_xch_rt b
+                          WHERE a.curr_cd = b.curr_cd
+                            AND b.acct_xch_rt_lvl(+) = '1'
+                            AND b.acct_xch_rt_yrmon(+) = substr(@[cost_yrweek],1,4)||a.eq_wk
+                       GROUP BY a.flet_ctrt_tp_cd
+                              , a.vsl_cd
+                              , a.day_cnt
+                              , a.eq_wk
+                        ) b
+                GROUP BY vsl_cd, eq_wk
+        )
+) b 
+ON (        a.cost_yrmon = b.cost_yrmon 
+        AND a.cost_wk = b.cost_wk 
+        AND a.trd_cd = b.trd_cd 
+        AND a.rlane_cd = b.rlane_cd )
+WHEN MATCHED THEN 
+        UPDATE SET a.otr_expn_amt = b.otr_expn_amt
+                 , a.upd_dt = SYSDATE
+                 , a.upd_usr_id = @[user_id]
+WHEN NOT MATCHED THEN 
+        INSERT (  a.cost_yrmon
+                , a.cost_wk
+                , a.trd_cd
+                , a.rlane_cd
+                , a.ioc_cd
+                , a.dir_cd
+                , a.sub_trd_cd
+                , a.otr_expn_amt
+                , a.cre_usr_id
+                , a.cre_dt
+                , a.upd_usr_id
+                , a.upd_dt)
+        VALUES (  b.cost_yrmon
+                , b.cost_wk
+                , b.trd_cd
+                , b.rlane_cd
+                , b.ioc_cd
+                , b.dir_cd
+                , b.sub_trd_cd
+                , b.otr_expn_amt
+                , @[user_id]
+                , SYSDATE
+                , @[user_id]
+                , SYSDATE)
+			]]></sql>
+			<params>
+				<param name="cost_yrweek" type="12" value="" out="N"/>
+				<param name="user_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

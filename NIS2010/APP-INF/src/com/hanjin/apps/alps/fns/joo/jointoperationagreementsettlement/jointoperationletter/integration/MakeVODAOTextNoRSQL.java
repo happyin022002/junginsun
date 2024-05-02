@@ -1,0 +1,66 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : MakeVODAOTextNoRSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.10.20
+*@LastModifier : 장강철
+*@LastVersion : 1.0
+* 2009.10.20 장강철
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.fns.joo.jointoperationagreementsettlement.jointoperationletter.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author jang kang cheol
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class MakeVODAOTextNoRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * DESC Enter..
+	  * </pre>
+	  */
+	public MakeVODAOTextNoRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.fns.joo.jointoperationagreementsettlement.jointoperationletter.integration").append("\n"); 
+		query.append("FileName : MakeVODAOTextNoRSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT   '' JO_TMPLT_NO," ).append("\n"); 
+		query.append("''JO_LTR_TMPLT_SEQ" ).append("\n"); 
+		query.append("FROM   DUAL" ).append("\n"); 
+
+	}
+}

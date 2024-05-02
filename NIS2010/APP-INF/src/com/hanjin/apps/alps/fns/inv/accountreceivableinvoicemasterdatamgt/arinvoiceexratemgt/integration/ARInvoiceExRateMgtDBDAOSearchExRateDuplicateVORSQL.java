@@ -1,0 +1,132 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : ARInvoiceExRateMgtDBDAOSearchExRateDuplicateVORSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.08.25
+*@LastModifier : 최도순
+*@LastVersion : 1.0
+* 2009.08.25 최도순
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.fns.inv.accountreceivableinvoicemasterdatamgt.arinvoiceexratemgt.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author Choi Do Soon
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class ARInvoiceExRateMgtDBDAOSearchExRateDuplicateVORSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * Duplicate check
+	  * </pre>
+	  */
+	public ARInvoiceExRateMgtDBDAOSearchExRateDuplicateVORSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("io_bnd_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("to_dt",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("xch_rt_tp_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.NUMERIC + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cust_seq",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("chg_curr_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("fm_dt",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("locl_curr_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cust_cnt_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.fns.inv.accountreceivableinvoicemasterdatamgt.arinvoiceexratemgt.integration").append("\n"); 
+		query.append("FileName : ARInvoiceExRateMgtDBDAOSearchExRateDuplicateVORSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT" ).append("\n"); 
+		query.append("fm_dt,to_dt" ).append("\n"); 
+		query.append("FROM inv_cust_and_dly_xch_rt" ).append("\n"); 
+		query.append("WHERE	cust_cnt_cd = @[cust_cnt_cd]" ).append("\n"); 
+		query.append("AND	cust_seq = @[cust_seq]" ).append("\n"); 
+		query.append("AND	io_bnd_cd = @[io_bnd_cd]" ).append("\n"); 
+		query.append("AND	chg_curr_cd = @[chg_curr_cd]" ).append("\n"); 
+		query.append("AND	locl_curr_cd = @[locl_curr_cd]" ).append("\n"); 
+		query.append("AND	xch_rt_tp_cd = @[xch_rt_tp_cd]" ).append("\n"); 
+		query.append("AND fm_dt <= REPLACE(@[to_dt],'-','')" ).append("\n"); 
+		query.append("AND to_dt >= REPLACE(@[fm_dt],'-','')" ).append("\n"); 
+
+	}
+}

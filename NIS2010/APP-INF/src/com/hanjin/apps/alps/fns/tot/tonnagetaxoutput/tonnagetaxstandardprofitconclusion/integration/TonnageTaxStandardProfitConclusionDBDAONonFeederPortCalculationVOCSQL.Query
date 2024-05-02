@@ -1,0 +1,757 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TonnageTaxStandardProfitConclusionDBDAONonFeederPortCalculationVOCSQL">
+			<desc><![CDATA[2012.01.27 이준범 [CHM-201113807-01]
+제목 : ALPS 톤세 시스템 기능보완 - T/TAX Recalculation
+내용 : 1) T/Tax Recalculated 옆에 Lane이 추가 되면 추가된 선박만 재배치 할 수 있게 처리
+         2) T/Tax Recalculated 작업 후, 변경된 내역을 표시해주는 팝업창 또는 화면을 추가하여
+           변경사항 확인할 수 있게 처리]]></desc>
+			<sql><![CDATA[
+INSERT INTO TOT_PORT_STL_AMT
+(       
+  STL_YRMON	            
+ ,TONG_STL_BAT_JB_SEQ	  
+ ,VSL_CD	              
+ ,PORT_CD	              
+ ,PORT_SEQ	            
+ ,TRD_CD	              
+ ,SLAN_CD	              
+ ,SKD_VOY_NO	          
+ ,SKD_DIR_CD	          
+ ,BSA_CAPA	            
+ ,ACT_BSA_CAPA	        
+ ,LDB_CAPA_QTY	        
+ ,CHTR_BSA_CAPA	        
+ ,BSA_CAPA_MODI_FLG	    	
+ ,ETD_DT	              
+ ,USG_RT	 
+ ,VOY_DYS             
+ ,TONG_TAX_AMT	
+ ,PER_TON_REV             
+ ,NRT_WGT				        	
+ ,CRE_DT                
+ ,CRE_USR_ID            
+ ,UPD_DT                
+ ,UPD_USR_ID                      
+)
+SELECT S.STL_YRMON
+      ,S.TONG_STL_BAT_JB_SEQ 
+      ,S.VSL_CD
+      ,S.VPS_PORT_CD 
+      ,ROW_NUMBER() OVER(PARTITION BY  S.STL_YRMON, S.TONG_STL_BAT_JB_SEQ, S.VSL_CD, S.VPS_PORT_CD  ORDER BY S.VSL_CD )
+      ,S.TRD_CD
+      ,S.SLAN_CD
+      ,S.SKD_VOY_NO
+      ,S.SKD_DIR_CD
+      ,S.BSA_CAPA
+      ,S.ACTUAL_LOADED_VOL
+      ,S.LDB_CAPA_QTY
+      ,S.CHTR_BSA_CAPA
+      ,S.BSA_CAPA_MODI_FLG 
+      ,S.ETD_DT
+      ,ROUND(NVL(S.USG_RT,0),2)    
+      ,S.VOY_DYS
+      ,TRUNC(((NVL(S.USG_RT, 0)/100 )* S.TAX_RATE )* S.VOY_DYS )
+      ,S.TAX_RATE
+      ,S.VSL_NRT  
+      ,SYSDATE 
+      ,@[cre_usr_id]
+      ,SYSDATE
+      ,@[cre_usr_id]
+  FROM (
+        SELECT T1.STL_YRMON
+              ,T1.TONG_STL_BAT_JB_SEQ  
+              ,T1.VSL_CD
+              ,T1.VPS_PORT_CD
+              ,T1.SLAN_CD
+              ,T1.SKD_VOY_NO
+              ,T1.SKD_DIR_CD
+              ,CASE WHEN TO_CHAR(T1.VPS_ETD_DT, 'YYYYMMDD') < @[stl_yrmon] THEN 
+                         T1.F_DATE
+                    ELSE 
+                         T1.VPS_ETD_DT
+                     END 
+               AS ETD_DT  
+              ,'N' AS BSA_CAPA_MODI_FLG      
+              ,CASE WHEN (T2.FNL_HJS_BSA_CAPA + NVL(T2.CRR_BSA_CAPA,0)) > T1.QTY THEN 
+                         NVL((NVL(T2.FNL_HJS_BSA_CAPA,0) + NVL(T2.CRR_BSA_CAPA,0))/DECODE(T2.LDB_CAPA_QTY,0,null,T2.LDB_CAPA_QTY),0) *100
+                    ELSE 
+                         NVL((T1.QTY+ NVL(T2.CRR_BSA_CAPA,0))/DECODE(T2.LDB_CAPA_QTY,0,NULL,T2.LDB_CAPA_QTY),0)*100
+                     END 
+               AS USG_RT         
+              ,T1.DAYS - T1.EXP_DAYS AS VOY_DYS
+              ,T1.QTY                AS ACTUAL_LOADED_VOL
+              ,T2.TRD_CD
+              ,T2.CLPT_IND_SEQ
+              ,T2.CLPT_SEQ
+              ,T2.VSL_ENG_NM
+              ,T2.TONG_FLET_TP_CD
+              ,T2.VSL_GRT
+              ,T2.VSL_NRT
+              ,T2.VSL_DE_DT
+              ,T2.LDB_CAPA_QTY
+              ,T2.FNL_HJS_BSA_CAPA    AS BSA_CAPA
+              ,NVL(T2.CRR_BSA_CAPA,0) AS CHTR_BSA_CAPA 
+              ,CASE WHEN T2.VSL_NRT > 1000 THEN
+                         CASE WHEN (T2.VSL_NRT-1000) > 9000 THEN
+                                   CASE WHEN (T2.VSL_NRT-10000) > 15000 THEN
+                                             ((T2.VSL_NRT-25000)*4)+(15000*7)+(9000*11)+(1000*14)
+                                        ELSE
+                                             ((T2.VSL_NRT-10000)*7)+(9000*11)+(1000*14)
+                                         END
+                              ELSE
+                                   ((T2.VSL_NRT-1000)*11)+(1000*14)
+                               END 
+                    ELSE
+                         T2.VSL_NRT*14    
+                     END
+               AS TAX_RATE
+              ,T1.DAYS
+          FROM (
+                SELECT @[stl_yrmon] AS STL_YRMON
+                      ,( SELECT NVL(MAX(TONG_STL_BAT_JB_SEQ),0) 
+                           FROM TOT_PORT_STL_AMT 
+                          WHERE STL_YRMON = @[stl_yrmon] 
+                       ) AS TONG_STL_BAT_JB_SEQ  
+                      ,U1.VSL_CD
+                      ,U1.VPS_PORT_CD
+                      ,U1.SLAN_CD
+                      ,U1.SKD_VOY_NO
+                      ,U1.SKD_DIR_CD
+                      ,U1.VPS_ETD_DT  
+                      ,U1.F_DATE
+                      ,U1.DAYS
+                      ,U1.EXP_DAYS
+                      ,NVL(U2.ROB,0) AS QTY                       
+                  FROM (                  
+                        SELECT T.VSL_CD
+                              ,T.SKD_VOY_NO
+                              ,T.SKD_DIR_CD
+                              ,T.SLAN_CD
+                              ,T.VPS_PORT_CD
+                              ,T.SEQ_IN_MONTH
+                              ,T.VPS_ETD_DT
+                              ,T.F_DATE
+                              ,T.T_DATE
+                              ,T.VVD
+                              ,T.TURN_VVD
+                              ,T.PREV_VVD
+                              ,T.NEXT_VVD
+                              ,T.NEXT_TURN_VVD
+                              ,T.MIN_SEQ
+                              ,T.MAX_SEQ
+                              ,T.DAYS  
+                              ,MAX(T.EXP_DAYS) AS EXP_DAYS  
+                          FROM ( /*해당월의 선박 사용일수 구하는 쿼리*/
+                                SELECT T1.VSL_CD
+                                      ,T1.SKD_VOY_NO
+                                      ,T1.SKD_DIR_CD
+                                      ,T1.SLAN_CD
+                                      ,T1.VPS_PORT_CD
+                                      ,T1.SEQ_IN_MONTH
+                                      ,T1.VPS_ETD_DT
+                                      ,T1.F_DATE
+                                      ,T1.T_DATE
+                                      ,T1.VVD
+                                      ,T1.TURN_VVD
+                                      ,T1.PREV_VVD
+                                      ,T1.NEXT_VVD
+                                      ,T1.NEXT_TURN_VVD
+                                      ,T1.MIN_SEQ
+                                      ,T1.MAX_SEQ
+                                      ,CASE WHEN T1.SEQ_IN_MONTH = T1.MAX_SEQ AND T1.MIN_SEQ != T1.MAX_SEQ THEN /* 해당월의 마지막 스케쥴인 경우 */
+                                                 CASE WHEN T1.VVD = T1.NEXT_VVD OR T1.VVD = T1.NEXT_TURN_VVD THEN /* 전달 마지막 스케쥴과 다음달 첫 스케쥴의 VVD가 같거나 전달 마지막 스케쥴과 다음달 첫 스케쥴의 TURN_VVD가 같을 경우 연속 */
+                                                           T1.T_DATE-T1.F_DATE
+                                                      ELSE
+                                                             -- CASE WHEN TRIM(T1.NEXT_TURN_SKD_VOY_NO) IS NULL THEN     /* NEXT_TURN_SKD_VOY_NO 존재하는 경우 말일까지 일수 계산*/
+                                                           0 -- '마지막날이고 연속이 아닌 경우'
+                                                       END
+                                            ELSE /*마지막 스케쥴이 아닌경우 순수 해당월의 첫번째 PORT 스케쥴이 전월 마지막 PORT 스케쥴과 연속적인 경우*/
+                                                 CASE WHEN (T1.MIN_SEQ= 1 AND T1.SEQ_IN_MONTH = 1 AND (T1.VVD = T1.PREV_VVD OR T1.TURN_VVD = T1.PREV_VVD) ) THEN
+                                                           /*첫번째 PORT 스케쥴이 다음 스케쥴과 연속인 경우*/
+                                                           CASE WHEN (T1.VVD = T1.NEXT_VVD OR T1.VVD = T1.NEXT_TURN_VVD) THEN
+                                                                     T1.T_DATE-T1.F_DATE +1   
+                                                                ELSE
+                                                                     1
+                                                                 END   
+                                                      ELSE /*첫번째 PORT스케쥴이면서 PAGE IN인 경우나  마지막 스케쥴이 아닌 나머지 경우중 연속일때*/
+                                                           CASE WHEN(T1.VVD = T1.NEXT_VVD OR T1.VVD = T1.NEXT_TURN_VVD) THEN
+                                                                    T1.T_DATE-T1.F_DATE      
+                                                                ELSE
+                                                                     0
+                                                                 END                               
+                                                       END
+                                             END
+                                       AS DAYS
+                                      ,EXP_F_DATE
+                                      ,EXP_T_DATE
+                                      ,CASE WHEN T1.F_DATE >= T2.EXP_F_DATE AND T1.F_DATE <= T2.EXP_T_DATE THEN /*F_DATE가 제외기간 안에 있는경우*/                                                 
+                                                 CASE WHEN T1.T_DATE <= T2.EXP_T_DATE THEN   /* T_DATE가 제외기간 안에 있는경우*/
+                                                           CASE WHEN T1.SEQ_IN_TOTAL <> 1 AND SEQ_IN_MONTH  = MIN_SEQ THEN    /*초입이 아니고 (연속적인 스케줄이고) 달의 첫날이 걸려잇다면 운항일수에 +1을 함*/
+                                                                     T1.T_DATE-T1.F_DATE+1
+                                                                ELSE 
+                                                                     T1.T_DATE-T1.F_DATE
+                                                                 END
+                                                      ELSE /*T_DATE가 제외기간 밖에 있을경우 */
+                                                           CASE WHEN T1.SEQ_IN_TOTAL <> 1 AND SEQ_IN_MONTH  = MIN_SEQ THEN    /*초입이 아니고(연속적인 스케줄이고) 달의 첫날이 걸려잇다면 운항일수에 +1을 함*/
+                                                                     LEAST(TRUNC(T2.EXP_T_DATE), LAST_DAY(T1.F_DATE)) - T1.F_DATE+1
+                                                                ELSE 
+                                                                     LEAST(TRUNC(T2.EXP_T_DATE), LAST_DAY(T1.F_DATE)) - T1.F_DATE
+                                                                 END
+                                                       END
+                                            ELSE                             /*F_DATE가 제외기간 밖에 있는경우*/
+                                                 CASE WHEN (T1.T_DATE >= T2.EXP_F_DATE) AND (T1.T_DATE <= T2.EXP_T_DATE) AND T1.SEQ_IN_TOTAL != T1.MAX_NUM THEN     /*T_DATE가 제외기간 안에 있는경우*/                                                           
+                                                           CASE WHEN T1.SEQ_IN_TOTAL <> 1 AND SEQ_IN_MONTH  = MIN_SEQ THEN    /*초입이 아니고 달의 첫날이 걸려잇다면 운항일수에 +1을 함*/
+                                                                     T1.T_DATE - TO_DATE(SUBSTR(TO_CHAR(T1.F_DATE,'YYYYMMDD'),1,6) || 01,'YYYYMMDD')+1
+                                                                ELSE 
+                                                                     T1.T_DATE - T2.EXP_F_DATE
+                                                                 END
+                                                      ELSE
+                                                           0
+                                                       END          
+                                             END 
+                                       AS EXP_DAYS                                     
+                                  FROM (  /* 연속되지 않은 경우는 운항일수에서 배제됨 */
+                                        SELECT T3.VSL_CD
+                                              ,T3.SKD_VOY_NO
+                                              ,T3.SKD_DIR_CD
+                                              ,T3.SLAN_CD
+                                              ,T3.VPS_PORT_CD
+                                              ,T3.CLPT_IND_SEQ 
+                                              ,T3.CLPT_SEQ
+                                              ,T3.VPS_ETD_DT
+                                              ,T3.TURN_PORT_IND_CD 
+                                              ,T3.TURN_SKD_VOY_NO
+                                              ,T3.NEXT_VPS_ETD_DT
+                                              ,T3.SKD_CNG_STS_CD
+                                              ,T3.NUM_IN_TOTAL
+                                              ,T3.VVD
+                                              ,T3.PREV_VVD
+                                              ,T3.NEXT_VVD
+                                              ,T3.TURN_VVD
+                                              ,T3.NEXT_TURN_VVD
+                                              ,DECODE( MIN(T3.SEQ_IN_MONTH) OVER(PARTITION BY T3.VSL_CD), 2, DECODE(T3.SEQ_IN_MONTH, 2, DECODE(T3.PREV_VVD, T3.VVD, TO_DATE(@[stl_yrmon]||'01', 'YYYYMMDD'), T3.TURN_VVD, TO_DATE(@[stl_yrmon]||'01', 'YYYYMMDD'), T3.F_DATE), T3.F_DATE), T3.F_DATE) F_DATE
+                                              ,MIN(T3.SEQ_IN_MONTH) OVER(PARTITION BY  T3.VSL_CD) MIN_SEQ
+                                              ,MAX(T3.SEQ_IN_MONTH) OVER(PARTITION BY  T3.VSL_CD) MAX_SEQ
+                                              ,T3.T_DATE
+                                              ,T3.SEQ_IN_MONTH
+                                              ,T3.SEQ_IN_TOTAL
+                                              ,T3.MAX_NUM
+                                              ,T3.DEL_FLG
+                                          FROM (
+                                                SELECT T2.VSL_CD
+                                                      ,T2.SKD_VOY_NO
+                                                      ,T2.SKD_DIR_CD
+                                                      ,T2.SLAN_CD
+                                                      ,T2.VPS_PORT_CD
+                                                      ,T2.CLPT_IND_SEQ 
+                                                      ,T2.CLPT_SEQ
+                                                      ,T2.VPS_ETD_DT
+                                                      ,T2.TURN_PORT_IND_CD 
+                                                      ,T2.TURN_SKD_VOY_NO
+                                                      ,T2.NEXT_VPS_ETD_DT
+                                                      ,T2.SKD_CNG_STS_CD
+                                                      ,T2.NUM_IN_TOTAL
+                                                      ,T2.VVD
+                                                      ,T2.PREV_VVD
+                                                      ,T2.NEXT_VVD
+                                                      ,T2.TURN_VVD
+                                                      ,T2.NEXT_TURN_VVD
+                                                      ,T2.F_DATE
+                                                      ,T2.T_DATE
+                                                      ,T2.SEQ_IN_MONTH
+                                                      ,T2.SEQ_IN_TOTAL
+                                                      ,T2.MAX_NUM
+                                                      ,DECODE(T2.SEQ_IN_MONTH,1,'Y','N') DEL_FLG
+                                                  FROM ( /* 선정된 선박의 항차중 3월에 속한 항차를 선정 */
+                                                        SELECT T1.*
+                                                              ,GREATEST(TRUNC(VPS_ETD_DT), TO_DATE(@[stl_yrmon],'YYYYMM')) F_DATE
+                                                              ,LEAST(TRUNC(NEXT_VPS_ETD_DT), LAST_DAY(TO_DATE(@[stl_yrmon],'YYYYMM'))) T_DATE
+                                                              ,ROW_NUMBER() OVER(PARTITION BY  T1.VSL_CD ORDER BY T1.VPS_ETD_DT, T1.NEXT_VPS_ETD_DT) SEQ_IN_MONTH
+                                                              ,T1.NUM_IN_TOTAL AS SEQ_IN_TOTAL
+                                                              ,( SELECT COUNT(CLPT_SEQ) 
+                                                                   FROM VSK_VSL_PORT_SKD B 
+                                                                  WHERE TO_CHAR(VPS_ETD_DT, 'YYYYMM') BETWEEN TO_CHAR(TO_DATE(@[stl_yrmon]||'01','YYYYMMDD')-50, 'YYYYMM') AND TO_CHAR(LAST_DAY(ADD_MONTHS(TO_DATE(@[stl_yrmon],'YYYYMM'),+1)),'YYYYMM')
+                                                                    AND B.VSL_CD = T1.VSL_CD 
+                                                                    AND TURN_PORT_IND_CD NOT IN ('V','D') 
+                                                                    AND (SKD_CNG_STS_CD IS NULL OR SKD_CNG_STS_CD <> 'S') 
+                                                                    AND VPS_PORT_CD NOT IN ('EGSUZ', 'PAPAC')
+                                                               ) AS MAX_NUM
+                                                          FROM (
+                                                                SELECT VSL_CD
+                                                                      ,SKD_VOY_NO
+                                                                      ,SKD_DIR_CD
+                                                                      ,SLAN_CD
+                                                                      ,VPS_PORT_CD
+                                                                      ,CLPT_IND_SEQ 
+                                                                      ,CLPT_SEQ
+                                                                      ,VPS_ETD_DT
+                                                                      ,TURN_PORT_IND_CD 
+                                                                      ,TURN_SKD_VOY_NO
+                                                                      ,NEXT_VPS_ETD_DT
+                                                                      ,SKD_CNG_STS_CD
+                                                                      ,ROW_NUMBER() OVER(PARTITION BY  T0.VSL_CD ORDER BY VPS_ETD_DT, NEXT_VPS_ETD_DT) NUM_IN_TOTAL
+                                                                      ,VVD
+                                                                      ,PREV_VVD
+                                                                      ,NEXT_VVD
+                                                                      ,TURN_VVD
+                                                                      ,NEXT_TURN_VVD
+                                                                  FROM ( /* 해당월로부터 -50 일전부터  + 한달후까지 기준으로 대상선정*/
+                                                                        SELECT A.VSL_CD
+                                                                              ,A.SKD_VOY_NO
+                                                                              ,A.SKD_DIR_CD
+                                                                              ,A.VPS_PORT_CD
+                                                                              ,A.CLPT_IND_SEQ 
+                                                                              ,A.CLPT_SEQ
+                                                                              ,A.VPS_ETD_DT
+                                                                              ,A.TURN_PORT_IND_CD  
+                                                                              ,A.TURN_SKD_VOY_NO 
+                                                                              ,DECODE(LEAD(A.VPS_ETD_DT) OVER (PARTITION BY A.VSL_CD ORDER BY A.VPS_ETD_DT),NULL,A.VPS_ETD_DT,LEAD(A.VPS_ETD_DT) OVER (PARTITION BY A.VSL_CD ORDER BY A.VPS_ETD_DT)) AS NEXT_VPS_ETD_DT
+                                                                              ,TRIM(LEAD(A.VSL_CD||A.TURN_SKD_VOY_NO||A.TURN_SKD_DIR_CD) OVER (PARTITION BY A.VSL_CD ORDER BY A.VPS_ETD_DT)) AS NEXT_TURN_VVD
+                                                                              ,A.VSL_CD || A.SKD_VOY_NO || A.SKD_DIR_CD AS VVD
+                                                                              ,LEAD(A.VSL_CD || A.SKD_VOY_NO||A.SKD_DIR_CD) OVER (PARTITION BY A.VSL_CD ORDER BY A.VPS_ETD_DT DESC) AS PREV_VVD
+                                                                              ,LEAD(A.VSL_CD || A.SKD_VOY_NO||A.SKD_DIR_CD) OVER (PARTITION BY A.VSL_CD ORDER BY A.VPS_ETD_DT) AS NEXT_VVD
+                                                                              ,A.VSL_CD || A.TURN_SKD_VOY_NO || A.TURN_SKD_DIR_CD AS TURN_VVD
+                                                                              ,A.SKD_CNG_STS_CD
+                                                                              ,A.SLAN_CD
+                                                                              ,B.VSL_SVC_TP_CD
+                                                                          FROM VSK_VSL_PORT_SKD A
+                                                                              ,MDM_VSL_SVC_LANE B
+                                                                         WHERE 1=1
+                                                                           AND A.SLAN_CD IN ( 
+                                                                                             SELECT L.VSL_SLAN_CD
+                                                                                               FROM TOT_LANE L
+                                                                                                   ,TOT_LANE_TRD T
+                                                                                              WHERE L.STL_YRMON =@[stl_yrmon]
+                                                                                                AND L.DELT_FLG = 'N'
+                                                                                                AND T.LANE_SEQ = '1'
+                                                                                                AND L.STL_YRMON = T.STL_YRMON
+                                                                                                AND L.VSL_SLAN_CD = T.VSL_SLAN_CD
+                                                                                            )
+                                                                           AND TO_CHAR(A.VPS_ETD_DT, 'YYYYMM') BETWEEN TO_CHAR(TO_DATE(@[stl_yrmon]||'01','YYYYMMDD')-50, 'YYYYMM') AND TO_CHAR(LAST_DAY(ADD_MONTHS(TO_DATE(@[stl_yrmon],'YYYYMM'),+1)),'YYYYMM')
+                                                                           /* TURN_PORT_IND가 'V','D' 이거나 'F'일때 TURNNING 정보가 있는 경우는 제외 */
+                                                                           AND A.TURN_PORT_IND_CD NOT IN ('V','D',DECODE(NVL(A.TURN_SKD_VOY_NO,''),'','V','F'))  
+                                                                           AND (A.SKD_CNG_STS_CD IS NULL OR A.SKD_CNG_STS_CD <> 'S') 
+                                                                           AND A.VPS_PORT_CD NOT IN ('EGSUZ', 'PAPAC')
+                                                                           /* CALLING SEQ 무조건 다 가져오기로 함 BY 박효숙*/
+                                                                           AND A.SLAN_CD = B.VSL_SLAN_CD
+                                                                           AND B.VSL_SVC_TP_CD IN ('J','I','S')
+                                                                           AND A.VSL_CD = @[vsl_cd]                                                                           
+                                                                         ORDER BY A.VPS_ETD_DT, NEXT_VPS_ETD_DT
+                                                                       ) T0           
+                                                               ) T1
+                                                         WHERE (@[stl_yrmon] <= TO_CHAR(NEXT_VPS_ETD_DT,'YYYYMM') OR NEXT_VPS_ETD_DT IS NULL)
+                                                           AND TO_CHAR(LAST_DAY(TO_DATE(@[stl_yrmon],'YYYYMM')),'YYYYMMDD') >= TO_CHAR(VPS_ETD_DT,'YYYYMMDD')
+                                                         ORDER BY VPS_ETD_DT , NEXT_VPS_ETD_DT              
+                                                       )T2
+                                                       /* 해당월의 첫번째 스케쥴이고  비연속경우 제외*/
+                                                 WHERE NOT(T2.SEQ_IN_MONTH = 1 AND (T2.VVD <> T2.NEXT_VVD AND T2.VVD <> T2.NEXT_TURN_VVD) AND T2.PREV_VVD IS NOT NULL) /*해당월의 첫번째 스케쥴이고 비연속인경우 제외           */                  
+                                                 ORDER BY T2.VSL_CD, T2.VPS_ETD_DT   
+                                               )T3
+                                         WHERE T3.SEQ_IN_MONTH > 1 OR (T3.SEQ_IN_MONTH = 1 AND TO_CHAR(T3.F_DATE,'YYYYMM') = @[stl_yrmon])
+                                       ) T1
+                                      ,( /*해당월의 30일이상 운항하지 않는 선박에 대한 날짜 쿼리*/
+                                        SELECT T2.VSL_CD  AS VSL_CD
+                                              ,T2.VSL_SEQ AS VSL_SEQ
+                                              ,GREATEST(TRUNC(T2.CTRT_ST_DT), TO_DATE(@[stl_yrmon],'YYYYMM')) EXP_F_DATE
+                                              ,LEAST(TRUNC(T2.CTRT_END_DT), LAST_DAY(TO_DATE(@[stl_yrmon],'YYYYMM'))) EXP_T_DATE 
+                                          FROM (  /*해당월에 속해 있는 선박을 선정*/
+                                                SELECT A.VSL_CD
+                                                  FROM VSK_VSL_PORT_SKD A
+                                                      ,MDM_VSL_SVC_LANE B 
+                                                 WHERE A.SLAN_CD IN ( SELECT L.VSL_SLAN_CD
+                                                                        FROM TOT_LANE L
+                                                                            ,TOT_LANE_TRD T
+                                                                       WHERE L.STL_YRMON = @[stl_yrmon]
+                                                                         AND L.DELT_FLG = 'N'
+                                                                         AND T.LANE_SEQ = '1'
+                                                                         AND L.STL_YRMON = T.STL_YRMON
+                                                                         AND L.VSL_SLAN_CD = T.VSL_SLAN_CD
+                                                                    )
+                                                   AND TO_CHAR(A.VPS_ETD_DT, 'YYYYMM') BETWEEN TO_CHAR(TO_DATE(@[stl_yrmon]||'01','YYYYMMDD')-50, 'YYYYMM') AND TO_CHAR(LAST_DAY(ADD_MONTHS(TO_DATE(@[stl_yrmon],'YYYYMM'),+1)),'YYYYMM')
+                                                   AND A.TURN_PORT_IND_CD NOT IN ('V','D','F')  
+                                                   AND (A.SKD_CNG_STS_CD IS NULL OR A.SKD_CNG_STS_CD <> 'S') 
+                                                   AND A.SLAN_CD = B.VSL_SLAN_CD
+                                                   AND B.VSL_SVC_TP_CD IN ('J','I','S')
+                                                   AND A.VSL_CD = @[vsl_cd]                                                   
+                                                 GROUP BY A.VSL_CD
+                                               ) T1
+                                              ,TOT_VESSEL T2 
+                                         WHERE T2.VSL_CD = T1.VSL_CD 
+                                           AND T2.TONG_FLET_TP_CD = 'E'  
+                                           AND TO_DATE(@[stl_yrmon],'YYYYMM') >= TO_DATE(TO_CHAR(T2.CTRT_ST_DT,'YYYYMM'),'YYYYMM')
+                                           AND TO_DATE(@[stl_yrmon],'YYYYMM') <= TO_DATE(TO_CHAR(T2.CTRT_END_DT,'YYYYMM'),'YYYYMM')
+                                           AND DELT_FLG = 'N'
+                                       ) T2
+                                 WHERE T1.VSL_CD = T2.VSL_CD(+)
+                                 ORDER BY T1.VSL_CD, T1.F_DATE, T1.T_DATE ASC  
+                               ) T
+                          GROUP BY T.VSL_CD
+                                  ,T.SKD_VOY_NO
+                                  ,T.SKD_DIR_CD
+                                  ,T.SLAN_CD
+                                  ,T.VPS_PORT_CD
+                                  ,T.SEQ_IN_MONTH
+                                  ,T.VPS_ETD_DT
+                                  ,T.F_DATE
+                                  ,T.T_DATE
+                                  ,T.VVD
+                                  ,T.TURN_VVD
+                                  ,T.PREV_VVD
+                                  ,T.NEXT_VVD
+                                  ,T.NEXT_TURN_VVD
+                                  ,T.MIN_SEQ
+                                  ,T.MAX_SEQ
+                                  ,T.DAYS                               
+                       ) U1
+                      ,(                             
+                        SELECT VSL_CD
+                              ,SKD_VOY_NO
+                              ,SKD_DIR_CD
+                              ,VPS_PORT_CD
+                              ,CLPT_IND_SEQ
+                              ,CLPT_SEQ
+                              ,LOADING_QTY
+                              ,DISCHARGE_QTY 
+                              ,DECODE(LOADING_YN,'Y',SUM(DECODE(LOADING_YN,'Y',PRE_ROB)) OVER (PARTITION BY VSL_CD ORDER BY MIN_VPS_ETD_DT, CLPT_SEQ)) AS ROB 
+                              ,LOADING_YN
+                              ,VPS_ETD_DT
+                              ,MIN_VPS_ETD_DT
+                          FROM (
+                                SELECT T1.VSL_CD
+                                      ,T1.SKD_VOY_NO
+                                      ,T1.SKD_DIR_CD
+                                      ,T1.VPS_PORT_CD
+                                      ,T1.CLPT_IND_SEQ
+                                      ,T1.CLPT_SEQ
+                                      ,NVL(LOADING_QTY,0) AS LOADING_QTY
+                                      ,NVL(DISCHARGE_QTY,0) AS DISCHARGE_QTY
+                                      ,SUM(LOADING_QTY - DISCHARGE_QTY) OVER (PARTITION BY T1.VSL_CD, T1.ORG_VVD,T1.VPS_PORT_CD,T1.CLPT_IND_SEQ) AS PRE_ROB
+                                      ,CASE WHEN T1.TURN_PORT_IND_CD IN ('Y','N') THEN 
+                                                 'Y' 
+                                            ELSE 
+                                                 'N' 
+                                             END 
+                                       AS LOADING_YN
+                                      ,T1.ORG_VVD
+                                      ,T1.MIN_VPS_ETD_DT
+                                      ,T1.VPS_ETD_DT
+                                  FROM (
+                                        SELECT V.VSL_CD
+                                              ,V.SKD_VOY_NO
+                                              ,V.SKD_DIR_CD
+                                              ,DECODE(TURN_PORT_IND_CD,'Y', V.VSL_CD||V.SKD_VOY_NO||V.SKD_DIR_CD, 'N', V.VSL_CD||V.SKD_VOY_NO||V.SKD_DIR_CD, V.VSL_CD||NVL(TURN_SKD_VOY_NO, V.SKD_VOY_NO)||NVL(TURN_SKD_DIR_CD,V.SKD_DIR_CD)) AS ORG_VVD
+                                              ,V.TURN_PORT_IND_CD
+                                              ,V.VPS_PORT_CD
+                                              ,V.CLPT_IND_SEQ
+                                              ,V.CLPT_SEQ
+                                              ,V.VPS_ETD_DT
+                                              ,MIN(VPS_ETD_DT) OVER (PARTITION BY V.VSL_CD, V.SKD_VOY_NO, V.SKD_DIR_CD) AS MIN_VPS_ETD_DT
+                                          FROM VSK_VSL_PORT_SKD V
+                                         WHERE 1=1
+                                           AND (V.VSL_CD, V.SKD_VOY_NO, V.SKD_DIR_CD) IN (
+                                                                                          SELECT VSL_CD
+                                                                                                ,SKD_VOY_NO
+                                                                                                ,SKD_DIR_CD
+                                                                                            FROM VSK_VSL_PORT_SKD
+                                                                                           WHERE VPS_ETD_DT BETWEEN ADD_MONTHS(TO_DATE(@[stl_yrmon],'YYYYMM'), -4) AND ADD_MONTHS(TO_DATE(@[stl_yrmon],'YYYYMM'), 2)+0.99999
+                                                                                             AND VSL_CD = @[vsl_cd]                                                                                             
+                                                                                         )
+                                       ) T1
+                                      ,(
+                                        SELECT VSL_CD
+                                              ,SKD_VOY_NO
+                                              ,SKD_DIR_CD
+                                              ,CASE WHEN GUBUN IN ('LOADING TOTAL')   THEN POL_CD
+                                            		WHEN GUBUN IN ('DISCHARGE TOTAL') THEN POD_CD 
+                                                     END 
+                                               AS VPS_PORT_CD
+                                              ,CASE WHEN GUBUN IN ('LOADING TOTAL')   THEN POL_CLPT_IND_SEQ
+                                            		WHEN GUBUN IN ('DISCHARGE TOTAL') THEN POD_CLPT_IND_SEQ 
+                                                     END 
+                                               AS CLPT_IND_SEQ
+                                              ,NVL(SUM(DECODE(GUBUN,'LOADING TOTAL',QTY)),0)   AS LOADING_QTY
+                                              ,NVL(SUM(DECODE(GUBUN,'DISCHARGE TOTAL',QTY)),0) AS DISCHARGE_QTY
+                                          FROM (
+                                                SELECT VSL_CD
+                                                      ,SKD_VOY_NO
+                                                      ,SKD_DIR_CD
+                                                      ,DECODE(GROUPING(POL_CD),1,'ALL POL',0, POL_CD) AS POL_CD
+                                                      ,DECODE(GROUPING(POL_CLPT_IND_SEQ),1,'ALL POL',0,POL_CLPT_IND_SEQ) AS POL_CLPT_IND_SEQ
+                                                      ,DECODE(GROUPING(POD_CD),1,'ALL POD',0,POD_CD) AS POD_CD
+                                                      ,DECODE(GROUPING(POD_CLPT_IND_SEQ),1,'ALL POD',0,POD_CLPT_IND_SEQ) AS POD_CLPT_IND_SEQ
+                                                      ,CASE WHEN GROUPING(POL_CD)=1 AND GROUPING(POD_CD)=0 THEN 'DISCHARGE TOTAL'
+                                                            WHEN GROUPING(POL_CD)=0 AND GROUPING(POD_CD)=1 THEN 'LOADING TOTAL'
+                                                             END
+                                                       AS GUBUN
+                                                      ,SUM(QTY) AS QTY
+                                                  FROM (
+                                                        SELECT B1.VSL_CD
+                                                              ,B1.SKD_VOY_NO
+                                                              ,B1.SKD_DIR_CD
+                                                              ,DECODE(SUBSTR(CNTR_TPSZ_CD,2,1),'2', 1, 2) * CNTR_VOL_QTY AS QTY
+                                                              ,B1.POL_CD
+                                                              ,DECODE(B1.POL_CD,NULL,NULL,NVL(B1.POL_CLPT_IND_SEQ,1)) AS POL_CLPT_IND_SEQ
+                                                              ,B1.POD_CD
+                                                              ,NVL(B1.POD_CLPT_IND_SEQ,1) AS POD_CLPT_IND_SEQ
+                                                          FROM BKG_VVD B1
+                                                              ,BKG_CONTAINER C
+                                                              ,BKG_BOOKING K
+                                                         WHERE 1=1
+                                                           AND B1.BKG_NO = C.BKG_NO
+                                                           AND B1.BKG_NO = K.BKG_NO
+                                                           AND K.BKG_STS_CD = 'F'                                        /* F = CONFIRM인 경우 */
+                                                           AND (B1.VSL_CD, B1.SKD_VOY_NO, B1.SKD_DIR_CD) IN (
+                                                                                                             SELECT VSL_CD, SKD_VOY_NO, SKD_DIR_CD
+                                                                                                               FROM VSK_VSL_PORT_SKD
+                                                                                                              WHERE VPS_ETD_DT BETWEEN ADD_MONTHS(TO_DATE(@[stl_yrmon],'YYYYMM'), -4) AND ADD_MONTHS(TO_DATE(@[stl_yrmon],'YYYYMM'), 2)+0.99999
+                                                                                                                AND VSL_CD = @[vsl_cd]                                                                                                                
+                                                                                                            )
+                                                       )
+                                                  GROUP BY VSL_CD
+                                                          ,SKD_VOY_NO
+                                                          ,SKD_DIR_CD
+                                                          ,CUBE((POL_CD,POL_CLPT_IND_SEQ),(POD_CD,POD_CLPT_IND_SEQ)) 
+                                                    HAVING ((GROUPING(POL_CD)=1 AND GROUPING(POD_CD)=0) OR (GROUPING(POL_CD)=0 AND GROUPING(POD_CD)=1))
+                                               ) T02              
+                                          GROUP BY VSL_CD
+                                                  ,SKD_VOY_NO
+                                                  ,SKD_DIR_CD
+                                                  ,CASE WHEN GUBUN IN ('LOADING TOTAL')   THEN POL_CD
+                                        		        WHEN GUBUN IN ('DISCHARGE TOTAL') THEN POD_CD 
+                                                         END
+                                                  ,CASE WHEN GUBUN IN ('LOADING TOTAL')   THEN POL_CLPT_IND_SEQ
+                                        		        WHEN GUBUN IN ('DISCHARGE TOTAL') THEN POD_CLPT_IND_SEQ 
+                                                         END
+                                       ) T2         
+                                  WHERE T1.VSL_CD = T2.VSL_CD(+)
+                                    AND T1.SKD_VOY_NO = T2.SKD_VOY_NO(+)
+                                    AND T1.SKD_DIR_CD = T2.SKD_DIR_CD(+)
+                                    AND T1.VPS_PORT_CD =  T2.VPS_PORT_CD(+)
+                                    AND T1.CLPT_IND_SEQ = T2.CLPT_IND_SEQ(+)
+                               )
+                          ORDER BY VSL_CD, SKD_VOY_NO,MIN_VPS_ETD_DT,CLPT_SEQ                     
+                       ) U2
+                  WHERE U1.VSL_CD = U2.VSL_CD(+)
+                    AND U1.SKD_VOY_NO = U2.SKD_VOY_NO(+)
+                    AND U1.SKD_DIR_CD = U2.SKD_DIR_CD(+)
+                    AND U1.VPS_PORT_CD = U2.VPS_PORT_CD(+)
+                    AND U1.VPS_ETD_DT = U2.VPS_ETD_DT(+)
+                  ORDER BY U1.VSL_CD, U1.F_DATE ASC	
+               ) T1
+              ,(
+                SELECT T1.VSL_CD
+                      ,T1.SLAN_CD
+                      ,T1.TRD_CD
+                      ,T1.SKD_VOY_NO
+                      ,T1.SKD_DIR_CD
+                      ,T1.VPS_PORT_CD
+                      ,T1.CLPT_IND_SEQ
+                      ,T1.VPS_ETD_DT
+                      ,T1.CLPT_SEQ
+                      ,T2.VSL_ENG_NM
+                      ,DECODE(SUBSTR(T1.VSL_CD, 1, 2), 'HJ', 'O', 'C') AS TONG_FLET_TP_CD
+                      ,NVL(T2.GRS_RGST_TONG_WGT,0) AS VSL_GRT
+                      ,NVL(T2.NET_RGST_TONG_WGT,0) AS VSL_NRT
+                      ,TO_CHAR(T2.VSL_DE_DT, 'YYYYMMDD') AS VSL_DE_DT
+                      ,T1.LDB_CAPA_QTY
+                      ,T1.FNL_HJS_BSA_CAPA
+                      ,T1.CRR_BSA_CAPA
+                  FROM (
+                        SELECT A.VSL_CD
+                              ,A.SKD_VOY_NO
+                              ,A.SKD_DIR_CD
+                              ,A.VPS_PORT_CD
+                              ,A.SLAN_CD
+                              ,A.CLPT_IND_SEQ
+                              ,A.CLPT_SEQ
+                              ,A.VPS_ETD_DT
+                              ,A.TURN_PORT_IND_CD
+                              ,A.SKD_CNG_STS_CD
+                              ,B.TRD_CD
+                              ,B.LDB_CAPA_QTY
+                              ,B.FNL_HJS_BSA_CAPA
+                              ,B.CRR_BSA_CAPA
+                          FROM ( 
+                                SELECT V.VSL_CD
+                                      ,V.SKD_VOY_NO
+                                      ,V.SKD_DIR_CD
+                                      ,V.VPS_PORT_CD
+                                      ,V.CLPT_IND_SEQ 
+                                      ,V.CLPT_SEQ
+                                      ,V.VPS_ETD_DT
+                                      ,V.TURN_PORT_IND_CD 
+                                      ,V.TURN_SKD_VOY_NO
+                                      ,DECODE(LEAD(V.VPS_ETD_DT) OVER (PARTITION BY V.VSL_CD ORDER BY V.VPS_ETD_DT),NULL,V.VPS_ETD_DT,LEAD(V.VPS_ETD_DT) OVER (PARTITION BY V.VSL_CD ORDER BY V.VPS_ETD_DT)) AS NEXT_VPS_ETD_DT
+                                      ,V.SKD_CNG_STS_CD
+                                      ,V.SLAN_CD
+                                  FROM VSK_VSL_PORT_SKD V
+                                 WHERE 1=1
+                                   AND V.VPS_ETD_DT BETWEEN ADD_MONTHS(TO_DATE(@[stl_yrmon],'YYYYMM'), -4) AND ADD_MONTHS(TO_DATE(@[stl_yrmon],'YYYYMM'), 2)+0.99999
+                                   AND (V.SKD_CNG_STS_CD IS NULL OR V.SKD_CNG_STS_CD <> 'S') 
+                                   AND V.TURN_PORT_IND_CD NOT IN ('V','D',DECODE(NVL(V.TURN_SKD_VOY_NO,''),'','V','F'))  
+                                   AND V.VPS_PORT_CD NOT IN ('EGSUZ', 'PAPAC')
+                                   AND V.VSL_CD = @[vsl_cd]                                  
+                               ) A
+                              ,(  /*해당 선박의 service lane의 VSL Loadable CAPA와 BSA를 가져오기 위해 조인*/
+                                SELECT T.STL_YRMON
+                                      ,T.VSL_CD
+                                      ,T.SKD_VOY_NO
+                                      ,T.SKD_DIR_CD
+                                      ,T.SLAN_CD
+                                      ,T.TRD_CD
+                                      ,T.LDB_CAPA_QTY
+                                      ,T.FNL_HJS_BSA_CAPA
+                                      ,T.CRR_BSA_CAPA    
+                                  FROM (
+                                        SELECT STL_YRMON
+                                              ,VSL_CD
+                                              ,SKD_VOY_NO
+                                              ,SKD_DIR_CD
+                                              ,SLAN_CD
+                                              ,TRD_CD
+                                              ,LDB_CAPA_QTY
+                                              ,FNL_HJS_BSA_CAPA
+                                              ,CRR_BSA_CAPA    
+                                              ,ROW_NUMBER() OVER(PARTITION BY VSL_CD,SKD_VOY_NO, SKD_DIR_CD, SLAN_CD ORDER BY STL_YRMON, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, SLAN_CD ASC, FNL_HJS_BSA_CAPA DESC, TRD_CD ASC) NUM_BY_LANE
+                                          FROM TOT_BSA
+          	                             WHERE STL_YRMON BETWEEN TO_CHAR(ADD_MONTHS(TO_DATE(@[stl_yrmon],'YYYYMM'), -4), 'YYYYMMDD') AND @[stl_yrmon]
+                                           AND VSL_CD = @[vsl_cd]                                           
+                                       ) T
+                                  WHERE NUM_BY_LANE = 1
+                               ) B
+                          WHERE 1=1
+                            AND A.VSL_CD = B.VSL_CD(+)
+                            AND A.SKD_VOY_NO = B.SKD_VOY_NO(+)
+                            AND A.SKD_DIR_CD = B.SKD_DIR_CD(+)
+                            AND A.SLAN_CD = B.SLAN_CD(+)         
+                       ) T1
+                      ,MDM_VSL_CNTR T2 /*GRT,NRT, VSL_ENG_NM을 구하기 위해 조인*/
+                 WHERE T1.VSL_CD = T2.VSL_CD(+)
+               ) T2       				
+          WHERE T1.VSL_CD = T2.VSL_CD(+)
+            AND T1.SKD_VOY_NO = T2.SKD_VOY_NO(+)
+            AND T1.SKD_DIR_CD = T2.SKD_DIR_CD(+)
+            AND T1.VPS_PORT_CD = T2.VPS_PORT_CD(+)
+            AND T1.VPS_ETD_DT = T2.VPS_ETD_DT(+)																	        
+       ) S      
+UNION ALL
+     /* 대선 BSA, 운항일수와 물량정보를 조회한다. */
+SELECT T.STL_YRMON
+      ,T.TONG_STL_BAT_JB_SEQ  
+      ,T.VSL_CD
+      ,T.PORT_CD AS VPS_PORT_CD
+      /* 2010.04.19 대선인 경우 VSL_CD, PORT_CD로 두건 이상 발생할 수 있으므로 아래와 같이 수정함*/
+      ,ROW_NUMBER() OVER(PARTITION BY  T.STL_YRMON, T.TONG_STL_BAT_JB_SEQ, T.VSL_CD, T.PORT_CD  ORDER BY T.VSL_CD, T.PORT_CD )
+      /*, T.PORT_SEQ*/ 
+      ,T.TRD_CD
+      ,T.SLAN_CD
+      ,T.SKD_VOY_NO 
+      ,T.SKD_DIR_CD
+      ,T.BSA_CAPA
+      ,T.ACT_BSA_CAPA
+      ,T.LDB_CAPA_QTY
+      ,T.CHTR_BSA_CAPA
+      ,T.BSA_CAPA_MODI_FLG
+      ,T.ETD_DT
+      ,T.USG_RT
+      ,T.VOY_DYS 
+      ,T.PER_TON_REV*T.VOY_DYS*(T.USG_RT/100)
+      ,T.PER_TON_REV     
+      ,T.VSL_NRT 
+      ,SYSDATE  
+      ,@[cre_usr_id]
+      ,SYSDATE
+      ,@[cre_usr_id]
+      FROM (      
+            SELECT T.STL_YRMON
+                  ,T.TONG_STL_BAT_JB_SEQ  
+                  ,T.VSL_CD
+                  ,T.PORT_CD                     
+                  ,T.PORT_SEQ 
+                  ,T.TRD_CD
+                  ,T.SLAN_CD
+                  ,T.SKD_VOY_NO 
+                  ,T.SKD_DIR_CD
+                  ,T.BSA_CAPA
+                  ,T.ACT_BSA_CAPA
+                  ,T.LDB_CAPA_QTY
+                  ,T.CHTR_BSA_CAPA
+                  ,T.BSA_CAPA_MODI_FLG
+                  ,T.ETD_DT
+                  ,T.USG_RT
+                  ,T.VOY_DYS                          
+                  ,CASE WHEN T.VSL_NRT > 1000 THEN
+                             CASE WHEN (T.VSL_NRT-1000) > 9000 THEN
+                                       CASE WHEN (T.VSL_NRT-10000) > 15000 THEN
+                                                 ((T.VSL_NRT-25000)*4)+(15000*7)+(9000*11)+(1000*14)
+                                            ELSE
+                                                 ((T.VSL_NRT-10000)*7)+(9000*11)+(1000*14)
+                                             END
+                                  ELSE
+                                       ((T.VSL_NRT-1000)*11)+(1000*14)
+                                   END 
+                        ELSE
+                             T.VSL_NRT*14    
+                         END
+                   AS PER_TON_REV     
+                  ,T.VSL_NRT
+              FROM (
+                    SELECT @[stl_yrmon] AS STL_YRMON
+                          ,( SELECT NVL(MAX(TONG_STL_BAT_JB_SEQ),0) 
+                               FROM TOT_PORT_STL_AMT WHERE STL_YRMON = @[stl_yrmon]
+                           ) AS TONG_STL_BAT_JB_SEQ  
+                          ,A.VSL_CD
+                          ,DECODE(A.TONG_FLET_TP_CD,'T','ZZZZZ','L','YYYYY') AS PORT_CD
+                          ,1 AS PORT_SEQ 
+                          ,DECODE(A.TONG_FLET_TP_CD,'T','ZZZ','L','YYY') AS TRD_CD
+                          ,DECODE(A.TONG_FLET_TP_CD,'T','ZZZ','L','YYY') AS SLAN_CD
+                          ,NULL AS SKD_VOY_NO
+                          ,NULL AS SKD_DIR_CD
+                          ,0 AS BSA_CAPA
+                          ,0 AS ACT_BSA_CAPA
+                          ,0 AS LDB_CAPA_QTY
+                          ,0 AS CHTR_BSA_CAPA
+                          ,'N' AS BSA_CAPA_MODI_FLG
+                          ,TO_DATE(@[stl_yrmon]||'01','YYYYMMDD') AS ETD_DT
+                          ,100 AS USG_RT
+                          ,A.CTRT_ST_DT
+                          ,A.CTRT_END_DT
+                          ,CASE WHEN TO_DATE(TO_CHAR(CTRT_ST_DT,'YYYYMM'),'YYYYMM') = TO_DATE(@[stl_yrmon],'YYYYMM') AND TO_DATE(TO_CHAR(CTRT_END_DT,'YYYYMM'),'YYYYMM') = TO_DATE(@[stl_yrmon],'YYYYMM') THEN
+                                     CTRT_END_DT - CTRT_ST_DT 
+                                ELSE
+                                     CASE WHEN TO_DATE(TO_CHAR(CTRT_ST_DT,'YYYYMM'),'YYYYMM') < TO_DATE(@[stl_yrmon],'YYYYMM') AND TO_DATE(TO_CHAR(CTRT_END_DT,'YYYYMM'),'YYYYMM') = TO_DATE(@[stl_yrmon],'YYYYMM') THEN
+                           			           CTRT_END_DT - TO_DATE(@[stl_yrmon]||'01' ,'YYYYMMDD')+1
+                      				      ELSE
+                                               CASE WHEN TO_DATE(TO_CHAR(CTRT_ST_DT,'YYYYMM'),'YYYYMM') = TO_DATE(@[stl_yrmon],'YYYYMM') AND TO_DATE(TO_CHAR(CTRT_END_DT,'YYYYMM'),'YYYYMM') > TO_DATE(@[stl_yrmon],'YYYYMM') THEN
+                           							   	 TO_DATE(@[stl_yrmon]|| TO_CHAR(LAST_DAY(TO_DATE(@[stl_yrmon],'YYYYMM')),'DD'),'YYYYMMDD') - CTRT_ST_DT
+                      						        ELSE
+                      								     CASE WHEN TO_DATE(TO_CHAR(CTRT_ST_DT,'YYYYMM'),'YYYYMM') < TO_DATE(@[stl_yrmon],'YYYYMM') AND TO_DATE(TO_CHAR(CTRT_END_DT,'YYYYMM'),'YYYYMM') > TO_DATE(@[stl_yrmon],'YYYYMM') THEN
+                           									       TO_DATE(@[stl_yrmon]|| TO_CHAR(LAST_DAY(TO_DATE(@[stl_yrmon],'YYYYMM')),'DD'),'YYYYMMDD') - TO_DATE(@[stl_yrmon]||'01','YYYYMMDD') + 1
+                      										  ELSE
+                                                	               0
+                      										   END
+                      							     END
+                                           END
+                                 END
+                           AS VOY_DYS
+                          ,NVL(B.NET_RGST_TONG_WGT,0) AS VSL_NRT
+                      FROM TOT_VESSEL A, MDM_VSL_CNTR B
+                     WHERE A.TONG_FLET_TP_CD IN ( 'T' ,'L')
+                       AND (A.STL_YR, A.VSL_SEQ) = ( SELECT STL_YR, MAX(VSL_SEQ) FROM TOT_VESSEL WHERE TONG_FLET_TP_CD = A.TONG_FLET_TP_CD AND VSL_CD = A.VSL_CD AND STL_YR = SUBSTR(@[stl_yrmon],1,4) GROUP BY STL_YR) 
+                       AND A.DELT_FLG = 'N'
+                       AND TO_DATE(@[stl_yrmon],'YYYYMM') BETWEEN TO_DATE(TO_CHAR(A.CTRT_ST_DT,'YYYYMM'),'YYYYMM') AND TO_DATE(TO_CHAR(A.CTRT_END_DT,'YYYYMM'),'YYYYMM')
+                       AND A.VSL_CD = B.VSL_CD(+)
+                       AND A.VSL_CD = @[vsl_cd]                       
+                   ) T       
+           ) T   
+      ORDER BY VSL_CD, ETD_DT ASC			]]></sql>
+			<params>
+				<param name="cre_usr_id" type="12" value="" out="N"/>
+				<param name="stl_yrmon" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

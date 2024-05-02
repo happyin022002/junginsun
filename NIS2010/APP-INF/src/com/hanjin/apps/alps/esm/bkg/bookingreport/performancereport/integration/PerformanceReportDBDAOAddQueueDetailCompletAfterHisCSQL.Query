@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PerformanceReportDBDAOAddQueueDetailCompletAfterHisCSQL">
+			<desc><![CDATA[2011.03 김기종 [CHM-201109394-01] DPCS고도화일환으로  말레이지아 LOCAL TIME 변경]]></desc>
+			<sql><![CDATA[
+INSERT INTO BKG_SR_HIS
+    (       SR_KND_CD,
+            SR_NO,
+            BKG_NO,
+            SR_HIS_SEQ,
+            SR_STS_CD,
+            SR_PROC_STS_CD,
+            SR_PROC_UPD_DT,
+            SR_PROC_UPD_GDT,
+            ATND_USR_ID,
+            RTN_TO_USR_ID,
+            ST_DT,
+            ST_GDT,
+            FNT_OFC_RTN_CD,
+            CRE_USR_ID,
+            CRE_DT,
+            UPD_USR_ID,
+            UPD_DT,
+            DIFF_RMK,
+            SR_PROC_HRS,
+            BL_DOC_WRK_HRS,
+            BL_DOC_OVT_HRS,
+            HOL_FLG
+    )
+SELECT *
+FROM(
+   SELECT
+     @[src_cd] SR_KND_CD,
+     @[sr_no] SR_NO,
+     @[bkg_no] BKG_NO,
+     ( SELECT NVL(MAX(SR_HIS_SEQ) + 1,0)
+        FROM BKG_SR_HIS
+        WHERE SR_KND_CD = @[src_cd] /* 0421의 SRC_CD*/
+          AND  SR_NO    = @[sr_no]
+          AND  BKG_NO   = @[bkg_no]                
+     ) SR_HIS_SEQ,
+     @[sr_sts_cd] SR_STS_CD,
+     'N' SR_PROC_STS_CD, /*상수 */
+	 T.AST_DT SR_PROC_UPD_DT,
+	 T.AST_DT SR_PROC_UPD_GDT,
+     @[usr_id] ATND_USR_ID,
+     @[rtn_to] RTN_TO_USR_ID,
+
+#if (${sr_sts_cd} == 'PN' || ${sr_sts_cd} == 'FP') 
+	 null ST_DT,
+	 null ST_GDT,
+#else 
+	 GLOBALDATE_PKG.TIME_LOCAL_FNC('MYPKG') ST_DT,
+	 GLOBALDATE_PKG.TIME_LOCAL_FNC('MYPKG') ST_GDT,
+#end
+     RTN_FM_STS_CD FNT_OFC_RTN_CD,
+     @[usr_id] CRE_USR_ID,
+     SYSDATE CRE_DT,
+     @[usr_id] UPD_USR_ID,
+     SYSDATE UPD_DT,
+     @[message] DIFF_RMK,
+	 T.SR_PROC_HRS,
+	 T.BL_DOC_WRK_HRS,     
+     T.BL_DOC_OVT_HRS,
+     T.HOL_FLG
+   FROM BKG_SR_CRNT_RQST X,
+       (SELECT T.AST_DT, T.AEND_DT, T.AEND_DT - T.AST_DT SR_PROC_HRS,
+	           SUM(CASE WHEN TO_CHAR(T.ST_FM_DT,'D') IN (1,7) OR T.HOL_FLG = 'Y' THEN T.ST_FM_DT
+                        WHEN T.AEND_DT BETWEEN T.ST_FM_DT AND T.ST_TO_DT THEN T.AEND_DT
+                        WHEN T.ST_TO_DT < T.AEND_DT THEN T.ST_TO_DT
+                        WHEN T.AEND_DT < T.ST_FM_DT THEN T.ST_FM_DT
+                        ELSE T.ST_TO_DT + 1
+                    END
+                -
+                   CASE WHEN TO_CHAR(T.ST_FM_DT,'D') IN (1,7) OR T.HOL_FLG = 'Y' THEN T.ST_FM_DT
+                        WHEN T.AST_DT BETWEEN T.ST_FM_DT AND T.ST_TO_DT THEN T.AST_DT 
+                        WHEN T.ST_FM_DT > T.AST_DT THEN T.ST_FM_DT 
+                        WHEN T.AST_DT > T.ST_TO_DT THEN T.ST_TO_DT 
+                        ELSE T.ST_FM_DT -1
+                   END) BL_DOC_WRK_HRS,     
+               T.AEND_DT - T.AST_DT -
+               SUM(CASE WHEN TO_CHAR(T.ST_FM_DT,'D') IN (1,7) OR T.HOL_FLG = 'Y' THEN T.ST_FM_DT
+                        WHEN T.AEND_DT BETWEEN T.ST_FM_DT AND T.ST_TO_DT THEN T.AEND_DT
+                        WHEN T.ST_TO_DT < T.AEND_DT THEN T.ST_TO_DT
+                        WHEN T.AEND_DT < T.ST_FM_DT THEN T.ST_FM_DT
+                        ELSE T.ST_TO_DT + 1
+                   END
+                -
+                   CASE WHEN TO_CHAR(T.ST_FM_DT,'D') IN (1,7) OR T.HOL_FLG = 'Y' THEN T.ST_FM_DT
+                        WHEN T.AST_DT BETWEEN T.ST_FM_DT AND T.ST_TO_DT THEN T.AST_DT 
+                        WHEN T.ST_FM_DT > T.AST_DT THEN T.ST_FM_DT 
+                        WHEN T.AST_DT > T.ST_TO_DT THEN T.ST_TO_DT 
+                        ELSE T.ST_FM_DT -1
+                   END) BL_DOC_OVT_HRS,
+               MAX(T.HOL_FLG) HOL_FLG
+	    FROM (SELECT AST_DT, AEND_DT, 
+                     ST_FM_DT, ST_TO_DT,
+                     (SELECT DECODE(COUNT(DISTINCT HOL_DT),0,'N','Y')
+                      FROM DMT_HOLIDAY H, MDM_ORGANIZATION O,MDM_LOCATION L
+				      WHERE O.OFC_CD = (SELECT BKG_OFC_CD FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+                      AND O.LOC_CD = L.LOC_CD
+                      AND (H.CNT_CD = L.CNT_CD OR H.CNT_CD = ' ')
+                      AND (H.RGN_CD = L.RGN_CD OR H.RGN_CD = ' ')
+                      AND (H.STE_CD = L.STE_CD OR H.STE_CD = ' ')
+                      AND (H.LOC_CD = L.LOC_CD OR H.LOC_CD = ' ')
+
+                      AND HOL_DT BETWEEN TRUNC(ST_FM_DT) AND TRUNC(ST_TO_DT)) HOL_FLG
+              FROM (SELECT T.AST_DT,T.AEND_DT,
+                           TO_DATE(TO_CHAR(T.AST_DT,'YYYYMMDD')||W.DOC_WRK_ST_HRMNT,'YYYYMMDDHH24MI') 
+                             - DECODE(W.DOC_WRK_OVN_FLG,'Y',DECODE(SIGN(T.AST_DT - TO_DATE(TO_CHAR(T.AST_DT,'YYYYMMDD')||W.DOC_WRK_ST_HRMNT,'YYYYMMDDHH24MI')),-1,1,0),0) 
+                             + CNT -1 ST_FM_DT,
+                           TO_DATE(TO_CHAR(T.AST_DT+DECODE(W.DOC_WRK_OVN_FLG,'Y',1,0),'YYYYMMDD')||W.DOC_WRK_END_HRMNT,'YYYYMMDDHH24MI') 
+                             - DECODE(W.DOC_WRK_OVN_FLG,'Y',DECODE(SIGN(T.AST_DT - TO_DATE(TO_CHAR(T.AST_DT,'YYYYMMDD')||W.DOC_WRK_ST_HRMNT,'YYYYMMDDHH24MI')),-1,1,0),0) 
+                             + CNT -1 ST_TO_DT
+                     FROM BKG_DPCS_OFC_WRK_TM W,
+                         (SELECT TO_DATE(@[wrk_st_tm],'YYYYMMDD HH24:MI:SS') AST_DT, 
+                                GLOBALDATE_PKG.TIME_LOCAL_FNC('MYPKG') AEND_DT 
+                          FROM DUAL) T,
+                         (SELECT ROWNUM CNT FROM DICT) C
+                     WHERE W.BKG_OFC_CD = (SELECT BKG_OFC_CD FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+                     AND C.CNT < T.AEND_DT - T.AST_DT + 3)) T
+	    WHERE TRUNC(T.AEND_DT) >= TRUNC(T.ST_FM_DT) -- 필요할까?
+	    GROUP BY T.AST_DT, T.AEND_DT
+	    ) T
+        WHERE SR_KND_CD   = @[src_cd] /* 0421의 SRC_CD*/
+         AND SR_NO        = @[sr_no]    
+         AND BKG_NO       = @[bkg_no]
+         AND SR_AMD_TP_CD = @[sr_kind]/* 0421의 SR_KND_CD*/ 
+         AND SR_AMD_SEQ = (SELECT NVL(MAX(SR_AMD_SEQ),0)
+                             FROM  BKG_SR_CRNT_RQST
+                            WHERE SR_KND_CD = X.SR_KND_CD
+                              AND SR_AMD_TP_CD = X.SR_AMD_TP_CD
+                              AND BKG_NO = X.BKG_NO
+                              AND SR_NO = X.SR_NO
+                           )
+         )
+WHERE ROWNUM = 1			]]></sql>
+			<params>
+				<param name="src_cd" type="12" value="" out="N"/>
+				<param name="sr_no" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="sr_sts_cd" type="12" value="" out="N"/>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="rtn_to" type="12" value="" out="N"/>
+				<param name="message" type="12" value="" out="N"/>
+				<param name="wrk_st_tm" type="12" value="" out="N"/>
+				<param name="sr_kind" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

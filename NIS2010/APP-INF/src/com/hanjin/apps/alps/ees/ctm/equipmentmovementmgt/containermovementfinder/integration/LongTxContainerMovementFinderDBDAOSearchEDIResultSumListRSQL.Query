@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LongTxContainerMovementFinderDBDAOSearchEDIResultSumListRSQL">
+			<desc><![CDATA[   ]]></desc>
+			<sql><![CDATA[
+SELECT   RCC,
+         CN,
+         LCC,
+         LOC,
+         YARD,
+         SUM (INIT_ERR_CNT) AS INT_ERR,
+         ROUND (SUM (INIT_ERR_CNT) / SUM (TTL_CNT) * 100, 1) AS INT_ERR_RATIO,
+         SUM (TTL_CNT) - SUM (INIT_ERR_CNT) AS INT_OK,
+         ROUND ((SUM (TTL_CNT) - SUM (INIT_ERR_CNT)) / SUM (TTL_CNT) * 100, 1) AS INT_OK_RATIO,
+         SUM (TTL_CNT) AS INT_TTL,
+#if (${gap_radio} == '12')
+         SUM (GAP_12) AS EDI_12H,
+         ROUND (SUM (GAP_12) / SUM (TTL_CNT), 1) * 100 AS EDI_12H_RATIO,
+         (SUM (GAP_24) + SUM (GAP_48) + SUM (GAP_OVER)) AS EDI_OVER,
+         ROUND ((SUM (GAP_24) + SUM (GAP_48) + SUM (GAP_OVER)) / SUM (TTL_CNT), 1) * 100 AS EDI_OVER_RATIO,
+#elseif (${gap_radio} == '24')
+         (SUM (GAP_12) + SUM (GAP_24)) AS EDI_24H,
+         ROUND ((SUM (GAP_12) + SUM (GAP_24)) / SUM (TTL_CNT), 1) * 100 AS EDI_24H_RATIO,
+         (SUM (GAP_48) + SUM (GAP_OVER)) AS EDI_OVER,
+         ROUND ((SUM (GAP_48) + SUM (GAP_OVER)) / SUM (TTL_CNT), 1) * 100 AS EDI_OVER_RATIO,
+#elseif (${gap_radio} == '48')
+         (SUM (GAP_12) + SUM (GAP_24) + SUM (GAP_48)) AS EDI_48H,
+         ROUND ((SUM (GAP_12) + SUM (GAP_24) + SUM (GAP_48)) / SUM (TTL_CNT), 1) * 100 AS EDI_48H_RATIO,
+         SUM (GAP_OVER) AS EDI_OVER,
+         ROUND (SUM (GAP_OVER) / SUM (TTL_CNT), 1) * 100 AS EDI_OVER_RATIO,
+#else
+         SUM (GAP_12) AS EDI_12H,
+         ROUND (SUM (GAP_12) / SUM (TTL_CNT), 1) * 100 AS EDI_12H_RATIO,
+         SUM (GAP_24) AS EDI_24H,
+         ROUND (SUM (GAP_24) / SUM (TTL_CNT), 1) * 100 AS EDI_24H_RATIO,
+         SUM (GAP_48) AS EDI_48H,
+         ROUND (SUM (GAP_48) / SUM (TTL_CNT), 1) * 100 AS EDI_48H_RATIO,
+         SUM (GAP_OVER) AS EDI_OVER,
+         ROUND (SUM (GAP_OVER) / SUM (TTL_CNT), 1) * 100 AS EDI_OVER_RATIO,
+#end
+         SUM (TTL_CNT) AS EDI_TTL,
+         @[p_date1] AS P_DATE1,
+         @[p_date2] AS P_DATE2,
+         @[gap_radio] AS GAP_RADIO,
+         @[source_radio] AS SOURCE_RADIO
+    FROM (SELECT ME.RCC_CD AS RCC,
+                 SUBSTR (EVNT_YD_CD, 1, 2) AS CN,
+                 ME.LCC_CD AS LCC,
+                 SUBSTR (EVNT_YD_CD, 1, 5) AS LOC,
+                 EVNT_YD_CD AS YARD,
+                 CASE
+                    WHEN (RTY_KNT = 0 AND MVMT_EDI_RSLT_CD = 'N') OR (RTY_KNT > 0)
+                       THEN 1
+                    ELSE 0
+                 END AS INIT_ERR_CNT,
+                 CASE
+                    WHEN (RTY_KNT = RTY_KNT)
+                       THEN 1
+                    ELSE 0
+                 END AS TTL_CNT,
+                 CASE
+                    WHEN ROUND (CRE_LOCL_DT - EVNT_DT, 2) <= 0.5
+                       THEN 1
+                    ELSE 0
+                 END AS GAP_12,
+                 CASE
+                    WHEN ROUND (CRE_LOCL_DT - EVNT_DT, 2) > 0.5 AND ROUND (CRE_LOCL_DT - EVNT_DT, 2) <= 1
+                       THEN 1
+                    ELSE 0
+                 END AS GAP_24,
+                 CASE
+                    WHEN ROUND (CRE_LOCL_DT - EVNT_DT, 2) > 1 AND ROUND (CRE_LOCL_DT - EVNT_DT, 2) <= 2
+                       THEN 1
+                    ELSE 0
+                 END AS GAP_48,
+                 CASE
+                    WHEN ROUND (CRE_LOCL_DT - EVNT_DT, 2) > 2
+                       THEN 1
+                    ELSE 0
+                 END AS GAP_OVER
+            FROM CTM_MVMT_EDI_MSG,
+                 MDM_LOCATION ML,
+                 MDM_EQ_ORZ_CHT ME
+           WHERE IDX_CRE_LOCL_DT BETWEEN REPLACE (@[p_date1], '-', '') AND REPLACE (@[p_date2], '-', '')
+             AND MVMT_EDI_RSLT_CD IN ('Y', 'N')
+#if (${rcc_cd} == '' || ${rcc_cd} == 'ALL')
+             AND MVMT_EDI_MSG_AREA_CD IN ('USA', 'SWA', 'KOR', 'EUR', 'CHN')
+#else
+             AND MVMT_EDI_MSG_AREA_CD = (SELECT SYS_AREA_GRP_ID AS SVR_ID
+                                           FROM COM_SYS_AREA_GRP_ID
+                                          WHERE CNT_CD = SUBSTR (@[rcc_cd], 0, 2)
+                                            AND SUBSTR (SYS_AREA_GRP_ID, 0, 1) != 'D')
+             AND ME.RCC_CD = @[rcc_cd]
+#end
+#if (${lcc_cd} != '')
+             AND ME.LCC_CD = @[lcc_cd]
+#end
+#if (${p_yard2} != '')
+             AND EVNT_YD_CD = @[p_yard1]||@[p_yard2]
+#elseif (${p_yard1} != '')
+             AND EVNT_YD_CD LIKE @[p_yard1]||'%'
+#end
+#if (${source_radio} == 'DOM')
+             AND SUBSTR (EDI_MVMT_STS_CD, 0, 1) = 'C'
+#elseif (${source_radio} == 'ITN')
+             AND SUBSTR (EDI_MVMT_STS_CD, 0, 1) != 'C'
+#end
+             AND ME.SCC_CD = ML.SCC_CD
+             AND ML.LOC_CD = SUBSTR (EVNT_YD_CD, 0, 5)
+/*             AND MVMT_EDI_RMK = DECODE (MVMT_EDI_RSLT_CD, 'Y', 'OK.PROCESSED', MVMT_EDI_RMK)*/
+         )
+GROUP BY RCC, CN, LCC, LOC, YARD
+#if (${rcc_cd} != '' && ${rcc_cd} != 'ALL')
+  HAVING RCC IN (@[rcc_cd])
+#end
+ORDER BY RCC, CN, LCC, LOC, YARD			]]></sql>
+			<params>
+				<param name="p_date1" type="12" value="" out="N"/>
+				<param name="p_date2" type="12" value="" out="N"/>
+				<param name="gap_radio" type="12" value="" out="N"/>
+				<param name="source_radio" type="12" value="" out="N"/>
+				<param name="rcc_cd" type="12" value="" out="N"/>
+				<param name="lcc_cd" type="12" value="" out="N"/>
+				<param name="p_yard1" type="12" value="" out="N"/>
+				<param name="p_yard2" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

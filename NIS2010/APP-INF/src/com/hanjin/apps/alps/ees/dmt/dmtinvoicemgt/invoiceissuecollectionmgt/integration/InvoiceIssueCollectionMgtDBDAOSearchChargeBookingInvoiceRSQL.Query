@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="InvoiceIssueCollectionMgtDBDAOSearchChargeBookingInvoiceRSQL">
+			<desc><![CDATA[Invoice Creation & Issue - Booking]]></desc>
+			<sql><![CDATA[
+select  A.SYS_AREA_GRP_ID 								as SVR_ID
+	   ,BB.BL_NO
+	   ,BB.BKG_NO
+	   ,B.DMDT_TRF_CD
+	   ,B.OFC_CD
+	   ,BB.SC_NO
+	   --,A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD 			as VVD_CD
+
+       ,MAX(
+		NVL(
+		NVL(
+		DECODE(SUBSTR(B.DMDT_TRF_CD,3,1),'I',
+         ( SELECT /*+ ORDERED USE_NL( V K )
+                                INDEX    ( V XPKBKG_VVD )
+                                INDEX_DESC    ( K XPKVSK_VSL_PORT_SKD) */
+                   V.VSL_CD||V.SKD_VOY_NO||V.SKD_DIR_CD
+              FROM BKG_VVD V
+                  ,VSK_VSL_PORT_SKD K
+             WHERE V.BKG_NO = BB.BKG_NO
+               AND V.POD_CD = BB.POD_CD
+               AND (V.VSL_PRE_PST_CD, V.VSL_SEQ) =
+                      (SELECT /*+ INDEX_DESC( VV XPKBKG_VVD) */
+                              VV.VSL_PRE_PST_CD
+                             ,VV.VSL_SEQ
+                         FROM BKG_VVD VV
+                        WHERE VV.BKG_NO = V.BKG_NO
+                          AND VV.POD_CD = V.POD_CD
+                          AND ROWNUM = 1)
+               AND V.VSL_CD = K.VSL_CD(+)
+               AND V.SKD_VOY_NO = K.SKD_VOY_NO(+)
+               AND V.SKD_DIR_CD = K.SKD_DIR_CD(+)
+               AND V.POD_CD = K.VPS_PORT_CD(+)
+               AND V.POD_CLPT_IND_SEQ = K.CLPT_IND_SEQ(+)
+               AND NVL (K.SKD_CNG_STS_CD, ' ') != 'S'
+               AND ROWNUM = 1 )
+       , ( SELECT /*+ ORDERED USE_NL( V K )
+                   INDEX    ( V XPKBKG_VVD )
+                   INDEX_DESC    ( K XPKVSK_VSL_PORT_SKD) */
+               V.VSL_CD||V.SKD_VOY_NO||V.SKD_DIR_CD
+          FROM BKG_VVD V
+              ,VSK_VSL_PORT_SKD K
+         WHERE V.BKG_NO = BB.BKG_NO
+           AND V.POL_CD = BB.POL_CD
+           AND (V.VSL_PRE_PST_CD, V.VSL_SEQ) =
+                  (SELECT /*+ INDEX( VV XPKBKG_VVD) */
+                          VV.VSL_PRE_PST_CD
+                         ,VV.VSL_SEQ
+                     FROM BKG_VVD VV
+                    WHERE VV.BKG_NO = V.BKG_NO
+                      AND VV.POL_CD = V.POL_CD
+                      AND ROWNUM = 1)
+           AND V.VSL_CD = K.VSL_CD(+)
+           AND V.SKD_VOY_NO = K.SKD_VOY_NO(+)
+           AND V.SKD_DIR_CD = K.SKD_DIR_CD(+)
+           AND V.POL_CD = K.VPS_PORT_CD(+)
+           AND V.POL_CLPT_IND_SEQ = K.CLPT_IND_SEQ(+)
+           AND NVL (K.SKD_CNG_STS_CD, ' ') != 'S'
+           AND ROWNUM = 1 ))
+		, A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD)
+		, BB.VSL_CD||BB.SKD_VOY_NO||BB.SKD_DIR_CD)) VVD_CD
+
+	   ,BB.POR_CD
+	   ,BB.POL_CD
+	   ,BB.POD_CD
+	   ,BB.DEL_CD
+--	   ,(select RCV_TERM_CD from BKG_BOOKING where BKG_NO = A.BKG_NO)||'/'||(select DE_TERM_CD from BKG_BOOKING where BKG_NO = A.BKG_NO) as RD
+	   ,BB.RCV_TERM_CD||'/'||BB.DE_TERM_CD 		as RD
+	   ,B.BZC_TRF_CURR_CD 								as CHG_CURR_CD
+	   ,case 
+			when (select AR_OFC_CD  from MDM_ORGANIZATION where OFC_CD = @[ofc_cd]) in ('MTRBS', 'TORSC', 'VANSO') then 'USD'
+            else (select AR_CURR_CD from MDM_ORGANIZATION where OFC_CD = @[ofc_cd])
+        end												as INV_CURR_CD
+	   ,@[s_chg_type] 									as CHG_TYPE
+	   ,BB.RFA_NO
+	   ,max(B.ACT_CNT_CD||lpad(B.ACT_CUST_SEQ,6,'0')) 	as PAYER_CD
+	   ,max(lpad(B.VNDR_SEQ,6,'0')) 					as TRUCKER_CD
+	   ,sum(nvl(B.ORG_CHG_AMT,0)) 						as MN_ORG_CHG_AMT
+	   ,sum(nvl(B.SC_RFA_EXPT_AMT,0)) 					as DMDT_EXPT_AMT
+	   ,sum(nvl(B.AFT_EXPT_DC_AMT,0)) 					as CHG_DC_AMT
+	   ,sum(nvl(B.BIL_AMT,0)) 							as MN_BIL_AMT
+	   ,count(A.CNTR_NO) 								as CNTR_CNT
+	   ,BB.TAA_NO
+  from  DMT_CHG_BKG_CNTR    A
+       ,DMT_CHG_CALC        B
+	   ,BKG_BOOKING			BB
+
+--########## Confirm 된 Charge 는 무조건 Invoice 생성 대상이 되어야 함.(Office Transfer 조건과는 무관) 2015.02.26 ##############################	   
+--	   ,COM_SYS_AREA_GRP_ID D
+--####################################################################################################################################
+
+ where  A.SYS_AREA_GRP_ID = B.SYS_AREA_GRP_ID
+   and  A.CNTR_NO         = B.CNTR_NO
+   and  A.CNTR_CYC_NO     = B.CNTR_CYC_NO
+   and  B.OFC_CD	      = @[s_ofc_cd]
+   and  A.BKG_NO          = @[s_bkg_no]
+   AND  A.BKG_NO          = BB.BKG_NO
+##AND B.DMDT_CHG_STS_CD = 'C'
+   and  B.DMDT_CHG_STS_CD in 
+		(
+			#foreach( $dmdt_chg_sts_cd in ${dmdt_chg_sts_cd_list}) 
+				#if($velocityCount < $dmdt_chg_sts_cd_list.size()) 
+				   '$dmdt_chg_sts_cd', 
+				#else 
+				   '$dmdt_chg_sts_cd' 
+				#end 
+			#end
+		)
+   and  B.DMDT_TRF_CD     = @[s_dmdt_trf_cd]
+
+--########## Confirm 된 Charge 는 무조건 Invoice 생성 대상이 되어야 함.(Office Transfer 조건과는 무관) 2015.02.26 ##############################
+--AND (							-- OFC_TRNS_FLG 상태에 따라 쿼리가 달라짐
+--			(	nvl(B.OFC_TRNS_FLG,'N') = 'Y'
+--				AND D.SYS_AREA_GRP_ID = A.SYS_AREA_GRP_ID
+--				--AND D.CNT_CD = SUBSTR(B.FM_MVMT_YD_CD,1,2) 
+--				AND D.CNT_CD = (SELECT SUBSTR(LOC_CD,1,2) 
+--                                FROM MDM_ORGANIZATION 
+--                                WHERE OFC_CD = B.OFC_CD)
+--				AND CO_IND_CD = 'H'
+--				AND DECODE(B.OFC_TRNS_RHQ_CNG_FLG, 'Y', B.SYS_AREA_GRP_ID, A.SYS_AREA_GRP_ID)=B.SYS_AREA_GRP_ID
+--			)
+--       OR
+--       		(
+--				nvl(B.OFC_TRNS_FLG,'N') = 'N'
+--				AND D.CNT_CD = (SELECT SUBSTR(LOC_CD,1,2) 
+--                                FROM MDM_ORGANIZATION 
+--                                WHERE OFC_CD = B.OFC_CD)
+--				AND CO_IND_CD = 'H'
+--       			AND A.SYS_AREA_GRP_ID = B.SYS_AREA_GRP_ID       
+--			)
+--		)
+--####################################################################################################################################
+
+group by A.SYS_AREA_GRP_ID
+	, BB.BL_NO
+	, BB.BKG_NO
+	, B.DMDT_TRF_CD
+	, B.OFC_CD
+	, BB.SC_NO
+	, BB.POR_CD
+	, BB.POL_CD
+	, BB.POD_CD
+	, BB.DEL_CD
+	, BB.RCV_TERM_CD||'/'||BB.DE_TERM_CD
+	, B.BZC_TRF_CURR_CD
+	, BB.RFA_NO
+    , BB.TAA_NO			]]></sql>
+			<params>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="s_chg_type" type="12" value="" out="N"/>
+				<param name="s_ofc_cd" type="12" value="" out="N"/>
+				<param name="s_bkg_no" type="12" value="" out="N"/>
+				<param name="s_dmdt_trf_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

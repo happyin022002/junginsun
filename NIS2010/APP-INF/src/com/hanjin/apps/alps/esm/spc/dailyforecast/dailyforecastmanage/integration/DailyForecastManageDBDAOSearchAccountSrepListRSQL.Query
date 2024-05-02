@@ -1,0 +1,430 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="DailyForecastManageDBDAOSearchAccountSrepListRSQL">
+			<desc><![CDATA[본사에서 내려준 화주별 S.REP 매핑
+[CHM-201322502-01] SPC 프로젝트 - 성수기 선복운영 개선을 위한 T/F추진
+[Trouble Shooting] 성수기시 guide 내려간 화주들만 기본셋팅되도록 변경
+[Trouble Shooting] 진마리아 SC Join 오류 수정
+[Trouble Shooting] 김시몬 SC Join 오류 수정 관련 distinct  추가
+2013.10.24 [선처리] Account Add/Del 과 Mapping 구분자 생성
+2013.12.02 모델 불일치로 인한 컬럼명 수정. MAPG_FLG -> CUST_MAPG_FLG
+2014.02.04 [CHM-201428383-01] RFA 로직 추가
+2014.05.22 [선반영] AES-SC관련 로직 추가
+2014.05.30 [선반영] SMP만 존재하고 ACCT MAPPING이 안된 ACCT에 대해 SUB TRD
+2014.07.30 [CHM-201431081] SPC Allocation Control Option 추가 보완 요청보여지도록 보완
+2015.06.26 [선반영] SPC_ALOC_LANE_CTRL_OPT_DTL 테이블 구조 변경으로 인한 오류 수정, SR 접수중으로 다른 CR에 묶어 반영 함
+2015.12.10 [CHM-201539142] Control Option Registration과 FCST Input 의 Account Mapping상 데이터 오류]]></desc>
+			<sql><![CDATA[
+SELECT   
+         M.CUST_CD             ,
+         M.CUST_NM             ,
+         M.CUST_CTRL_CD        ,
+         M.RVIS_CNTR_CUST_TP_CD,
+         M.CUST_CNT_CD         ,
+         M.CUST_SEQ            ,
+         S.SREP_CD             ,
+         S.SREP_NM             ,
+         NVL(C.SUB_TRD_CD, R.SUB_TRD_CD) AS SUB_TRD_CD,
+         C.SREP_CD AS INDIV_CUST
+    FROM (
+            SELECT 
+                   DISTINCT 
+                   C.CUST_CNT_CD||TO_CHAR(C.CUST_SEQ, 'FM000000') AS CUST_CD,
+                   C.CUST_CNT_CD,
+                   C.CUST_SEQ,
+                   C.CUST_LGL_ENG_NM AS CUST_NM,
+                   C.RVIS_CNTR_CUST_TP_CD,
+                   MC.CUST_CTRL_CD
+              FROM SPC_MDL_CUST_CTRL     MC,
+                   MDM_CUSTOMER          C
+             WHERE MC.TRD_CD = @[trade]
+               AND MC.COST_YRWK||'-'||MC.VER_SEQ = NVL((SELECT /*+ INDEX_DESC (M XPKSPC_MDL_VER_MST) */
+                                                               COST_YRWK||'-'||VER_SEQ
+                                                          FROM SPC_MDL_VER_MST M
+                                                         WHERE @[cost_yrwk] BETWEEN M.VER_ST_YRWK AND M.VER_END_YRWK
+                                                           AND M.TRD_CD  = MC.TRD_CD
+                                                           AND M.CFM_FLG = 'Y'
+                                                           AND ROWNUM    = 1), '200001-1')
+               AND EXISTS (SELECT 'X' FROM SPC_MDL_CUST_REV_LANE R
+                            WHERE R.TRD_CD = MC.TRD_CD
+                              AND R.COST_YRWK = MC.COST_YRWK
+                              AND R.VER_SEQ = MC.VER_SEQ
+                              AND R.CUST_CNT_CD      = MC.CUST_CNT_CD
+                              AND R.CUST_SEQ         = MC.CUST_SEQ
+                              AND R.RLANE_ADJ_QTY > 0
+                              AND R.DELT_FLG = 'N'
+                              AND R.SLS_RGN_OFC_CD = @[ofc_cd]
+
+                           UNION ALL
+                           SELECT 'X' FROM DUAL
+                            WHERE MC.COST_YRWK||'-'||MC.VER_SEQ = '200001-1'
+                           )
+               AND MC.CUST_CNT_CD     = C.CUST_CNT_CD 
+               AND MC.CUST_SEQ        = C.CUST_SEQ 
+         ) M,
+         (
+            SELECT CUST_CNT_CD||TO_CHAR(CUST_SEQ, 'FM000000') AS CUST_CD,
+                   CUST_NM             ,
+                   CUST_CTRL_CD        ,
+                   RVIS_CNTR_CUST_TP_CD,
+                   CUST_CNT_CD         ,
+                   CUST_SEQ            ,
+                   SUBSTR(MAX(SYS_CONNECT_BY_PATH(SREP_CD, '|')), 2) AS SREP_CD,
+                   SUBSTR(MAX(SYS_CONNECT_BY_PATH(SREP_NM, '|')), 2) AS SREP_NM
+              FROM (
+                      SELECT 
+                             DISTINCT 
+                             MC.CUST_CNT_CD,
+                             MC.CUST_SEQ   ,
+                             C.CUST_LGL_ENG_NM AS CUST_NM,
+                             C.RVIS_CNTR_CUST_TP_CD,
+                             MC.CUST_CTRL_CD       ,
+                             R.SREP_CD             ,
+                             S.SREP_NM             ,
+                             DENSE_RANK() OVER (PARTITION BY MC.CUST_CNT_CD, MC.CUST_SEQ ORDER BY S.SREP_NM) AS RNUM
+                        FROM SPC_MDL_CUST_CTRL     MC,
+                             SPC_SLS_REP_CUST      R ,
+                             MDM_SLS_REP           S ,
+                             MDM_CUSTOMER          C
+                       WHERE MC.TRD_CD = @[trade]
+                       
+                         AND MC.COST_YRWK = NVL((SELECT /*+ INDEX_DESC (M XPKSPC_MDL_VER_MST) */
+                                                                         COST_YRWK
+                                                                    FROM SPC_MDL_VER_MST M
+                                                                   WHERE @[cost_yrwk] BETWEEN M.VER_ST_YRWK AND M.VER_END_YRWK
+                                                                     AND M.TRD_CD  = MC.TRD_CD
+                                                                     AND M.CFM_FLG = 'Y'
+                                                                     AND ROWNUM    = 1), '200001') 
+                         AND MC.VER_SEQ = NVL((SELECT /*+ INDEX_DESC (M XPKSPC_MDL_VER_MST) */
+                                                                         VER_SEQ
+                                                                    FROM SPC_MDL_VER_MST M
+                                                                   WHERE @[cost_yrwk] BETWEEN M.VER_ST_YRWK AND M.VER_END_YRWK
+                                                                     AND M.TRD_CD  = MC.TRD_CD
+                                                                     AND M.CFM_FLG = 'Y'
+                                                                     AND ROWNUM    = 1), '1')  
+
+                         AND MC.CUST_CNT_CD     = R.CUST_CNT_CD
+                         AND MC.CUST_SEQ        = R.CUST_SEQ
+                         AND R.SREP_CD          = S.SREP_CD
+                         AND S.SREP_STS_CD      = 'N'
+                         AND MC.CUST_CNT_CD     = C.CUST_CNT_CD 
+                         AND MC.CUST_SEQ        = C.CUST_SEQ 
+                         AND S.OFC_CD           IN (SELECT OFC_CD
+                                                      FROM SPC_OFC_LVL
+                                                     WHERE @[cost_yrwk] BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK
+                                                       AND N4TH_PRNT_OFC_CD = @[ofc_cd])
+
+                   )
+        START WITH RNUM = 1
+        CONNECT BY PRIOR RNUM = RNUM - 1 AND PRIOR CUST_CNT_CD = CUST_CNT_CD AND PRIOR CUST_SEQ = CUST_SEQ
+          GROUP BY CUST_CNT_CD ,
+                   CUST_SEQ    ,
+                   CUST_NM     ,
+                   CUST_CTRL_CD,
+                   RVIS_CNTR_CUST_TP_CD
+          ORDER BY CUST_CNT_CD,
+                   CUST_SEQ
+         ) S,
+         (
+            SELECT CUST_CNT_CD||TO_CHAR(CUST_SEQ, 'FM000000') AS CUST_CD,
+                   CUST_NM             ,
+                   CUST_CTRL_CD        ,
+                   RVIS_CNTR_CUST_TP_CD,
+                   CUST_CNT_CD         ,
+                   CUST_SEQ            ,
+                   SUBSTR(MAX(SYS_CONNECT_BY_PATH(SUB_TRD_CD, ',')), 2) AS SUB_TRD_CD
+              FROM (
+                      SELECT 
+                             DISTINCT 
+                             MC.CUST_CNT_CD,
+                             MC.CUST_SEQ   ,
+                             C.CUST_LGL_ENG_NM AS CUST_NM,
+                             C.RVIS_CNTR_CUST_TP_CD,
+                             MC.CUST_CTRL_CD       ,
+                             DECODE(MC.COST_YRWK, '200001', MC.SUB_TRD_CD, MR.SUB_TRD_CD) AS SUB_TRD_CD,
+                             DENSE_RANK() OVER (PARTITION BY MC.CUST_CNT_CD, MC.CUST_SEQ ORDER BY DECODE(MC.COST_YRWK, '200001', MC.SUB_TRD_CD, MR.SUB_TRD_CD)) AS RNUM
+                        FROM SPC_MDL_CUST_CTRL     MC,
+                             SPC_MDL_CUST_REV_LANE MR,
+                             MDM_CUSTOMER          C                              
+                       WHERE MC.TRD_CD     = @[trade]
+                         AND MC.COST_YRWK||'-'||MC.VER_SEQ = NVL((SELECT /*+ INDEX_DESC (M XPKSPC_MDL_VER_MST) */
+                                                                         COST_YRWK||'-'||VER_SEQ
+                                                                    FROM SPC_MDL_VER_MST M
+                                                                   WHERE @[cost_yrwk]  BETWEEN M.VER_ST_YRWK AND M.VER_END_YRWK
+                                                                     AND M.TRD_CD  = MC.TRD_CD
+                                                                     AND M.CFM_FLG = 'Y'
+                                                                     AND ROWNUM    = 1), '200001-1')
+                         AND MC.CUST_CNT_CD     = C.CUST_CNT_CD 
+                         AND MC.CUST_SEQ        = C.CUST_SEQ    
+                         AND MC.TRD_CD          = MR.TRD_CD     (+)
+                         AND MC.COST_YRWK       = MR.COST_YRWK  (+)
+                         AND MC.VER_SEQ         = MR.VER_SEQ    (+)
+                         AND MC.CUST_CNT_CD     = MR.CUST_CNT_CD(+)
+                         AND MC.CUST_SEQ        = MR.CUST_SEQ   (+)
+                         AND @[ofc_cd]          = MR.SLS_RGN_OFC_CD (+)
+                         AND NVL(MC.SC_NO,NVL(MC.RFA_NO, 'X')) = NVL(MR.SC_NO(+),NVL(MR.RFA_NO(+), 'X'))
+                         --AND DECODE(MC.TRD_CD, 'AES', NVL(MC.RFA_NO, 'X'), NVL(MC.SC_NO, 'X')) = DECODE(MC.TRD_CD, 'AES', NVL(MR.RFA_NO(+), 'X'), NVL(MR.SC_NO(+), NVL(MC.SC_NO, 'X')))
+                         AND MR.RLANE_ADJ_QTY(+)>0
+                         AND DECODE(MC.COST_YRWK||'-'||MC.VER_SEQ,'200001-1',MR.TRD_CD,NULL) IS NULL
+                         AND DECODE(MC.COST_YRWK||'-'||MC.VER_SEQ,'200001-1','X',MR.TRD_CD) IS NOT NULL
+                   )
+        START WITH RNUM = 1
+        CONNECT BY PRIOR RNUM = RNUM - 1 AND PRIOR CUST_CNT_CD = CUST_CNT_CD AND PRIOR CUST_SEQ = CUST_SEQ
+          GROUP BY CUST_CNT_CD ,
+                   CUST_SEQ    ,
+                   CUST_NM     ,
+                   CUST_CTRL_CD,
+                   RVIS_CNTR_CUST_TP_CD
+          ORDER BY CUST_CNT_CD,
+                   CUST_SEQ
+         ) R,
+         (
+            SELECT DISTINCT
+                   CUST_CNT_CD,
+                   CUST_SEQ   ,
+                   SREP_CD    ,
+                   SUBSTR(MAX(SYS_CONNECT_BY_PATH(SUB_TRD_CD, ',')), 2) AS SUB_TRD_CD
+              FROM (
+                      SELECT DISTINCT 
+                             CUST_CNT_CD,
+                             CUST_SEQ   ,
+                             SREP_CD    ,
+                             DECODE(SUB_TRD_CD, '*', '', SUB_TRD_CD) AS SUB_TRD_CD,
+                             DENSE_RANK() OVER (PARTITION BY CUST_CNT_CD, CUST_SEQ ORDER BY DECODE(SUB_TRD_CD, '*', '', SUB_TRD_CD)) AS RNUM
+                        FROM SPC_SLS_REP_CUST MC
+                       WHERE 1=1 
+                         AND DELT_FLG = 'N'
+                         AND NVL(INDIV_CUST_USE_FLG, 'N') = 'Y'
+                         AND TRD_CD      = @[trade]
+
+                         AND SLS_OFC_CD  IN (SELECT OFC_CD
+                                               FROM SPC_OFC_LVL
+                                              WHERE @[cost_yrwk]  BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK
+                                                AND N4TH_PRNT_OFC_CD =  @[ofc_cd])
+
+                         AND CUST_MAPG_FLG = 'Y'
+                   )
+             WHERE NOT (RNUM > 1 AND SUB_TRD_CD IS NULL)
+        START WITH RNUM = 1
+        CONNECT BY PRIOR RNUM = RNUM - 1 AND PRIOR CUST_CNT_CD = CUST_CNT_CD AND PRIOR CUST_SEQ = CUST_SEQ
+          GROUP BY CUST_CNT_CD ,
+                   CUST_SEQ    ,
+                   SREP_CD
+          ORDER BY CUST_CNT_CD,
+                   CUST_SEQ
+         ) C
+   WHERE M.CUST_CNT_CD  = S.CUST_CNT_CD (+)
+     AND M.CUST_SEQ     = S.CUST_SEQ    (+)
+     AND M.CUST_CTRL_CD = S.CUST_CTRL_CD(+)
+     AND M.CUST_CNT_CD  = C.CUST_CNT_CD (+)
+     AND M.CUST_SEQ     = C.CUST_SEQ    (+)
+     AND M.CUST_CNT_CD  = R.CUST_CNT_CD (+)
+     AND M.CUST_SEQ     = R.CUST_SEQ    (+)
+     AND M.CUST_CTRL_CD = R.CUST_CTRL_CD(+)
+     
+UNION 
+
+SELECT M.CUST_CD
+       , M.CUST_NM
+       , M.CUST_CTRL_CD
+       , M.RVIS_CNTR_CUST_TP_CD
+       , M.CUST_CNT_CD
+       , M.CUST_SEQ
+       , M.SREP_CD
+       , M.SREP_NM
+       , NVL(C.SUB_TRD_CD, M.SUB_TRD_CD) AS SUB_TRD_CD
+       , M.INDIV_CUST
+  FROM (
+        SELECT  CUST_CD
+               , CUST_NM
+               , CUST_CTRL_CD
+               , RVIS_CNTR_CUST_TP_CD
+               , CUST_CNT_CD
+               , CUST_SEQ
+               , SREP_CD
+               , SREP_NM
+               , SUB_TRD_CD
+               , INDIV_CUST
+          FROM (
+                SELECT DISTINCT
+                       L.CUST_CD,
+                       L.CUST_NM,
+                       L.RVIS_CNTR_CUST_TP_CD,
+                       L.CUST_CNT_CD,
+                       L.CUST_SEQ,
+                       R.SREP_CD,
+                       (SELECT SREP_NM FROM MDM_SLS_REP S WHERE S.SREP_CD = R.SREP_CD) SREP_NM,
+                       L.SUB_TRD_CD,
+                       DECODE(NVL(R.INDIV_CUST_USE_FLG, 'N'), 'Y', R.SREP_CD, '')  INDIV_CUST,
+                       R.SLS_OFC_CD,
+                       NVL((SELECT MAX(MC.CUST_CTRL_CD) CUST_CTRL_CD
+                              FROM SPC_MDL_CUST_CTRL MC
+                             WHERE MC.TRD_CD = @[trade]
+                               AND MC.COST_YRWK||'-'||MC.VER_SEQ = NVL((SELECT /*+ INDEX_DESC (M XPKSPC_MDL_VER_MST) */
+                                              COST_YRWK||'-'||VER_SEQ
+                                              FROM SPC_MDL_VER_MST M
+                                             WHERE @[cost_yrwk]  BETWEEN M.VER_ST_YRWK AND M.VER_END_YRWK
+                                               AND M.TRD_CD = MC.TRD_CD
+                                               AND M.CFM_FLG = 'Y'
+                                               AND ROWNUM = 1), '200001-1')
+                               AND MC.CUST_CNT_CD = L.CUST_CNT_CD
+                               AND MC.CUST_SEQ = L.CUST_SEQ )
+                         ,'C') CUST_CTRL_CD
+                    
+                  FROM (
+                         SELECT CUST_CNT_CD||TO_CHAR(CUST_SEQ, 'FM000000') AS CUST_CD,
+                                CUST_CNT_CD,
+                                CUST_SEQ,
+                                CUST_NM,
+                                RVIS_CNTR_CUST_TP_CD,
+                                SUB_TRD_CD,
+                                SLS_OFC_CD
+                           FROM (
+                                   SELECT 
+                                           CUST_CNT_CD,
+                                           CUST_SEQ,
+                                           CUST_NM,
+                                           RVIS_CNTR_CUST_TP_CD,
+                                           SUB_TRD_CD,
+                                           SLS_OFC_CD, 
+                                           DENSE_RANK() OVER (PARTITION BY CUST_CNT_CD, CUST_SEQ ORDER BY DECODE(SUB_TRD_CD, '*', '', SUB_TRD_CD)) AS RNUM
+                                      FROM (
+                                            SELECT 
+                                                   DISTINCT 
+                                                   CUST.RVIS_CNTR_CUST_TP_CD
+                                                 , SUBSTR(CD.ALOC_CTRL_DTL_CD, 0, 2) CUST_CNT_CD
+--                                                 , TO_NUMBER(SUBSTR(CD.CTRL_LOC_ACCT_CD, -6)) CUST_SEQ
+                                                 , TO_NUMBER(SUBSTR(CD.ALOC_CTRL_DTL_CD, -6)) CUST_SEQ
+                                                 , CUST.CUST_LGL_ENG_NM AS CUST_NM
+                                                 , CD.SUB_TRD_CD
+                                                 , SLS_OFC_CD
+                                              FROM SPC_ALOC_LANE_CTRL_OPT CO
+                                                 , SPC_ALOC_LANE_CTRL_OPT_DTL CD
+                                                 , MDM_CUSTOMER CUST  
+                                                 , (SELECT DISTINCT REP_TRD_CD
+                                                         , REP_SUB_TRD_CD
+                                                         , RLANE_CD
+                                                         , DIR_CD 
+                                                         , SLS_OFC_CD 
+                                                     FROM SPC_FCAST_OFC_POL_MAPG M
+                                                     WHERE SLS_OFC_CD  IN (SELECT OFC_CD
+                                                              FROM SPC_OFC_LVL
+                                                             WHERE @[cost_yrwk]  BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK
+                                                               AND N4TH_PRNT_OFC_CD = @[ofc_cd]) )OFC                      
+                                             WHERE CO.TRD_CD = CD.TRD_CD
+                                               AND CO.SUB_TRD_CD = CD.SUB_TRD_CD
+                                               AND CO.RLANE_CD = CD.RLANE_CD
+                                               AND CO.DIR_CD = CD.DIR_CD
+                                               AND CO.CTRL_ACCT_FLG = 'Y'
+                                               AND CD.ALOC_CTRL_TP_CD = 'A'
+                                               AND CO.TRD_CD = @[trade] 
+                                               AND CUST.CUST_CNT_CD = SUBSTR(CD.ALOC_CTRL_DTL_CD, 0, 2)
+--                                               AND CUST.CUST_SEQ = TO_NUMBER(SUBSTR(CD.CTRL_LOC_ACCT_CD, -6))
+                                               AND CUST.CUST_SEQ = TO_NUMBER(SUBSTR(CD.ALOC_CTRL_DTL_CD, -6))
+                                               AND OFC.REP_TRD_CD = CD.TRD_CD
+                                               AND OFC.REP_SUB_TRD_CD = CD.SUB_TRD_CD
+                                               AND OFC.RLANE_CD = CD.RLANE_CD
+                                               AND OFC.DIR_CD = CD.DIR_CD
+                                               AND NOT EXISTS (SELECT 1
+                                                                  FROM SPC_MDL_CUST_CTRL     MC,
+                                                                       MDM_CUSTOMER          C
+                                                                 WHERE MC.TRD_CD = @[trade]
+                                                                   AND MC.COST_YRWK||'-'||MC.VER_SEQ = NVL((SELECT /*+ INDEX_DESC (M XPKSPC_MDL_VER_MST) */
+                                                                                                                   COST_YRWK||'-'||VER_SEQ
+                                                                                                              FROM SPC_MDL_VER_MST M
+                                                                                                             WHERE @[cost_yrwk] BETWEEN M.VER_ST_YRWK AND M.VER_END_YRWK
+                                                                                                               AND M.TRD_CD  = MC.TRD_CD
+                                                                                                               AND M.CFM_FLG = 'Y'
+                                                                                                               AND ROWNUM    = 1), '200001-1')
+                                                                   AND EXISTS (SELECT 'X' FROM SPC_MDL_CUST_REV_LANE R
+                                                                                WHERE R.TRD_CD = MC.TRD_CD
+                                                                                  AND R.COST_YRWK = MC.COST_YRWK
+                                                                                  AND R.VER_SEQ = MC.VER_SEQ
+                                                                                  AND R.CUST_CNT_CD      = MC.CUST_CNT_CD
+                                                                                  AND R.CUST_SEQ         = MC.CUST_SEQ
+                                                                                  AND R.RLANE_ADJ_QTY > 0
+                                                                                  AND R.DELT_FLG = 'N'
+                                                                                  AND R.SLS_RGN_OFC_CD = @[ofc_cd]
+                                                                               UNION ALL
+                                                                               SELECT 'X' FROM DUAL
+                                                                                WHERE MC.COST_YRWK||'-'||MC.VER_SEQ = '200001-1'
+                                                                               )
+                                                                   AND C.CUST_CNT_CD      = MC.CUST_CNT_CD
+                                                                   AND C.CUST_SEQ         = MC.CUST_SEQ                       
+                                                                   AND CUST.RVIS_CNTR_CUST_TP_CD = C.RVIS_CNTR_CUST_TP_CD
+                                                                   AND CUST.CUST_CNT_CD  = C.CUST_CNT_CD
+                                                                   AND CUST.CUST_SEQ   = C.CUST_SEQ
+                                                              )
+                                           )
+                                ) L
+                          WHERE NOT (RNUM > 1 AND SUB_TRD_CD IS NULL)
+                          START WITH RNUM = 1
+                          CONNECT BY PRIOR RNUM = RNUM - 1 AND PRIOR CUST_CNT_CD = CUST_CNT_CD AND PRIOR CUST_SEQ = CUST_SEQ
+                          GROUP BY CUST_CNT_CD,
+                                CUST_SEQ,
+                                CUST_NM,
+                                RVIS_CNTR_CUST_TP_CD,
+                                SUB_TRD_CD,
+                                SLS_OFC_CD
+                          ORDER BY CUST_CNT_CD,
+                                CUST_SEQ
+                       ) L
+                       , SPC_SLS_REP_CUST R
+                 WHERE 1=1
+                   AND R.DELT_FLG(+)      = 'N'
+                   AND NVL(R.INDIV_CUST_USE_FLG(+), 'N') = 'Y'
+                   AND R.TRD_CD(+)        = @[trade]
+                   AND R.CUST_MAPG_FLG(+) = 'Y'
+                   AND R.CUST_CNT_CD(+)   = L.CUST_CNT_CD
+                   AND R.CUST_SEQ(+)      = L.CUST_SEQ
+                   AND R.SLS_OFC_CD(+)    = L.SLS_OFC_CD
+                 ORDER BY CUST_NM, CUST_CTRL_CD 
+               )
+         WHERE 1=1 
+           AND CUST_CTRL_CD = 'C'
+        ) M,
+        (
+        SELECT CUST_CNT_CD,
+               CUST_SEQ   ,
+               SREP_CD    ,
+               SUBSTR(MAX(SYS_CONNECT_BY_PATH(SUB_TRD_CD, ',')), 2) AS SUB_TRD_CD
+          FROM (
+                  SELECT DISTINCT 
+                         CUST_CNT_CD,
+                         CUST_SEQ   ,
+                         SREP_CD    ,
+                         DECODE(SUB_TRD_CD, '*', '', SUB_TRD_CD) AS SUB_TRD_CD,
+                         DENSE_RANK() OVER (PARTITION BY CUST_CNT_CD, CUST_SEQ ORDER BY DECODE(SUB_TRD_CD, '*', '', SUB_TRD_CD)) AS RNUM
+                    FROM SPC_SLS_REP_CUST MC
+                   WHERE 1=1 
+                     AND DELT_FLG = 'N'
+                     AND NVL(INDIV_CUST_USE_FLG, 'N') = 'Y'
+                     AND TRD_CD      = @[trade]
+
+                     AND SLS_OFC_CD  IN (SELECT OFC_CD
+                                           FROM SPC_OFC_LVL
+                                          WHERE @[cost_yrwk]  BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK
+                                            AND N4TH_PRNT_OFC_CD = @[ofc_cd])
+
+                     AND CUST_MAPG_FLG = 'Y'
+               )
+         WHERE NOT (RNUM > 1 AND SUB_TRD_CD IS NULL)
+         START WITH RNUM = 1
+         CONNECT BY PRIOR RNUM = RNUM - 1 AND PRIOR CUST_CNT_CD = CUST_CNT_CD AND PRIOR CUST_SEQ = CUST_SEQ
+         GROUP BY CUST_CNT_CD ,
+               CUST_SEQ    ,
+               SREP_CD
+       ) C 
+ WHERE 1=1 
+   AND M.CUST_CNT_CD = C.CUST_CNT_CD(+)
+   AND M.CUST_SEQ    = C.CUST_SEQ(+)
+   AND M.SREP_CD     = C.SREP_CD(+)			]]></sql>
+			<params>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="cost_yrwk" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

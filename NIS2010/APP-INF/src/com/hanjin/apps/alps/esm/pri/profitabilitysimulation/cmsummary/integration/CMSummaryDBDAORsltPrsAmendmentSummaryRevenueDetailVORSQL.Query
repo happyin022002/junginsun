@@ -1,0 +1,1177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CMSummaryDBDAORsltPrsAmendmentSummaryRevenueDetailVORSQL">
+			<desc><![CDATA[2015.06.26 CHM-201536492 Split05-주간 MAS Open에 따른 타모듈 프로그램 적용 요청]]></desc>
+			<sql><![CDATA[
+WITH VW_CONTRACT_DT_LIST AS (
+	SELECT /*+ MATERIALIZE */
+		COST_YR || SUBSTR(SLS_TO_DT, 5, 2) AS COST_YRMON, COST_WK
+	FROM MAS_WK_PRD
+	WHERE (COST_YR || COST_WK) >=(@[frm_ctrt_eff_yr]  || @[frm_ctrt_eff_wk]) AND (COST_YR || COST_WK) <=(@[frm_ctrt_exp_yr] ||  @[frm_ctrt_exp_wk])
+)
+,VW_SUMMARY_WEEK AS (
+	SELECT /*+ MATERIALIZE */ SLS_FM_YRWK, SLS_FM_DT, SLS_TO_YRWK, SLS_TO_DT, WK_TP
+		, (SELECT COUNT(*) FROM MAS_WK_PRD PRD WHERE (    PRD.COST_YR || PRD.COST_WK >= MN.SLS_FM_YRWK AND PRD.COST_YR || PRD.COST_WK <= MN.SLS_TO_YRWK )) + DECODE(WK_TP, 1, 1, 0) AS TOT_WK
+        FROM (
+		SELECT   MIN(COST_YR || COST_WK) AS SLS_FM_YRWK, MIN(SLS_FM_DT) AS SLS_FM_DT ,MAX(COST_YR || COST_WK) AS SLS_TO_YRWK, MAX(SLS_TO_DT) AS SLS_TO_DT, WK_TP
+		FROM (
+			SELECT COST_YR, COST_WK, SLS_FM_DT, SLS_TO_DT
+				,CASE WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= SLS_TO_DT AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= SLS_FM_DT
+				THEN 0
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > SLS_TO_DT
+				THEN -1
+				ELSE 1
+                               END AS WK_TP
+			FROM MAS_WK_PRD
+			WHERE ( COST_YR || COST_WK >=(@[frm_smr_eff_yr] ||  @[frm_smr_eff_wk]) AND COST_YR || COST_WK <=(@[frm_smr_exp_yr] || @[frm_smr_exp_wk]))
+		)
+		GROUP BY WK_TP 
+	) MN
+)
+,VW_RFA_KEY_LIST AS (
+	SELECT /*+ MATERIALIZE LEADING(HDR SMRY @V0 SR_CST_DTL) USE_NL(HDR SMRY SR_CST_DTL) */
+		--HDR.RFA_NO, PKEY.PROP_NO, PKEY.AMDT_SEQ, SR_CST_DTL.PRS_YRMON, SR_CST_DTL.PRS_WK
+		HDR.RFA_NO, HDR.PROP_NO, HDR.AMDT_SEQ, SR_CST_DTL.PRS_YRMON, SR_CST_DTL.PRS_WK
+		,SR_CST_DTL.PRC_CTRT_TP_CD, SR_CST_DTL.PRC_CTRT_NO, SR_CST_DTL.SVC_SCP_CD
+		,SR_CST_DTL.VSL_SLAN_DIR_CD, SR_CST_DTL.TRD_CD, SR_CST_DTL.SUB_TRD_CD
+		,SR_CST_DTL.RLANE_CD, SR_CST_DTL.PRC_CGO_TP_CD, SR_CST_DTL.ORG_LOC_TP_CD
+		,SR_CST_DTL.ORG_LOC_DEF_CD, SR_CST_DTL.DEST_LOC_TP_CD, SR_CST_DTL.DEST_LOC_DEF_CD
+		,SR_CST_DTL.TEU_FRT_REV, SR_CST_DTL.PRS_RESPB_CM_UC_AMT, SR_CST_DTL.PRS_PFIT_CM_UC_AMT
+		,SR_CST_DTL.PRS_RESPB_OPFIT_UC_AMT, SR_CST_DTL.PRS_CRNT_LOD_QTY
+		,SR_CST_DTL.PRS_RESPB_CMPB_AMT, SR_CST_DTL.PRS_PFIT_CMPB_AMT
+		,SR_CST_DTL.PRS_RESPB_OPB_AMT, SCG.CHG_CD, SCG.SCG_AMT
+	FROM --PRI_RP_HDR HDR, VW_RFA_PROP_KEY PKEY
+		(
+			SELECT /*+ ORDERED USE_HASH(DUR DUR) INDEX_FFS(DUR XAK1PRI_RP_DUR) CACHE(DUR) CACHE(HDR) */
+			       HDR.RFA_NO, DUR.PROP_NO, DUR.AMDT_SEQ, DUR.CTRT_EFF_DT, DUR.CTRT_EXP_DT
+			       ,ROW_NUMBER() OVER (PARTITION BY HDR.RFA_NO, DUR.PROP_NO ORDER BY DUR.AMDT_SEQ DESC) RN 
+			--FROM VW_CONTRACT_DT CDT, PRI_RP_HDR HDR, PRI_RP_DUR DUR
+			FROM PRI_RP_DUR DUR, PRI_RP_HDR HDR
+			WHERE HDR.RFA_NO IS NOT NULL
+				AND HDR.PROP_NO  = DUR.PROP_NO
+				AND DUR.CTRT_EFF_DT >= TO_DATE(@[c_sls_fm_dt],'YYYYMMDD') AND DUR.CTRT_EXP_DT < TO_DATE(@[c_sls_to_dt],'YYYYMMDD') + 1         
+		) HDR
+		, PRI_PRS_CTRT_SMRY SMRY
+		,PRI_PRS_CTRT_SMRY_COST_DTL SR_CST_DTL, PRI_PRS_CTRT_SMRY_SCG_DTL SCG
+		--WHERE HDR.PROP_NO = PKEY.PROP_NO
+	WHERE HDR.RN = 1
+		AND HDR.RFA_NO = SMRY.PRC_CTRT_NO
+		AND SMRY.PRC_CTRT_TP_CD = 'R'
+		--AND (SMRY.PRS_YRMON, SMRY.PRS_WK) IN(SELECT COST_YRMON, COST_WK FROM VW_CONTRACT_DT_LIST)
+		AND (SMRY.PRS_YRMON, SMRY.PRS_WK) IN (SELECT /*+ QB_NAME(V0) */ COST_YRMON, COST_WK FROM VW_CONTRACT_DT_LIST WHERE COST_YRMON IS NOT NULL AND COST_WK IS NOT NULL)
+		AND SMRY.PRS_YRMON = SR_CST_DTL.PRS_YRMON
+		AND SMRY.PRS_WK = SR_CST_DTL.PRS_WK
+		AND SMRY.PRC_CTRT_TP_CD = SR_CST_DTL.PRC_CTRT_TP_CD
+		AND SMRY.PRC_CTRT_NO = SR_CST_DTL.PRC_CTRT_NO
+		AND SR_CST_DTL.PRS_YRMON = SCG.PRS_YRMON
+		AND SR_CST_DTL.PRS_WK = SCG.PRS_WK
+		AND SR_CST_DTL.PRC_CTRT_TP_CD = SCG.PRC_CTRT_TP_CD
+		AND SR_CST_DTL.PRC_CTRT_NO = SCG.PRC_CTRT_NO
+		AND SR_CST_DTL.SVC_SCP_CD = SCG.SVC_SCP_CD
+		AND SR_CST_DTL.VSL_SLAN_DIR_CD = SCG.VSL_SLAN_DIR_CD
+		AND SR_CST_DTL.TRD_CD = SCG.TRD_CD
+		AND SR_CST_DTL.SUB_TRD_CD = SCG.SUB_TRD_CD
+		AND SR_CST_DTL.RLANE_CD = SCG.RLANE_CD
+		AND SR_CST_DTL.PRC_CGO_TP_CD = SCG.PRC_CGO_TP_CD
+		AND SR_CST_DTL.ORG_LOC_TP_CD = SCG.ORG_LOC_TP_CD
+		AND SR_CST_DTL.ORG_LOC_DEF_CD = SCG.ORG_LOC_DEF_CD
+		AND SR_CST_DTL.DEST_LOC_TP_CD = SCG.DEST_LOC_TP_CD
+		AND SR_CST_DTL.DEST_LOC_DEF_CD = SCG.DEST_LOC_DEF_CD
+		AND HDR.RFA_NO IS NOT NULL
+		AND SR_CST_DTL.TRD_CD = @[frm_trd_cd]
+		AND SR_CST_DTL.VSL_SLAN_DIR_CD = @[frm_dir_cd]
+		#if(${frm_sub_trd_cd} != '')
+			AND SR_CST_DTL.SUB_TRD_CD = @[frm_sub_trd_cd]
+		#end
+		#if(${frm_rlane_cd} != '')
+			AND SR_CST_DTL.RLANE_CD IN (
+			#foreach( ${key} in ${rlane_list}) 
+				#if($velocityCount != 1 ) 
+					UNION ALL
+				#end
+				SELECT 
+						 '$key' 
+				FROM DUAL
+			#end
+			)
+		#end
+			 
+		#if(${frm_customer_type} == 'B')
+					AND SMRY.PRS_CUST_TP_CD IN ('I','A','O')
+		#elseif(${frm_customer_type} == 'N')
+					AND SMRY.PRS_CUST_TP_CD IN ('N')
+		#else 
+				AND SMRY.PRS_CUST_TP_CD IN ('I','A','O','N')
+		#end
+
+		#if(${frm_prop_ofc_cd} != '')
+					AND SMRY.PROP_OFC_CD = @[frm_prop_ofc_cd] -- REQUEST
+		#end
+
+		#if(${frm_prop_srep_cd} != '')
+					AND SMRY.RESPB_SREP_CD = @[frm_prop_srep_cd]
+		#end
+
+		#if(${frm_prop_apro_ofc_cd} != '')
+					AND SMRY.PROP_APRO_OFC_CD = @[frm_prop_apro_ofc_cd]
+		#end
+
+		#if( $cust_list.size() != 0 ) 
+			AND (SMRY.CUST_CNT_CD , SMRY.CUST_SEQ) IN (
+			#foreach( ${key} in ${cust_list}) 
+				#if($velocityCount != 1 ) 
+					UNION ALL
+				#end
+				SELECT 
+						substr('$key',1,2),substr('$key',3)
+				FROM DUAL
+			#end
+			)
+		#end 
+
+
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'R' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+
+
+
+
+)
+,VW_RFA_CONTRACT_KEY AS (
+	SELECT /*+ MATERIALIZE */ DISTINCT RFA_NO, PROP_NO, AMDT_SEQ
+	FROM VW_RFA_KEY_LIST
+)
+,VW_RFA_TOT_WEEK_PER_RFA_NO AS (
+	SELECT /*+ MATERIALIZE */  PROP_NO, AMDT_SEQ, RFA_NO
+		, ACTUAL_WK_CNT
+		, DECODE(ESTIMATE_WK_CNT, 1, 0, ESTIMATE_WK_CNT) AS ESTIMATE_WK_CNT
+		, REFER_WK_CNT
+        FROM (
+		SELECT  KLIST.PROP_NO, KLIST.AMDT_SEQ, KLIST.RFA_NO
+			,SUM(
+				CASE WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= PRD.SLS_TO_DT AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= PRD.SLS_FM_DT 
+				THEN 0
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT AND PRD.SLS_TO_DT >= @[s_sls_fm_dt]  
+				THEN 1
+				ELSE 0
+				END
+			) AS ACTUAL_WK_CNT
+			,SUM(
+				CASE WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= PRD.SLS_TO_DT AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= PRD.SLS_FM_DT 
+				THEN 1
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT 
+				THEN 0
+				WHEN PRD.SLS_TO_DT <= @[s_sls_to_dt]  
+				THEN 1
+				ELSE 0
+				END
+			) AS ESTIMATE_WK_CNT
+			,SUM(
+				CASE WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= PRD.SLS_TO_DT AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= PRD.SLS_FM_DT 
+				THEN 0
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT AND PRD.SLS_FM_DT >=  @[r_sls_fm_dt] AND PRD.SLS_FM_DT <= @[r_sls_to_dt] 
+				THEN 1
+				ELSE 0
+				END
+			) AS REFER_WK_CNT
+                 FROM PRI_RP_DUR DUR
+			, VW_RFA_CONTRACT_KEY KLIST
+			, MAS_WK_PRD PRD
+--                       , VW_SUMMARY_DT SDT
+--                       , VW_REFERENCE_DT RDT
+                 WHERE DUR.PROP_NO = KLIST.PROP_NO
+			AND DUR.AMDT_SEQ = KLIST.AMDT_SEQ
+			AND (  
+				(	TO_CHAR(DUR.CTRT_EFF_DT, 'YYYYMMDD') >= PRD.SLS_FM_DT
+					AND TO_CHAR(DUR.CTRT_EFF_DT, 'YYYYMMDD') <= PRD.SLS_TO_DT
+				) OR (    
+					TO_CHAR(DUR.CTRT_EXP_DT, 'YYYYMMDD') >= PRD.SLS_FM_DT
+					AND TO_CHAR(DUR.CTRT_EXP_DT, 'YYYYMMDD') <= PRD.SLS_TO_DT
+				) OR (    
+					TO_CHAR(DUR.CTRT_EFF_DT, 'YYYYMMDD') <= PRD.SLS_FM_DT
+					AND TO_CHAR(DUR.CTRT_EXP_DT, 'YYYYMMDD') >= PRD.SLS_TO_DT
+				)
+			)
+			AND PRD.COST_YR||COST_WK BETWEEN (@[frm_ctrt_eff_yr] || @[frm_ctrt_eff_wk]) AND (@[frm_ctrt_exp_yr] || @[frm_ctrt_exp_wk])
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'R' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+              GROUP BY KLIST.PROP_NO, KLIST.AMDT_SEQ, KLIST.RFA_NO
+	)
+)
+,VW_RFA_ACTUAL_VALUE AS (
+	SELECT   /*+ MATERIALIZE */
+		SUM(LOAD / DECODE(@[frm_pfmc_unit], 'FEU', 2, 'TEU', 1)) AS LOAD
+		, PRC_CTRT_NO
+		, RFA_NO
+		, MAX(WEEK_CNT) AS WEEK_CNT
+		, SUM(G_REV * LOAD) AS G_REV
+		, SUM(OFT_SURCHARGE * LOAD) AS OFT_SURCHARGE
+		, SUM(BUC_SURCHARGE * LOAD) AS BUC_SURCHARGE
+		, SUM(IFC_SURCHARGE * LOAD) AS IFC_SURCHARGE
+		, SUM(PSC_SURCHARGE * LOAD) AS PSC_SURCHARGE
+		, SUM(OTHERS_SURCHARGE * LOAD) AS OTHERS_SURCHARGE
+	FROM (
+		SELECT   CKEY.RFA_NO
+			, CKEY.PRC_CTRT_NO
+			, MAX(CKEY.PRS_CRNT_LOD_QTY) AS LOAD
+                        , MAX(WK_PER_SC.ACTUAL_WK_CNT) AS WEEK_CNT
+			, SUM(SCG_AMT) AS G_REV
+                        , SUM(
+				CASE WHEN CHG_CD IN('OFT') THEN 
+					SCG_AMT
+                                ELSE 
+					0
+				END
+			) AS OFT_SURCHARGE
+                        , SUM(
+				CASE WHEN CHG_CD IN('BUC', 'BAF', 'FRC') THEN 
+					SCG_AMT
+                                ELSE 
+					0
+				END
+			) AS BUC_SURCHARGE
+                        , SUM(
+				CASE WHEN CHG_CD IN('IFC', 'IFM', 'IFR') THEN 
+					SCG_AMT
+                                ELSE 
+					0
+				END
+			) AS IFC_SURCHARGE
+                        , SUM(
+				CASE WHEN CHG_CD IN('PSC', 'PSS') THEN 
+					SCG_AMT
+                                ELSE 
+					0
+				END
+			) AS PSC_SURCHARGE
+                        , SUM(
+				CASE WHEN CHG_CD NOT IN ('OFT', 'BUC', 'BAF', 'FRC', 'IFC', 'IFM', 'IFR', 'PSC', 'PSS') THEN 
+					SCG_AMT
+                                ELSE 
+					0
+				END
+			) AS OTHERS_SURCHARGE
+		FROM VW_RFA_KEY_LIST CKEY
+			, VW_SUMMARY_WEEK WK
+			,VW_RFA_TOT_WEEK_PER_RFA_NO WK_PER_SC
+		WHERE CKEY.RFA_NO = WK_PER_SC.RFA_NO
+			AND WK.WK_TP = -1
+			AND (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) >= WK.SLS_FM_YRWK
+			AND (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) <= WK.SLS_TO_YRWK
+#if( ${frm_ori_rout_cd} != '' )
+		-- origin
+		AND CKEY.ORG_LOC_DEF_CD= @[frm_ori_rout_cd]
+#end
+#if( ${frm_dest_rout_cd} != '' )
+		-- DEST
+		AND CKEY.DEST_LOC_TP_CD= @[frm_dest_rout_cd]
+#end
+
+-- BY CARGO TYPE
+#if (${crg_tp_str} != '' )
+			AND CKEY.PRC_CGO_TP_CD IN ( ${crg_tp_str} )
+#end
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'R' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+                GROUP BY CKEY.RFA_NO
+			, CKEY.PRS_YRMON
+			, CKEY.PRS_WK
+			, CKEY.PRC_CTRT_TP_CD
+                        , CKEY.PRC_CTRT_NO
+			, CKEY.SVC_SCP_CD
+			, CKEY.VSL_SLAN_DIR_CD
+			, CKEY.TRD_CD
+                        , CKEY.SUB_TRD_CD
+			, CKEY.RLANE_CD
+			, CKEY.PRC_CGO_TP_CD
+			, CKEY.ORG_LOC_TP_CD
+                        , CKEY.ORG_LOC_DEF_CD
+			, CKEY.DEST_LOC_TP_CD
+			, CKEY.DEST_LOC_DEF_CD
+	)
+	GROUP BY RFA_NO, PRC_CTRT_NO
+)
+,VW_RFA_EST_ACT_1ST_VALUE AS (
+     SELECT /*+ MATERIALIZE */
+		MN.PRC_CTRT_NO, MN.LOAD / MN.WEEK_CNT * MN.TOT_WK AS LOAD
+		, MN.G_REV / MN.WEEK_CNT * MN.TOT_WK AS G_REV
+		, MN.OFT_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK AS OFT_SURCHARGE
+		, MN.BUC_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK AS BUC_SURCHARGE
+		, MN.IFC_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK AS IFC_SURCHARGE
+		, MN.PSC_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK AS PSC_SURCHARGE
+		, MN.OTHERS_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK AS OTHERS_SURCHARGE
+		, MN.WEEK_CNT
+		, MN.TOT_WK
+        FROM (
+		SELECT   SUM(LOAD / DECODE(@[frm_pfmc_unit], 'FEU', 2, 'TEU', 1)) AS LOAD
+			, PRC_CTRT_NO
+			, RFA_NO
+			, MAX(WEEK_CNT) AS WEEK_CNT
+			, MAX(TOT_WK) AS TOT_WK
+			, SUM(G_REV * LOAD) AS G_REV
+			, SUM(OFT_SURCHARGE * LOAD) AS OFT_SURCHARGE
+			, SUM(BUC_SURCHARGE * LOAD) AS BUC_SURCHARGE
+			, SUM(IFC_SURCHARGE * LOAD) AS IFC_SURCHARGE
+			, SUM(PSC_SURCHARGE * LOAD) AS PSC_SURCHARGE
+			, SUM(OTHERS_SURCHARGE * LOAD) AS OTHERS_SURCHARGE
+		FROM (
+			SELECT  /*+ ORDERED USE_MERGE(CKEY WK) USE_HASH(WK_PER_SC) */
+				CKEY.RFA_NO, CKEY.PRC_CTRT_NO
+				, MAX(CKEY.PRS_CRNT_LOD_QTY) AS LOAD
+				, MAX(WK_PER_SC.REFER_WK_CNT) AS WEEK_CNT
+				, MAX(WK_PER_SC.ESTIMATE_WK_CNT) AS TOT_WK
+				, SUM(SCG_AMT) AS G_REV
+				, SUM(
+					CASE WHEN CHG_CD IN('OFT') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS OFT_SURCHARGE
+				,SUM(
+					CASE WHEN CHG_CD IN('BUC', 'BAF', 'FRC') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS BUC_SURCHARGE
+				,SUM(
+					CASE WHEN CHG_CD IN('IFC', 'IFM', 'IFR') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS IFC_SURCHARGE
+				,SUM(
+					CASE WHEN CHG_CD IN('PSC', 'PSS') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS PSC_SURCHARGE
+				,SUM(
+					CASE WHEN CHG_CD NOT IN ('OFT', 'BUC', 'BAF', 'FRC' ,'IFC', 'IFM', 'IFR', 'PSC'	 ,'PSS') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS OTHERS_SURCHARGE
+			FROM VW_RFA_KEY_LIST CKEY--, VW_REFERENCE_WEEK WK
+				,VW_RFA_TOT_WEEK_PER_RFA_NO WK_PER_SC
+			WHERE (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) >=  @[r_fm_yrwk]
+				AND (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) <=  @[r_to_yrwk]
+				AND CKEY.RFA_NO = WK_PER_SC.RFA_NO
+#if( ${frm_ori_rout_cd} != '' )
+		-- origin
+		AND CKEY.ORG_LOC_DEF_CD= @[frm_ori_rout_cd]
+#end
+#if( ${frm_dest_rout_cd} != '' )
+		-- DEST
+		AND CKEY.DEST_LOC_TP_CD= @[frm_dest_rout_cd]
+#end
+-- BY CARGO TYPE
+#if (${crg_tp_str} != '' )
+			AND CKEY.PRC_CGO_TP_CD IN ( ${crg_tp_str} )
+#end
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'R' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+			GROUP BY CKEY.RFA_NO
+				, CKEY.PRS_YRMON
+				, CKEY.PRS_WK
+				, CKEY.PRC_CTRT_TP_CD
+				, CKEY.PRC_CTRT_NO
+				, CKEY.SVC_SCP_CD
+				, CKEY.VSL_SLAN_DIR_CD
+				, CKEY.TRD_CD
+				, CKEY.SUB_TRD_CD
+				, CKEY.RLANE_CD
+				, CKEY.PRC_CGO_TP_CD
+				, CKEY.ORG_LOC_TP_CD
+				, CKEY.ORG_LOC_DEF_CD
+				, CKEY.DEST_LOC_TP_CD
+				, CKEY.DEST_LOC_DEF_CD
+		)
+		GROUP BY RFA_NO, PRC_CTRT_NO
+	) MN
+)
+,VW_RFA_EST_ACT_2ND_VALUE AS (
+	SELECT /*+ MATERIALIZE */
+		MN.PRC_CTRT_NO
+		, DECODE( MN.WEEK_CNT,0,0,MN.LOAD / MN.WEEK_CNT * MN.TOT_WK) AS LOAD
+		, DECODE( MN.WEEK_CNT,0,0,MN.G_REV / MN.WEEK_CNT * MN.TOT_WK) AS G_REV
+		, DECODE( MN.WEEK_CNT,0,0,MN.OFT_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK) AS OFT_SURCHARGE
+		, DECODE( MN.WEEK_CNT,0,0,MN.BUC_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK) AS BUC_SURCHARGE
+		, DECODE( MN.WEEK_CNT,0,0,MN.IFC_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK) AS IFC_SURCHARGE
+		, DECODE( MN.WEEK_CNT,0,0,MN.PSC_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK) AS PSC_SURCHARGE
+		, DECODE( MN.WEEK_CNT,0,0,MN.OTHERS_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK) AS OTHERS_SURCHARGE
+		, MN.WEEK_CNT
+		, MN.TOT_WK
+	FROM (
+		SELECT   SUM(LOAD / DECODE(@[frm_pfmc_unit], 'FEU', 2, 'TEU', 1)) AS LOAD
+			, PRC_CTRT_NO
+			, RFA_NO
+			, MAX(WEEK_CNT) AS WEEK_CNT
+			, MAX(TOT_WK) AS TOT_WK
+			, SUM(G_REV * LOAD) AS G_REV
+			, SUM(OFT_SURCHARGE * LOAD) AS OFT_SURCHARGE
+			, SUM(BUC_SURCHARGE * LOAD) AS BUC_SURCHARGE
+			, SUM(IFC_SURCHARGE * LOAD) AS IFC_SURCHARGE
+			, SUM(PSC_SURCHARGE * LOAD) AS PSC_SURCHARGE
+			, SUM(OTHERS_SURCHARGE * LOAD) AS OTHERS_SURCHARGE
+		FROM (
+			SELECT   /*+ ORDERED SWAP_JOIN_INPUTS(@V1) USE_HASH(CKEY WK_PER_SC) */
+				CKEY.RFA_NO
+				, CKEY.PRC_CTRT_NO
+				, MAX(CKEY.PRS_CRNT_LOD_QTY) AS LOAD
+				, MAX(WK_PER_SC.ACTUAL_WK_CNT + WK_PER_SC.ESTIMATE_WK_CNT) AS WEEK_CNT
+				, MAX(WK_PER_SC.ESTIMATE_WK_CNT) AS TOT_WK
+				, SUM(SCG_AMT) AS G_REV
+				, SUM(
+					CASE WHEN CHG_CD IN('OFT') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS OFT_SURCHARGE
+				, SUM(
+					CASE WHEN CHG_CD IN('BUC', 'BAF', 'FRC') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS BUC_SURCHARGE
+				,SUM(
+					CASE WHEN CHG_CD IN('IFC', 'IFM', 'IFR') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS IFC_SURCHARGE
+				,SUM(
+					CASE WHEN CHG_CD IN('PSC', 'PSS') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS PSC_SURCHARGE
+				,SUM(
+					CASE WHEN CHG_CD NOT IN	('OFT', 'BUC', 'BAF', 'FRC' ,'IFC', 'IFM', 'IFR', 'PSC'	,'PSS')	THEN
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS OTHERS_SURCHARGE
+			FROM VW_RFA_KEY_LIST CKEY
+				, VW_RFA_TOT_WEEK_PER_RFA_NO WK_PER_SC
+			WHERE NOT EXISTS( SELECT /*+ QB_NAME(V1) */ 'F'	FROM VW_RFA_EST_ACT_1ST_VALUE V1 WHERE V1.PRC_CTRT_NO = CKEY.PRC_CTRT_NO)
+				AND CKEY.RFA_NO = WK_PER_SC.RFA_NO
+#if( ${frm_ori_rout_cd} != '' )
+		-- origin
+		AND CKEY.ORG_LOC_DEF_CD= @[frm_ori_rout_cd]
+#end
+#if( ${frm_dest_rout_cd} != '' )
+		-- DEST
+		AND CKEY.DEST_LOC_TP_CD= @[frm_dest_rout_cd]
+#end
+-- BY CARGO TYPE
+#if (${crg_tp_str} != '' )
+			AND CKEY.PRC_CGO_TP_CD IN ( ${crg_tp_str} )
+#end
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'R' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+			GROUP BY CKEY.RFA_NO
+				, CKEY.PRS_YRMON
+				, CKEY.PRS_WK
+				, CKEY.PRC_CTRT_TP_CD
+				, CKEY.PRC_CTRT_NO
+				, CKEY.SVC_SCP_CD
+				, CKEY.VSL_SLAN_DIR_CD
+				, CKEY.TRD_CD
+				, CKEY.SUB_TRD_CD
+				, CKEY.RLANE_CD
+				, CKEY.PRC_CGO_TP_CD
+				, CKEY.ORG_LOC_TP_CD
+				, CKEY.ORG_LOC_DEF_CD
+				, CKEY.DEST_LOC_TP_CD
+				, CKEY.DEST_LOC_DEF_CD
+		)
+		GROUP BY RFA_NO, PRC_CTRT_NO
+	) MN
+)
+ -----------------------------------------
+ -- 이하 SC
+-- 기준이 되는 PROP_NO를 조회
+,VW_PROP_KEY AS (
+	SELECT   /*+ MATERIALIZE */ DUR.PROP_NO, MAX(DUR.AMDT_SEQ) AS AMDT_SEQ
+	FROM PRI_SP_DUR DUR
+	WHERE CTRT_EFF_DT >= TO_DATE(@[c_sls_fm_dt],'YYYYMMDD')
+		AND CTRT_EXP_DT < TO_DATE(@[c_sls_to_dt],'YYYYMMDD') + 1
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'S' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+	GROUP BY DUR.PROP_NO
+ )
+,VW_KEY_LIST AS (
+	SELECT /*+ MATERIALIZE LEADING(PKEY HDR SMRY @V0 SR_CST_DTL) USE_NL(HDR PKEY SMRY SR_CST_DTL) */
+		HDR.SC_NO, PKEY.PROP_NO, PKEY.AMDT_SEQ, SR_CST_DTL.PRS_YRMON, SR_CST_DTL.PRS_WK
+		,SR_CST_DTL.PRC_CTRT_TP_CD, SR_CST_DTL.PRC_CTRT_NO, SR_CST_DTL.SVC_SCP_CD
+		,SR_CST_DTL.VSL_SLAN_DIR_CD, SR_CST_DTL.TRD_CD, SR_CST_DTL.SUB_TRD_CD
+		,SR_CST_DTL.RLANE_CD, SR_CST_DTL.PRC_CGO_TP_CD, SR_CST_DTL.ORG_LOC_TP_CD
+		,SR_CST_DTL.ORG_LOC_DEF_CD, SR_CST_DTL.DEST_LOC_TP_CD, SR_CST_DTL.DEST_LOC_DEF_CD
+		,SR_CST_DTL.TEU_FRT_REV, SR_CST_DTL.PRS_RESPB_CM_UC_AMT, SR_CST_DTL.PRS_PFIT_CM_UC_AMT
+		,SR_CST_DTL.PRS_RESPB_OPFIT_UC_AMT, SR_CST_DTL.PRS_CRNT_LOD_QTY
+		,SR_CST_DTL.PRS_RESPB_CMPB_AMT, SR_CST_DTL.PRS_PFIT_CMPB_AMT
+		,SR_CST_DTL.PRS_RESPB_OPB_AMT, SCG.CHG_CD, SCG.SCG_AMT
+	FROM VW_PROP_KEY PKEY, PRI_SP_HDR HDR
+		, PRI_PRS_CTRT_SMRY SMRY
+		, PRI_PRS_CTRT_SMRY_COST_DTL SR_CST_DTL
+		, PRI_PRS_CTRT_SMRY_SCG_DTL SCG
+	WHERE HDR.PROP_NO = PKEY.PROP_NO
+		AND HDR.SC_NO = SMRY.PRC_CTRT_NO
+		AND SMRY.PRC_CTRT_TP_CD = 'S'
+		AND (SMRY.PRS_YRMON, SMRY.PRS_WK) IN(SELECT /*+ QB_NAME(V0) */ COST_YRMON, COST_WK FROM VW_CONTRACT_DT_LIST WHERE COST_YRMON IS NOT NULL AND COST_WK IS NOT NULL)
+		AND SMRY.PRS_YRMON = SR_CST_DTL.PRS_YRMON
+		AND SMRY.PRS_WK = SR_CST_DTL.PRS_WK
+		AND SMRY.PRC_CTRT_TP_CD = SR_CST_DTL.PRC_CTRT_TP_CD
+		AND SMRY.PRC_CTRT_NO = SR_CST_DTL.PRC_CTRT_NO
+		AND SR_CST_DTL.PRS_YRMON = SCG.PRS_YRMON
+		AND SR_CST_DTL.PRS_WK = SCG.PRS_WK
+		AND SR_CST_DTL.PRC_CTRT_TP_CD = SCG.PRC_CTRT_TP_CD
+		AND SR_CST_DTL.PRC_CTRT_NO = SCG.PRC_CTRT_NO
+		AND SR_CST_DTL.SVC_SCP_CD = SCG.SVC_SCP_CD
+		AND SR_CST_DTL.VSL_SLAN_DIR_CD = SCG.VSL_SLAN_DIR_CD
+		AND SR_CST_DTL.TRD_CD = SCG.TRD_CD
+		AND SR_CST_DTL.SUB_TRD_CD = SCG.SUB_TRD_CD
+		AND SR_CST_DTL.RLANE_CD = SCG.RLANE_CD
+		AND SR_CST_DTL.PRC_CGO_TP_CD = SCG.PRC_CGO_TP_CD
+		AND SR_CST_DTL.ORG_LOC_TP_CD = SCG.ORG_LOC_TP_CD
+		AND SR_CST_DTL.ORG_LOC_DEF_CD = SCG.ORG_LOC_DEF_CD
+		AND SR_CST_DTL.DEST_LOC_TP_CD = SCG.DEST_LOC_TP_CD
+		AND SR_CST_DTL.DEST_LOC_DEF_CD = SCG.DEST_LOC_DEF_CD
+		AND HDR.SC_NO IS NOT NULL
+		AND SR_CST_DTL.TRD_CD = @[frm_trd_cd]
+		AND SR_CST_DTL.VSL_SLAN_DIR_CD = @[frm_dir_cd]
+		#if(${frm_sub_trd_cd} != '')
+			AND SR_CST_DTL.SUB_TRD_CD = @[frm_sub_trd_cd]
+		#end
+		#if(${frm_rlane_cd} != '')
+			AND SR_CST_DTL.RLANE_CD IN (
+			#foreach( ${key} in ${rlane_list}) 
+				#if($velocityCount != 1 ) 
+					UNION ALL
+				#end
+				SELECT 
+						 '$key' 
+				FROM DUAL
+			#end
+			)
+		#end
+			 
+		#if(${frm_customer_type} == 'B')
+					AND SMRY.PRS_CUST_TP_CD IN ('I','A','O')
+		#elseif(${frm_customer_type} == 'N')
+					AND SMRY.PRS_CUST_TP_CD IN ('N')
+		#else 
+				AND SMRY.PRS_CUST_TP_CD IN ('I','A','O','N')
+		#end
+
+		#if(${frm_prop_ofc_cd} != '')
+					AND SMRY.PROP_OFC_CD = @[frm_prop_ofc_cd] -- REQUEST
+		#end
+
+		#if(${frm_prop_srep_cd} != '')
+					AND SMRY.RESPB_SREP_CD = @[frm_prop_srep_cd]
+		#end
+
+		#if(${frm_prop_apro_ofc_cd} != '')
+					AND SMRY.PROP_APRO_OFC_CD = @[frm_prop_apro_ofc_cd]
+		#end
+
+		#if( $cust_list.size() != 0 ) 
+			AND (SMRY.CUST_CNT_CD , SMRY.CUST_SEQ) IN (
+			#foreach( ${key} in ${cust_list}) 
+				#if($velocityCount != 1 ) 
+					UNION ALL
+				#end
+				SELECT 
+						substr('$key',1,2),substr('$key',3)
+				FROM DUAL
+			#end
+			)
+		#end 
+ 
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'S' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+)
+,VW_CONTRACT_KEY AS (
+     SELECT /*+ MATERIALIZE */  DISTINCT SC_NO, PROP_NO, AMDT_SEQ
+        FROM VW_KEY_LIST
+)
+,VW_TOT_WEEK_PER_SC_NO AS (
+	SELECT /*+ MATERIALIZE */
+		PROP_NO, AMDT_SEQ, SC_NO, ACTUAL_WK_CNT
+		,DECODE(ESTIMATE_WK_CNT, 1, 0, ESTIMATE_WK_CNT) AS ESTIMATE_WK_CNT
+		, REFER_WK_CNT
+	FROM (
+		SELECT   KLIST.PROP_NO, KLIST.AMDT_SEQ, KLIST.SC_NO
+			,SUM(
+				CASE WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= PRD.SLS_TO_DT AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= PRD.SLS_FM_DT 
+				THEN 0
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT AND PRD.SLS_TO_DT >= @[s_sls_fm_dt] 
+				THEN 1
+				ELSE 0
+				END
+			) AS ACTUAL_WK_CNT
+			,SUM(
+				CASE WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= PRD.SLS_TO_DT AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= PRD.SLS_FM_DT
+				THEN 1
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT THEN 0 
+				WHEN PRD.SLS_TO_DT <= @[s_sls_to_dt]
+				THEN 1
+				ELSE 0
+				END
+			) AS ESTIMATE_WK_CNT
+			,SUM(
+				CASE WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= PRD.SLS_TO_DT AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= PRD.SLS_FM_DT
+				THEN 0
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT AND PRD.SLS_FM_DT >= @[r_sls_fm_dt] AND PRD.SLS_FM_DT <= @[r_sls_to_dt] 
+				THEN 1
+				ELSE 0
+				END
+			) AS REFER_WK_CNT
+		FROM PRI_SP_DUR DUR
+			, VW_CONTRACT_KEY KLIST
+			, MAS_WK_PRD PRD
+		--                       , VW_SUMMARY_DT SDT
+		--                       , VW_REFERENCE_DT RDT
+		WHERE DUR.PROP_NO = KLIST.PROP_NO
+			AND DUR.AMDT_SEQ = KLIST.AMDT_SEQ
+			AND (  
+				(    
+					TO_CHAR(DUR.CTRT_EFF_DT, 'YYYYMMDD') >= PRD.SLS_FM_DT
+					AND TO_CHAR(DUR.CTRT_EFF_DT, 'YYYYMMDD') <= PRD.SLS_TO_DT
+				) OR (    
+					TO_CHAR(DUR.CTRT_EXP_DT, 'YYYYMMDD') >= PRD.SLS_FM_DT
+					AND TO_CHAR(DUR.CTRT_EXP_DT, 'YYYYMMDD') <= PRD.SLS_TO_DT
+				) OR (    
+					TO_CHAR(DUR.CTRT_EFF_DT, 'YYYYMMDD') <= PRD.SLS_FM_DT
+					AND TO_CHAR(DUR.CTRT_EXP_DT, 'YYYYMMDD') >= PRD.SLS_TO_DT
+				)
+			)
+			AND PRD.COST_YR||COST_WK BETWEEN (@[frm_ctrt_eff_yr] || @[frm_ctrt_eff_wk]) AND (@[frm_ctrt_exp_yr] || @[frm_ctrt_exp_wk])
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'S' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+		GROUP BY KLIST.PROP_NO, KLIST.AMDT_SEQ, KLIST.SC_NO
+	)
+)
+,VW_ACTUAL_VALUE AS (
+	SELECT   /*+ MATERIALIZE */
+		SUM(LOAD / DECODE(@[frm_pfmc_unit], 'FEU', 2, 'TEU', 1)) AS LOAD
+		, PRC_CTRT_NO
+		, SC_NO
+		,MAX(WEEK_CNT) AS WEEK_CNT
+		, SUM(G_REV * LOAD) AS G_REV
+		,SUM(OFT_SURCHARGE * LOAD) AS OFT_SURCHARGE
+		,SUM(BUC_SURCHARGE * LOAD) AS BUC_SURCHARGE
+		,SUM(IFC_SURCHARGE * LOAD) AS IFC_SURCHARGE
+		,SUM(PSC_SURCHARGE * LOAD) AS PSC_SURCHARGE
+		,SUM(OTHERS_SURCHARGE * LOAD) AS OTHERS_SURCHARGE
+	FROM (
+		SELECT   /*+ USE_HASH(CKEY WK WK_PER_SC)*/
+			CKEY.SC_NO, CKEY.PRC_CTRT_NO
+			, MAX(CKEY.PRS_CRNT_LOD_QTY) AS LOAD
+			, MAX(WK_PER_SC.ACTUAL_WK_CNT) AS WEEK_CNT
+			, SUM(SCG_AMT) AS G_REV
+			, SUM(
+				CASE WHEN CHG_CD IN('OFT') THEN 
+					SCG_AMT
+				ELSE 
+					0
+				END
+			) AS OFT_SURCHARGE
+			,SUM(
+				CASE WHEN CHG_CD IN('BUC', 'BAF', 'FRC') THEN 
+					SCG_AMT
+				ELSE 
+					0
+				END
+			) AS BUC_SURCHARGE
+			,SUM(
+				CASE WHEN CHG_CD IN('IFC', 'IFM', 'IFR') THEN
+					SCG_AMT
+				ELSE 
+					0
+				END
+			) AS IFC_SURCHARGE
+			,SUM(
+				CASE WHEN CHG_CD IN('PSC', 'PSS') THEN 
+					SCG_AMT
+				ELSE 
+					0
+				END
+			) AS PSC_SURCHARGE
+			,SUM(
+				CASE WHEN CHG_CD NOT IN ('OFT', 'BUC', 'BAF', 'FRC', 'IFC', 'IFM', 'IFR', 'PSC', 'PSS')	THEN
+					SCG_AMT
+				ELSE 
+					0
+				END
+			) AS OTHERS_SURCHARGE
+		FROM VW_KEY_LIST CKEY
+			, VW_SUMMARY_WEEK WK
+			, VW_TOT_WEEK_PER_SC_NO WK_PER_SC
+		WHERE CKEY.SC_NO = WK_PER_SC.SC_NO
+			AND WK.WK_TP = -1
+			AND (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) >= WK.SLS_FM_YRWK
+			AND (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) <= WK.SLS_TO_YRWK
+#if( ${frm_ori_rout_cd} != '' )
+		-- origin
+		AND CKEY.ORG_LOC_DEF_CD= @[frm_ori_rout_cd]
+#end
+#if( ${frm_dest_rout_cd} != '' )
+		-- DEST
+		AND CKEY.DEST_LOC_TP_CD= @[frm_dest_rout_cd]
+#end
+-- BY CARGO TYPE
+#if (${crg_tp_str} != '' )
+			AND CKEY.PRC_CGO_TP_CD IN ( ${crg_tp_str} )
+#end
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'S' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+		GROUP BY CKEY.SC_NO
+			, CKEY.PRS_YRMON
+			, CKEY.PRS_WK
+			, CKEY.PRC_CTRT_TP_CD
+			, CKEY.PRC_CTRT_NO
+			, CKEY.SVC_SCP_CD
+			, CKEY.VSL_SLAN_DIR_CD
+			, CKEY.TRD_CD
+			, CKEY.SUB_TRD_CD
+			, CKEY.RLANE_CD
+			, CKEY.PRC_CGO_TP_CD
+			, CKEY.ORG_LOC_TP_CD
+			, CKEY.ORG_LOC_DEF_CD
+			, CKEY.DEST_LOC_TP_CD
+			, CKEY.DEST_LOC_DEF_CD
+	)
+	GROUP BY SC_NO, PRC_CTRT_NO
+)
+,VW_EST_ACT_1ST_VALUE AS (
+	SELECT /*+ MATERIALIZE */
+		MN.PRC_CTRT_NO, MN.LOAD / MN.WEEK_CNT * MN.TOT_WK AS LOAD
+		, MN.G_REV / MN.WEEK_CNT * MN.TOT_WK AS G_REV
+		, MN.OFT_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK AS OFT_SURCHARGE
+		, MN.BUC_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK AS BUC_SURCHARGE
+		, MN.IFC_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK AS IFC_SURCHARGE
+		, MN.PSC_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK AS PSC_SURCHARGE
+		, MN.OTHERS_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK AS OTHERS_SURCHARGE
+		, MN.WEEK_CNT
+		, MN.TOT_WK
+	FROM (
+		SELECT   SUM(LOAD / DECODE(@[frm_pfmc_unit], 'FEU', 2, 'TEU', 1)) AS LOAD
+			, PRC_CTRT_NO
+			, SC_NO
+			, MAX(WEEK_CNT) AS WEEK_CNT, MAX(TOT_WK) AS TOT_WK
+			, SUM(G_REV * LOAD) AS G_REV
+			, SUM(OFT_SURCHARGE * LOAD) AS OFT_SURCHARGE
+			, SUM(BUC_SURCHARGE * LOAD) AS BUC_SURCHARGE
+			, SUM(IFC_SURCHARGE * LOAD) AS IFC_SURCHARGE
+			, SUM(PSC_SURCHARGE * LOAD) AS PSC_SURCHARGE
+			, SUM(OTHERS_SURCHARGE * LOAD) AS OTHERS_SURCHARGE
+		FROM (
+			SELECT   /*+USE_HASH(CKEY WK WK_PER_SC)*/
+				CKEY.SC_NO
+				, CKEY.PRC_CTRT_NO
+				, MAX(CKEY.PRS_CRNT_LOD_QTY) AS LOAD
+				, MAX(WK_PER_SC.REFER_WK_CNT) AS WEEK_CNT
+				, MAX(WK_PER_SC.ESTIMATE_WK_CNT) AS TOT_WK
+				, SUM(SCG_AMT) AS G_REV
+				, SUM(
+					CASE WHEN CHG_CD IN('OFT') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS OFT_SURCHARGE
+				, SUM(
+					CASE WHEN CHG_CD IN('BUC', 'BAF', 'FRC') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS BUC_SURCHARGE
+				, SUM(
+					CASE WHEN CHG_CD IN('IFC', 'IFM', 'IFR') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS IFC_SURCHARGE
+				, SUM(
+					CASE WHEN CHG_CD IN('PSC', 'PSS') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS PSC_SURCHARGE
+				, SUM(
+					CASE WHEN CHG_CD NOT IN	('OFT', 'BUC', 'BAF', 'FRC','IFC', 'IFM', 'IFR', 'PSC','PSS') THEN
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS OTHERS_SURCHARGE
+			FROM VW_KEY_LIST CKEY 
+			,VW_TOT_WEEK_PER_SC_NO WK_PER_SC
+			WHERE (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) >= @[r_fm_yrwk] AND (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) <= @[r_to_yrwk]
+				AND CKEY.SC_NO = WK_PER_SC.SC_NO
+#if( ${frm_ori_rout_cd} != '' )
+		-- origin
+		AND CKEY.ORG_LOC_DEF_CD= @[frm_ori_rout_cd]
+#end
+#if( ${frm_dest_rout_cd} != '' )
+		-- DEST
+		AND CKEY.DEST_LOC_TP_CD= @[frm_dest_rout_cd]
+#end
+-- BY CARGO TYPE
+#if (${crg_tp_str} != '' )
+			AND CKEY.PRC_CGO_TP_CD IN ( ${crg_tp_str} )
+#end
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'S' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+			GROUP BY CKEY.SC_NO
+				, CKEY.PRS_YRMON
+				, CKEY.PRS_WK
+				, CKEY.PRC_CTRT_TP_CD
+				, CKEY.PRC_CTRT_NO
+				, CKEY.SVC_SCP_CD
+				, CKEY.VSL_SLAN_DIR_CD
+				, CKEY.TRD_CD
+				, CKEY.SUB_TRD_CD
+				, CKEY.RLANE_CD
+				, CKEY.PRC_CGO_TP_CD
+				, CKEY.ORG_LOC_TP_CD
+				, CKEY.ORG_LOC_DEF_CD
+				, CKEY.DEST_LOC_TP_CD
+				, CKEY.DEST_LOC_DEF_CD
+		)
+		GROUP BY SC_NO, PRC_CTRT_NO
+	) MN
+)
+,VW_EST_ACT_2ND_VALUE AS (
+	SELECT /*+ MATERIALIZE */
+		MN.PRC_CTRT_NO
+		, DECODE(MN.WEEK_CNT,0,0,MN.LOAD / MN.WEEK_CNT * MN.TOT_WK) AS LOAD
+		, DECODE(MN.WEEK_CNT,0,0,MN.G_REV / MN.WEEK_CNT * MN.TOT_WK) AS G_REV
+		, DECODE(MN.WEEK_CNT,0,0,MN.OFT_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK) AS OFT_SURCHARGE
+		, DECODE(MN.WEEK_CNT,0,0,MN.BUC_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK) AS BUC_SURCHARGE
+		, DECODE(MN.WEEK_CNT,0,0,MN.IFC_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK) AS IFC_SURCHARGE
+		, DECODE(MN.WEEK_CNT,0,0,MN.PSC_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK) AS PSC_SURCHARGE
+		, DECODE(MN.WEEK_CNT,0,0,MN.OTHERS_SURCHARGE / MN.WEEK_CNT * MN.TOT_WK) AS OTHERS_SURCHARGE
+		, MN.WEEK_CNT
+		, MN.TOT_WK
+	FROM (
+		SELECT   SUM(LOAD / DECODE(@[frm_pfmc_unit], 'FEU', 2, 'TEU', 1)) AS LOAD
+			, PRC_CTRT_NO
+			, SC_NO
+			, MAX(WEEK_CNT) AS WEEK_CNT
+			, MAX(TOT_WK) AS TOT_WK
+			, SUM(G_REV * LOAD) AS G_REV
+			, SUM(OFT_SURCHARGE * LOAD) AS OFT_SURCHARGE
+			, SUM(BUC_SURCHARGE * LOAD) AS BUC_SURCHARGE
+			, SUM(IFC_SURCHARGE * LOAD) AS IFC_SURCHARGE
+			, SUM(PSC_SURCHARGE * LOAD) AS PSC_SURCHARGE
+			, SUM(OTHERS_SURCHARGE * LOAD) AS OTHERS_SURCHARGE
+		FROM (
+			SELECT   /*+ ORDERED SWAP_JOIN_INPUTS(@V1) USE_HASH(CKEY WK_PER_SC) */
+				CKEY.SC_NO
+				, CKEY.PRC_CTRT_NO
+				, MAX(CKEY.PRS_CRNT_LOD_QTY) AS LOAD
+				, MAX(WK_PER_SC.ACTUAL_WK_CNT + WK_PER_SC.ESTIMATE_WK_CNT) AS WEEK_CNT
+				, MAX(WK_PER_SC.ESTIMATE_WK_CNT) AS TOT_WK
+				, SUM(SCG_AMT) AS G_REV
+				, SUM(
+					CASE WHEN CHG_CD IN('OFT') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS OFT_SURCHARGE
+				, SUM(
+					CASE WHEN CHG_CD IN('BUC', 'BAF', 'FRC') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS BUC_SURCHARGE
+				, SUM(
+					CASE WHEN CHG_CD IN('IFC', 'IFM', 'IFR') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS IFC_SURCHARGE
+				, SUM(
+					CASE WHEN CHG_CD IN('PSC', 'PSS') THEN 
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS PSC_SURCHARGE
+				, SUM(
+					CASE WHEN CHG_CD NOT IN	('OFT', 'BUC', 'BAF', 'FRC','IFC', 'IFM', 'IFR', 'PSC','PSS') THEN
+						SCG_AMT
+					ELSE 
+						0
+					END
+				) AS OTHERS_SURCHARGE
+			FROM VW_KEY_LIST CKEY
+				, VW_TOT_WEEK_PER_SC_NO WK_PER_SC
+			WHERE NOT EXISTS(SELECT /*+ QB_NAME(V1) */ 'F' FROM VW_EST_ACT_1ST_VALUE V1 WHERE V1.PRC_CTRT_NO = CKEY.PRC_CTRT_NO)
+				AND CKEY.SC_NO = WK_PER_SC.SC_NO
+#if( ${frm_ori_rout_cd} != '' )
+		-- origin
+		AND CKEY.ORG_LOC_DEF_CD= @[frm_ori_rout_cd]
+#end
+#if( ${frm_dest_rout_cd} != '' )
+		-- DEST
+		AND CKEY.DEST_LOC_TP_CD= @[frm_dest_rout_cd]
+#end
+-- BY CARGO TYPE
+#if (${crg_tp_str} != '' )
+			AND CKEY.PRC_CGO_TP_CD IN ( ${crg_tp_str} )
+#end
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'S' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+			GROUP BY CKEY.SC_NO
+				, CKEY.PRS_YRMON
+				, CKEY.PRS_WK
+				, CKEY.PRC_CTRT_TP_CD
+				, CKEY.PRC_CTRT_NO
+				, CKEY.SVC_SCP_CD
+				, CKEY.VSL_SLAN_DIR_CD
+				, CKEY.TRD_CD
+				, CKEY.SUB_TRD_CD
+				, CKEY.RLANE_CD
+				, CKEY.PRC_CGO_TP_CD
+				, CKEY.ORG_LOC_TP_CD
+				, CKEY.ORG_LOC_DEF_CD
+				, CKEY.DEST_LOC_TP_CD
+				, CKEY.DEST_LOC_DEF_CD
+		)
+		GROUP BY SC_NO, PRC_CTRT_NO
+	) MN
+)
+SELECT   'SC' AS CONTRACT_NM
+	, A_SC_NO
+	, E1_SC_NO
+	, E2_SC_NO
+	, A1_LOAD
+	, A1_G_REV
+	, A1_OFT_SURCHARGE
+        , A1_BUC_SURCHARGE
+	, A1_IFC_SURCHARGE
+	, A1_PSC_SURCHARGE
+	, A1_OTHERS_SURCHARGE
+	, A1_WEEK_CNT
+        , E1_LOAD
+	, E1_G_REV
+	, E1_OFT_SURCHARGE
+	, E1_BUC_SURCHARGE
+	, E1_IFC_SURCHARGE
+	, E1_PSC_SURCHARGE
+        , E1_OTHERS_SURCHARGE
+	, E1_LOAD + A1_LOAD AS SUM_LOAD
+	, E1_G_REV + A1_G_REV AS SUM_G_REV
+        , E1_OFT_SURCHARGE + A1_OFT_SURCHARGE AS SUM_OFT_SURCHARGE
+        , E1_BUC_SURCHARGE + A1_BUC_SURCHARGE AS SUM_BUC_SURCHARGE
+        , E1_IFC_SURCHARGE + A1_IFC_SURCHARGE AS SUM_IFC_SURCHARGE
+        , E1_PSC_SURCHARGE + A1_PSC_SURCHARGE AS SUM_PSC_SURCHARGE
+        , E1_OTHERS_SURCHARGE + A1_OTHERS_SURCHARGE AS SUM_OTHERS_SURCHARGE
+        , C.CUST_CNT_CD || TO_CHAR(C.CUST_SEQ, 'FM000000') || ' - ' || C.CTRT_PTY_NM AS CUST_NM
+        , M.PROP_OFC_CD
+	,  ( 
+		       CASE WHEN Q.CNTR_LOD_UT_CD = 'F' AND @[frm_pfmc_unit] = 'TEU' THEN 
+			   Q.FNL_MQC_QTY * 2
+		       WHEN Q.CNTR_LOD_UT_CD = 'T' AND @[frm_pfmc_unit] = 'FEU' THEN
+			   Q.FNL_MQC_QTY /2
+		       ELSE Q.FNL_MQC_QTY
+		       END
+	)  AS MQC_QTY
+FROM (
+		SELECT CKEY.SC_NO
+			, CKEY.PROP_NO
+			, CKEY.AMDT_SEQ
+			, CKEY.SC_NO AS A_SC_NO
+			, EST_1ST.PRC_CTRT_NO AS E1_SC_NO
+			, EST_2ND.PRC_CTRT_NO AS E2_SC_NO
+			, AVALUE.LOAD AS A1_LOAD
+			, AVALUE.G_REV AS A1_G_REV
+			, AVALUE.OFT_SURCHARGE AS A1_OFT_SURCHARGE
+			, AVALUE.BUC_SURCHARGE AS A1_BUC_SURCHARGE
+			, AVALUE.IFC_SURCHARGE AS A1_IFC_SURCHARGE
+			, AVALUE.PSC_SURCHARGE AS A1_PSC_SURCHARGE
+			, AVALUE.OTHERS_SURCHARGE AS A1_OTHERS_SURCHARGE
+			, AVALUE.WEEK_CNT AS A1_WEEK_CNT
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.LOAD, EST_1ST.LOAD) AS E1_LOAD
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.G_REV, EST_1ST.G_REV) AS E1_G_REV
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.OFT_SURCHARGE, EST_1ST.OFT_SURCHARGE) AS E1_OFT_SURCHARGE
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.BUC_SURCHARGE, EST_1ST.BUC_SURCHARGE) AS E1_BUC_SURCHARGE
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.IFC_SURCHARGE, EST_1ST.IFC_SURCHARGE) AS E1_IFC_SURCHARGE
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.PSC_SURCHARGE, EST_1ST.PSC_SURCHARGE) AS E1_PSC_SURCHARGE
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.OTHERS_SURCHARGE, EST_1ST.OTHERS_SURCHARGE) AS E1_OTHERS_SURCHARGE
+		FROM VW_CONTRACT_KEY CKEY
+			, VW_ACTUAL_VALUE AVALUE
+			, VW_EST_ACT_1ST_VALUE EST_1ST
+			, VW_EST_ACT_2ND_VALUE EST_2ND
+		WHERE CKEY.SC_NO = AVALUE.SC_NO(+)
+			AND CKEY.SC_NO = EST_1ST.PRC_CTRT_NO(+)
+			AND CKEY.SC_NO = EST_2ND.PRC_CTRT_NO(+)
+	) MN
+        ,PRI_SP_MN M
+        ,PRI_SP_CTRT_PTY C
+        ,PRI_SP_MQC Q
+WHERE MN.PROP_NO = M.PROP_NO
+	AND MN.AMDT_SEQ = M.AMDT_SEQ
+	AND M.PROP_NO = C.PROP_NO
+	AND M.AMDT_SEQ = C.AMDT_SEQ
+	AND M.PROP_NO = Q.PROP_NO(+)
+	AND M.AMDT_SEQ = Q.AMDT_SEQ(+)
+	AND C.PRC_CTRT_PTY_TP_CD = 'C'
+UNION ALL
+SELECT   'RFA' AS CONTRACT_NM
+	, A_SC_NO
+	, E1_SC_NO
+	, E2_SC_NO
+	, A1_LOAD
+	, A1_G_REV
+	, A1_OFT_SURCHARGE
+        , A1_BUC_SURCHARGE
+	, A1_IFC_SURCHARGE
+	, A1_PSC_SURCHARGE
+	, A1_OTHERS_SURCHARGE
+	, A1_WEEK_CNT
+        , E1_LOAD
+	, E1_G_REV
+	, E1_OFT_SURCHARGE
+	, E1_BUC_SURCHARGE
+	, E1_IFC_SURCHARGE
+	, E1_PSC_SURCHARGE
+        , E1_OTHERS_SURCHARGE
+	, E1_LOAD + A1_LOAD AS SUM_LOAD
+	, E1_G_REV + A1_G_REV AS SUM_G_REV
+        , E1_OFT_SURCHARGE + A1_OFT_SURCHARGE AS SUM_OFT_SURCHARGE
+        , E1_BUC_SURCHARGE + A1_BUC_SURCHARGE AS SUM_BUC_SURCHARGE
+        , E1_IFC_SURCHARGE + A1_IFC_SURCHARGE AS SUM_IFC_SURCHARGE
+        , E1_PSC_SURCHARGE + A1_PSC_SURCHARGE AS SUM_PSC_SURCHARGE
+        , E1_OTHERS_SURCHARGE + A1_OTHERS_SURCHARGE AS SUM_OTHERS_SURCHARGE
+        , M.CTRT_CUST_CNT_CD || TO_CHAR(M.CTRT_CUST_SEQ, 'FM000000') || ' - ' || CUST.CUST_LGL_ENG_NM AS CUST_NM
+        , M.PROP_OFC_CD
+		, (
+			CASE WHEN M.CNTR_LOD_UT_CD = 'F' AND @[frm_pfmc_unit] = 'TEU' THEN
+			M.TGT_MVC_QTY * 2
+			WHEN M.CNTR_LOD_UT_CD = 'T' AND @[frm_pfmc_unit] = 'FEU' THEN
+			M.TGT_MVC_QTY /2
+			ELSE M.TGT_MVC_QTY
+			END
+		)  AS MQC_QTY
+FROM (
+		SELECT CKEY.RFA_NO AS SC_NO
+			, CKEY.PROP_NO
+			, CKEY.AMDT_SEQ
+			, CKEY.RFA_NO AS A_SC_NO
+			, EST_1ST.PRC_CTRT_NO AS E1_SC_NO
+			, EST_2ND.PRC_CTRT_NO AS E2_SC_NO
+			, AVALUE.LOAD AS A1_LOAD
+			, AVALUE.G_REV AS A1_G_REV
+			, AVALUE.OFT_SURCHARGE AS A1_OFT_SURCHARGE
+			, AVALUE.BUC_SURCHARGE AS A1_BUC_SURCHARGE
+			, AVALUE.IFC_SURCHARGE AS A1_IFC_SURCHARGE
+			, AVALUE.PSC_SURCHARGE AS A1_PSC_SURCHARGE
+			, AVALUE.OTHERS_SURCHARGE AS A1_OTHERS_SURCHARGE
+			, AVALUE.WEEK_CNT AS A1_WEEK_CNT
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.LOAD, EST_1ST.LOAD) AS E1_LOAD
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.G_REV, EST_1ST.G_REV) AS E1_G_REV
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.OFT_SURCHARGE, EST_1ST.OFT_SURCHARGE) AS E1_OFT_SURCHARGE
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.BUC_SURCHARGE, EST_1ST.BUC_SURCHARGE) AS E1_BUC_SURCHARGE
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.IFC_SURCHARGE, EST_1ST.IFC_SURCHARGE) AS E1_IFC_SURCHARGE
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.PSC_SURCHARGE, EST_1ST.PSC_SURCHARGE) AS E1_PSC_SURCHARGE
+			, DECODE(EST_1ST.PRC_CTRT_NO, NULL, EST_2ND.OTHERS_SURCHARGE, EST_1ST.OTHERS_SURCHARGE) AS E1_OTHERS_SURCHARGE
+		FROM VW_RFA_CONTRACT_KEY CKEY
+			, VW_RFA_ACTUAL_VALUE AVALUE
+			, VW_RFA_EST_ACT_1ST_VALUE EST_1ST
+			, VW_RFA_EST_ACT_2ND_VALUE EST_2ND
+		WHERE CKEY.RFA_NO = AVALUE.RFA_NO(+)
+			AND CKEY.RFA_NO = EST_1ST.PRC_CTRT_NO(+)
+			AND CKEY.RFA_NO = EST_2ND.PRC_CTRT_NO(+)
+	) MN
+        ,PRI_RP_MN M
+        ,MDM_CUSTOMER CUST
+WHERE MN.PROP_NO = M.PROP_NO
+	AND MN.AMDT_SEQ = M.AMDT_SEQ
+	AND CUST.CUST_CNT_CD = M.CTRT_CUST_CNT_CD
+	AND CUST.CUST_SEQ = M.CTRT_CUST_SEQ
+ORDER BY CONTRACT_NM DESC, PROP_OFC_CD, A_SC_NO, CUST_NM			]]></sql>
+			<params>
+				<param name="frm_ctrt_eff_yr" type="12" value="" out="N"/>
+				<param name="frm_ctrt_eff_wk" type="12" value="" out="N"/>
+				<param name="frm_ctrt_exp_yr" type="12" value="" out="N"/>
+				<param name="frm_ctrt_exp_wk" type="12" value="" out="N"/>
+				<param name="frm_smr_eff_yr" type="12" value="" out="N"/>
+				<param name="frm_smr_eff_wk" type="12" value="" out="N"/>
+				<param name="frm_smr_exp_yr" type="12" value="" out="N"/>
+				<param name="frm_smr_exp_wk" type="12" value="" out="N"/>
+				<param name="c_sls_fm_dt" type="12" value="" out="N"/>
+				<param name="c_sls_to_dt" type="12" value="" out="N"/>
+				<param name="frm_trd_cd" type="12" value="" out="N"/>
+				<param name="frm_dir_cd" type="12" value="" out="N"/>
+				<param name="frm_sub_trd_cd" type="12" value="" out="N"/>
+				<param name="frm_prop_ofc_cd" type="12" value="" out="N"/>
+				<param name="frm_prop_srep_cd" type="12" value="" out="N"/>
+				<param name="frm_prop_apro_ofc_cd" type="12" value="" out="N"/>
+				<param name="s_sls_fm_dt" type="12" value="" out="N"/>
+				<param name="s_sls_to_dt" type="12" value="" out="N"/>
+				<param name="r_sls_fm_dt" type="12" value="" out="N"/>
+				<param name="r_sls_to_dt" type="12" value="" out="N"/>
+				<param name="frm_pfmc_unit" type="12" value="" out="N"/>
+				<param name="frm_ori_rout_cd" type="12" value="" out="N"/>
+				<param name="frm_dest_rout_cd" type="12" value="" out="N"/>
+				<param name="r_fm_yrwk" type="12" value="" out="N"/>
+				<param name="r_to_yrwk" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

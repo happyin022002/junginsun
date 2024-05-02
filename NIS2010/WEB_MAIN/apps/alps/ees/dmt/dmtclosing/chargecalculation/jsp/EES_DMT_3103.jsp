@@ -1,0 +1,184 @@
+<%
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : EES_DMT_3103.jsp
+*@FileTitle : Correction Save History
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.07.29
+*@LastModifier : 황효근
+*@LastVersion : 1.0
+* 2009.07.29 황효근
+* 1.0 Creation
+=========================================================*/
+%>
+
+<%@ page contentType="text/html; charset=UTF-8"%>
+<%@ page import="com.hanjin.framework.component.util.JSPUtil"%>
+<%@ page import="com.hanjin.framework.component.util.DateTime"%>
+<%@ page import="com.hanjin.framework.component.message.ErrorHandler"%>
+<%@ page import="com.hanjin.framework.core.layer.event.GeneralEventResponse"%>
+<%@ page import="com.hanjin.framework.support.controller.html.CommonWebKeys"%>
+<%@ page import="com.hanjin.framework.support.view.signon.SignOnUserAccount"%>
+<%@ page import="com.hanjin.apps.alps.ees.dmt.dmtclosing.chargecalculation.event.EesDmt3103Event"%>
+<%@ page import="org.apache.log4j.Logger" %>
+
+<%
+	EesDmt3103Event  event = null;					//PDTO(Data Transfer Object including Parameters)
+	Exception serverException   = null;			//서버에서 발생한 에러
+	String strErrMsg = "";						//에러메세지
+	int rowCount	 = 0;						//DB ResultSet 리스트의 건수
+
+	String successFlag = "";
+	String codeList  = "";
+	String pageRows  = "100";
+
+	String strUsr_id		= "";
+	String strUsr_nm		= "";
+	String strCnt_cd		= "";
+	Logger log = Logger.getLogger("com.hanjin.apps.DMTClosing.ChargeCalculation");
+
+	try {
+	   	SignOnUserAccount account=(SignOnUserAccount)session.getAttribute(CommonWebKeys.SIGN_ON_USER_ACCOUNT);
+		strUsr_id =	account.getUsr_id();
+		strUsr_nm = account.getUsr_nm();
+		strCnt_cd = account.getCnt_cd();
+
+		event = (EesDmt3103Event)request.getAttribute("Event");
+		serverException = (Exception)request.getAttribute(CommonWebKeys.EXCEPTION_OBJECT);
+
+		if (serverException != null) {
+			strErrMsg = new ErrorHandler(serverException).loadPopupMessage();
+		}
+
+		// 초기화면 로딩시 서버로부터 가져온 데이터 추출하는 로직추가 ..
+		GeneralEventResponse eventResponse = (GeneralEventResponse) request.getAttribute("EventResponse");
+
+	}catch(Exception e) {
+		out.println(e.toString());
+	}
+%>
+<html>
+<head>
+<title>Correction Save History</title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<script language="javascript">
+	function setupPage(){
+		var errMessage = "<%=strErrMsg%>";
+		if (errMessage.length >= 1) {
+			ComShowMessage(errMessage);
+		} // end if
+		loadPage();
+	}
+</script>
+</head>
+
+<body class="popup_bg" onLoad="setupPage();">
+<form name="form">
+<input type="hidden" name="f_cmd">
+<input type="hidden" name="pagerows">
+
+
+<!-- 개발자 작업	-->
+<input type="hidden" name="login_cnt_cd"		value="<%=strCnt_cd%>">
+<input type="hidden" name="svr_id"				value="<%=JSPUtil.getParameter(request, "svr_id", "")%>">
+<input type="hidden" name="cntr_cyc_no"			value="<%=JSPUtil.getParameter(request, "cntr_cyc_no", "")%>">
+<input type="hidden" name="dmdt_chg_loc_div_cd"	value="<%=JSPUtil.getParameter(request, "dmdt_chg_loc_div_cd", "")%>">
+<input type="hidden" name="chg_seq"				value="<%=JSPUtil.getParameter(request, "chg_seq", "")%>">
+
+
+<!-- OUTER - POPUP (S)tart -->
+<table width="100%" class="popup" cellpadding="10" border="0"> 
+<tr><td class="top"></td></tr>
+<tr><td valign="top">
+	
+		<!-- : ( Title ) (S) -->
+		<table width="100%" border="0">
+		<tr><td class="title"><img src="img/icon_title_dot.gif" align="absmiddle">&nbsp;Correction Save History</td></tr>
+		</table>
+		<!-- : ( Title ) (E) -->
+		
+		<!-- : ( Search Options ) (S) -->
+ 
+			<table class="search"> 
+       		<tr><td class="bg">
+				<!--  biz_1  (S) -->
+				<table class="search" border="0" style="width:880;"> 
+					<tr class="h23">
+						<td width="60">CNTR No.</td>
+						<td width="140"><input type="text" name="cntr_no" value="<%=JSPUtil.getParameter(request, "cntr_no", "")%>" readonly style="width:90;" class="input2">&nbsp;<input type="text" name="cntr_tpsz_cd" value="<%=JSPUtil.getParameter(request, "cntr_tpsz_cd", "")%>" readonly style="width:25;" class="input2"></td>
+						<td width="70">Tariff Type</td>
+						<td width="70"><input type="text" name="dmdt_trf_cd" value="<%=JSPUtil.getParameter(request, "dmdt_trf_cd", "")%>" readonly style="width:40;" class="input2" value=""></td>
+						<td width="25" id="tdGB">G/B</td>
+						<td width="40"><input type="text" name="chg_type" value="<%=JSPUtil.getParameter(request, "chg_type", "")%>" readonly style="width:20;" class="input2" value=""></td>
+						<td width="40">Office</td>
+						<td width="70"><input type="text" name="ofc_cd" value="<%=JSPUtil.getParameter(request, "ofc_cd", "")%>" readonly style="width:50;" class="input2" value=""></td>
+						<td width="50">BKG No.</td>
+						<td width="120"><input type="text" name="bkg_no" value="<%=JSPUtil.getParameter(request, "bkg_no", "")%>" readonly style="width:105;" class="input2" value=""></td>
+						<td width="50">B/L No.</td>
+						<td width=""><input type="text" name="bl_no" value="<%=JSPUtil.getParameter(request, "bl_no", "")%>" readonly style="width:100;" class="input2" value=""></td>
+					</tr>
+				</table> 
+					
+				<table class="line_bluedot"><tr><td colspan="6"></td></tr></table>
+	
+				<!-- Grid  (S) -->
+				
+				<table width="100%"  id="mainTable"> 
+					<tr>
+						<td width="100%">
+							<script language="javascript">ComSheetObject('sheet1');</script>
+						</td>
+					</tr>
+				</table>				
+	
+				<table class="height_8"><tr><td></td></tr></table>
+
+				<!--  biz_1  (S) -->
+				<table class="grid2" border="0" style="width:880;"> 
+					<tr>
+						<td width="100" class="tr2_head">Remark(s)</td>
+						<td width="" class="noinput2"><textarea  name="corr_his_rmk" readonly style="width:780;height:45"  class="textarea2"></textarea></td>
+					</tr>
+				
+				</table>
+				<!--  biz_1   (E) -->
+				
+			</td></tr>
+		</table>
+<!-- : ( Search Options ) (E) -->
+<table class="height_5"><tr><td></td></tr></table>
+</td></tr>
+</table> 
+
+
+	
+<!-- : ( Button : pop ) (S) -->
+<table width="100%" class="sbutton">
+<tr><td height="71" class="popup">
+	
+		<table width="100%" class="button" border="0" cellpadding="0" cellspacing="0" style="padding-top:5;,padding-bottom:10;"> 
+       	<tr><td class="btn3_bg">
+		    <table border="0" cellpadding="0" cellspacing="0">
+		    <tr>
+				<td><table width="100%" border="0" cellpadding="0" cellspacing="0" class="button">
+					<tr><td class="btn1_left"></td>
+					<td class="btn1" name="btn_Close">Close</td>
+					<td class="btn1_right">
+				</tr></table></td>
+				
+			</tr>
+		</table>
+    <!--Button (E) -->
+	
+	</td></tr>
+</table>
+<!-- : ( Button : pop ) (E) -->
+<div id="topdeck" style="position:absolute;visibility:hidden;z-index:200;"></div>
+</td></tr>
+</table>
+<!-- 개발자 작업  끝 -->
+</form>
+</body>
+</html>

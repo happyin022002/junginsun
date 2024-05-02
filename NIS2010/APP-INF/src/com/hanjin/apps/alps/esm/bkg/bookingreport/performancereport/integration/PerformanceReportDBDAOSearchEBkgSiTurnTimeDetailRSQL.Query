@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PerformanceReportDBDAOSearchEBkgSiTurnTimeDetailRSQL">
+			<desc><![CDATA[eBKG&SI Turn Time Detail 조회
+* e-BKG은 BKG Office 기준, e-SI는 Doc. Perf Office GSO 기준에 의해 실적 귀속]]></desc>
+			<sql><![CDATA[
+SELECT *
+FROM (
+SELECT DISTINCT BKG_NO,XTER_RQST_NO,XTER_RQST_SEQ, 
+        VVD, BKG_OFC_CD, POL_CD, POD_CD, XTER_RQST_VIA_CD, PORT_CLZ_DT,
+        --BKG_GET_CONV_INTVAL_TIME_FNC(NTC_DT-RQST_DT,'TM') TURN_TM, 
+        ROUND(BKG_E_BKG_TURNTIME_FNC('D',substr(u.POR_CD,1,2),RQST_DT,NTC_DT),2) TURN_TM, 
+		TO_CHAR(RQST_DT,'YYYY-MM-DD HH24:MI:SS') RQST_DT, 
+		TO_CHAR(NTC_DT,'YYYY-MM-DD HH24:MI:SS') NTC_DT
+FROM (
+        SELECT T.BKG_NO,
+              T.VVD,
+              T.BKG_OFC_CD,
+			  T.PORT_CLZ_DT,
+              T.SND_USR_ID,
+			  T.POR_CD,
+              T.POL_CD,
+              T.POD_CD,
+              X.XTER_RQST_VIA_CD,
+              X.XTER_RQST_NO,
+              X.XTER_RQST_SEQ,
+              GLOBALDATE_PKG.TIME_CONV_FNC('KRPUS', X.CRE_DT, T.POR_CD ) RQST_DT,
+              GLOBALDATE_PKG.TIME_CONV_FNC('KRPUS', t.NTC_DT, T.POR_CD ) NTC_DT,
+              RANK() OVER(PARTITION BY X.BKG_NO, X.RQST_DT ORDER BY T.NTC_DT) NTC_RANK,
+              RANK() OVER(PARTITION BY X.BKG_NO, T.NTC_DT ORDER BY X.RQST_DT) RQST_RANK
+        FROM ( SELECT N.BKG_NO, 
+                  B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD VVD,
+                  B.BKG_OFC_CD,
+				  B.PORT_CLZ_DT,
+                  B.POR_CD,
+                  B.POL_CD,
+                  B.POD_CD,
+                  N.NTC_KND_CD,
+                  N.SND_USR_ID,
+				  LAG(N.CRE_DT) OVER (PARTITION BY N.BKG_NO, NTC_KND_CD ORDER BY N.CRE_DT) BEF_NTC_DT,
+                  N.CRE_DT NTC_DT
+                FROM BKG_BOOKING B, BKG_NTC_HIS N
+                WHERE N.BKG_NO = B.BKG_NO
+                  AND N.NTC_KND_CD = DECODE(@[doc_tp_cd],'B','BK','S','BL')
+                  AND N.SND_OFC_CD NOT IN ('SELCOS','SELCMQ')   
+                  AND B.BKG_STS_CD <> 'X'
+                  AND B.BKG_CGO_TP_CD = 'F'
+#if (${doc_tp_cd} == 'B')
+				  AND N.SND_OFC_CD = B.BKG_OFC_CD
+#end                                 
+#if (${opt_tp} == 'D' && ${period} == 'B')
+                  AND B.BKG_CRE_DT BETWEEN TO_DATE(@[fm_dt],'YYYY-MM-DD') AND TO_DATE(@[to_dt],'YYYY-MM-DD')+0.99999
+#end
+                  AND EXISTS (SELECT 'X' 
+                                FROM BKG_XTER_RQST_MST X 
+                               WHERE B.BKG_NO = X.BKG_NO 
+                                 AND X.DOC_TP_CD = @[doc_tp_cd]
+#if (${opt_tp} == 'D' && ${period} == 'R')
+                                 AND X.RQST_DT BETWEEN TO_DATE(@[fm_dt],'YYYY-MM-DD') AND TO_DATE(@[to_dt],'YYYY-MM-DD')+0.99999
+#end
+                                  )                     
+#if (${opt_tp} == 'D' && ${period} == 'E')
+                  AND B.BKG_NO IN (SELECT D.BKG_NO
+                                     FROM BKG_VVD D
+                                         ,VSK_VSL_PORT_SKD V
+                                    WHERE V.VSL_CD = D.VSL_CD
+                                      AND V.SKD_VOY_NO = D.SKD_VOY_NO
+                                      AND V.SKD_DIR_CD = D.SKD_DIR_CD
+                                      AND V.VPS_PORT_CD = D.POL_CD
+                                      AND V.CLPT_IND_SEQ = D.POL_CLPT_IND_SEQ
+                                      AND V.VPS_ETD_DT BETWEEN TO_DATE(@[fm_dt],'YYYY-MM-DD') AND TO_DATE(@[to_dt],'YYYY-MM-DD')+0.99999 )
+#end
+#if (${bkg_no} != '')
+                  AND B.BKG_NO = @[bkg_no]
+#end
+#if (${vvd} != '')
+                  AND B.VSL_CD = SUBSTR(@[vvd],1,4)
+				  AND B.SKD_VOY_NO = SUBSTR(@[vvd],5,4)
+				  AND B.SKD_DIR_CD = SUBSTR(@[vvd],9,1)
+#end
+#if (${pol_cd} != '')
+                  AND B.POL_CD = @[pol_cd]
+#end
+#if (${pod_cd} != '')
+                  AND B.POD_CD = @[pod_cd]
+#end
+#if (${ctrt_tp_cd} == 'S/C' && ${ctrt_no} != '')
+                  AND B.SC_NO = @[ctrt_no]
+#end
+#if (${ctrt_tp_cd} == 'RFA' && ${ctrt_no} != '')
+                  AND B.RFA_NO = @[ctrt_no]
+#end
+#if (${ctrt_tp_cd} == 'TAA' && ${ctrt_no} != '')
+                  AND B.TAA_NO = @[ctrt_no]
+#end
+#if (${bkg_ofc_cd} != '')          
+                   AND B.BKG_OFC_CD = @[bkg_ofc_cd]
+#end
+#if (${opt_tp} == 'D' && ${period} == 'B' && (${cust_cnt_cd} != '' || ${cust_grp_id} != ''))
+                   AND EXISTS (SELECT 'X'
+                                 FROM BKG_CUSTOMER BC, MDM_CUSTOMER MC
+                                WHERE BC.BKG_NO = B.BKG_NO
+                                  AND BC.BKG_CUST_TP_CD = NVL(@[cust_tp_cd], BC.BKG_CUST_TP_CD)
+                                  AND BC.CUST_CNT_CD = NVL(@[cust_cnt_cd], BC.CUST_CNT_CD)
+                                  AND BC.CUST_SEQ = NVL(@[cust_seq], BC.CUST_SEQ)
+                                  AND BC.BKG_CUST_TP_CD IN (${cust_grp_tp})
+                                  AND BC.CUST_CNT_CD = MC.CUST_CNT_CD
+                                  AND BC.CUST_SEQ = MC.CUST_SEQ
+                                  AND MC.CUST_GRP_ID = NVL(@[cust_grp_id], MC.CUST_GRP_ID)
+                                  AND MC.DELT_FLG = 'N'
+                              )
+#end
+
+#if (${opt_tp} == 'D')
+                   AND (
+#foreach( ${key} in ${d_bkg_ofc_cd})
+	#if($velocityCount < $d_bkg_ofc_cd.size()) 
+                          (B.BKG_OFC_CD = SUBSTR('${key}',1,5))  OR 
+    #else 
+                          (B.BKG_OFC_CD = SUBSTR('${key}',1,5))  
+    #end 
+#end
+						)  
+#end
+              ) T, BKG_XTER_RQST_MST X, BKG_DOC_PERF_OFC O 
+        WHERE X.BKG_NO = T.BKG_NO
+#if (${opt_tp} == 'D' && ${period} == 'R')
+          AND X.RQST_DT BETWEEN TO_DATE(@[fm_dt],'YYYY-MM-DD') AND TO_DATE(@[to_dt],'YYYY-MM-DD')+0.99999
+#end
+          AND EXISTS (SELECT 'X' 
+						FROM BKG_BL_DOC BBD 
+						WHERE BBD.BKG_NO = X.BKG_NO
+#if (${doc_tp_cd} == 'S')
+						AND   X.CRE_DT > BL_OBRD_DT - 7)
+#else                   
+                                  AND   X.CRE_DT > BL_OBRD_DT - 22)
+#end
+          AND X.DOC_TP_CD = @[doc_tp_cd]
+          AND NVL(X.XTER_BL_TP_CD,'X') <> 'H'
+          AND NVL(X.SNACCS_MSG_TP_CD,'X') NOT IN ('SAT050', 'SAT054')
+          AND X.CRE_DT < NTC_DT
+          AND X.CRE_DT >= NVL(BEF_NTC_DT, X.CRE_DT) 
+          AND T.BKG_OFC_CD = DECODE(SUBSTR(O.POR_CD,1,2),'JP',T.BKG_OFC_CD,O.BKG_OFC_CD)
+          AND T.POR_CD = DECODE(O.POR_CD,'*',T.POR_CD,O.POR_CD)
+#if (${opt_tp} == 'D' && ${doc_tp_cd} != 'B')
+          AND (
+#foreach( ${key} in ${d_bkg_ofc_cd})
+	#if($velocityCount < $d_bkg_ofc_cd.size()) 
+               (T.BKG_OFC_CD = SUBSTR('${key}',1,5) AND  O.GSO_OFC_CD = DECODE(@[doc_tp_cd],'B',O.GSO_OFC_CD,SUBSTR('${key}',6,10))) OR 
+    #else 
+               (T.BKG_OFC_CD = SUBSTR('${key}',1,5) AND  O.GSO_OFC_CD = DECODE(@[doc_tp_cd],'B',O.GSO_OFC_CD,SUBSTR('${key}',6,10)))
+    #end 
+#end
+			)
+
+#end
+        ) U
+WHERE NTC_RANK = 1
+#if (${doc_tp_cd} == 'S')
+	AND NOT EXISTS (SELECT 'X' FROM DUAL WHERE PORT_CLZ_DT < NTC_DT AND SND_USR_ID = 'SYSTEM' )
+#end 
+  AND RQST_RANK = 1)
+WHERE TURN_TM > 0			]]></sql>
+			<params>
+				<param name="doc_tp_cd" type="12" value="" out="N"/>
+				<param name="fm_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="ctrt_no" type="12" value="" out="N"/>
+				<param name="bkg_ofc_cd" type="12" value="" out="N"/>
+				<param name="cust_tp_cd" type="12" value="" out="N"/>
+				<param name="cust_cnt_cd" type="12" value="" out="N"/>
+				<param name="cust_seq" type="12" value="" out="N"/>
+				<param name="cust_grp_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

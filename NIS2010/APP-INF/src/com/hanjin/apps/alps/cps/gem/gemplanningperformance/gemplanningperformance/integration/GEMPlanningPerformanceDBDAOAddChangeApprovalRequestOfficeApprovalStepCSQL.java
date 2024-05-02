@@ -1,0 +1,154 @@
+/*=========================================================
+*Copyright(c) 2011 CyberLogitec
+*@FileName : GEMPlanningPerformanceDBDAOAddChangeApprovalRequestOfficeApprovalStepCSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2011.05.09
+*@LastModifier : 이준범
+*@LastVersion : 1.0
+* 2011.05.09 이준범
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.cps.gem.gemplanningperformance.gemplanningperformance.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author Jun-bum, Lee
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class GEMPlanningPerformanceDBDAOAddChangeApprovalRequestOfficeApprovalStepCSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * 2011.04.18 [CHM-201108838-01] 이준범
+	  * Title : OFC code Change 설정 시 Assigned Expense Data 변경 요청
+	  * DESC :  ApprovalStep의 기존 OFC_CD 를 변경될 OFC_CD 로 생성 한다.
+	  * </pre>
+	  */
+	public GEMPlanningPerformanceDBDAOAddChangeApprovalRequestOfficeApprovalStepCSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("usr_id",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("bfr_ofc_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("ofc_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("stnd_dt",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.cps.gem.gemplanningperformance.gemplanningperformance.integration").append("\n"); 
+		query.append("FileName : GEMPlanningPerformanceDBDAOAddChangeApprovalRequestOfficeApprovalStepCSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("INSERT INTO GEM_APRO_STEP" ).append("\n"); 
+		query.append("( GEN_EXPN_RQST_NO" ).append("\n"); 
+		query.append(" ,OFC_CD" ).append("\n"); 
+		query.append(" ,GEN_EXPN_CD" ).append("\n"); 
+		query.append(" ,GEN_EXPN_ITM_NO" ).append("\n"); 
+		query.append(" ,GEN_EXPN_TRNS_DIV_CD" ).append("\n"); 
+		query.append(" ,GEN_EXPN_RQST_SEQ" ).append("\n"); 
+		query.append(" ,GEN_EXPN_APRO_STEP_CD" ).append("\n"); 
+		query.append(" ,GEN_EXPN_APSTS_CD" ).append("\n"); 
+		query.append(" ,GEN_EXPN_APRO_AUTH_OFC_CD" ).append("\n"); 
+		query.append(" ,JAN_AMT" ).append("\n"); 
+		query.append(" ,FEB_AMT" ).append("\n"); 
+		query.append(" ,MAR_AMT" ).append("\n"); 
+		query.append(" ,APR_AMT" ).append("\n"); 
+		query.append(" ,MAY_AMT" ).append("\n"); 
+		query.append(" ,JUN_AMT" ).append("\n"); 
+		query.append(" ,JUL_AMT" ).append("\n"); 
+		query.append(" ,AUG_AMT" ).append("\n"); 
+		query.append(" ,SEP_AMT" ).append("\n"); 
+		query.append(" ,OCT_AMT" ).append("\n"); 
+		query.append(" ,NOV_AMT" ).append("\n"); 
+		query.append(" ,DEC_AMT" ).append("\n"); 
+		query.append(" ,APRO_OPIN_RMK" ).append("\n"); 
+		query.append(" ,CRE_USR_ID" ).append("\n"); 
+		query.append(" ,CRE_DT" ).append("\n"); 
+		query.append(" ,UPD_USR_ID" ).append("\n"); 
+		query.append(" ,UPD_DT" ).append("\n"); 
+		query.append(")" ).append("\n"); 
+		query.append("SELECT B.GEN_EXPN_RQST_NO" ).append("\n"); 
+		query.append("      ,@[bfr_ofc_cd]" ).append("\n"); 
+		query.append("      ,B.GEN_EXPN_CD" ).append("\n"); 
+		query.append("      ,B.GEN_EXPN_ITM_NO" ).append("\n"); 
+		query.append("      ,B.GEN_EXPN_TRNS_DIV_CD" ).append("\n"); 
+		query.append("      ,B.GEN_EXPN_RQST_SEQ" ).append("\n"); 
+		query.append("      ,B.GEN_EXPN_APRO_STEP_CD" ).append("\n"); 
+		query.append("      ,B.GEN_EXPN_APSTS_CD" ).append("\n"); 
+		query.append("      ,B.GEN_EXPN_APRO_AUTH_OFC_CD" ).append("\n"); 
+		query.append("      ,CASE WHEN SUBSTR(@[stnd_dt],5 ,2) > '01' THEN 0 ELSE B.JAN_AMT END AS JAN_AMT" ).append("\n"); 
+		query.append("      ,CASE WHEN SUBSTR(@[stnd_dt],5 ,2) > '02' THEN 0 ELSE B.FEB_AMT END AS FEB_AMT" ).append("\n"); 
+		query.append("      ,CASE WHEN SUBSTR(@[stnd_dt],5 ,2) > '03' THEN 0 ELSE B.MAR_AMT END AS MAR_AMT" ).append("\n"); 
+		query.append("      ,CASE WHEN SUBSTR(@[stnd_dt],5 ,2) > '04' THEN 0 ELSE B.APR_AMT END AS APR_AMT" ).append("\n"); 
+		query.append("      ,CASE WHEN SUBSTR(@[stnd_dt],5 ,2) > '05' THEN 0 ELSE B.MAY_AMT END AS MAY_AMT" ).append("\n"); 
+		query.append("      ,CASE WHEN SUBSTR(@[stnd_dt],5 ,2) > '06' THEN 0 ELSE B.JUN_AMT END AS JUN_AMT" ).append("\n"); 
+		query.append("      ,CASE WHEN SUBSTR(@[stnd_dt],5 ,2) > '07' THEN 0 ELSE B.JUL_AMT END AS JUL_AMT" ).append("\n"); 
+		query.append("      ,CASE WHEN SUBSTR(@[stnd_dt],5 ,2) > '08' THEN 0 ELSE B.AUG_AMT END AS AUG_AMT" ).append("\n"); 
+		query.append("      ,CASE WHEN SUBSTR(@[stnd_dt],5 ,2) > '09' THEN 0 ELSE B.SEP_AMT END AS SEP_AMT" ).append("\n"); 
+		query.append("      ,CASE WHEN SUBSTR(@[stnd_dt],5 ,2) > '10' THEN 0 ELSE B.OCT_AMT END AS OCT_AMT" ).append("\n"); 
+		query.append("      ,CASE WHEN SUBSTR(@[stnd_dt],5 ,2) > '11' THEN 0 ELSE B.NOV_AMT END AS NOV_AMT" ).append("\n"); 
+		query.append("      ,CASE WHEN SUBSTR(@[stnd_dt],5 ,2) > '12' THEN 0 ELSE B.DEC_AMT END AS DEC_AMT" ).append("\n"); 
+		query.append("      ,B.APRO_OPIN_RMK" ).append("\n"); 
+		query.append("      ,@[usr_id]" ).append("\n"); 
+		query.append("      ,SYSDATE" ).append("\n"); 
+		query.append("      ,@[usr_id]" ).append("\n"); 
+		query.append("      ,SYSDATE" ).append("\n"); 
+		query.append("  FROM GEM_REQUEST A" ).append("\n"); 
+		query.append("      ,GEM_APRO_STEP B" ).append("\n"); 
+		query.append(" WHERE A.PLN_YRMON LIKE SUBSTR(@[stnd_dt], 1, 4)||'%'" ).append("\n"); 
+		query.append("   AND A.GEN_EXPN_RQST_NO = B.GEN_EXPN_RQST_NO" ).append("\n"); 
+		query.append("   AND B.OFC_CD = @[ofc_cd]" ).append("\n"); 
+
+	}
+}

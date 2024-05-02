@@ -1,0 +1,348 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="UnmatchBLDBDAOSearchTxsBkgListForAuditRSQL">
+			<desc><![CDATA[ TXS BKG List for Audit]]></desc>
+			<sql><![CDATA[
+#if (${search_option} == 'A') 
+-- Application Date
+WITH BKG  AS(
+SELECT BKG_NO,
+       RCV_TERM_CD,
+       DE_TERM_CD,
+       SVC_SCP_CD,
+       POR_CD,
+       POL_CD,
+       POD_CD,
+       DEL_CD,
+       CTRT_NO,
+       RAT_UT_CD,
+       CURR_CD,
+       CHG_AMT
+FROM   (
+        SELECT BKG_NO,
+               RCV_TERM_CD,
+               DE_TERM_CD,
+               SVC_SCP_CD,
+               POR_CD,
+               POL_CD,
+               POD_CD,
+               DEL_CD,
+               CTRT_NO,
+               RAT_UT_CD,
+               CURR_CD,
+               CHG_AMT,
+               COUNT(BKG_NO) OVER ( PARTITION BY BKG_NO, SVC_SCP_CD, POR_CD, POL_CD, POD_CD, DEL_CD, CTRT_NO) CNT
+        FROM   (
+                SELECT DISTINCT
+                       BK.BKG_NO,
+                       BK.RCV_TERM_CD,
+                       BK.DE_TERM_CD,
+                       BK.SVC_SCP_CD,
+                       BK.POR_CD,
+                       BK.POL_CD,
+                       BK.POD_CD,
+                       BK.DEL_CD,
+                       DECODE(BR.BKG_CTRT_TP_CD, 'S', BK.SC_NO, 'R', BK.RFA_NO, BK.TAA_NO) CTRT_NO,
+                       DECODE(BCR.CHG_CD, 'TXS', BCR.RAT_UT_CD, '') RAT_UT_CD,
+                       DECODE(BCR.CHG_CD, 'TXS', BCR.CURR_CD, '') CURR_CD,
+                       DECODE(BCR.CHG_CD, 'TXS', BCR.CHG_AMT, '') CHG_AMT
+                FROM   BKG_BOOKING BK,
+                       BKG_RATE  BR,
+                       BKG_CHG_RT BCR,
+                       BKG_CONTAINER   BCNTR
+                WHERE  BK.BKG_NO = BR.BKG_NO
+                AND    BK.BKG_NO = BCR.BKG_NO
+                AND    BK.BKG_NO = BCNTR.BKG_NO
+                --AND    BCR.CHG_CD = 'TXS'
+                AND    (SUBSTR(BK.POL_CD,1,2) = 'US' OR SUBSTR(BK.POD_CD,1,2) = 'US')
+                AND    BK.SVC_SCP_CD = @[svc_scp_cd]
+                AND    BCNTR.CNTR_WGT >= DECODE(BCNTR.WGT_UT_CD,'KGS',17236,'LBS',38000, 17236)
+                AND    SUBSTR(BCNTR.CNTR_TPSZ_CD,2,1) = '2'
+                AND    BR.RT_APLY_DT BETWEEN TO_DATE(REPLACE(@[from_dt],'-',''),'YYYY-MM-DD') AND TO_DATE(REPLACE(@[to_dt],'-',''),'YYYY-MM-DD') + 0.99999
+                #if (${rcv_term_cd} != '')
+				AND    BK.RCV_TERM_CD = @[rcv_term_cd]
+				#end
+                #if (${de_term_cd} != '')
+				AND    BK.DE_TERM_CD = @[de_term_cd]
+				#end
+				)
+        )
+        WHERE (CNT = 1  OR (CNT > 1 AND RAT_UT_CD IS NOT NULL))
+),
+TRS AS(
+SELECT  DISTINCT 
+        BKG.BKG_NO,
+		BKG.RCV_TERM_CD,
+		BKG.DE_TERM_CD, 
+		BKG.SVC_SCP_CD,
+		BKG.POR_CD,
+		BKG.POL_CD,
+		BKG.POD_CD,
+		BKG.DEL_CD,
+		BKG.CTRT_NO,
+		BKG.RAT_UT_CD,
+		BKG.CURR_CD,
+		BKG.CHG_AMT,
+		SO.BKG_NO TRS_BKG_NO,
+		SO.EQ_TPSZ_CD,
+		SO.EQ_NO,
+		NVL(SC.TRI_AXL_FLG,'N') TRI_AXL_FLG,
+		WK.WO_RMK,
+		TO_CHAR(WK.LOCL_CRE_DT, 'YYYY-MM-DD HH24:MI:SS') LOCL_CRE_DT,
+		WK.TRSP_WO_OFC_CTY_CD||WK.TRSP_WO_SEQ WO_NO
+FROM    TRS_TRSP_SVC_ORD SO,
+		TRS_TRSP_WRK_ORD WK,
+		TRS_TRSP_SCG_DTL SC,
+		BKG
+WHERE SO.TRSP_WO_OFC_CTY_CD = WK.TRSP_WO_OFC_CTY_CD(+)
+AND   SO.TRSP_WO_SEQ = WK.TRSP_WO_SEQ(+)
+AND   SO.TRSP_SO_OFC_CTY_CD  = SC.TRSP_SO_OFC_CTY_CD (+)
+AND   SO.TRSP_SO_SEQ  = SC.TRSP_SO_SEQ (+)
+AND   BKG.BKG_NO = SO.BKG_NO(+)
+AND   SO.EQ_TPSZ_CD IN (SELECT CNTR_TPSZ_CD FROM MDM_CNTR_TP_SZ WHERE CNTR_SZ_CD = '2')
+AND   WK.CRE_OFC_CD IN (SELECT OFC_CD 
+            			FROM   MDM_ORGANIZATION
+                        WHERE  SUBSTR(LOC_CD,1,2) = 'US')
+AND   SC.LGS_COST_CD(+) = 'SCOWAL' -- Over Weight Surcharge
+#if (${tri_axel} != '')
+AND   NVL(SC.TRI_AXL_FLG, 'N') = @[tri_axel]
+#end
+)
+SELECT  DISTINCT 
+        TRS.BKG_NO,
+		TRS.RCV_TERM_CD,
+		TRS.DE_TERM_CD, 
+		TRS.SVC_SCP_CD,
+		TRS.POR_CD,
+		TRS.POL_CD,
+		TRS.POD_CD,
+		TRS.DEL_CD,
+		TRS.CTRT_NO,
+		TRS.RAT_UT_CD,
+		TRS.CURR_CD,
+		TRS.CHG_AMT,
+		TRS.TRS_BKG_NO,
+		TRS.EQ_TPSZ_CD,
+		TRS.EQ_NO,
+		TRS.TRI_AXL_FLG,
+		TRS.WO_RMK,
+		TRS.LOCL_CRE_DT,
+		TRS.WO_NO,
+		TPB.TPB_BKG_NO,
+		TPB.MAIN,
+		TPB.SUB,
+		TPB.N3PTY_NO,
+		TPB.CFM_CURR_CD,
+		TPB.INV_AMT,
+		COUNT(DISTINCT TRS.BKG_NO) OVER () AS  BKG_CNT  
+FROM    
+        TRS,
+        (
+			SELECT  DISTINCT
+			        TOD.BKG_NO TPB_BKG_NO,
+			        TOD.N3PTY_EXPN_TP_CD MAIN,
+			        TPB_GET_N3PTY_BIL_TP_NM_FNC(TOD.N3PTY_BIL_TP_CD) SUB,
+			        TOG.N3PTY_NO,
+			        TOD.CFM_CURR_CD,
+			        TOD.INV_AMT,
+					TOD.EQ_NO     
+			FROM    TPB_OTS_GRP TOG,
+			        TPB_OTS_DTL TOD,
+					TRS
+			WHERE   1=1
+			AND     TOG.N3PTY_NO = TOD.N3PTY_NO
+			AND		TOD.BKG_NO(+) = TRS.BKG_NO
+			AND     TOD.IF_RHQ_CD='NYCRA' 
+			AND     TOD.N3PTY_NO IS NOT NULL 
+			AND     TOD.N3PTY_DELT_TP_CD ='N'
+			AND     TOD.N3PTY_BIL_TP_CD = 'OW'  --Over Weight
+		) TPB
+WHERE   1=1
+AND     TRS.BKG_NO = TPB.TPB_BKG_NO(+)
+AND     TRS.EQ_NO  = TPB.EQ_NO(+)
+ORDER BY TRS.BKG_NO
+
+#else
+-- Work Order Issue Date
+
+WITH TRS  AS(
+SELECT DISTINCT SO.BKG_NO TRS_BKG_NO,
+       SO.EQ_TPSZ_CD,
+       SO.EQ_NO,
+       NVL(SC.TRI_AXL_FLG, 'N') TRI_AXL_FLG,
+       WK.WO_RMK,
+	   TO_CHAR(WK.LOCL_CRE_DT, 'YYYY-MM-DD HH24:MI:SS') LOCL_CRE_DT,
+       WK.TRSP_WO_OFC_CTY_CD||WK.TRSP_WO_SEQ WO_NO
+FROM   TRS_TRSP_SVC_ORD SO,
+       TRS_TRSP_WRK_ORD WK,
+       TRS_TRSP_SCG_DTL SC,
+       BKG_BOOKING BK
+WHERE SO.TRSP_WO_OFC_CTY_CD =WK.TRSP_WO_OFC_CTY_CD(+)
+AND   SO.TRSP_WO_SEQ = WK.TRSP_WO_SEQ(+)
+AND   SO.TRSP_SO_OFC_CTY_CD  = SC.TRSP_SO_OFC_CTY_CD (+)
+AND   SO.TRSP_SO_SEQ  = SC.TRSP_SO_SEQ (+)
+AND   SC.LGS_COST_CD(+) = 'SCOWAL' -- Over Weight Surcharge
+AND   SO.BKG_NO = BK.BKG_NO
+AND   WK.LOCL_CRE_DT BETWEEN TO_DATE(REPLACE(@[from_dt],'-',''),'YYYY-MM-DD') AND TO_DATE(REPLACE(@[to_dt],'-',''),'YYYY-MM-DD') + 0.99999
+AND   BK.SVC_SCP_CD = @[svc_scp_cd]
+AND   SO.EQ_TPSZ_CD IN (SELECT CNTR_TPSZ_CD FROM MDM_CNTR_TP_SZ WHERE CNTR_SZ_CD = '2')
+AND   WK.CRE_OFC_CD IN (SELECT OFC_CD 
+                        FROM   MDM_ORGANIZATION
+                        WHERE  SUBSTR(LOC_CD,1,2) = 'US')
+#if (${tri_axel} != '')
+AND   NVL(SC.TRI_AXL_FLG, 'N') = @[tri_axel]
+#end
+),
+BKG AS (
+SELECT B.BKG_NO,
+       B.RCV_TERM_CD,
+       B.DE_TERM_CD,
+       B.SVC_SCP_CD,
+       B.POR_CD,
+       B.POL_CD,
+       B.POD_CD,
+       B.DEL_CD,
+       B.CTRT_NO,
+       B.RAT_UT_CD,
+       B.CURR_CD,
+       B.CHG_AMT, 
+	   TRS.TRS_BKG_NO,
+	   TRS.EQ_TPSZ_CD,
+	   TRS.EQ_NO,
+	   TRS.TRI_AXL_FLG,
+	   TRS.WO_RMK,
+	   TRS.LOCL_CRE_DT,
+	   TRS.WO_NO
+FROM (
+		SELECT BKG_NO,
+               RCV_TERM_CD,
+               DE_TERM_CD,
+               SVC_SCP_CD,
+               POR_CD,
+               POL_CD,
+               POD_CD,
+               DEL_CD,
+               CTRT_NO,
+               RAT_UT_CD,
+               CURR_CD,
+               CHG_AMT
+        FROM  (
+				SELECT BKG_NO,
+                       RCV_TERM_CD,
+                       DE_TERM_CD,
+                       SVC_SCP_CD,
+                       POR_CD,
+                       POL_CD,
+                       POD_CD,
+                       DEL_CD,
+                       CTRT_NO,
+                       RAT_UT_CD,
+                       CURR_CD,
+                       CHG_AMT,
+                       COUNT(BKG_NO) OVER ( PARTITION BY BKG_NO, SVC_SCP_CD, POR_CD, POL_CD, POD_CD, DEL_CD, CTRT_NO) CNT
+                FROM   (
+                    	SELECT DISTINCT
+                    			BK.BKG_NO,
+                    			BK.RCV_TERM_CD,
+                    			BK.DE_TERM_CD,
+                    			BK.SVC_SCP_CD,
+                    			BK.POR_CD,
+                    			BK.POL_CD,
+                    			BK.POD_CD,
+                    			BK.DEL_CD,
+                    			DECODE(BR.BKG_CTRT_TP_CD, 'S', BK.SC_NO, 'R', BK.RFA_NO, BK.TAA_NO) CTRT_NO,
+                    			DECODE(BCR.CHG_CD, 'TXS', BCR.RAT_UT_CD, '') RAT_UT_CD,
+                    			DECODE(BCR.CHG_CD, 'TXS', BCR.CURR_CD, '') CURR_CD,
+                    			DECODE(BCR.CHG_CD, 'TXS', BCR.CHG_AMT, '') CHG_AMT
+                    	FROM    BKG_BOOKING BK,
+                    			BKG_RATE  BR,
+                    			BKG_CHG_RT BCR,
+                    			BKG_CONTAINER   BCNTR,
+								TRS
+                    	WHERE  BK.BKG_NO = BR.BKG_NO
+                    	AND    BK.BKG_NO = BCR.BKG_NO
+                    	AND    BK.BKG_NO = BCNTR.BKG_NO
+            			--AND    BCR.CHG_CD = 'TXS'
+            			AND    (SUBSTR(BK.POL_CD,1,2) = 'US' OR SUBSTR(BK.POD_CD,1,2) = 'US')
+            			AND    BK.SVC_SCP_CD = @[svc_scp_cd]
+            			AND    BCNTR.CNTR_WGT >= DECODE(BCNTR.WGT_UT_CD,'KGS',17236,'LBS',38000, 17236)
+            			AND    SUBSTR(BCNTR.CNTR_TPSZ_CD,2,1) = '2'
+            			AND    BK.BKG_NO = TRS.TRS_BKG_NO
+                		#if (${rcv_term_cd} != '')
+						AND    BK.RCV_TERM_CD = @[rcv_term_cd]
+						#end
+                		#if (${de_term_cd} != '')
+						AND    BK.DE_TERM_CD = @[de_term_cd]
+						#end
+			           )
+				)
+        WHERE (CNT = 1  OR (CNT > 1 AND RAT_UT_CD IS NOT NULL))
+	) B,
+	TRS
+WHERE B.BKG_NO = TRS.TRS_BKG_NO      
+)
+SELECT  DISTINCT 
+        BKG.BKG_NO,
+		BKG.RCV_TERM_CD,
+		BKG.DE_TERM_CD, 
+		BKG.SVC_SCP_CD,
+		BKG.POR_CD,
+		BKG.POL_CD,
+		BKG.POD_CD,
+		BKG.DEL_CD,
+		BKG.CTRT_NO,
+		BKG.RAT_UT_CD,
+		BKG.CURR_CD,
+		BKG.CHG_AMT,
+		BKG.TRS_BKG_NO,
+		BKG.EQ_TPSZ_CD,
+		BKG.EQ_NO,
+		BKG.TRI_AXL_FLG,
+		BKG.WO_RMK,
+		BKG.LOCL_CRE_DT,
+		BKG.WO_NO,
+		TPB.TPB_BKG_NO,
+		TPB.MAIN,
+		TPB.SUB,
+		TPB.N3PTY_NO,
+		TPB.CFM_CURR_CD,
+		TPB.INV_AMT,
+		COUNT(DISTINCT BKG.BKG_NO) OVER () AS  BKG_CNT  
+FROM    BKG,
+        (
+			SELECT  TOD.BKG_NO TPB_BKG_NO,
+			        TOD.N3PTY_EXPN_TP_CD MAIN,
+			        TPB_GET_N3PTY_BIL_TP_NM_FNC(TOD.N3PTY_BIL_TP_CD) SUB,
+			        TOG.N3PTY_NO,
+			        TOD.CFM_CURR_CD,
+			        TOD.INV_AMT,
+					TOD.EQ_NO     
+			FROM    TPB_OTS_GRP TOG,
+			        TPB_OTS_DTL TOD,
+					TRS
+			WHERE   1=1
+			AND     TOG.N3PTY_NO = TOD.N3PTY_NO
+			AND     TOD.IF_RHQ_CD='NYCRA' 
+			AND     TOD.N3PTY_NO IS NOT NULL 
+			AND     TOD.N3PTY_DELT_TP_CD ='N'
+			AND     TOD.N3PTY_BIL_TP_CD = 'OW'  --Over Weight
+			AND     TOD.BKG_NO = TRS.TRS_BKG_NO
+		) TPB
+WHERE   1=1
+AND     BKG.BKG_NO = TPB.TPB_BKG_NO(+)
+AND     BKG.EQ_NO  = TPB.EQ_NO(+)
+ORDER BY BKG.BKG_NO
+
+#end			]]></sql>
+			<params>
+				<param name="svc_scp_cd" type="12" value="" out="N"/>
+				<param name="from_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+				<param name="rcv_term_cd" type="12" value="" out="N"/>
+				<param name="de_term_cd" type="12" value="" out="N"/>
+				<param name="tri_axel" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,149 @@
+CREATE OR REPLACE FUNCTION TRS_GET_AGMT_RATE2_FNC
+(
+      pi_sys_cd VARCHAR2, -- TRS, COA 구분
+      pi_cre_ofc_cd VARCHAR2, 
+      pi_vndr_cd VARCHAR2,      
+      pi_cre_dt DATE, 
+      pi_wy_tp_cd VARCHAR2,   -- NULL
+      pi_eq_knd_cd VARCHAR2,  -- 'U'
+      pi_eq_tpsz_cd VARCHAR2, 
+      pi_trsp_so_cmb_tp_cd VARCHAR2, 
+      pi_cgo_tp_cd VARCHAR2, 
+      pi_trsp_bnd_cd VARCHAR2, 
+      pi_trsp_crr_mod_cd VARCHAR2, 
+      pi_trsp_cost_dtl_mod_cd VARCHAR2,  -- DOOR일 경우 'DR' 그렇지 않을 경우 'CY'
+      pi_cust_cnt_cd VARCHAR2,           -- HJS는 null, CNT는 값 입력
+      pi_cust_seq NUMBER,              -- HJS는 null, CNT는 값 입력
+      pi_rail_ssvc_tp_cd VARCHAR2, 
+      pi_cmdt_cd VARCHAR2, 
+      pi_fm_nod_cd VARCHAR2, 
+      pi_via_nod_cd VARCHAR2, 
+      pi_dor_nod_cd VARCHAR2, 
+      pi_to_nod_cd VARCHAR2, 
+      pi_bundling_no NUMBER, 
+      pi_wgt_meas_ut_cd VARCHAR2, 
+      pi_cntr_wgt NUMBER, 
+      pi_rcv_term VARCHAR2, 
+      pi_de_term VARCHAR2, 
+      pi_trsp_agmt_ofc_cty_cd VARCHAR2, 
+      pi_trsp_agmt_seq NUMBER, 
+      pi_spcl_cgo_cd VARCHAR2,
+      pi_debug_flg VARCHAR2
+)
+RETURN VARCHAR2
+IS                                                                                                         
+/******************************************************************************                           
+   Name         :   TRS_GET_AGMT_RATE_FNC                                                                    
+   Purpose      :   AGMT Rate를 구하는 Function
+   Table        :   none                                                                             
+   System       :   ALPS > Transportation                                                                 
+   History      :   Ver 1.0 최종혁 2014.06.09
+******************************************************************************/  
+    O_OUT                 VARCHAR2(100) ; -- RETURN
+    v_cust_nomi_trkr_flg  VARCHAR2(1) ;
+    
+    po_trsp_agmt_ofc_cty_cd    VARCHAR2(100) ;
+    po_trsp_agmt_seq           NUMBER        ;
+    po_trsp_agmt_rt_tp_cd      VARCHAR2(100) ;
+    po_way_type                VARCHAR2(100) ;
+    po_trsp_agmt_rt_tp_nm      VARCHAR2(100) ;
+    po_sp_type                 VARCHAR2(100) ;
+    po_cust_nomi_trkr_flg      VARCHAR2(100) ;
+    po_cust_cnt_cd             VARCHAR2(100) ;
+    po_cust_seq                NUMBER        ;
+    po_local_curr_cd           VARCHAR2(100) ;
+    po_bzc_rt                  NUMBER        ;
+    po_fuel_scg_rt             NUMBER        ;
+    po_over_wgt_scg_rt         NUMBER        ;
+    po_hzs_scg_rt              NUMBER        ;
+    po_ttl_wgt_scg_rt          NUMBER        ;
+    po_vat_scg_rt              NUMBER        ;
+    po_scg1_rt                 NUMBER        ;
+    po_scg2_rt                 NUMBER        ;
+    po_scg3_rt                 VARCHAR2(4000);
+    po_local_curr_tot_amt      NUMBER        ;
+    po_usd_curr_tot_amt        NUMBER        ;
+    po_wtr_rcv_term_cd         VARCHAR2(100) ;
+    po_wtr_de_term_cd          VARCHAR2(100) ;
+    po_rtn_cd                  NUMBER        ;
+    po_rtn_msg                 VARCHAR2(100) ;    
+    
+BEGIN
+    IF LENGTH(pi_cust_cnt_cd) > 1 THEN
+        v_cust_nomi_trkr_flg := 'Y';
+    ELSE
+        v_cust_nomi_trkr_flg := 'N';
+    END IF;
+
+    TRS_AGMT_RATE_CC_PKG.GET_TRS_ALL_RATE_PRC
+      (
+       pi_sys_cd -- TRS, COA 구분
+      ,pi_cre_ofc_cd
+      ,pi_vndr_cd     
+      ,pi_cre_dt
+      ,pi_wy_tp_cd
+      ,pi_eq_knd_cd
+      ,pi_eq_tpsz_cd
+      ,pi_trsp_so_cmb_tp_cd
+      ,pi_cgo_tp_cd
+      ,pi_trsp_bnd_cd
+      ,pi_trsp_crr_mod_cd -- pi_trsp_crr_mod_cd
+      ,pi_trsp_cost_dtl_mod_cd -- DOOR일 경우 'DR' 그렇지 않을 경우 'CY'
+      ,v_cust_nomi_trkr_flg    -- HJS는 'N' CNT는 'Y'
+      ,pi_cust_cnt_cd          -- HJS는 null, CNT는 값 입력
+      ,pi_cust_seq             -- HJS는 null, CNT는 값 입력
+      ,pi_rail_ssvc_tp_cd
+      ,pi_cmdt_cd
+      ,pi_fm_nod_cd
+      ,pi_via_nod_cd
+      ,pi_dor_nod_cd
+      ,pi_to_nod_cd
+      ,pi_bundling_no
+      ,pi_wgt_meas_ut_cd
+      ,pi_cntr_wgt
+      ,pi_rcv_term
+      ,pi_de_term
+      ,pi_trsp_agmt_ofc_cty_cd
+      ,pi_trsp_agmt_seq
+      ,pi_spcl_cgo_cd
+      ,pi_debug_flg  -- debug_flg
+    
+      ,po_trsp_agmt_ofc_cty_cd
+      ,po_trsp_agmt_seq
+      ,po_trsp_agmt_rt_tp_cd
+      ,po_way_type
+      ,po_trsp_agmt_rt_tp_nm
+      ,po_sp_type
+      ,po_cust_nomi_trkr_flg
+      ,po_cust_cnt_cd
+      ,po_cust_seq
+      ,po_local_curr_cd
+      ,po_bzc_rt
+      ,po_fuel_scg_rt
+      ,po_over_wgt_scg_rt
+      ,po_hzs_scg_rt
+      ,po_ttl_wgt_scg_rt  
+      ,po_vat_scg_rt
+      ,po_scg1_rt
+      ,po_scg2_rt
+      ,po_scg3_rt  
+      ,po_local_curr_tot_amt
+      ,po_usd_curr_tot_amt
+      ,po_wtr_rcv_term_cd
+      ,po_wtr_de_term_cd
+      ,po_rtn_cd
+      ,po_rtn_msg
+    );
+
+
+SELECT po_local_curr_cd ||'^'||  
+       po_local_curr_tot_amt ||'^'|| 
+       TRS_COMMON_PKG.GET_CONVERSION_USD_AMT_FNC(po_local_curr_cd, po_local_curr_tot_amt, pi_cre_ofc_cd) ||'^'||
+       po_trsp_agmt_ofc_cty_cd||po_trsp_agmt_seq||'^'||
+       po_bzc_rt||'^'||
+       po_fuel_scg_rt
+  INTO O_OUT
+  FROM DUAL;
+
+  RETURN O_OUT;
+END ;

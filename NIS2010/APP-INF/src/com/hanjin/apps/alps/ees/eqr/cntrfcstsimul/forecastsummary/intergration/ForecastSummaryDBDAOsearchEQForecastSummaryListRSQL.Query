@@ -1,0 +1,585 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ForecastSummaryDBDAOsearchEQForecastSummaryListRSQL">
+			<desc><![CDATA[EES_EQR_1102 EQ Forecast Summary]]></desc>
+			<sql><![CDATA[
+WITH WK_DATA AS (
+    SELECT MAX(WEEK1) WEEK1
+         , MAX(WEEK2) WEEK2
+         , MAX(WEEK3) WEEK3
+         , MAX(WEEK4) WEEK4
+      FROM
+      (
+       SELECT MAX(DECODE(SEQ,1,WEEK)) WEEK1
+            , MAX(DECODE(SEQ,2,WEEK)) WEEK2
+            , MAX(DECODE(SEQ,3,WEEK)) WEEK3
+            , MAX(DECODE(SEQ,4,WEEK)) WEEK4
+        FROM   									
+            (      									
+                SELECT 
+                    (ROWNUM)SEQ, PLN_YR || PLN_WK WEEK
+                FROM 
+                    EQR_WK_PRD
+                WHERE 
+                    PLN_YR||PLN_WK >= REPLACE(@[fcast_yrwk], '-', '')
+                ORDER BY SEQ ASC                        
+            )                                			
+        WHERE ROWNUM <= 4
+        GROUP BY SEQ
+       )
+)
+-- 검색주차보다 작거나 같은것 중에 제일 큰 TARGET WEEK
+,TGT_WEEK AS 
+(
+    SELECT NVL(MAX(TGT_YRWK), '190001') TGT_YRWK -- CIM 에 WEEK 없는 경우 대비
+    FROM
+    (
+        SELECT DISTINCT A.TGT_YRWK
+              ,(
+                  SELECT TO_DATE(WK_ST_DT, 'YYYYMMDD')
+                  FROM EQR_WK_PRD
+                  WHERE PLN_YR||PLN_WK = A.TGT_YRWK
+              ) A_DATE
+              ,(
+                  SELECT TO_DATE(WK_ST_DT, 'YYYYMMDD')
+                  FROM EQR_WK_PRD
+                  WHERE PLN_YR||PLN_WK = REPLACE(@[fcast_yrwk], '-', '')
+              ) B_DATE
+        
+        FROM CIM_OPTM_STK_SMRY A 
+        WHERE A.OPTM_STK_MNG_TP_CD = 'F' -- final (4주 1번 생성)
+        AND   A.DMG_FLG = 'A'
+        ORDER BY A.TGT_YRWK
+    )
+    WHERE A_DATE <= B_DATE -- 검색주차보다 작거나 같은것 중에 제일 큰 TARGET WEEK
+)
+,DUMMY_HEAD AS
+(
+             SELECT REPLACE(@[fcast_yrwk], '-', '') INP_YRWK
+                   ,A.RCC_CD
+                   ,A.LOC_CD
+                   ,A.LOC_GRP_CD
+                   ,A.LOC_CD ||'('||A.LOC_GRP_CD ||')' DIVISION
+                   ,C.CNTR_TPSZ_CD    
+                   ,A.STK_ICRZ_FTR_FLG
+                   ,A.STK_DCRZ_FTR_FLG
+                   ,A.SROS_SPLS_FTR_FLG
+                   ,A.NORM_SPLS_FTR_FLG
+                   ,A.BAL_FTR_FLG
+                   ,A.SROS_SHTG_FTR_FLG
+                   ,A.NORM_SHTG_FTR_FLG
+             FROM EQR_CTRL_FCAST_SMRY_FTR A     
+                 ,(  -- 타입사이즈 하드코딩
+                               SELECT 'D2' CNTR_TPSZ_CD FROM DUAL
+                     UNION ALL SELECT 'D4' CNTR_TPSZ_CD FROM DUAL
+                     UNION ALL SELECT 'D5' CNTR_TPSZ_CD FROM DUAL
+                     UNION ALL SELECT 'D7' CNTR_TPSZ_CD FROM DUAL
+                   ) C
+            WHERE DELT_FTR_FLG = 'N' -- 삭제건은 제외
+            #if(${s_rcc_cd} != '')
+               AND A.RCC_CD = @[s_rcc_cd]
+            #end
+            #if(${s_loc_grp_cd} != '')
+               AND A.LOC_GRP_CD = @[s_loc_grp_cd]
+            #end
+            #if(${s_loc_cd} != '')
+               AND A.LOC_CD = @[s_loc_cd]
+            #end
+)
+
+SELECT Z.RCC_CD
+      ,Z.DIVISION
+      ,Z.CNTR_TPSZ_CD
+      ,NVL(B.IV_W0 , 0) IV_W0 
+      ,NVL(B.IV_W1 , 0) IV_W1 
+      ,NVL(B.IV_W2 , 0) IV_W2 
+      ,NVL(B.IV_W3 , 0) IV_W3 
+      ,NVL(B.IV_AVG, 0) IV_AVG
+
+      ,NVL(E.OPT_VOL,0) OPT_VOL -- FROM CIM OPTI VALUE
+
+      ,NVL(D.OP_W0 , 0) OP_W0 
+      ,NVL(D.OP_W1 , 0) OP_W1 
+      ,NVL(D.OP_W2 , 0) OP_W2 
+      ,NVL(D.OP_W3 , 0) OP_W3 
+      --,NVL(D.OP_AVG, 0) OP_AVG
+      ,ROUND(NVL(D.OP_AVG, 0)) OP_AVG
+      
+      ,NVL(C.PR_W0 , 0) PR_W0 
+      ,NVL(C.PR_W1 , 0) PR_W1 
+      ,NVL(C.PR_W2 , 0) PR_W2 
+      ,NVL(C.PR_W3 , 0) PR_W3 
+      ,NVL(C.PR_AVG, 0) PR_AVG
+
+      ,NVL(F.MB, 0) MB_VALUE
+      ,F.MB_STATUS      
+
+#if(${s_option_cd} == 'Y')
+      -- filter 적용하면 filter에 표시된 정보만 표시 
+      ,CASE WHEN A.STK_ICRZ_FLG ='Y' AND Z.STK_ICRZ_FTR_FLG ='Y' THEN A.STK_ICRZ_FLG  ELSE NULL END STK_ICRZ_FLG 
+      ,CASE WHEN A.STK_DCRZ_FLG ='Y' AND Z.STK_DCRZ_FTR_FLG ='Y' THEN A.STK_DCRZ_FLG  ELSE NULL END STK_DCRZ_FLG 
+      ,CASE WHEN A.SROS_SPLS_FLG='Y' AND Z.SROS_SPLS_FTR_FLG='Y' THEN A.SROS_SPLS_FLG ELSE NULL END SROS_SPLS_FLG 
+      ,CASE WHEN A.NORM_SPLS_FLG='Y' AND Z.NORM_SPLS_FTR_FLG='Y' THEN A.NORM_SPLS_FLG ELSE NULL END NORM_SPLS_FLG 
+      ,CASE WHEN A.SROS_SHTG_FLG='Y' AND Z.SROS_SHTG_FTR_FLG='Y' THEN A.SROS_SHTG_FLG ELSE NULL END SROS_SHTG_FLG 
+      ,CASE WHEN A.NORM_SHTG_FLG='Y' AND Z.NORM_SHTG_FTR_FLG='Y' THEN A.NORM_SHTG_FLG ELSE NULL END NORM_SHTG_FLG 
+      ,CASE WHEN A.BAL_FLG      ='Y' AND Z.BAL_FTR_FLG      ='Y' THEN A.BAL_FLG       ELSE NULL END BAL_FLG 
+#else
+       -- filter 적용 안되었으므로, 모든 정보 표시
+      ,DECODE(A.STK_ICRZ_FLG , 'N', NULL, A.STK_ICRZ_FLG ) STK_ICRZ_FLG 
+      ,DECODE(A.STK_DCRZ_FLG , 'N', NULL, A.STK_DCRZ_FLG ) STK_DCRZ_FLG 
+      ,DECODE(A.SROS_SPLS_FLG, 'N', NULL, A.SROS_SPLS_FLG) SROS_SPLS_FLG
+      ,DECODE(A.NORM_SPLS_FLG, 'N', NULL, A.NORM_SPLS_FLG) NORM_SPLS_FLG
+      ,DECODE(A.SROS_SHTG_FLG, 'N', NULL, A.SROS_SHTG_FLG) SROS_SHTG_FLG
+      ,DECODE(A.NORM_SHTG_FLG, 'N', NULL, A.NORM_SHTG_FLG) NORM_SHTG_FLG
+      ,DECODE(A.BAL_FLG,       'N', NULL, A.BAL_FLG)       BAL_FLG
+#end
+   
+FROM DUMMY_HEAD Z
+,(
+    -- SUMMARY 결과 조회
+    SELECT B.LOC_CD
+          ,B.INP_YRWK
+          ,B.LOC_GRP_CD      
+          ,B.CNTR_TPSZ_CD
+          
+	      ,B.STK_ICRZ_FLG 
+		  ,B.STK_DCRZ_FLG 
+		  ,B.SROS_SPLS_FLG
+		  ,B.NORM_SPLS_FLG
+		  ,B.SROS_SHTG_FLG
+		  ,B.NORM_SHTG_FLG
+		  ,B.BAL_FLG    
+    FROM EQR_CTRL_FCAST_SMRY     B    
+    WHERE B.INP_YRWK = REPLACE(@[fcast_yrwk], '-', '') -- 변수처리
+
+) A
+,(
+    -- INVENTORY VOLUME DATA 수집
+    -- HEAD HAUL
+    SELECT A.INP_YRWK
+          ,A.LOC_GRP_CD
+          ,A.LOC_CD
+          ,A.CNTR_TPSZ_CD
+          -- WEEK 는 모두 변수 처리
+          ,NVL(SUM(DECODE(A.FCAST_YRWK, WEEK1, A.FCAST_VOL_VAL)),0) IV_W0
+          ,NVL(SUM(DECODE(A.FCAST_YRWK, WEEK2, A.FCAST_VOL_VAL)),0) IV_W1
+          ,NVL(SUM(DECODE(A.FCAST_YRWK, WEEK3, A.FCAST_VOL_VAL)),0) IV_W2
+          ,NVL(SUM(DECODE(A.FCAST_YRWK, WEEK4, A.FCAST_VOL_VAL)),0) IV_W3
+    
+          ,ROUND(
+                (
+               NVL(SUM(DECODE(A.FCAST_YRWK, WEEK1, A.FCAST_VOL_VAL)),0) +
+               NVL(SUM(DECODE(A.FCAST_YRWK, WEEK2, A.FCAST_VOL_VAL)),0) +
+               NVL(SUM(DECODE(A.FCAST_YRWK, WEEK3, A.FCAST_VOL_VAL)),0) +
+               NVL(SUM(DECODE(A.FCAST_YRWK, WEEK4, A.FCAST_VOL_VAL)),0)
+                ) / 4
+           ,0)  IV_AVG
+    
+    FROM EQR_CTRL_FCAST_SMRY_VOL A
+        ,EQR_CTRL_FCAST_SMRY_FTR B
+        ,WK_DATA C
+    WHERE A.LOC_GRP_CD   = B.LOC_GRP_CD
+    AND   A.LOC_CD       = B.LOC_CD
+    AND   B.DELT_FTR_FLG = 'N'
+    AND   B.HUL_BND_CD   = 'HH'
+    AND   A.INP_YRWK     = REPLACE(@[fcast_yrwk], '-', '') -- 변수처리
+    AND   A.MTY_RPT_TP_CD IN ('IV', 'RI', 'OT', 'MG') -- HEAD HAUL : Inventory + Reposition In + Other(LT/ST/OW) + MG Forecast)                  
+    #if(${s_rcc_cd} != '')
+        AND B.RCC_CD = @[s_rcc_cd]
+    #end
+    #if(${s_loc_grp_cd} != '')
+        AND B.LOC_GRP_CD = @[s_loc_grp_cd]
+    #end
+    #if(${s_loc_cd} != '')
+        AND B.LOC_CD = @[s_loc_cd]
+    #end
+    GROUP BY A.INP_YRWK
+            ,A.LOC_GRP_CD
+            ,A.LOC_CD
+            ,A.CNTR_TPSZ_CD
+            
+    -- BACK HAUL
+    UNION ALL
+    SELECT A.INP_YRWK
+          ,A.LOC_GRP_CD
+          ,A.LOC_CD
+          ,A.CNTR_TPSZ_CD
+          -- WEEK 는 모두 변수 처리
+          ,NVL(SUM(DECODE(A.FCAST_YRWK, WEEK1, A.FCAST_VOL_VAL)),0) IV_W0
+          ,NVL(SUM(DECODE(A.FCAST_YRWK, WEEK2, A.FCAST_VOL_VAL)),0) IV_W1
+          ,NVL(SUM(DECODE(A.FCAST_YRWK, WEEK3, A.FCAST_VOL_VAL)),0) IV_W2
+          ,NVL(SUM(DECODE(A.FCAST_YRWK, WEEK3, A.FCAST_VOL_VAL)),0) IV_W3
+    
+          ,ROUND(
+                (
+               NVL(SUM(DECODE(A.FCAST_YRWK, WEEK1, A.FCAST_VOL_VAL)),0) +
+               NVL(SUM(DECODE(A.FCAST_YRWK, WEEK2, A.FCAST_VOL_VAL)),0) +
+               NVL(SUM(DECODE(A.FCAST_YRWK, WEEK3, A.FCAST_VOL_VAL)),0) +
+               NVL(SUM(DECODE(A.FCAST_YRWK, WEEK4, A.FCAST_VOL_VAL)),0)
+                ) / 4
+           ,0)  IV_AVG
+    
+    FROM EQR_CTRL_FCAST_SMRY_VOL A
+        ,EQR_CTRL_FCAST_SMRY_FTR B
+        ,WK_DATA
+    WHERE A.LOC_GRP_CD   = B.LOC_GRP_CD
+    AND   A.LOC_CD       = B.LOC_CD
+    AND   B.DELT_FTR_FLG = 'N'
+    AND   B.HUL_BND_CD   = 'BH'
+    AND   A.INP_YRWK     = REPLACE(@[fcast_yrwk], '-', '') -- 변수처리
+    AND   A.MTY_RPT_TP_CD IN ('IV', 'MG', 'RV', 'OH') -- BACK HAUL : Starting Inventory = Initial Inventory + MG + MT In via VD + On-hire       
+    #if(${s_rcc_cd} != '')
+        AND B.RCC_CD = @[s_rcc_cd]
+    #end
+    #if(${s_loc_grp_cd} != '')
+        AND B.LOC_GRP_CD = @[s_loc_grp_cd]
+    #end
+    #if(${s_loc_cd} != '')
+        AND B.LOC_CD = @[s_loc_cd]
+    #end
+    GROUP BY A.INP_YRWK
+            ,A.LOC_GRP_CD
+            ,A.LOC_CD
+            ,A.CNTR_TPSZ_CD            
+) B
+,(
+    -- PFMC 수집
+    SELECT INP_YRWK
+          ,LOC_GRP_CD
+          ,LOC_CD
+          ,CNTR_TPSZ_CD
+          -- WEEK 는 모두 변수 처리         
+          ,TO_CHAR(NVL(SUM(DECODE(FCAST_YRWK, WEEK1, FCAST_VOL_VAL)),0), 'fm9999999999990.0') PR_W0
+          ,TO_CHAR(NVL(SUM(DECODE(FCAST_YRWK, WEEK2, FCAST_VOL_VAL)),0), 'fm9999999999990.0') PR_W1
+          ,TO_CHAR(NVL(SUM(DECODE(FCAST_YRWK, WEEK3, FCAST_VOL_VAL)),0), 'fm9999999999990.0') PR_W2
+          ,TO_CHAR(NVL(SUM(DECODE(FCAST_YRWK, WEEK4, FCAST_VOL_VAL)),0), 'fm9999999999990.0') PR_W3
+    
+          ,TO_CHAR(ROUND(
+                (
+               NVL(SUM(DECODE(FCAST_YRWK, WEEK1, FCAST_VOL_VAL)),0) +
+               NVL(SUM(DECODE(FCAST_YRWK, WEEK2, FCAST_VOL_VAL)),0) +
+               NVL(SUM(DECODE(FCAST_YRWK, WEEK3, FCAST_VOL_VAL)),0) +
+               NVL(SUM(DECODE(FCAST_YRWK, WEEK4, FCAST_VOL_VAL)),0)
+                ) / 4
+           ,1), 'fm9999999999990.0')  PR_AVG
+    
+    FROM EQR_CTRL_FCAST_SMRY_VOL
+       , WK_DATA
+    WHERE   INP_YRWK = REPLACE(@[fcast_yrwk], '-', '') -- 변수처리
+    AND     MTY_RPT_TP_CD IN ('PR') -- 하드코딩, PFMC                   
+    GROUP BY INP_YRWK
+          ,LOC_GRP_CD
+          ,LOC_CD
+          ,CNTR_TPSZ_CD
+) C
+,(
+    -- OP VOLUME DATA 수집
+    SELECT INP_YRWK
+          ,LOC_GRP_CD
+          ,LOC_CD
+          ,CNTR_TPSZ_CD
+          -- WEEK 는 모두 변수 처리         
+          ,NVL(SUM(DECODE(FCAST_YRWK, WEEK1, FCAST_VOL_VAL)),0) OP_W0
+          ,NVL(SUM(DECODE(FCAST_YRWK, WEEK2, FCAST_VOL_VAL)),0) OP_W1
+          ,NVL(SUM(DECODE(FCAST_YRWK, WEEK3, FCAST_VOL_VAL)),0) OP_W2
+          ,NVL(SUM(DECODE(FCAST_YRWK, WEEK4, FCAST_VOL_VAL)),0) OP_W3
+    
+          ,ROUND(
+                (
+               NVL(SUM(DECODE(FCAST_YRWK, WEEK1, FCAST_VOL_VAL)),0) +
+               NVL(SUM(DECODE(FCAST_YRWK, WEEK2, FCAST_VOL_VAL)),0) +
+               NVL(SUM(DECODE(FCAST_YRWK, WEEK3, FCAST_VOL_VAL)),0) +
+               NVL(SUM(DECODE(FCAST_YRWK, WEEK4, FCAST_VOL_VAL)),0)
+                ) / 4
+           ,1)  OP_AVG
+    
+    FROM EQR_CTRL_FCAST_SMRY_VOL
+       , WK_DATA
+    WHERE   INP_YRWK = REPLACE(@[fcast_yrwk], '-', '') -- 변수처리
+    AND     MTY_RPT_TP_CD IN ('OP') -- 하드코딩, OP (OutBound Pickup)                   
+    GROUP BY INP_YRWK
+          ,LOC_GRP_CD
+          ,LOC_CD
+          ,CNTR_TPSZ_CD
+) D
+,(  -- ECC 값을 SCC 로 보여줍니다(유저요청)
+    SELECT REPLACE(@[fcast_yrwk], '-', '') INP_YRWK
+          ,'S' LOC_GRP_CD
+          ,SCC_CD LOC_CD
+          ,CNTR_TPSZ_CD
+          ,SUM(CNTR_QTY) OPT_VOL
+    FROM
+    (
+        SELECT A.ECC_CD 
+              ,C.SCC_CD
+              ,A.CNTR_TPSZ_CD
+              ,A.CNTR_QTY
+        FROM CIM_OPTM_STK_SMRY  A
+            ,TGT_WEEK           B
+            ,MDM_EQ_ORZ_CHT     C
+        WHERE A.OPTM_STK_MNG_TP_CD = 'F' -- FINAL OPT
+        AND   A.DMG_FLG = 'A'
+        AND   A.TGT_YRWK = B.TGT_YRWK
+        AND   A.ECC_CD   = C.ECC_CD
+        AND   C.DELT_FLG = 'N'
+        AND   A.CNTR_TPSZ_CD IN ('D2','D4','D5','D7')
+    )
+    GROUP BY SCC_CD 
+            ,CNTR_TPSZ_CD
+    
+    -- ECC 값을 추출
+    UNION ALL
+    SELECT REPLACE(@[fcast_yrwk], '-', '') INP_YRWK
+          ,'E'      LOC_GRP_CD
+          ,A.ECC_CD LOC_CD
+          ,A.CNTR_TPSZ_CD
+          ,SUM(A.CNTR_QTY) OPT_VOL
+    FROM CIM_OPTM_STK_SMRY  A
+        ,TGT_WEEK           B
+    WHERE A.OPTM_STK_MNG_TP_CD = 'F' -- FINAL OPT
+    AND   A.DMG_FLG = 'A'
+    AND   A.TGT_YRWK = B.TGT_YRWK
+    AND   A.CNTR_TPSZ_CD IN ('D2','D4','D5','D7')
+    GROUP BY A.ECC_CD
+            ,A.CNTR_TPSZ_CD
+    
+    
+    -- ECC 값을 LCC 로 SUM
+    UNION ALL
+    SELECT INP_YRWK
+          ,LOC_GRP_CD
+          ,LOC_CD
+          ,CNTR_TPSZ_CD
+          ,SUM(CNTR_QTY) OPT_VOL
+    FROM
+    (
+        SELECT REPLACE(@[fcast_yrwk], '-', '') INP_YRWK
+              ,'L'      LOC_GRP_CD 
+              ,A.ECC_CD
+              ,(
+                  SELECT DISTINCT X.LCC_CD 
+                  FROM MDM_EQ_ORZ_CHT X
+                  WHERE X.ECC_CD = A.ECC_CD
+                  AND   X.DELT_FLG = 'N'
+                  AND   ROWNUM=1
+               ) LOC_CD
+              ,A.CNTR_TPSZ_CD
+              ,A.CNTR_QTY
+        FROM CIM_OPTM_STK_SMRY  A
+            ,TGT_WEEK           B
+        WHERE A.OPTM_STK_MNG_TP_CD = 'F' -- FINAL OPT
+        AND   A.DMG_FLG = 'A'
+        AND   A.TGT_YRWK = B.TGT_YRWK
+        AND   A.CNTR_TPSZ_CD IN ('D2','D4','D5','D7')
+    )
+    GROUP BY INP_YRWK
+          ,LOC_GRP_CD
+          ,LOC_CD
+          ,CNTR_TPSZ_CD
+) E
+,(  
+    -- CIM MATCH BACK VALUE
+    -- Equipment Management > CNTR Inventory > Inventory Status > EQ Inbalance Report > EQ Balance Report Inquiry
+    SELECT ECC_CD LOC_CD
+          ,'E' LOC_GRP_CD
+          ,CNTR_TPSZ_CD
+          ,REPLACE(@[fcast_yrwk], '-', '') INP_YRWK
+          ,MB
+          ,CASE WHEN MB >=  90 AND MB <= 100 THEN 'Balance'
+    			WHEN MB >=  75 AND MB <   90 THEN '+'
+    			WHEN MB >=  50 AND MB <   75 THEN '++'
+                WHEN MB >=   0 AND MB <   50 THEN '+++'
+    			WHEN MB <= -90 AND MB >=-100 THEN 'Balance'
+    			WHEN MB <= -75 AND MB >  -90 THEN '-'
+    			WHEN MB <= -50 AND MB >  -75 THEN '--'
+    			WHEN MB <=   0 AND MB >  -50 THEN '---'
+                ELSE ''
+    	   END AS MB_STATUS             
+    FROM
+    (
+        SELECT B.ECC_CD         
+              ,T.CNTR_TPSZ_CD
+              ,T.TGT_YRWK
+              ,SUM(T.IB_QTY) IB_QTY
+              ,SUM(T.OB_QTY) OB_QTY
+              ,CASE WHEN SUM (T.IB_QTY) >= SUM (T.OB_QTY) THEN DECODE(NVL(SUM(T.IB_QTY),0), 0, 0,  ROUND(  (SUM (T.OB_QTY) / SUM (T.IB_QTY)) * 100 ))
+    	    	    WHEN SUM (T.OB_QTY) >0                THEN DECODE(NVL(SUM(T.OB_QTY),0), 0, 0,  ROUND(  (SUM (T.IB_QTY) / SUM (T.OB_QTY)) * -1  * 100 ))
+    	    	    ELSE 0
+    	       END AS MB           
+        FROM CIM_LOC_MTCH_BAK_SMRY  T
+            ,MDM_EQ_ORZ_CHT		    B
+    	    ,MDM_LOCATION		    A   
+        WHERE T.LOC_CD = A.LOC_CD
+        AND   A.SCC_CD = B.SCC_CD
+        AND   T.TGT_YRWK = @[cim_matchback_week]
+        AND   T.CNTR_TPSZ_CD IN ('D2','D4','D5','D7')
+        AND   T.FULL_MTY_CD	=	'F'		
+        AND   T.MVMT_CO_CD IN ('H','S') 
+        AND	  T.ENR_FLG	    =	'N'
+        AND   T.TN_ROUT_FLG =	'N'
+        AND   T.SOC_FLG     = 'N'
+        GROUP BY  B.ECC_CD     
+                 ,T.CNTR_TPSZ_CD
+                 ,T.TGT_YRWK
+    )  
+    
+    UNION ALL
+    
+    SELECT SCC_CD LOC_CD
+          ,'S' LOC_GRP_CD
+          ,CNTR_TPSZ_CD
+          ,REPLACE(@[fcast_yrwk], '-', '') INP_YRWK
+          ,MB
+          ,CASE WHEN MB >=  90 AND MB <= 100 THEN 'Balance'
+    			WHEN MB >=  75 AND MB <   90 THEN '+'
+    			WHEN MB >=  50 AND MB <   75 THEN '++'
+                WHEN MB >=   0 AND MB <   50 THEN '+++'
+    			WHEN MB <= -90 AND MB >=-100 THEN 'Balance'
+    			WHEN MB <= -75 AND MB >  -90 THEN '-'
+    			WHEN MB <= -50 AND MB >  -75 THEN '--'
+    			WHEN MB <=   0 AND MB >  -50 THEN '---'
+                ELSE ''
+    	   END AS MB_STATUS             
+    FROM
+    (
+        SELECT B.SCC_CD         
+              ,T.CNTR_TPSZ_CD
+              ,T.TGT_YRWK
+              ,SUM(T.IB_QTY) IB_QTY
+              ,SUM(T.OB_QTY) OB_QTY
+              ,CASE WHEN SUM (T.IB_QTY) >= SUM (T.OB_QTY) THEN DECODE(NVL(SUM(T.IB_QTY),0), 0, 0,  ROUND(  (SUM (T.OB_QTY) / SUM (T.IB_QTY)) * 100 ))
+    	    	    WHEN SUM (T.OB_QTY) >0                THEN DECODE(NVL(SUM(T.OB_QTY),0), 0, 0,  ROUND(  (SUM (T.IB_QTY) / SUM (T.OB_QTY)) * -1  * 100 ))
+    	    	    ELSE 0
+    	       END AS MB           
+        FROM CIM_LOC_MTCH_BAK_SMRY  T
+            ,MDM_EQ_ORZ_CHT		    B
+    	    ,MDM_LOCATION		    A   
+        WHERE T.LOC_CD = A.LOC_CD
+        AND   A.SCC_CD = B.SCC_CD
+        AND   T.TGT_YRWK = @[cim_matchback_week]
+        AND   T.CNTR_TPSZ_CD IN ('D2','D4','D5','D7')
+        AND   T.FULL_MTY_CD	=	'F'		
+        AND   T.MVMT_CO_CD IN ('H','S') 
+        AND	  T.ENR_FLG	    =	'N'
+        AND   T.TN_ROUT_FLG =	'N'
+        AND   T.SOC_FLG     = 'N'
+        GROUP BY  B.SCC_CD     
+                 ,T.CNTR_TPSZ_CD
+                 ,T.TGT_YRWK
+    )  
+    
+    UNION ALL
+    
+    SELECT LCC_CD LOC_CD
+          ,'L' LOC_GRP_CD
+          ,CNTR_TPSZ_CD
+          ,REPLACE(@[fcast_yrwk], '-', '') INP_YRWK
+          ,MB
+          ,CASE WHEN MB >=  90 AND MB <= 100 THEN 'Balance'
+    			WHEN MB >=  75 AND MB <   90 THEN '+'
+    			WHEN MB >=  50 AND MB <   75 THEN '++'
+                WHEN MB >=   0 AND MB <   50 THEN '+++'
+    			WHEN MB <= -90 AND MB >=-100 THEN 'Balance'
+    			WHEN MB <= -75 AND MB >  -90 THEN '-'
+    			WHEN MB <= -50 AND MB >  -75 THEN '--'
+    			WHEN MB <=   0 AND MB >  -50 THEN '---'
+                ELSE ''
+    	   END AS MB_STATUS             
+    FROM
+    (
+        SELECT B.LCC_CD         
+              ,T.CNTR_TPSZ_CD
+              ,T.TGT_YRWK
+              ,SUM(T.IB_QTY) IB_QTY
+              ,SUM(T.OB_QTY) OB_QTY
+              ,CASE WHEN SUM (T.IB_QTY) >= SUM (T.OB_QTY) THEN DECODE(NVL(SUM(T.IB_QTY),0), 0, 0,  ROUND(  (SUM (T.OB_QTY) / SUM (T.IB_QTY)) * 100 ))
+    	    	    WHEN SUM (T.OB_QTY) >0                THEN DECODE(NVL(SUM(T.OB_QTY),0), 0, 0,  ROUND(  (SUM (T.IB_QTY) / SUM (T.OB_QTY)) * -1  * 100 ))
+    	    	    ELSE 0
+    	       END AS MB           
+        FROM CIM_LOC_MTCH_BAK_SMRY  T
+            ,MDM_EQ_ORZ_CHT		    B
+    	    ,MDM_LOCATION		    A   
+        WHERE T.LOC_CD = A.LOC_CD
+        AND   A.SCC_CD = B.SCC_CD
+        AND   T.TGT_YRWK = @[cim_matchback_week]
+        AND   T.CNTR_TPSZ_CD IN ('D2','D4','D5','D7')
+        AND   T.FULL_MTY_CD	=	'F'		
+        AND   T.MVMT_CO_CD IN ('H','S') 
+        AND	  T.ENR_FLG	    =	'N'
+        AND   T.TN_ROUT_FLG =	'N'
+        AND   T.SOC_FLG     = 'N'
+        GROUP BY  B.LCC_CD     
+                 ,T.CNTR_TPSZ_CD
+                 ,T.TGT_YRWK
+    )  
+) F
+WHERE Z.INP_YRWK    = A.INP_YRWK     (+)
+AND   Z.LOC_GRP_CD  = A.LOC_GRP_CD   (+)
+AND   Z.LOC_CD      = A.LOC_CD       (+)
+AND   Z.CNTR_TPSZ_CD= A.CNTR_TPSZ_CD (+)
+
+AND   Z.INP_YRWK    = B.INP_YRWK     (+)
+AND   Z.LOC_GRP_CD  = B.LOC_GRP_CD   (+)
+AND   Z.LOC_CD      = B.LOC_CD       (+)
+AND   Z.CNTR_TPSZ_CD= B.CNTR_TPSZ_CD (+)
+
+AND   Z.INP_YRWK    = C.INP_YRWK     (+)
+AND   Z.LOC_GRP_CD  = C.LOC_GRP_CD   (+)
+AND   Z.LOC_CD      = C.LOC_CD       (+)
+AND   Z.CNTR_TPSZ_CD= C.CNTR_TPSZ_CD (+)
+
+AND   Z.INP_YRWK    = D.INP_YRWK     (+)
+AND   Z.LOC_GRP_CD  = D.LOC_GRP_CD   (+)
+AND   Z.LOC_CD      = D.LOC_CD       (+)
+AND   Z.CNTR_TPSZ_CD= D.CNTR_TPSZ_CD (+)
+
+AND   Z.INP_YRWK    = E.INP_YRWK     (+)
+AND   Z.LOC_GRP_CD  = E.LOC_GRP_CD   (+)
+AND   Z.LOC_CD      = E.LOC_CD       (+)
+AND   Z.CNTR_TPSZ_CD= E.CNTR_TPSZ_CD (+)
+
+AND   Z.INP_YRWK    = F.INP_YRWK     (+)
+AND   Z.LOC_GRP_CD  = F.LOC_GRP_CD   (+)
+AND   Z.LOC_CD      = F.LOC_CD       (+)
+AND   Z.CNTR_TPSZ_CD= F.CNTR_TPSZ_CD (+)
+
+-- Y가 1개도 없으면 조회대상에서 제외
+#if(${s_option_cd} == 'Y')
+-- 라인 통제
+-- filter 적용된 경우는 filter 표시여부, summary 결과 모두 존재하는 라인만 표시
+AND  (
+          (A.STK_ICRZ_FLG  = 'Y' AND Z.STK_ICRZ_FTR_FLG  = 'Y' )        
+       OR (A.STK_DCRZ_FLG  = 'Y' AND Z.STK_DCRZ_FTR_FLG  = 'Y' )
+       
+       OR (A.SROS_SPLS_FLG = 'Y' AND Z.SROS_SPLS_FTR_FLG = 'Y' )
+       OR (A.NORM_SPLS_FLG = 'Y' AND Z.NORM_SPLS_FTR_FLG = 'Y' )
+       OR (A.SROS_SHTG_FLG = 'Y' AND Z.SROS_SHTG_FTR_FLG = 'Y' ) 
+       OR (A.NORM_SHTG_FLG = 'Y' AND Z.NORM_SHTG_FTR_FLG = 'Y' )
+       OR (A.BAL_FLG       = 'Y' AND Z.BAL_FTR_FLG       = 'Y' ) 
+     ) 
+#end
+
+-- Inventory 는 5개중 1개라도 0이 아니어야 UI에 조회합니다.
+AND (
+          NVL(B.IV_W0 , 0) <> 0
+       OR NVL(B.IV_W1 , 0) <> 0 
+       OR NVL(B.IV_W2 , 0) <> 0  
+       OR NVL(B.IV_W3 , 0) <> 0 
+       OR NVL(B.IV_AVG, 0) <> 0 
+    )
+ 
+ORDER BY Z.RCC_CD
+        ,Z.LOC_GRP_CD
+        ,Z.LOC_CD
+        ,Z.CNTR_TPSZ_CD			]]></sql>
+			<params>
+				<param name="fcast_yrwk" type="12" value="" out="N"/>
+				<param name="s_rcc_cd" type="12" value="" out="N"/>
+				<param name="s_loc_grp_cd" type="12" value="" out="N"/>
+				<param name="s_loc_cd" type="12" value="" out="N"/>
+				<param name="cim_matchback_week" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

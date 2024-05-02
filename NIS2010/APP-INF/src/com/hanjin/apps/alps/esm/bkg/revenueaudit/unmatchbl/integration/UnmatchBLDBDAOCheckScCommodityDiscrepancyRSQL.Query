@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="UnmatchBLDBDAOCheckScCommodityDiscrepancyRSQL">
+			<desc><![CDATA[checkScCommodityDiscrepancy]]></desc>
+			<sql><![CDATA[
+WITH
+SC AS
+(
+/*******************************************************************************************
+계약 정보 조회
+*******************************************************************************************/
+SELECT * FROM (
+SELECT  SS.PROP_NO    ,
+        SS.AMDT_SEQ   ,
+        SS.SVC_SCP_CD
+FROM    BKG_BOOKING     BK  ,
+        MDM_LOCATION    L1  ,
+        MDM_LOCATION    L4  ,
+        PRI_SP_HDR      SH  ,
+        PRI_SP_MN       SM  ,
+        PRI_SP_SCP_MN   SS
+WHERE   L1.LOC_CD       = BK.POR_CD
+AND     L4.LOC_CD       = BK.DEL_CD
+AND     SH.SC_NO        = BK.SC_NO
+AND     SM.PROP_NO      = SH.PROP_NO
+AND     SM.PROP_STS_CD  = 'F'       -- FILED S/C
+AND     SS.PROP_NO      = SM.PROP_NO
+AND     SS.AMDT_SEQ     = SM.AMDT_SEQ
+AND     SS.SVC_SCP_CD   IN (BK.SVC_SCP_CD,DECODE(BK.SVC_SCP_CD,'ACE','TPE','MXE','TPE'))
+AND     ( SELECT BKG_REV_APLY_DT_PKG.BKG_GET_REV_APLY_DT_FNC(@[bkg_no], @[ca_flg]) FROM DUAL )
+        BETWEEN SS.EFF_DT AND SS.EXP_DT
+AND     BK.BKG_NO       = @[bkg_no]
+AND     @[ca_flg]       = 'N'
+ORDER BY DECODE(SS.SVC_SCP_CD,'ACE',1,'MXE',2,'TPE',3)
+)
+WHERE ROWNUM = 1
+
+UNION ALL
+
+SELECT * FROM (
+SELECT  SS.PROP_NO    ,
+        SS.AMDT_SEQ   ,
+        SS.SVC_SCP_CD
+FROM    BKG_BKG_HIS     BK  ,
+        MDM_LOCATION    L1  ,
+        MDM_LOCATION    L4  ,
+        PRI_SP_HDR      SH  ,
+        PRI_SP_MN       SM  ,
+        PRI_SP_SCP_MN   SS
+WHERE   L1.LOC_CD       = BK.POR_CD
+AND     L4.LOC_CD       = BK.DEL_CD
+AND     SH.SC_NO        = BK.SC_NO
+AND     SM.PROP_NO      = SH.PROP_NO
+AND     SM.PROP_STS_CD  = 'F'       -- FILED S/C
+AND     SS.PROP_NO      = SM.PROP_NO
+AND     SS.AMDT_SEQ     = SM.AMDT_SEQ
+AND     SS.SVC_SCP_CD   IN (BK.SVC_SCP_CD,DECODE(BK.SVC_SCP_CD,'ACE','TPE','MXE','TPE'))
+AND     ( SELECT BKG_REV_APLY_DT_PKG.BKG_GET_REV_APLY_DT_FNC(@[bkg_no], @[ca_flg]) FROM DUAL )
+        BETWEEN SS.EFF_DT AND SS.EXP_DT
+AND     BK.BKG_NO       = @[bkg_no]
+AND     BK.CORR_NO      = 'TMP0000001'  -- CORRECTION 중인 DATA 를 나타내는 고정된 상수값
+AND     @[ca_flg]       = 'Y'
+ORDER BY DECODE(SS.SVC_SCP_CD,'ACE',1,'MXE',2,'TPE',3)
+)
+WHERE ROWNUM = 1
+) ,
+C1 AS
+(
+/*******************************************************************************************
+COMMODITY DATA 비교
+*******************************************************************************************/
+
+SELECT  'X'
+FROM    (
+        /* BKG COMMODITY */
+        SELECT  CMDT_CD
+        FROM    BKG_BOOKING BK
+        WHERE   BK.BKG_NO   = @[bkg_no]
+        AND     @[ca_flg]   = 'N'
+
+        UNION ALL
+
+        SELECT  CMDT_CD
+        FROM    BKG_BKG_HIS BK
+        WHERE   BK.BKG_NO   = @[bkg_no]
+        AND     BK.CORR_NO  = 'TMP0000001'  -- CORRECTION 중인 DATA 를 나타내는 고정된 상수값
+        AND     @[ca_flg]   = 'Y'
+        ) BC  ,
+        (
+        SELECT  CASE
+                WHEN CM.PRC_CMDT_TP_CD = 'C' THEN CM.PRC_CMDT_DEF_CD
+                WHEN CM.PRC_CMDT_TP_CD = 'R' THEN C1.CMDT_CD
+                WHEN CM.PRC_CMDT_TP_CD = 'G' AND GD.PRC_CMDT_TP_CD = 'C' THEN GD.PRC_CMDT_DEF_CD
+                WHEN CM.PRC_CMDT_TP_CD = 'G' AND GD.PRC_CMDT_TP_CD = 'R' THEN C2.CMDT_CD
+                END CMDT_CD
+        FROM    SC  ,
+                PRI_SP_SCP_RT_CMDT      CM  ,
+                MDM_COMMODITY           C1  ,
+                PRI_SP_SCP_GRP_CMDT     GC  ,
+                PRI_SP_SCP_GRP_CMDT_DTL GD  ,
+                MDM_COMMODITY           C2
+        WHERE   C1.REP_CMDT_CD(+)     = CM.PRC_CMDT_DEF_CD
+        AND     GC.PROP_NO(+)         = CM.PROP_NO
+        AND     GC.AMDT_SEQ(+)        = CM.AMDT_SEQ
+        AND     GC.SVC_SCP_CD(+)      = CM.SVC_SCP_CD
+        AND     GC.PRC_GRP_CMDT_CD(+) = CM.PRC_CMDT_DEF_CD
+        AND     GD.PROP_NO(+)         = GC.PROP_NO
+        AND     GD.AMDT_SEQ(+)        = GC.AMDT_SEQ
+        AND     GD.SVC_SCP_CD(+)      = GC.SVC_SCP_CD
+        AND     GD.GRP_CMDT_SEQ(+)    = GC.GRP_CMDT_SEQ
+        AND     GD.SRC_INFO_CD(+)     <> 'AD'
+        AND     C2.REP_CMDT_CD(+)     = GD.PRC_CMDT_DEF_CD
+        AND     CM.PROP_NO            = SC.PROP_NO
+        AND     CM.AMDT_SEQ           = SC.AMDT_SEQ
+        AND     CM.SVC_SCP_CD         = SC.SVC_SCP_CD
+        AND     CM.SRC_INFO_CD        <> 'AD'
+        ) RC
+WHERE   (
+            BC.CMDT_CD  = RC.CMDT_CD
+        OR  ( SELECT A.REP_CMDT_CD FROM MDM_COMMODITY A WHERE A.CMDT_CD = RC.CMDT_CD ) = '0000' -- FAK
+        OR  ( SELECT A.REP_CMDT_CD FROM MDM_COMMODITY A WHERE A.CMDT_CD = RC.CMDT_CD ) = '9901' -- GDSM
+        )
+AND     ROWNUM  = 1
+)
+SELECT  'C'   UMCH_TP_CD      ,
+        '[Commodity]['
+          ||  DECODE(@[ca_flg],
+                'N', ( SELECT CMDT_CD FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no] ),
+                'Y', ( SELECT CMDT_CD FROM BKG_BKG_HIS WHERE BKG_NO = @[bkg_no] AND CORR_NO = 'TMP0000001' )
+                )
+          ||  ']' BKG_ITM_LOG ,
+        (
+        SELECT  '[Commodity]'
+        FROM    DUAL
+        WHERE   EXISTS  (
+                        SELECT  'X'
+                        FROM    PRI_SP_SCP_RT_CMDT  CM
+                        WHERE   ( CM.PROP_NO, CM.AMDT_SEQ, CM.SVC_SCP_CD ) = ( SELECT PROP_NO, AMDT_SEQ, SVC_SCP_CD FROM SC )
+                        AND     CM.SRC_INFO_CD  <> 'AD'
+                        )
+        )
+        ||
+        (
+        SELECT  REPLACE(RTRIM(REPLACE(LTRIM(SYS_CONNECT_BY_PATH(PRC_CMDT_DEF_CD || DECODE(MOD(ROW_NUMBER, 5), 0, '/'), ';'), ';'), '/;', CHR(10)) ,'/'), ';', '')
+        FROM    (
+                SELECT  '[' || RPAD(PRC_CMDT_DEF_CD, 6, ' ') || ']' PRC_CMDT_DEF_CD ,
+                        ROW_NUMBER() OVER ( ORDER BY CMDT_HDR_SEQ, CMDT_SEQ ) ROW_NUMBER  ,
+                        COUNT(1) OVER () CNT
+                FROM    PRI_SP_SCP_RT_CMDT  CM
+                WHERE   ( CM.PROP_NO, CM.AMDT_SEQ, CM.SVC_SCP_CD ) = ( SELECT PROP_NO, AMDT_SEQ, SVC_SCP_CD FROM SC )
+                AND     CM.SRC_INFO_CD        <> 'AD'
+                )
+        WHERE   LEVEL   = LEAST(CNT, 20)
+        START WITH ROW_NUMBER = 1
+        CONNECT BY
+                ROW_NUMBER        = PRIOR ROW_NUMBER + 1
+        )   CTRT_ITM_LOG    ,
+        'U'   MTCH_UMCH_TP_CD ,
+        ( SELECT UMCH_TP_DESC FROM BKG_REV_UMCH_TP WHERE UMCH_TP_CD = 'C' ) UMCH_TP_DESC  ,
+        ( SELECT INTG_CD_VAL_DP_DESC FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD02456' AND INTG_CD_VAL_CTNT = 'U' ) MTCH_UMCH_TP_DESC
+FROM    DUAL
+WHERE   NOT EXISTS ( SELECT 'X' FROM C1 )
+
+
+/*******************************************************************************************
+신규 BKG 만 대상으로 한다.
+*******************************************************************************************/
+
+AND     LENGTH(@[bkg_no]) = 12
+
+/*******************************************************************************************
+CO-BIZ은 대상에서 제외한다.
+*******************************************************************************************/
+AND     (
+        SELECT  NVL(RT_BL_TP_CD, 'N')
+        FROM    BKG_RATE
+        WHERE   BKG_NO        = @[bkg_no]
+        AND     @[ca_flg]     = 'N'
+        UNION ALL
+        SELECT  NVL(RT_BL_TP_CD, 'N')
+        FROM    BKG_RT_HIS
+        WHERE   BKG_NO        = @[bkg_no]
+        AND     CORR_NO       = 'TMP0000001'  -- CORRECTION 중인 DATA 를 나타내는 고정된 상수값
+        AND     @[ca_flg]     = 'Y'
+        )
+        NOT IN ( 'B' )			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="ca_flg" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

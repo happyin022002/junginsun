@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="OwnDangerousCargoApprovalDBDAOPreRestrictionVesselOperatorVORSQL">
+			<desc><![CDATA[Pre Checking Report 화면의 Vessel Operator’s Prohibition 목록을 가져온다.
+History------------------------------------------------------------------------------------
+2011.12.21 [CHM-201115154-01] 김민아 [VOP-SCG] Pre checking Report 시스템 개선 요청 : CRR_REGU_DESC 컬럼 추가 조회]]></desc>
+			<sql><![CDATA[
+##------------------------------------------------------------------------------------
+##설명
+##1. IN_UN_NO_TBL    : 컨테이너별 Un No. 의 임시 테이블을 생성한다.
+##2. IN_CRR_RSTR_TBL : 자사/타사(Target Lane에 해당하는 VVD만)의 Vessel에 대한 Un No./Class 별 제약목록을 임시 테이블로 생성한다.
+##3. <Main Query>    : 2번에 해당하는 1번의 목록을 생성한다.
+##4. <Note>          : (1)위의 쿼리가 2번 수행된다.
+##                     (2)먼저 Un No.에 대한 체크, 이후 Class에 대한 체크를 수행한다.
+##                     (3)UN No.로 체크했을 경우 C(Excepted fm Class Prohibition, Target Lane에 포함되지 않은 VVD일 경우-타사제외)일 경우만 제외하고 Class로 재체크를 한다.
+##                     (4)두개의 체크 모두 Prohibition이 L,P,T인 경우만 목록으로 리턴한다.
+##------------------------------------------------------------------------------------
+WITH IN_UN_NO_TBL AS (
+#foreach(${obj} in ${opt_obj})
+     SELECT '$obj.getSpclCntrSeq()' AS SPCL_CNTR_SEQ
+          , '$obj.getSpclCgoSeq()'  AS SPCL_CGO_SEQ
+          , '$obj.getImdgUnNo()'    AS IMDG_UN_NO
+          , '$obj.getImdgUnNoSeq()' AS IMDG_UN_NO_SEQ
+          , '$obj.getImdgClssCd()'  AS IMDG_CLSS_CD
+          , @[vsl_cd]               AS VSL_CD
+          , @[skd_voy_no]           AS SKD_VOY_NO
+          , @[skd_dir_cd]           AS SKD_DIR_CD
+          , @[crr_cd]               AS CRR_CD
+          , @[slan_cd]              AS SLAN_CD
+       FROM DUAL
+     #if($velocityCount < ${obj_size})
+     UNION ALL
+     #end
+#end
+),
+IN_VVD_TBL AS (
+	 SELECT E.BKG_NO
+       	  , E.VSL_CD
+       	  , E.SKD_VOY_NO
+	   	  , E.SKD_DIR_CD
+      	  , E.CRR_CD
+     	  , E.SLAN_CD
+	   	  , SUM(E.SOURCE) AS SOURCE
+	  FROM ( 
+	     SELECT A.BKG_NO
+              , A.VSL_CD
+       		  , A.SKD_VOY_NO
+	          , A.SKD_DIR_CD
+              , B.CRR_CD
+       		  , A.SLAN_CD
+	          , 2 AS SOURCE
+          FROM  BKG_VVD          A                  
+    		  , MDM_VSL_CNTR     B
+		 WHERE A.BKG_NO   = @[bkg_no]                
+           AND A.VSL_CD   = B.VSL_CD
+		 UNION ALL
+         SELECT @[bkg_no]               AS BKG_NO
+         	  , @[vsl_cd]               AS VSL_CD
+		      , @[skd_voy_no]           AS SKD_VOY_NO
+              , @[skd_dir_cd]           AS SKD_DIR_CD
+        	  , @[crr_cd]               AS CRR_CD
+		      , @[slan_cd]              AS SLAN_CD
+              , 1 AS SOURCE
+           FROM DUAL
+	#if (${dummy_cd} != 'SML')
+		 UNION ALL
+         SELECT @[bkg_no]               AS BKG_NO
+         	  , ''               		AS VSL_CD
+		      , ''           			AS SKD_VOY_NO
+              , ''           			AS SKD_DIR_CD
+        	  , 'SML'                   AS CRR_CD
+		      , 'AKJ'					AS SLAN_CD
+              , 1 AS SOURCE
+           FROM DUAL
+	#end
+			) E
+		,	MDM_VSL_SVC_LANE  F
+	 WHERE E.SLAN_CD  = F.VSL_SLAN_CD
+       AND F.DELT_FLG = 'N'
+	   AND DECODE(E.SOURCE, 1, '1', 'Y') = DECODE(E.SOURCE, 1, '1', F.SPCL_CGO_RQST_TGT_LANE_FLG)
+       GROUP BY E.BKG_NO
+		      , E.VSL_CD
+        	  , E.SKD_VOY_NO
+	          , E.SKD_DIR_CD
+    	      , E.CRR_CD
+        	  , E.SLAN_CD
+
+),
+IN_UN_VVD_TBL AS (
+	 SELECT A.SPCL_CNTR_SEQ
+          , A.SPCL_CGO_SEQ
+          , A.IMDG_UN_NO
+          , A.IMDG_UN_NO_SEQ
+          , A.IMDG_CLSS_CD
+          , B.VSL_CD
+          , B.SKD_VOY_NO
+          , B.SKD_DIR_CD
+          , B.CRR_CD
+          , B.SLAN_CD
+	  FROM  IN_UN_NO_TBL A
+		, 	IN_VVD_TBL B
+),
+IN_RSTR_VVD_TBL AS ( 
+	 SELECT IMDG_UN_NO
+          , IMDG_UN_NO_SEQ
+          , IMDG_CLSS_CD
+          , DECODE(IMDG_CRR_RSTR_EXPT_SEQ,4,'L',3,'P',2,'C',1,'R','T') AS IMDG_CRR_RSTR_EXPT_CD
+          , VSL_OPR_TP_CD
+          , CRR_REGU_DESC
+	 FROM (
+		 SELECT D.IMDG_UN_NO
+    	      , D.IMDG_UN_NO_SEQ
+        	  , D.IMDG_CLSS_CD
+          	  , MAX(DECODE(D.IMDG_CRR_RSTR_EXPT_CD,'L',4,'P',3,'C',2,'R',1,0)) AS IMDG_CRR_RSTR_EXPT_SEQ
+	          , D.VSL_OPR_TP_CD
+	          , D.CRR_REGU_DESC
+    	  FROM  SCG_IMDG_CRR_RSTR D 
+			,	IN_VVD_TBL E
+    	 WHERE  D.VSL_OPR_TP_CD			= E.CRR_CD
+           AND	DECODE(D.IMDG_CRR_RSTR_EXPT_CD, 'L', D.SLAN_CD, 1) = DECODE(D.IMDG_CRR_RSTR_EXPT_CD, 'L', E.SLAN_CD, 1)
+	#if (${opt_clss} == 'U')
+    	   AND  D.IMDG_UN_NO IS NOT NULL
+	#elseif (${opt_clss} == 'C')
+    	   AND  D.IMDG_CRR_RSTR_EXPT_CD != 'R'
+           AND  D.IMDG_UN_NO            IS NULL
+	#end
+		 GROUP BY D.IMDG_UN_NO
+         	    , D.IMDG_UN_NO_SEQ
+          	    , D.IMDG_CLSS_CD
+          	    , D.VSL_OPR_TP_CD
+          	    , D.CRR_REGU_DESC
+		)
+)
+SELECT UT.SPCL_CNTR_SEQ                                             AS SPCL_CNTR_SEQ
+     , UT.SPCL_CGO_SEQ                                              AS SPCL_CGO_SEQ
+     , UT.IMDG_UN_NO                                                AS IMDG_UN_NO
+     , UT.IMDG_UN_NO_SEQ                                            AS IMDG_UN_NO_SEQ
+     , UT.IMDG_CLSS_CD                                              AS IMDG_CLSS_CD
+     , UT.VSL_CD                                                    AS VSL_CD
+     , UT.SKD_VOY_NO                                                AS SKD_VOY_NO
+     , UT.SKD_DIR_CD                                                AS SKD_DIR_CD
+     , UT.VSL_CD||UT.SKD_VOY_NO||UT.SKD_DIR_CD                      AS VVD_CD
+     , UT.CRR_CD                                                    AS CRR_CD
+     , UT.SLAN_CD                                                   AS SLAN_CD
+	 , RT.IMDG_CRR_RSTR_EXPT_CD         							AS PROHIBITION_CD
+     , DECODE(@[opt_clss],'U','UN No.','Class')||' - '||
+      (
+        SELECT CD.INTG_CD_VAL_DP_DESC 
+          FROM COM_INTG_CD_DTL CD 
+         WHERE CD.INTG_CD_ID = 'CD01950' 
+           AND CD.INTG_CD_VAL_CTNT = RT.IMDG_CRR_RSTR_EXPT_CD
+       )                                        AS PROHIBITION_DESC 
+     , DECODE(@[opt_clss],'U','UN No.','Class') AS CHK_TYPE
+     , RT.CRR_REGU_DESC                         AS CRR_REGU_DESC
+  FROM IN_UN_VVD_TBL    UT
+     , IN_RSTR_VVD_TBL  RT
+ WHERE 1=1
+#if (${opt_clss} == 'U')
+   AND UT.IMDG_UN_NO     = RT.IMDG_UN_NO(+)
+   AND UT.IMDG_UN_NO_SEQ = RT.IMDG_UN_NO_SEQ(+)
+   AND UT.CRR_CD         = RT.VSL_OPR_TP_CD(+)
+#elseif (${opt_clss} == 'C') 
+   AND UT.IMDG_CLSS_CD   = RT.IMDG_CLSS_CD
+   AND UT.CRR_CD         = RT.VSL_OPR_TP_CD
+--   AND (UT.SLAN_CD IS NOT NULL OR UT.SOURCE = 1)
+#end
+ ORDER BY 
+       UT.SPCL_CNTR_SEQ
+     , UT.SPCL_CGO_SEQ			]]></sql>
+			<params>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="crr_cd" type="12" value="" out="N"/>
+				<param name="slan_cd" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="opt_clss" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

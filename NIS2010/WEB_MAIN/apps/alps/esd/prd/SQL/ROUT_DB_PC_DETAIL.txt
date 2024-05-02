@@ -1,0 +1,884 @@
+--/*
+--Modified History
+--06-12-05 Ocean  Shuttle 구간 데이터 추출 로직 추가 sdkang
+--06-12-05 Ocean  customer nominated trucker 추가
+--06-12-05 ROUT ORG, DEST, SEQ 추가
+--06-12-06 Loading Due Date 대신 VVD 입력되는 CASE 추가
+--07-01-08 SQL REFINE (JYI)
+--07-01-10 R/D TERM Z --> D 로 변경 / TRSP_MOD NODE 인 경우 'X' 로 변경(COP 요청) (KSD)
+--07-01-17 TS ROUTE 반영 / BKG FLG 반영
+--07-01-23 BKG TERM 추가(조용인 수석님) V1.10
+--07-01-24 NODE DWELL TIME 에 PREMIER FLG 반영 V1.11
+--07-01-24 FREE IN OUT TERM일 경우에도 MTPU CY 반영 V1.12
+--07-01-24 YARD TERM 인 경우 INLND ROUTE가 없을 때 POR=POL이거나 POD=DEL일경우 LOADING/DISCHARGING TERMINAL로 해당 ROUTE를 구성함
+--         TACKLE / FREE IN OUT는 FULL RETURN CY를  LOADING/DISCHARGING TERMINAL로 해당 ROUTE를 구성함 V1.13
+--07-01-24 TACKLE / FREE IN OUT TERM일 경우 OCN ROUT 표시 이상 수정 V1.14
+--07-01-25 CFS일 경우 OFF-DOCK 일때 하나(CFS 작업용)를 그대로 (마지막 혹은 처음 NODE와 동일하게) 더 추가함. V1.15
+--07-01-25 MTPU / MTRTU 수 V1.16
+--07-01-26 DOOR TERM 이 아닌 경우 MTPU / RTN CY에서 이전 혹은 이후 지점 까지 TRANSIT TIME 24시간 적용
+--          또한 위 경우 VENDOR CODE는 NULL 처리이며 모든 TRSP MOD CD 는 TD로 HARD CODING 함 (김재홍 과장 확인)-COP 요구사항 V1.17
+--07-01-27 첫번째 NODE와 마지막 노드의 DWEEL TIME은 0 V.18, 
+--07-01-27 CFS일 경우 첫번째 LINK혹은 마지막 LINK의 TRANSIT TIME은 0 V.19
+--07-01-27 CFS일 경우 첫번째 LINK혹은 마지막 LINK의 TRSP_MOD_CD를 TD로 함 0 V.20
+--07-01-28 MASTER DETAIL 불일치 해결 0 V.21
+--07-01-29 VENDOR CODE INSERT ERROR 해결 0 V.22
+--07-01-31 FUNCTION NAME 변경 반영 V1.23
+--07-02-01 TS MODE 검색 수정 WHERE 조건에서 PRIOR_SEQ 제외 V1.24
+--07-02-05 ROUTE TABLE 변경사항 적용 V1.27
+--07-02-05 DRY, RF DWELL TIME 적용 로직 변경(REFFER가 하나라도 존재하면 REFFER 시간으로 )
+--07-02-05 PORT TML MTX에 다른 CRR_CD 오류 수정
+--07-02-14 각종 TERM에 따른 MT-YARD 및 TRSP MOD 등 오류 수정
+--07-02-21 MTPU,RETURN YARD가 없으면 RETRIEVE 안함.
+--*/
+--
+--:PCTL_NO	String	CHO
+--:R_TERM	String	Z
+--:CNEE_CNT_CD	String	HU
+--:SHPR_CNT_CD	String	
+--:CNEE_SEQ	String	1
+--:SHPR_SEQ	String	
+--:D_TERM	String	Y
+--:SKD_DATE	String	
+--:SKD_TYPE	String	
+--:POR	String	CNTAZ
+--:POL	String	CNTAZ
+--:DEL	String	HUBUD
+--:POD	String	ITGIT
+--:REC_YD	String	
+--:REC_ZN	String	
+--:DEL_YD	String	
+--:DEL_ZN	String	
+--:CONST_COM	String	
+--:CONST_DCG	String	
+--:USE_CONST	String	
+--
+--INSERT INTO PRD_PROD_CTL_ROUT_DTL
+--(
+--PCTL_NO,PCTL_SEQ,ORG_NOD_CD,DEST_NOD_CD,NOD_LNK_DIV_CD,PCTL_IO_BND_CD,TRSP_MOD_CD,CUST_NOMI_TRKR_FLG,PCTL_WTR_DIV_CD,
+--ORG_NOD_TP_CD,DEST_NOD_TP_CD, MTY_YD_FLG,
+--ARR_ST_DT,DEP_FSH_DT,TZ_DWLL_TM_HRS,
+--N1ST_VNDR_SEQ,N2ND_VNDR_SEQ,N3RD_VNDR_SEQ,
+--VSL_SLAN_CD,CRR_CD,VSL_CD,SKD_VOY_NO,
+-- GEN_AVAL_SPC,D7_AVAL_SPC,RF_AVAL_SPC,INLND_ROUT_CMB_FLG,INLND_ROUT_INV_BIL_PATT_CD,
+--SKD_DIR_CD,ROUT_ORG_NOD_CD,ROUT_DEST_NOD_CD,ROUT_SEQ, CNST_FLG
+--)
+--,COST_ACT_GRP_SEQ
+SELECT 
+:PCTL_NO||lpad(gp1,4,0) pctl_no, ord pctl_seq, --((o1-1)*2)+L_N0 pctl_seq,ord,
+NODE_NEW1,NODE_NEW2,NODE_NEW_KIND,OI_BND_CD, DECODE(NODE_NEW_KIND,'L',substr(trsp_mod_cd,1,2),'X') trsp_mod_cd,substr(trsp_mod_cd,3,1) CUST_NOMI_TRKR_FLG ,decode(trsp_mod_cd,'WD','W','VD','V') WTR_DIV_CD,
+NODE1_TP,NODE2_TP, 
+(
+CASE                                                                                               
+WHEN F_NO2 = 0  AND NODE_NEW_KIND = 'N' AND :R_TERM <> 'S' THEN 'Y' 
+WHEN F_NO2 = 33 AND NODE_NEW_KIND = 'N' AND :D_TERM <> 'S' THEN 'Y' 
+ELSE 'N' END
+) 
+MT_YD_FLG,
+TO_DATE(PRD_GET_SKD_STR_FNC(LEAD(SKD_TIME,CNT-ORD,NULL) OVER(PARTITION BY GP1 ORDER BY ORD),ORD,NODE_NEW_KIND,DECODE(NODE_NEW_KIND,'N','A','D')),'yyyymmdd hh24:mi:ss') A_TIME,
+TO_DATE(PRD_GET_SKD_STR_FNC(LEAD(SKD_TIME,CNT-ORD,NULL) OVER(PARTITION BY GP1 ORDER BY ORD),ORD,NODE_NEW_KIND,DECODE(NODE_NEW_KIND,'N','D','A')),'yyyymmdd hh24:mi:ss') D_TIME,
+TZTM_DW_HRS,
+(   
+CASE
+    WHEN NODE_NEW_KIND = 'L' THEN
+        TO_NUMBER(PRD_GET_SKD_STR_FNC(LEAD(SKD_TIME,CNT-ORD,NULL) OVER(PARTITION BY GP1 ORDER BY ORD),ORD,NODE_NEW_KIND,'T'))        
+    WHEN NODE_NEW_KIND = 'N' THEN
+        TZTM_DW_HRS
+END
+) ACT_DWTS_HRS,
+(CASE WHEN NODE_NEW_KIND = 'N' THEN N1ST_VNDR_SEQ
+      WHEN NODE_NEW_KIND = 'L' AND F_NO2 =0 AND :R_TERM = 'D' THEN  LEAD(N1ST_VNDR_SEQ, 1) OVER ( PARTITION BY GP1,NODE_NEW_KIND ORDER BY ORD)
+      WHEN NODE_NEW_KIND = 'L' AND F_NO2 =32 AND :D_TERM = 'D' THEN  LAG(N1ST_VNDR_SEQ, 1) OVER ( PARTITION BY GP1,NODE_NEW_KIND ORDER BY ORD)
+      ELSE N1ST_VNDR_SEQ 
+END
+) N1ST_VNDR_SEQ,
+
+N2ND_VNDR_SEQ,N3RD_VNDR_SEQ,SLANE,
+(
+CASE
+    WHEN (F_NO2 IN (13,15,17,19)) AND (NODE_NEW_KIND='L') THEN
+        PRD_GET_SKD_STR_FNC(LEAD(SKD_TIME,CNT-ORD,NULL) OVER(PARTITION BY GP1 ORDER BY ORD),ORD,NODE_NEW_KIND,'CD')
+END 
+) CRR_CD,
+(
+CASE
+    WHEN (F_NO2 IN (13,15,17,19)) AND (NODE_NEW_KIND='L') THEN
+        SUBSTR(PRD_GET_SKD_STR_FNC(LEAD(SKD_TIME,CNT-ORD,NULL) OVER(PARTITION BY GP1 ORDER BY ORD),ORD,NODE_NEW_KIND,'V'),1,4)
+END 
+) VSL_CD,
+(
+CASE
+    WHEN (F_NO2 IN (13,15,17,19)) AND (NODE_NEW_KIND='L') THEN
+        SUBSTR(PRD_GET_SKD_STR_FNC(LEAD(SKD_TIME,CNT-ORD,NULL) OVER(PARTITION BY GP1 ORDER BY ORD),ORD,NODE_NEW_KIND,'V'),5,4)
+END 
+) VOY_NO,
+NULL GEN_AVAL_SPC,
+NULL D7_AVAL_SPC,
+NULL RF_AVAL_SPC,
+INLND_ROUT_CMB_FLG,INLND_ROUT_INV_BIL_PATT_CD,
+dir_cd,
+ROUT_ORG,ROUT_DEST,ROUT_SEQ,
+PRD_GET_SKD_STR_FNC(LEAD(SKD_TIME,CNT-ORD,NULL) OVER(PARTITION BY GP1 ORDER BY ORD),ORD,NODE_NEW_KIND,'CT') CNST
+FROM
+(
+    WITH ROUT_TBL AS
+    (   
+        SELECT
+        GP1,F_NO2,L_N0,O1,NODE_NEW1,NODE1_TP,NODE_NEW2,NODE2_TP,NODE_NEW_KIND,OI_BND_CD,trsp_mod_cd,TZTM_DW_HRS,N1ST_VNDR_SEQ,N2ND_VNDR_SEQ,N3RD_VNDR_SEQ,
+        ROUT_ORG,ROUT_DEST,ROUT_SEQ,S_DATE,S_TYPE,SLANE,DIR_CD,
+        INLND_ROUT_CMB_FLG,INLND_ROUT_INV_BIL_PATT_CD,
+        (
+        F_NO2||':'||NODE_NEW1||':'||NODE_NEW2||':'||NODE_NEW_KIND||':'||OI_BND_CD||':'
+        ||NVL(SUBSTR(TRSP_MOD_CD,1,2),'NON')||':'||NVL(TZTM_DW_HRS,'0')||':'||NVL(SLANE,'NON')||':'||S_TYPE||':'||NVL(DIR_CD,'X')||':'
+        ) SKD_STR,
+        COUNT(*) over (PARTITION BY GP1) CNT,
+        ROW_NUMBER() over (PARTITION BY GP1 ORDER BY O1) ORD
+        FROM
+        (        
+            SELECT 
+             GP1,F_NO2,L_N0,O1,NODE_NEW1,(SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = NODE_NEW1) NODE1_TP,
+             DECODE(LENGTH(NODE_NEW2),7,NODE_NEW2,SUBSTR(NODE_NEW2,3,7))  NODE_NEW2, --NODE_NEW2 NODE_NEW2_ORG,
+             DECODE(LENGTH(NODE_NEW2),7,'N',SUBSTR(NODE_NEW2,18,1))  INLND_ROUT_CMB_FLG, 
+             DECODE(LENGTH(NODE_NEW2),7,'',SUBSTR(NODE_NEW2,19,3))  INLND_ROUT_INV_BIL_PATT_CD,             
+             (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = DECODE(LENGTH(NODE_NEW2),7,NODE_NEW2,SUBSTR(NODE_NEW2,3,7))) NODE2_TP,NODE_NEW_KIND,OI_BND_CD,
+            (
+            CASE 
+
+                WHEN NODE_NEW_KIND='L' AND F_NO2 IN ( 0,32) THEN 'TD'
+                WHEN NODE_NEW_KIND='L' AND F_NO2 = 1 AND :R_TERM ='S' AND OUT_ROUT_SEQ= 0 THEN 'TD'
+                WHEN NODE_NEW_KIND='L' AND F_NO2 = 20 AND :D_TERM IN ('S','T','F','Y') AND IN_ROUT_SEQ= 0 THEN 'TD' --CHO
+                WHEN NODE_NEW_KIND='L' AND F_NO2 IN (13,15,17,19) THEN 
+                (
+                    SELECT DECODE(VSL_SVC_TP_CD, 'O', 'WD', 'VD')
+                    FROM MDM_VSL_SVC_LANE
+                    WHERE VSL_SLAN_CD = DECODE(F_NO2,13,N1ST_LANE_CD,15,N2ND_LANE_CD,17,N3RD_LANE_CD,19,N4TH_LANE_CD)
+                )  
+               WHEN NODE_NEW_KIND='L' AND LENGTH(NODE_NEW2) > 7 THEN SUBSTR(NODE_NEW2,10,2)
+               ELSE       -- OCN TS와 INLAND TERM YARD 일 경우  RETURN VENDOR 논의 필요
+                NVL((
+                    SELECT D.TRSP_MOD_CD 
+                    FROM PRD_INLND_ROUT_MST M, PRD_INLND_ROUT_DTL D
+                    WHERE M.ROUT_ORG_NOD_CD =NODE_NEW1
+                    AND M.ROUT_DEST_NOD_CD = DECODE(LENGTH(NODE_NEW2),7,NODE_NEW2,SUBSTR(NODE_NEW2,3,7))
+                    AND M.PRIO_SEQ = (  
+                                       SELECT /*+ INDEX (XAK1PRD_INLND_ROUT_MST M2) */ 
+                                       M2.PRIO_SEQ    
+                                       FROM PRD_INLND_ROUT_MST M2, PRD_INLND_ROUT_DTL D2
+                                       WHERE    
+                                       M2.ROUT_ORG_NOD_CD = NODE_NEW1  
+                                       AND M2.ROUT_DEST_NOD_CD = NODE_NEW2 
+                                       AND M2.ROUT_ORG_NOD_CD = D2.ROUT_ORG_NOD_CD  
+                                       AND M2.ROUT_DEST_NOD_CD = D2.ROUT_DEST_NOD_CD
+                                      AND M2.ROUT_SEQ = D2.ROUT_SEQ         
+                                       AND D2.LNK_ORG_NOD_CD = NODE_NEW1  
+                                       AND D2.LNK_DEST_NOD_CD = NODE_NEW2  
+                                      AND D2.ROUT_DTL_SEQ = 1     
+                                       AND NOT EXISTS ( SELECT 'X' FROM PRD_INLND_ROUT_DTL  
+                                                        WHERE     
+                                                        ROUT_ORG_NOD_CD = D2.ROUT_ORG_NOD_CD  
+                                                        AND ROUT_DEST_NOD_CD = D2.ROUT_DEST_NOD_CD
+                                                        AND ROUT_SEQ = D2.ROUT_SEQ  
+                                                       AND ROUT_DTL_SEQ = 2 )   
+                                       AND ROWNUM = 1        
+                                   )
+                    AND M.ROUT_ORG_NOD_CD = D.ROUT_ORG_NOD_CD
+                    AND M.ROUT_DEST_NOD_CD = D.ROUT_DEST_NOD_CD
+                    AND M.ROUT_SEQ = D.ROUT_SEQ
+                    AND M.ROUT_ORG_NOD_CD = D.LNK_ORG_NOD_CD
+                    AND M.ROUT_DEST_NOD_CD = D.LNK_DEST_NOD_CD
+                ),'TD')    
+            END 
+            ) trsp_mod_cd,
+            (
+            CASE 
+
+                WHEN NODE_NEW_KIND='N' AND F_NO2 IN (1,32) AND (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = NODE_NEW1) = 'Z' THEN 
+                (
+                    SELECT CGO_HNDL_TM_HRS FROM MDM_ZONE WHERE ZN_CD = NODE_NEW1
+                )
+                WHEN NODE_NEW_KIND='N' AND F_NO2 = 1 AND :R_TERM ='S' AND OUT_ROUT_SEQ = 0 AND (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = NODE_NEW1) <> 'Z' THEN 
+                0
+                WHEN NODE_NEW_KIND='N' AND F_NO2 = 32 AND :D_TERM ='S' AND IN_ROUT_SEQ = 0 AND (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = NODE_NEW1) <> 'Z' THEN 
+                0                
+                WHEN NODE_NEW_KIND='N' AND (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = NODE_NEW1) <> 'Z' THEN 
+                (
+                    SELECT DECODE(F_NO2,33,0,DECODE(F_NO2,0,0,DECODE(:PM_F,'Y',
+                    DECODE(SIGN(INSTR(:CNTR_TYPE,'R')),1,RF_MIN_DWLL_HRS, DRY_MIN_DWLL_HRS),
+                    DECODE(SIGN(INSTR(:CNTR_TYPE,'R')),1,RF_AVG_DWLL_HRS,DRY_AVG_DWLL_HRS) ))) 
+                    FROM MDM_YARD WHERE YD_CD = NODE_NEW1
+                )  
+                WHEN  NODE_NEW_KIND='L' AND :R_TERM = 'D' AND F_NO2 = 0   THEN 
+                (SELECT TZTM_HRS FROM MDM_ZONE WHERE ZN_CD = NODE_NEW2 )
+                
+                WHEN  NODE_NEW_KIND='L' AND :D_TERM = 'D' AND F_NO2 = 32  THEN 
+                (SELECT TZTM_HRS FROM MDM_ZONE WHERE ZN_CD = NODE_NEW1 )  
+                
+                WHEN  NODE_NEW_KIND='L' AND :R_TERM NOT IN ( 'D','S' ) AND F_NO2 = 0   THEN 24
+                WHEN  NODE_NEW_KIND='L' AND :D_TERM NOT IN ( 'D','S' ) AND F_NO2 = 32  THEN 24
+                  
+                WHEN (F_NO2 =13 ) AND (NODE_NEW_KIND='L') THEN N1ST_TZTM_HRS 
+                WHEN (F_NO2 =15 ) AND (NODE_NEW_KIND='L') THEN N2ND_TZTM_HRS 
+                WHEN (F_NO2 =17 ) AND (NODE_NEW_KIND='L') THEN N3RD_TZTM_HRS 
+                WHEN (F_NO2 =19 ) AND (NODE_NEW_KIND='L') THEN N4TH_TZTM_HRS 
+                WHEN NODE_NEW_KIND='L' AND OI_BND_CD ='T' AND F_NO2 NOT IN (13,15,17,19) THEN 6
+                ELSE 
+                 (SELECT TZTM_HRS
+                    FROM PRD_INLND_EACH_LNK
+                   WHERE lnk_org_nod_cd = NODE_NEW1
+                    AND lnk_dest_nod_cd = DECODE(LENGTH(NODE_NEW2),7,NODE_NEW2,SUBSTR(NODE_NEW2,3,7))
+                    AND TRSP_MOD_CD = DECODE(LENGTH(NODE_NEW2),7,TRSP_MOD_CD,SUBSTR(NODE_NEW2,10,2))
+                    )
+            END 
+            ) TZTM_DW_HRS,
+            (
+            CASE
+                WHEN (F_NO2 =13 ) AND (NODE_NEW_KIND='L') THEN N1ST_LANE_CD 
+                WHEN (F_NO2 =15 ) AND (NODE_NEW_KIND='L') THEN N2ND_LANE_CD 
+                WHEN (F_NO2 =17 ) AND (NODE_NEW_KIND='L') THEN N3RD_LANE_CD 
+                WHEN (F_NO2 =19 ) AND (NODE_NEW_KIND='L') THEN N4TH_LANE_CD 
+            END  
+            ) SLANE,             
+            (
+            CASE 
+                WHEN NODE_NEW_KIND='N' THEN 
+                (
+                    SELECT TO_CHAR(N1ST_VNDR_SEQ)
+                    FROM MDM_YARD
+                    WHERE YD_CD = NODE_NEW1 
+                ) 
+                WHEN NODE_NEW_KIND='L' AND F_NO2 IN (13,15,17,19) THEN 
+                (
+                    SELECT TO_CHAR(VNDR_SEQ)
+                    FROM PRD_FDR_LNK
+                    WHERE VSL_SLAN_CD =DECODE(F_NO2,13,N1ST_LANE_CD,15,N2ND_LANE_CD,17,N3RD_LANE_CD,19,N4TH_LANE_CD)
+                    AND LNK_ORG_LOC_CD = SUBSTR(NODE_NEW1,1,5)
+                    AND LNK_DEST_LOC_CD = DECODE(LENGTH(NODE_NEW2),7,SUBSTR(NODE_NEW2,1,5),SUBSTR(NODE_NEW2,3,5))
+                ) 
+                WHEN NODE_NEW_KIND='L' AND LENGTH(NODE_NEW2) > 7 THEN SUBSTR(NODE_NEW2,12,6)                
+                ELSE 
+                   (
+                    SELECT TO_CHAR(D.VNDR_SEQ )
+                    FROM PRD_INLND_ROUT_MST M, PRD_INLND_ROUT_DTL D
+                    WHERE M.ROUT_ORG_NOD_CD =NODE_NEW1
+                    AND M.ROUT_DEST_NOD_CD = DECODE(LENGTH(NODE_NEW2),7,NODE_NEW2,SUBSTR(NODE_NEW2,3,7))
+                    AND M.PRIO_SEQ = (  
+                                       SELECT /*+ INDEX (XAK1PRD_INLND_ROUT_MST M2) */ 
+                                       M2.PRIO_SEQ    
+                                       FROM PRD_INLND_ROUT_MST M2, PRD_INLND_ROUT_DTL D2
+                                       WHERE    
+                                       M2.ROUT_ORG_NOD_CD = NODE_NEW1  
+                                       AND M2.ROUT_DEST_NOD_CD = NODE_NEW2 
+                                       AND M2.ROUT_ORG_NOD_CD = D2.ROUT_ORG_NOD_CD  
+                                       AND M2.ROUT_DEST_NOD_CD = D2.ROUT_DEST_NOD_CD
+                                      AND M2.ROUT_SEQ = D2.ROUT_SEQ         
+                                       AND D2.LNK_ORG_NOD_CD = NODE_NEW1  
+                                       AND D2.LNK_DEST_NOD_CD = NODE_NEW2  
+                                      AND D2.ROUT_DTL_SEQ = 1     
+                                       AND NOT EXISTS ( SELECT 'X' FROM PRD_INLND_ROUT_DTL  
+                                                        WHERE     
+                                                        ROUT_ORG_NOD_CD = D2.ROUT_ORG_NOD_CD  
+                                                        AND ROUT_DEST_NOD_CD = D2.ROUT_DEST_NOD_CD
+                                                        AND ROUT_SEQ = D2.ROUT_SEQ  
+                                                       AND ROUT_DTL_SEQ = 2 )   
+                                       AND ROWNUM = 1        
+                                   )
+                    AND M.ROUT_ORG_NOD_CD = D.ROUT_ORG_NOD_CD
+                    AND M.ROUT_DEST_NOD_CD = D.ROUT_DEST_NOD_CD
+                    AND M.ROUT_SEQ = D.ROUT_SEQ  
+                    AND M.ROUT_ORG_NOD_CD = D.LNK_ORG_NOD_CD
+                    AND M.ROUT_DEST_NOD_CD = D.LNK_DEST_NOD_CD  
+                    )
+            END 
+            ) N1ST_VNDR_SEQ,
+            (
+            CASE 
+                WHEN NODE_NEW_KIND='N' THEN 
+                (
+                    SELECT N2ND_VNDR_SEQ
+                    FROM MDM_YARD
+                    WHERE YD_CD = NODE_NEW1 
+                ) 
+             END
+             ) N2ND_VNDR_SEQ,   
+            (
+            CASE 
+                WHEN NODE_NEW_KIND='N' THEN 
+                (
+                    SELECT N3RD_VNDR_SEQ
+                    FROM MDM_YARD
+                    WHERE YD_CD = NODE_NEW1 
+                ) 
+             END
+             ) N3RD_VNDR_SEQ,
+             (
+            CASE
+                WHEN F_NO2 IN (13,15,17,19) AND (NODE_NEW_KIND='L') THEN 
+                    DECODE(F_NO2,13,N1ST_SKD_DIR_CD,15,N2ND_SKD_DIR_CD,17,N3RD_SKD_DIR_CD,19,N4TH_SKD_DIR_CD,NULL)
+            END
+            ) DIR_CD,
+            DECODE(OI_BND_CD,'I',IN_ORG,'O',OUT_ORG,'T',OCN_ORG) ROUT_ORG,
+            DECODE(OI_BND_CD,'I',IN_DEST,'O',OUT_DEST,'T',OCN_DEST) ROUT_DEST,
+            DECODE(OI_BND_CD,'I',in_rout_seq,'O',out_rout_seq,'T',OCN_ROUT_SEQ) ROUT_SEQ,
+            NVL(TO_DATE(DECODE(:SKD_TYPE,'D',NVL(:SKD_DATE,TO_CHAR(SYSDATE,'yyyymmdd'))||'090000',NVL(:SKD_DATE,TO_CHAR(SYSDATE,'yyyymmdd'))||'235959'),'yyyymmddhh24miss'),SYSDATE) S_DATE,
+            NVL(:SKD_TYPE,'D') S_TYPE -- D : Door Arrival Date L : Loading Due Date
+            FROM
+            (
+                SELECT C_POR, C_POL,C_POD,C_DEL,
+                GP1,  F_N0 AS F_NO2, L_N0, O1,
+                (CASE LENGTH(NODE1) WHEN 7 THEN NODE1 ELSE SUBSTR(NODE1,3,7)  END ) NODE_NEW1,
+                (
+                 CASE WHEN L_N0 = 1 THEN NODE1
+                      WHEN L_N0 = 2 AND F_N0 =32 AND :D_TERM = 'S' AND IN_ROUT_SEQ =0 THEN ''
+                      WHEN L_N0 = 2 THEN LEAD(NODE1, 1, NULL) OVER (PARTITION BY GP1 ORDER BY GP1,F_N0,L_N0,O1)
+                 END
+                ) NODE_NEW2,
+                (CASE L_N0 WHEN 1 THEN 'N' WHEN 2 THEN 'L' END) NODE_NEW_KIND,
+                (
+                CASE
+                    WHEN F_N0 <=12 OR (F_N0 = 13 AND L_N0 =1)  THEN 'O'
+                    WHEN F_N0 >= 20  THEN 'I' ELSE 'T'
+                END
+                ) OI_BND_CD,
+                N1ST_LANE_CD,
+                N1ST_SKD_DIR_CD,
+                N2ND_POL_CD,
+                N2ND_LANE_CD,
+                N2ND_SKD_DIR_CD,
+                N3RD_POL_CD,
+                N3RD_LANE_CD,
+                N3RD_SKD_DIR_CD,
+                N4TH_POL_CD,
+                N4TH_LANE_CD,
+                N4TH_SKD_DIR_CD,
+                N1ST_TZTM_HRS ,
+                N2ND_TZTM_HRS ,
+                N3RD_TZTM_HRS ,
+                N4TH_TZTM_HRS,
+                IN_ORG,IN_DEST,in_rout_seq,
+                OUT_ORG, OUT_DEST,out_rout_seq,
+                OCN_ORG, OCN_DEST, OCN_ROUT_SEQ
+                FROM 
+                (
+                    SELECT C_POR, C_POL,C_POD,C_DEL,
+                    F_N0,
+                    GP1,
+                    NODE1,
+                    ROWNUM O1,
+                    N1ST_LANE_CD,
+                    N1ST_SKD_DIR_CD,
+                    N2ND_POL_CD,
+                    N2ND_LANE_CD,
+                    N2ND_SKD_DIR_CD,
+                    N3RD_POL_CD,
+                    N3RD_LANE_CD,
+                    N3RD_SKD_DIR_CD,
+                    N4TH_POL_CD,
+                    N4TH_LANE_CD,
+                    N4TH_SKD_DIR_CD,
+                    N1ST_TZTM_HRS ,
+                    N2ND_TZTM_HRS ,
+                    N3RD_TZTM_HRS ,
+                    N4TH_TZTM_HRS,
+                    IN_ORG,IN_DEST,in_rout_seq,
+                    OUT_ORG, OUT_DEST,out_rout_seq,
+                    OCN_ORG, OCN_DEST, OCN_ROUT_SEQ
+                    FROM 
+                    (
+                        SELECT C_POR, C_POL,C_POD,C_DEL,F_N0, 
+                        GP1,
+                        (
+                        CASE F_N0 
+                            WHEN 0 THEN MTPU_CY
+                            WHEN 1 THEN DECODE(:R_TERM,'T','',DECODE(:R_TERM,'F','',DECODE(:POR,:POL,DECODE(:R_TERM,'D',C_POR,'S',C_POR,''),C_POR))) --CHO
+                            WHEN 2 THEN OL_NODE01   WHEN 3 THEN OL_NODE02   WHEN 4 THEN OL_NODE03   WHEN 5 THEN OL_NODE04 
+                            WHEN 6 THEN OL_NODE05   WHEN 7 THEN OL_NODE06   WHEN 8 THEN OL_NODE07   WHEN 9 THEN OL_NODE08   WHEN 10 THEN OL_NODE09 
+                            WHEN 11 THEN OL_NODE10  WHEN 12 THEN C_POL0     
+                            WHEN 13 THEN DECODE(:R_TERM,'T',C_POR,DECODE(:R_TERM,'F',C_POR,C_POL))     
+                            WHEN 14 THEN C_POD1     WHEN 15 THEN C_POL1 
+                            WHEN 16 THEN C_POD2     WHEN 17 THEN C_POL2     WHEN 18 THEN C_POD3     WHEN 19 THEN C_POL3     WHEN 20 THEN C_POD 
+                            WHEN 21 THEN C_POD0     WHEN 22 THEN IL_NODE01  WHEN 23 THEN IL_NODE02  WHEN 24 THEN IL_NODE03  WHEN 25 THEN IL_NODE04 
+                            WHEN 26 THEN IL_NODE05  WHEN 27 THEN IL_NODE06  WHEN 28 THEN IL_NODE07  WHEN 29 THEN IL_NODE08  WHEN 30 THEN IL_NODE09 
+                            WHEN 31 THEN IL_NODE10 
+                            WHEN 32 THEN DECODE(:D_TERM,'T','',DECODE(:D_TERM,'F','',DECODE(:POD,:DEL,DECODE(:D_TERM,'D',C_DEL,'S',C_DEL,''),C_DEL))) --CHO
+                            WHEN 32 THEN C_DEL      
+                            WHEN 33 THEN MTRTN_CY ELSE 'N/A' 
+                        END
+                        ) NODE1,
+                        N1ST_LANE_CD,
+                        N1ST_SKD_DIR_CD,
+                        N2ND_POL_CD,
+                        N2ND_LANE_CD,
+                        N2ND_SKD_DIR_CD,
+                        N3RD_POL_CD,
+                        N3RD_LANE_CD,
+                        N3RD_SKD_DIR_CD,
+                        N4TH_POL_CD,
+                        N4TH_LANE_CD,
+                        N4TH_SKD_DIR_CD,
+                        N1ST_TZTM_HRS ,
+                        N2ND_TZTM_HRS ,
+                        N3RD_TZTM_HRS ,
+                        N4TH_TZTM_HRS,
+                        IN_ORG,IN_DEST,in_rout_seq,
+                        OUT_ORG, OUT_DEST,out_rout_seq,
+                        OCN_ORG, OCN_DEST, OCN_ROUT_SEQ
+                        FROM 
+                        (
+                            SELECT 
+                            N1ST_LANE_CD,
+                            N1ST_SKD_DIR_CD,
+                            N2ND_POL_CD,
+                            N2ND_LANE_CD,
+                            N2ND_SKD_DIR_CD,
+                            N3RD_POL_CD,
+                            N3RD_LANE_CD,
+                            N3RD_SKD_DIR_CD,
+                            N4TH_POL_CD,
+                            N4TH_LANE_CD,
+                            N4TH_SKD_DIR_CD,
+                            N1ST_TZTM_HRS ,
+                            N2ND_TZTM_HRS ,
+                            N3RD_TZTM_HRS ,
+                            N4TH_TZTM_HRS,
+                            POL1,
+                            POD1,
+                            POL2,
+                            POD2,
+                            POL3,
+                            POD3,
+                            MTPU_CY,
+                            POR AS C_POR,
+                            OL_NODE01,
+                            OL_NODE02,
+                            OL_NODE03,
+                            OL_NODE04,
+                            OL_NODE05,
+                            OL_NODE06,
+                            OL_NODE07,
+                            OL_NODE08,
+                            OL_NODE09,
+                            OL_NODE10,
+                            '' AS C_POL0,
+                            POL0 AS C_POL,
+                            DECODE(POD1,POD,'',DECODE(POD1, POL1, '', POD1)) AS C_POD1,
+                            POL1 AS C_POL1,
+                            DECODE(POD2,POD,'',DECODE(POD2, POL2, '', POD2)) AS C_POD2,
+                            POL2 AS C_POL2,
+                            DECODE(POD3,POD,'',DECODE(POD3, POL3, '', POD3)) AS C_POD3,
+                            POL3 AS C_POL3,
+                            POD AS C_POD,
+                            DECODE(POD, POD0, NULL, POD0) AS C_POD0, --POD0 은 IN INLAND의 첫번째 DEST LOC
+                            IL_NODE01,
+                            IL_NODE02,
+                            IL_NODE03,
+                            IL_NODE04,
+                            IL_NODE05,
+                            IL_NODE06,
+                            IL_NODE07,
+                            IL_NODE08,
+                            IL_NODE09,
+                            IL_NODE10,
+                            DEL AS C_DEL,
+                            MTRTN_CY,
+                            OUT_LAND.ROUT_ORG_NOD_CD OUT_ORG,
+                            OUT_LAND.ROUT_DEST_NOD_CD OUT_DEST,
+                            OUT_LAND.ROUT_SEQ out_rout_seq,
+                            IN_LAND.ROUT_ORG_NOD_CD IN_ORG,
+                            IN_LAND.ROUT_DEST_NOD_CD IN_DEST,
+                            IN_LAND.ROUT_SEQ in_rout_seq,
+                            OCEAN.ORG_LOC_CD OCN_ORG,
+                            OCEAN.DEST_LOC_CD OCN_DEST,
+                            OCEAN.ROUT_SEQ OCN_ROUT_SEQ,
+                            RANK() OVER (ORDER BY  OCEAN.ORG_LOC_CD , OCEAN.DEST_LOC_CD , OCEAN.ROUT_SEQ,                                   
+                            OUT_LAND.ROUT_ORG_NOD_CD , OUT_LAND.ROUT_DEST_NOD_CD , OUT_LAND.ROUT_SEQ ,                   
+                            IN_LAND.ROUT_ORG_NOD_CD , IN_LAND.ROUT_DEST_NOD_CD , IN_LAND.ROUT_SEQ) GP1
+                            from 
+                            (
+                                SELECT 
+                                DISTINCT
+                                N1.TML_CD POL, --AS NODE1 ,  --> POL LOADING 
+                                N2.TML_CD POD1, --AS NODE2 ,  
+                                N3.TML_CD POL1, --AS NODE3 ,  
+                                N4.TML_CD POD2, --AS NODE4 ,
+                                N5.TML_CD POL2, -- AS NODE5 ,
+                                N6.TML_CD POD3, --AS NODE6 ,
+                                N7.TML_CD POL3, --AS NODE7 ,
+                                (CASE 
+                                    WHEN TS_IND_CD ='D' THEN N2.TML_CD 
+                                    WHEN N2ND_LANE_CD IS NOT NULL AND N3RD_LANE_CD IS NULL THEN N4.TML_CD 
+                                    WHEN N2ND_LANE_CD IS NOT NULL AND N3RD_LANE_CD IS NOT NULL AND N4TH_LANE_CD IS NULL THEN N6.TML_CD 
+                                    WHEN N2ND_LANE_CD IS NOT NULL AND N3RD_LANE_CD IS NOT NULL AND N4TH_LANE_CD IS NOT NULL THEN N9.TML_CD 
+                                END) POD,
+                                N1ST_LANE_CD,
+                                N1ST_SKD_DIR_CD,
+                                N2ND_POL_CD,
+                                N2ND_LANE_CD,
+                                N2ND_SKD_DIR_CD,
+                                N3RD_POL_CD,
+                                N3RD_LANE_CD,
+                                N3RD_SKD_DIR_CD,
+                                N4TH_POL_CD,
+                                N4TH_LANE_CD,
+                                N4TH_SKD_DIR_CD,
+                                N1ST_TZTM_HRS ,
+                                N2ND_TZTM_HRS ,
+                                N3RD_TZTM_HRS ,
+                                N4TH_TZTM_HRS,
+                                ORG_LOC_CD,DEST_LOC_CD,ROUT_SEQ
+                                FROM 
+                                (  
+                                            SELECT 
+                                            ORG_LOC_CD,
+                                            N1ST_LANE_CD,
+                                            N1ST_SKD_DIR_CD,
+                                            N1ST_POD_CD,
+                                            N2ND_POL_CD,
+                                            N2ND_LANE_CD, -- 첫번째 갈아타는 구간 (PORT OR LOC + LANE)
+                                            N2ND_SKD_DIR_CD,
+                                            N2ND_POD_CD,
+                                            N3RD_POL_CD,
+                                            N3RD_LANE_CD, -- 두번째 갈아타는 구간 (PORT OR LOC + LANE)
+                                            N3RD_SKD_DIR_CD,
+                                            N3RD_POD_CD,
+                                            N4TH_POL_CD,
+                                            N4TH_LANE_CD, -- 세번째 갈아타는 구간 (의미상 없음)
+                                            N4TH_SKD_DIR_CD,
+                                            N1ST_TZTM_HRS ,
+                                            N2ND_TZTM_HRS ,
+                                            N3RD_TZTM_HRS ,
+                                            N4TH_TZTM_HRS,
+                                            DEST_LOC_CD,
+                                            ROUT_SEQ,
+                                            TS_IND_CD --DIRECT CALLING, TRANSSIMPMENT 구분
+                                            FROM PRD_OCN_ROUT A
+                                            WHERE 
+                                            A.ORG_LOC_CD =:POL
+                                            AND A.DEST_LOC_CD = :POD
+                                            AND A.ROUT_SEQ = :ROUT_SEQ -- 999999
+                                            AND NVL(A.UPD_IND_CD,'C') <> 'D'
+                                            AND NOT EXISTS 
+                                            (
+                                                SELECT 'X' FROM PRD_MBGO_MGMT TT
+                                                WHERE SUBSTR (A.ORG_LOC_CD, 1, 2) = TT.FM_CNT_CD AND A.TS_IND_CD = 'D' AND SUBSTR (A.DEST_LOC_CD, 1, 2) = TT.TO_CNT_CD 
+                                            )
+                                                                  
+                                ) M ,
+                                PRD_PORT_TML_MTX N1, PRD_PORT_TML_MTX N2, PRD_PORT_TML_MTX N3, PRD_PORT_TML_MTX N4, PRD_PORT_TML_MTX N5,
+                                PRD_PORT_TML_MTX N6, PRD_PORT_TML_MTX N7, PRD_PORT_TML_MTX N8, PRD_PORT_TML_MTX N9
+                                WHERE ORG_LOC_CD = N1.PORT_CD
+                                AND N1ST_LANE_CD = N1.VSL_SLAN_CD --> POL LOADING
+                                AND N1.SKD_DIR_CD= N1ST_SKD_DIR_CD
+                                
+                                AND N1ST_POD_CD = N2.PORT_CD(+) --> 1ST TS PORT DISCHARGING
+                                AND N1ST_LANE_CD = N2.VSL_SLAN_CD(+)
+                                AND N2.SKD_DIR_CD(+)=N1ST_SKD_DIR_CD
+                                
+                                AND N2ND_POL_CD = N3.PORT_CD(+) --> 1ST TS PORT LOADING
+                                AND N2ND_LANE_CD = N3.VSL_SLAN_CD(+)
+                                AND N3.SKD_DIR_CD(+)=N2ND_SKD_DIR_CD
+                                
+                                AND N2ND_POD_CD = N4.PORT_CD(+) --> 2ND TS PORT DISCHARGING
+                                AND N2ND_LANE_CD = N4.VSL_SLAN_CD(+)
+                                AND N4.SKD_DIR_CD(+)=N2ND_SKD_DIR_CD
+                                
+                                AND N3RD_POL_CD = N5.PORT_CD(+) --> 2ND TS PORT LOADING
+                                AND N3RD_LANE_CD = N5.VSL_SLAN_CD(+)
+                                AND N5.SKD_DIR_CD(+)=N3RD_SKD_DIR_CD
+                                
+                                AND N3RD_POD_CD = N6.PORT_CD(+) --> 3RD TS PORT DISCHARGING
+                                AND N3RD_LANE_CD = N6.VSL_SLAN_CD(+)
+                                AND N6.SKD_DIR_CD(+)=N3RD_SKD_DIR_CD
+                                
+                                AND N4TH_POL_CD = N7.PORT_CD(+) --> 3RD TS PORT LODING 
+                                AND N4TH_LANE_CD = N7.VSL_SLAN_CD(+)
+                                AND N7.SKD_DIR_CD(+)=N4TH_SKD_DIR_CD
+                                
+                                                                
+                                AND DEST_LOC_CD = N8.PORT_CD(+) --> 2번째 TS에서 POD까지 가는 POD
+                                AND N3RD_LANE_CD = N8.VSL_SLAN_CD(+)
+                                AND N8.SKD_DIR_CD(+)=N3RD_SKD_DIR_CD
+                                
+                                AND DEST_LOC_CD = N9.PORT_CD(+) --> 3번째 TS에서 POD까지 가는 POD
+                                AND N4TH_LANE_CD = N9.VSL_SLAN_CD(+)
+                                AND N9.SKD_DIR_CD(+)=N4TH_SKD_DIR_CD
+                            ) OCEAN ,
+                             ( /*  INLAND ROUTE (POR-POL) START */
+                                SELECT
+                                ROUT_ORG_NOD_CD,
+                                ROUT_DEST_NOD_CD,
+                                ROUT_SEQ,
+                                DECODE(:R_TERM,'S',DECODE(ROUT_SEQ,0,'',ROUT_ORG_NOD_CD),DECODE(:MTPU_CY,'',MAX(DECODE(:R_TERM,'D',Z.REP_YD_CD , L.MTY_PKUP_YD_CD)),:MTPU_CY)) MTPU_CY,
+                                ROUT_ORG_NOD_CD AS POR, 
+                                MAX(DECODE(CNT, 1, '', DECODE(CNT, 1 , '', DECODE(ROUT_DTL_SEQ, 1 , LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 2 , '', DECODE(ROUT_DTL_SEQ, 2 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 3 , '', DECODE(ROUT_DTL_SEQ, 3 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 4 , '', DECODE(ROUT_DTL_SEQ, 4 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 5 , '', DECODE(ROUT_DTL_SEQ, 5 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 6 , '', DECODE(ROUT_DTL_SEQ, 6 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 7 , '', DECODE(ROUT_DTL_SEQ, 7 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 8 , '', DECODE(ROUT_DTL_SEQ, 8 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 9 , '', DECODE(ROUT_DTL_SEQ, 9 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 10, '', DECODE(ROUT_DTL_SEQ, 10, '-'||LNK_DEST_NOD_CD)))) AS OUT_CONTENT,
+                                MAX(DECODE(ROUT_DTL_SEQ, 1 , DECODE(CNT, 1 , '', LNK_DEST_NOD_CD))) OL_NODE01,
+                                MAX(DECODE(ROUT_DTL_SEQ, 2 , DECODE(CNT, 2 , '', LNK_DEST_NOD_CD))) OL_NODE02,
+                                MAX(DECODE(ROUT_DTL_SEQ, 3 , DECODE(CNT, 3 , '', LNK_DEST_NOD_CD))) OL_NODE03,
+                                MAX(DECODE(ROUT_DTL_SEQ, 4 , DECODE(CNT, 4 , '', LNK_DEST_NOD_CD))) OL_NODE04,
+                                MAX(DECODE(ROUT_DTL_SEQ, 5 , DECODE(CNT, 5 , '', LNK_DEST_NOD_CD))) OL_NODE05,
+                                MAX(DECODE(ROUT_DTL_SEQ, 6 , DECODE(CNT, 6 , '', LNK_DEST_NOD_CD))) OL_NODE06,
+                                MAX(DECODE(ROUT_DTL_SEQ, 7 , DECODE(CNT, 7 , '', LNK_DEST_NOD_CD))) OL_NODE07,
+                                MAX(DECODE(ROUT_DTL_SEQ, 8 , DECODE(CNT, 8 , '', LNK_DEST_NOD_CD))) OL_NODE08,
+                                MAX(DECODE(ROUT_DTL_SEQ, 9 , DECODE(CNT, 9 , '', LNK_DEST_NOD_CD))) OL_NODE09,
+                                MAX(DECODE(ROUT_DTL_SEQ, 10, DECODE(CNT, 10, '', LNK_DEST_NOD_CD))) OL_NODE10,
+                                MAX(LNK_DEST_NOD_CD) AS POL0
+                                FROM (
+                                    SELECT M.ROUT_ORG_NOD_CD, 
+                                    M.ROUT_DEST_NOD_CD,
+                                    M.ROUT_SEQ,
+                                    RPAD(D.ROUT_DTL_SEQ,2,' ')||D.LNK_DEST_NOD_CD||D.TRSP_MOD_CD||LPAD(D.VNDR_SEQ,6,0)||
+                                    NVL(D.INLND_ROUT_CMB_FLG,'N')||M.INLND_ROUT_INV_BIL_PATT_CD LNK_DEST_NOD_CD,
+                                    D.ROUT_DTL_SEQ,
+                                    COUNT(*) OVER (PARTITION BY M.ROUT_ORG_NOD_CD, M.ROUT_DEST_NOD_CD, M.ROUT_SEQ
+                                        ORDER BY M.ROUT_ORG_NOD_CD, M.ROUT_DEST_NOD_CD, M.ROUT_SEQ) AS CNT
+                                    FROM PRD_INLND_ROUT_MST M, PRD_INLND_ROUT_DTL D
+                                    WHERE M.INLND_ROUT_BKG_FLG = 'Y' 
+                                    AND M.ROUT_ORG_NOD_CD LIKE DECODE(:R_TERM,'F','',DECODE(:R_TERM,'T','',
+                                                        DECODE(:R_TERM,'D',DECODE(:REC_ZN,'',(SELECT REP_ZN_CD FROM MDM_LOCATION WHERE LOC_CD = :POR),:REC_ZN)
+                                                                  ,DECODE(:REC_YD,'',:POR||'%',:REC_YD))))
+                                    AND M.ROUT_DEST_NOD_CD LIKE (SELECT DISTINCT PORT_CD||'%' 
+                                                                           FROM PRD_HUB_LOC_MTCH
+                                                                           WHERE LOC_CD = :POR
+                                                                           AND PORT_CD = :POL) 
+                                    AND M.ROUT_ORG_NOD_CD =D.ROUT_ORG_NOD_CD
+                                    AND M.ROUT_DEST_NOD_CD =D.ROUT_DEST_NOD_CD
+                                    AND M.ROUT_SEQ =D.ROUT_SEQ
+                                    AND EXISTS
+                                    (SELECT 'X' FROM PRD_NODE N
+                                    WHERE N.NOD_CD = M.ROUT_ORG_NOD_CD
+                                    AND DECODE(N.NOD_TP_CD,'Z','D',N.NOD_TP_CD) IN (DECODE(:R_TERM,'D','D',''), 
+                                                                                    DECODE(:R_TERM,'T','B','F','B','Y','B','S','B',''), 
+                                                                                    DECODE(:R_TERM,'T','M','F','M','Y','M','S','M',''),  
+                                                                                    DECODE(:R_TERM,'Y','Y','S','Y',''),    
+                                                                                    DECODE(:R_TERM,'Y','R','S','R','') )  )
+                                    AND DECODE(:R_TERM,'D','X','S','X',:POR) <> :POL
+                                    UNION ALL
+                                    SELECT TML_CD ROUT_ORG_NOD_CD,  
+                                    TML_CD ROUT_DEST_NOD_CD, 
+                                    0 ROUT_SEQ,
+                                    TML_CD LNK_DEST_NOD_CD, -- CHO DECODE(:R_TERM,'S',TML_CD,'') LNK_DEST_NOD_CD, --DECODE(:R_TERM,'S',:REC_YD,'') LNK_DEST_NOD_CD,
+                                    0 ROUT_DTL_SEQ,
+                                    0 CNT
+                                    FROM  (
+                                     SELECT  DISTINCT N1.TML_CD
+                                     FROM  ( 
+                                            SELECT  ORG_LOC_CD,N1ST_LANE_CD, N1ST_SKD_DIR_CD
+                                            FROM PRD_OCN_ROUT A
+                                            WHERE  A.ORG_LOC_CD =:POL
+                                            AND A.DEST_LOC_CD = :POD                                           
+                                            AND EXISTS 
+                                             ( SELECT 'X'  FROM PRD_HUB_LOC_MTCH
+                                               WHERE LOC_CD = DECODE(:DEL,:POD,LOC_CD,:DEL)
+                                                AND PORT_CD = DECODE(:POD,:DEL,PORT_CD,:POD) )
+                                            AND A.ROUT_SEQ = :ROUT_SEQ -- 999999
+                                            AND NVL(A.UPD_IND_CD,'C') <> 'D'                                        
+                                            AND NOT EXISTS 
+                                            (
+                                                SELECT 'X' FROM PRD_MBGO_MGMT TT
+                                                WHERE SUBSTR (A.ORG_LOC_CD, 1, 2) = TT.FM_CNT_CD AND A.TS_IND_CD = 'D' AND SUBSTR (A.DEST_LOC_CD, 1, 2) = TT.TO_CNT_CD 
+                                            )
+                                    ) M ,
+                                    PRD_PORT_TML_MTX N1
+                                    WHERE ORG_LOC_CD = N1.PORT_CD
+                                    AND N1ST_LANE_CD = N1.VSL_SLAN_CD --> POL LOADING
+                                    AND N1.SKD_DIR_CD= N1ST_SKD_DIR_CD
+                                    AND N1.TML_CD = DECODE(:REC_YD,'',N1.TML_CD,:REC_YD)
+                                    ) 
+                                  WHERE EXISTS
+                                  (SELECT 'X' FROM PRD_NODE N
+                                   WHERE N.NOD_CD = TML_CD
+                                   AND DECODE(N.NOD_TP_CD,'Z','D',N.NOD_TP_CD) IN ('B','M'))                                                                
+                                  AND :POR = :POL
+                                  AND :R_TERM <> 'D'
+                                  AND DECODE(:REC_YD,'',TML_CD,:REC_YD) = TML_CD
+
+                               ) M, MDM_ZONE Z, MDM_LOCATION L
+                                WHERE Z.ZN_CD(+) = M.ROUT_ORG_NOD_CD
+                                AND L.LOC_CD(+) = SUBSTR(M.ROUT_ORG_NOD_CD,1,5)
+                                AND DECODE(:R_TERM,'S','Y','X') = 
+                                   NVL((SELECT DECODE(:R_TERM,'S',YD_FCTY_TP_CFS_FLG,'X') FROM MDM_YARD WHERE YD_CD=M.ROUT_ORG_NOD_CD),'X')
+                                GROUP BY M.ROUT_ORG_NOD_CD, M.ROUT_DEST_NOD_CD, M.ROUT_SEQ                       
+                            ) OUT_LAND, /*  INLAND ROUTE (POR-POL) END */
+                            ( /*  INLAND ROUTE (POD-DEL) START */
+                                SELECT 
+                                ROUT_ORG_NOD_CD,
+                                ROUT_DEST_NOD_CD,
+                                ROUT_SEQ,
+                                MAX(DECODE(CNT, 1, '', DECODE(CNT, 1 , '', DECODE(ROUT_DTL_SEQ, 1 , LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 2 , '', DECODE(ROUT_DTL_SEQ, 2 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 3 , '', DECODE(ROUT_DTL_SEQ, 3 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 4 , '', DECODE(ROUT_DTL_SEQ, 4 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 5 , '', DECODE(ROUT_DTL_SEQ, 5 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 6 , '', DECODE(ROUT_DTL_SEQ, 6 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 7 , '', DECODE(ROUT_DTL_SEQ, 7 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 8 , '', DECODE(ROUT_DTL_SEQ, 8 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 9 , '', DECODE(ROUT_DTL_SEQ, 9 , '-'||LNK_DEST_NOD_CD)))) || MAX(DECODE(CNT, 1, '', DECODE(CNT, 10, '', DECODE(ROUT_DTL_SEQ, 10, '-'||LNK_DEST_NOD_CD)))) AS IN_CONTENT,
+                                ROUT_ORG_NOD_CD AS POD0,
+                                MAX(DECODE(ROUT_DTL_SEQ, 1 , DECODE(CNT, 1 , '', LNK_DEST_NOD_CD))) IL_NODE01,
+                                MAX(DECODE(ROUT_DTL_SEQ, 2 , DECODE(CNT, 2 , '', LNK_DEST_NOD_CD))) IL_NODE02,
+                                MAX(DECODE(ROUT_DTL_SEQ, 3 , DECODE(CNT, 3 , '', LNK_DEST_NOD_CD))) IL_NODE03,
+                                MAX(DECODE(ROUT_DTL_SEQ, 4 , DECODE(CNT, 4 , '', LNK_DEST_NOD_CD))) IL_NODE04,
+                                MAX(DECODE(ROUT_DTL_SEQ, 5 , DECODE(CNT, 5 , '', LNK_DEST_NOD_CD))) IL_NODE05,
+                                MAX(DECODE(ROUT_DTL_SEQ, 6 , DECODE(CNT, 6 , '', LNK_DEST_NOD_CD))) IL_NODE06,
+                                MAX(DECODE(ROUT_DTL_SEQ, 7 , DECODE(CNT, 7 , '', LNK_DEST_NOD_CD))) IL_NODE07,
+                                MAX(DECODE(ROUT_DTL_SEQ, 8 , DECODE(CNT, 8 , '', LNK_DEST_NOD_CD))) IL_NODE08,
+                                MAX(DECODE(ROUT_DTL_SEQ, 9 , DECODE(CNT, 9 , '', LNK_DEST_NOD_CD))) IL_NODE09,
+                                MAX(DECODE(ROUT_DTL_SEQ, 10, DECODE(CNT, 10, '', LNK_DEST_NOD_CD))) IL_NODE10,
+                                MAX(LNK_DEST_NOD_CD) DEL,
+                                DECODE(:D_TERM,'S',DECODE(ROUT_SEQ,0,'',ROUT_DEST_NOD_CD),DECODE(:MTRTN_CY,'',MAX(DECODE(:D_TERM,'D',Z.REP_YD_CD, L.EQ_RTN_YD_CD)),:MTRTN_CY)) MTRTN_CY
+                                FROM 
+                                (
+                                    SELECT M.ROUT_ORG_NOD_CD,
+                                    M.ROUT_DEST_NOD_CD,
+                                    M.ROUT_SEQ,
+                                    RPAD(D.ROUT_DTL_SEQ,2,' ')||D.LNK_DEST_NOD_CD||D.TRSP_MOD_CD||LPAD(D.VNDR_SEQ,6,0)||
+                                    NVL(D.INLND_ROUT_CMB_FLG,'N')||M.INLND_ROUT_INV_BIL_PATT_CD LNK_DEST_NOD_CD,
+                                    D.ROUT_DTL_SEQ,
+                                    COUNT(*) OVER (PARTITION BY M.ROUT_ORG_NOD_CD, M.ROUT_DEST_NOD_CD, M.ROUT_SEQ
+                                    ORDER BY M.ROUT_ORG_NOD_CD, M.ROUT_DEST_NOD_CD, M.ROUT_SEQ) AS CNT
+                                    FROM PRD_INLND_ROUT_MST M, PRD_INLND_ROUT_DTL D
+                                    WHERE M.INLND_ROUT_BKG_FLG = 'Y' 
+                                    AND M.ROUT_DEST_NOD_CD LIKE DECODE(:D_TERM,'F','',DECODE(:D_TERM,'T','',
+                                                DECODE(:D_TERM,'D',DECODE(:DEL_ZN,'',(SELECT REP_ZN_CD FROM MDM_LOCATION WHERE LOC_CD = :DEL),:DEL_ZN)
+                                                                          ,DECODE(:DEL_YD,'',:DEL||'%',:DEL_YD))))
+                                    AND M.ROUT_ORG_NOD_CD LIKE ( SELECT DISTINCT PORT_CD||'%' 
+                                                                           FROM PRD_HUB_LOC_MTCH
+                                                                           WHERE LOC_CD = :DEL
+                                                                           AND PORT_CD = :POD) 
+                                    AND M.ROUT_ORG_NOD_CD =D.ROUT_ORG_NOD_CD
+                                    AND M.ROUT_DEST_NOD_CD =D.ROUT_DEST_NOD_CD
+                                    AND M.ROUT_SEQ =D.ROUT_SEQ
+                                    AND EXISTS
+                                    (SELECT 'X' FROM PRD_NODE N
+                                    WHERE N.NOD_CD = M.ROUT_DEST_NOD_CD
+                                    AND DECODE(N.NOD_TP_CD,'Z','D',N.NOD_TP_CD) IN (DECODE(:D_TERM,'D','D',''), 
+                                                                                    DECODE(:D_TERM,'T','B','F','B','Y','B','S','B',''), 
+                                                                                    DECODE(:D_TERM,'T','M','F','M','Y','M','S','M',''),  
+                                                                                    DECODE(:D_TERM,'Y','Y','S','Y',''),    
+                                                                                    DECODE(:D_TERM,'Y','R','S','R','') )          
+                                    )
+                                    AND DECODE(:D_TERM,'D','X','S','X',:POD) <> :DEL 
+                                    UNION ALL
+                                    SELECT TML_CD ROUT_ORG_NOD_CD, 
+                                    TML_CD ROUT_DEST_NOD_CD,
+                                    0 ROUT_SEQ,
+                                    TML_CD LNK_DEST_NOD_CD, -- CHO DECODE(:D_TERM,'S',TML_CD,'') LNK_DEST_NOD_CD,
+                                    0 ROUT_DTL_SEQ,
+                                    0 CNT
+                                    FROM (
+                                     SELECT DISTINCT CHECK_POD TML_CD  
+                                     FROM (
+                                         SELECT 
+                                          (CASE 
+                                           WHEN TS_IND_CD ='D' THEN X61.TML_CD 
+                                           WHEN N2ND_LANE_CD IS NOT NULL AND N3RD_LANE_CD IS NULL THEN X63.TML_CD 
+                                           WHEN N2ND_LANE_CD IS NOT NULL AND N3RD_LANE_CD IS NOT NULL AND N4TH_LANE_CD IS NULL THEN N8.TML_CD 
+                                           WHEN N2ND_LANE_CD IS NOT NULL AND N3RD_LANE_CD IS NOT NULL AND N4TH_LANE_CD IS NOT NULL THEN N9.TML_CD 
+                                          END) CHECK_POD
+                                        FROM 
+                                         (  
+                                            SELECT 
+                                            ORG_LOC_CD,
+                                            N1ST_LANE_CD,
+                                            N1ST_SKD_DIR_CD,
+                                            N1ST_POD_CD,
+                                            N2ND_POL_CD,
+                                            N2ND_LANE_CD, -- 첫번째 갈아타는 구간 (PORT OR LOC + LANE)
+                                            N2ND_SKD_DIR_CD,
+                                            N2ND_POD_CD,
+                                            N3RD_POL_CD,
+                                            N3RD_LANE_CD, -- 두번째 갈아타는 구간 (PORT OR LOC + LANE)
+                                            N3RD_SKD_DIR_CD,
+                                            N3RD_POD_CD,
+                                            N4TH_POL_CD,
+                                            N4TH_LANE_CD, -- 세번째 갈아타는 구간 (의미상 없음)
+                                            N4TH_SKD_DIR_CD,
+                                            DEST_LOC_CD,
+                                            TS_IND_CD --DIRECT CALLING, TRANSSIMPMENT 구분
+                                            FROM PRD_OCN_ROUT A
+                                            WHERE  A.ORG_LOC_CD =:POL
+                                            AND EXISTS
+                                             ( SELECT 'X'  
+                                               FROM PRD_HUB_LOC_MTCH
+                                               WHERE LOC_CD = DECODE(:POR,:POL,LOC_CD,:POR)
+                                                AND PORT_CD = DECODE(:POL,:POR,PORT_CD,:POL))
+                                            AND A.DEST_LOC_CD = :POD
+                                            AND A.ROUT_SEQ = :ROUT_SEQ -- 999999
+                                            AND NVL(A.UPD_IND_CD,'C') <> 'D'
+                                            AND NOT EXISTS 
+                                            (
+                                                SELECT 'X' FROM PRD_MBGO_MGMT TT
+                                                WHERE SUBSTR (A.ORG_LOC_CD, 1, 2) = TT.FM_CNT_CD AND A.TS_IND_CD = 'D' AND SUBSTR (A.DEST_LOC_CD, 1, 2) = TT.TO_CNT_CD 
+                                            )
+                                                                 
+                                       ) M , PRD_PORT_TML_MTX N8, PRD_PORT_TML_MTX N9, PRD_PORT_TML_MTX X61, PRD_PORT_TML_MTX X63
+                                        WHERE DEST_LOC_CD = X63.PORT_CD(+)
+                                        AND N2ND_LANE_CD = X63.VSL_SLAN_CD(+) --> 첫번째 TS에서 POD까지 직행의 경우 POD
+                                        AND X63.SKD_DIR_CD(+)= N2ND_SKD_DIR_CD  
+                                                                        
+                                        AND DEST_LOC_CD = N8.PORT_CD(+) --> 2번째 TS에서 POD까지 가는 POD
+                                        AND N3RD_LANE_CD = N8.VSL_SLAN_CD(+)
+                                        AND N8.SKD_DIR_CD(+)=N3RD_SKD_DIR_CD
+                                        
+                                        AND DEST_LOC_CD = N9.PORT_CD(+) --> 3번째 TS에서 POD까지 가는 POD
+                                        AND N4TH_LANE_CD = N9.VSL_SLAN_CD(+)
+                                        AND N9.SKD_DIR_CD(+)=N4TH_SKD_DIR_CD
+                                        
+                                        AND DEST_LOC_CD = X61.PORT_CD(+)
+                                        AND N1ST_LANE_CD = X61.VSL_SLAN_CD(+) --> 처음 실은 배가 DIRECT로 POD 까지 가는 경우의 POD
+                                        AND X61.SKD_DIR_CD(+)=N1ST_SKD_DIR_CD 
+                                       )
+                                     WHERE CHECK_POD = DECODE(:DEL_YD,'',CHECK_POD,:DEL_YD)
+                                    ) 
+                                  WHERE EXISTS
+                                  (SELECT 'X' FROM PRD_NODE N
+                                   WHERE N.NOD_CD = TML_CD
+                                   AND DECODE(N.NOD_TP_CD,'Z','D',N.NOD_TP_CD) IN ('B','M'))                                
+                                  AND :POD = :DEL
+                                  AND :D_TERM <> 'D'
+                                  AND DECODE(:DEL_YD,'',TML_CD,:DEL_YD) = TML_CD   
+                                ) M , MDM_ZONE Z, MDM_LOCATION L
+                                WHERE Z.ZN_CD(+) = M.ROUT_DEST_NOD_CD
+                                AND L.LOC_CD(+) = SUBSTR(M.ROUT_DEST_NOD_CD,1,5) 
+                                AND DECODE(:D_TERM,'S','Y','X') = 
+                                   NVL((SELECT DECODE(:D_TERM,'S',YD_FCTY_TP_CFS_FLG,'X') FROM MDM_YARD WHERE YD_CD=M.ROUT_DEST_NOD_CD),'X')                                
+                               GROUP BY M.ROUT_ORG_NOD_CD, M.ROUT_DEST_NOD_CD, M.ROUT_SEQ 
+                                
+                            ) IN_LAND /*  INLAND ROUTE (POD-DEL) END */
+                            WHERE OCEAN.POL=OUT_LAND.ROUT_DEST_NOD_CD AND OCEAN.POD=IN_LAND.ROUT_ORG_NOD_CD 
+                            AND DECODE(:R_TERM,'S','S',MTPU_CY) IS NOT NULL 
+                            AND DECODE(:D_TERM,'S','S',MTRTN_CY) IS NOT NULL
+                        ),
+                        ( -- 필드 세우기 : POR -> POD 까지 각 NODE 별로 세운다.
+                            SELECT CPY_NO F_N0 FROM COM_CPY_NO WHERE CPY_NO <=33 
+                        ) 
+                    )
+                    WHERE NODE1 IS NOT NULL 
+                ),
+                (       -- NODE 와 RINK 구분을 위해.
+                    SELECT CPY_NO L_N0 FROM COM_CPY_NO WHERE CPY_NO IN (1,2)--<=2 
+                ) 
+            ) 
+            WHERE (F_NO2 <> 33 OR L_N0 <> 2 )
+            AND NODE_NEW2 IS NOT NULL
+            ORDER BY 1,2,3
+        ) ORDER BY GP1,O1, L_N0
+
+    )   --WITH TBL
+    SELECT
+    GP1,F_NO2,L_N0,O1,NODE_NEW1,NODE1_TP,NODE_NEW2,NODE2_TP,NODE_NEW_KIND,OI_BND_CD,trsp_mod_cd,TZTM_DW_HRS,TO_NUMBER(N1ST_VNDR_SEQ) N1ST_VNDR_SEQ,N2ND_VNDR_SEQ,N3RD_VNDR_SEQ,DIR_CD,
+    ROUT_ORG,ROUT_DEST,ROUT_SEQ,S_DATE,S_TYPE,SLANE,CNT,ORD, INLND_ROUT_CMB_FLG,INLND_ROUT_INV_BIL_PATT_CD,
+    --sys_connect_by_path(SKD_STR,'-')||'-' sss,   
+    (
+    CASE
+        WHEN CNT = ORD THEN
+            (
+----            CASE
+----                WHEN :POL1 IS NOT NULL THEN
+----                    PRD_GET_SKD_TS_FNC(TO_CHAR(S_DATE,'yyyymmdd hh24:mi:ss'),S_TYPE,replace(sys_connect_by_path(SKD_STR,'-')||'-',','),
+----                            ORD,NVL(:CONST_COM,NULL),NVL(:CONST_DCG,NULL),'Y','N',
+----                            RPAD(NVL(:POL1,' '),5,' ')||RPAD(NVL(:POD1,' '),5,' ')||RPAD(NVL(:VVD1,' '),9,' ')||RPAD(NVL(:LANE1,' '),3,' ')||RPAD(NVL(:MODE1,' '),1,' ')||RPAD(NVL(:TS_IND1,' '),1,' '),
+----                            RPAD(NVL(:POL2,' '),5,' ')||RPAD(NVL(:POD2,' '),5,' ')||RPAD(NVL(:VVD2,' '),9,' ')||RPAD(NVL(:LANE2,' '),3,' ')||RPAD(NVL(:MODE2,' '),1,' ')||RPAD(NVL(:TS_IND2,' '),1,' '),
+----                            RPAD(NVL(:POL3,' '),5,' ')||RPAD(NVL(:POD3,' '),5,' ')||RPAD(NVL(:VVD3,' '),9,' ')||RPAD(NVL(:LANE3,' '),3,' ')||RPAD(NVL(:MODE3,' '),1,' ')||RPAD(NVL(:TS_IND3,' '),1,' '),
+----                            RPAD(NVL(:POL4,' '),5,' ')||RPAD(NVL(:POD4,' '),5,' ')||RPAD(NVL(:VVD4,' '),9,' ')||RPAD(NVL(:LANE4,' '),3,' ')||RPAD(NVL(:MODE4,' '),1,' ')||RPAD(NVL(:TS_IND4,' '),1,' ')
+----                            ) 
+----                ELSE
+                    PRD_GET_SKD_FNC(DECODE(S_TYPE,'V',:T_VVD,TO_CHAR(S_DATE,'yyyymmdd hh24:mi:ss')),S_TYPE,replace(sys_connect_by_path(SKD_STR,'-')||'-',','),
+                            ORD,NVL(:CONST_COM,NULL),NVL(:CONST_DCG,NULL),'Y','N')
+----            END
+----            )   
+    END 
+    ) SKD_TIME    
+    FROM ROUT_TBL 
+    start with ORD = 1 connect by prior ORD = ORD - 1 and prior GP1 = GP1
+);

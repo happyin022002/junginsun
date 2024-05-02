@@ -1,0 +1,480 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PerformanceReportDBDAOSearchSZPBBQueueListRSQL">
+			<desc><![CDATA[SZPBB Queue List 조회]]></desc>
+			<sql><![CDATA[
+SELECT *
+FROM   (SELECT  COUNT(BKG_NO) OVER() AS TOTAL_CNT
+                ,ROWNUM AS RNUM
+               ,Z.*
+               ,BKG_GET_TOKEN_FNC(BKG_HIS_VALUES, 1, '☜☞') AS RTN_TO_USR_EML 
+               ,BKG_GET_TOKEN_FNC(BKG_HIS_VALUES, 2, '☜☞') AS RTN_TO_USR_REMARK
+       FROM   (SELECT  CASE WHEN NVL(X.RETURN_TO_CD,' ') = ' ' THEN '' ELSE FNT_OFC_RTN_CD || ' ' || X.RETURN_TO_CD END AS RETURN_CD
+                       ,X.RETURN_FROM_CD AS RETURN_TO
+                       ,(SELECT INTG_CD_VAL_DP_DESC
+                         FROM   COM_INTG_CD_DTL
+                         WHERE  INTG_CD_ID = 'CD01577'
+                         AND    (APLY_ST_DT < TO_CHAR(SYSDATE, 'YYYYMMDD') AND APLY_END_DT > TO_CHAR(SYSDATE, 'YYYYMMDD'))
+                         AND    INTG_CD_VAL_CTNT = SR_KIND_CD) AS SR_KIND
+                       ,COUNT(DISTINCT X.BKG_NO) OVER() AS TOTAL_BKG
+                       ,COUNT(DISTINCT X.SR_NO) OVER() AS TOTAL_SR
+                       ,SUM(DECODE(X.BL_DOC_INP_FLG,'Y',1,0)) OVER() AS TOTAL_INPUT
+                       ,SUM(DECODE(X.BL_RT_FLG,'Y',1,0)) OVER() AS TOTAL_RATE
+                       ,SUM(DECODE(X.BL_AUD_FLG,'Y',1,0)) OVER() AS TOTAL_QA
+                       ,SUM(DECODE(X.BL_DRFT_FAX_OUT_FLG,'Y',1,0)) OVER() AS TOTAL_FAX
+                       ,SUM(DECODE(X.SR_WRK_STS_CD,'P',1,0)) OVER() AS TOTAL_PENDING
+                       ,SUM(DECODE(X.SR_WRK_STS_CD,'W',1,0)) OVER() AS TOTAL_WORKING
+                       ,SUM(DECODE(X.SR_WRK_STS_CD,'X',1,0)) OVER() AS TOTAL_CANCELED
+                       ,SUM(DECODE(X.SR_WRK_STS_CD,'Y',1,0)) OVER() AS TOTAL_COMPLETED
+                       ,SUM(DECODE(X.SR_WRK_STS_CD,'P',0,'W',0,'X',0,'Y',0,1)) OVER() AS TOTAL_NA
+                       ,SUM(DECODE(TO_CHAR(X.TRNK_ESTM_BDR_DT,'RRMMDD'),TO_CHAR(SYSDATE,'RRMMDD'),1,0)) OVER() AS TOTAL_BDR
+                       ,SUM(DECODE(TO_CHAR(X.PCT_DATE,'RRMMDD'),TO_CHAR(SYSDATE,'RRMMDD'),1,0)) OVER() AS TOTAL_PCT	
+                       ,SUM(DECODE(URGENCY,'U',1,0)) OVER() AS TOTAL_URGENT
+                       ,SUM(DECODE(URGENCY,'V',1,0)) OVER() AS TOTAL_VIP
+                       ,SUM(DECODE(URGENCY,'N',1,0)) OVER() AS TOTAL_NORMAL
+                       ,SUM(CASE WHEN SR_WRK_STS_DT >= DOC_CCT THEN 1 ELSE 0 END) OVER() AS TOTAL_CUTOFF
+                       ,SUM(DECODE(X.RETURN_TO_CD,'->>',1,0))  OVER() AS TOTAL_RTN
+                       ,SUM(DECODE(X.SR_CRNT_INFO_CD,'R',DECODE(X.FNT_OFC_RTN_CD,'Customer',1,0),0)) OVER() AS TOTAL_RTN_CUST --add
+                       ,SUM(DECODE(X.SR_CRNT_INFO_CD,'R',DECODE(X.FNT_OFC_RTN_CD,'FO',1,0),0)) OVER() AS TOTAL_RTN_FO  --add
+                       ,TO_CHAR(X.TRNK_ESTM_BDR_DT,'YYYY-MM-DD HH24:MI') AS BDR_DATE
+                       ,X.*
+               FROM   (SELECT 
+							#if ('' == ${vvd_cd})	
+								/*+ORDERED */
+							#end
+                              '//a_dpcs/module/BKG/' || CASE WHEN INSTR(A.IMG_FILE_PATH_CTNT,'STIFF') > 0 THEN '' ELSE A.RCV_OFC_CD || '/' END || A.IMG_FILE_PATH_CTNT||A.IMG_FILE_NM AS IMG_FILE_REAL_PATH
+                              ,A.SR_URG_CD AS URGENCY
+                              ,A.SR_AMD_TP_CD AS SR_KIND_CD
+                              ,DECODE(DECODE (A.SR_CRNT_INFO_CD,'R','RT','T','TF')
+                                                    ,'RT','<<-','TF','->>',NULL) AS RETURN_TO_CD
+                              ,(SELECT DECODE(FNT_OFC_RTN_CD,'S','FO','I','Inputter','R','Rater','C','Customer','P','S.REP') 
+													FROM BKG_SR_HIS H 
+													WHERE H.BKG_NO = A.BKG_NO 
+													AND H.SR_NO = A.SR_NO 
+													AND H.SR_KND_CD = A.SR_KND_CD 
+													AND H.SR_STS_CD = 'RR' 
+													AND H.SR_HIS_SEQ = (SELECT MAX(H2.SR_HIS_SEQ)  
+                                                    					FROM   BKG_SR_HIS H2 
+                                                    					WHERE  H.BKG_NO   = H2.BKG_NO  
+                                                    					AND    H.SR_NO    = H2.SR_NO 
+																		AND    H2.SR_STS_CD = 'RR' 
+                                                    					AND    H.SR_KND_CD = H2.SR_KND_CD)) AS FNT_OFC_RTN_CD 								
+							  ,(SELECT DECODE(COUNT(H.SR_HIS_SEQ),0,NULL,COUNT(1))  FROM BKG_SR_HIS H WHERE H.BKG_NO = A.BKG_NO AND H.SR_NO = A.SR_NO AND H.SR_KND_CD = A.SR_KND_CD AND H.SR_STS_CD = 'RR') AS RTN_FREQ
+                              ,DECODE(A.SR_CRNT_INFO_CD
+                                                    ,'R', A.RTN_TO_USR_ID
+                                                    ,'T', A.RTN_TO_RTN_USR_ID) AS RETURN_FROM_CD
+                              ,DECODE(SR_CRNT_INFO_CD,'T',DECODE(@[usr_id],NVL(A.RTN_TO_RTN_USR_ID,''),'TT'
+                              ,NVL(A.RTN_FM_USR_ID,''),'TF','EE'),'R',DECODE(@[usr_id],NVL(A.RTN_TO_USR_ID,''),'RT'
+                                                    ,NVL(A.RTN_FM_USR_ID,''),'RF','EE'),'EE') AS RETURN_SRC
+                              ,(SELECT INTG_CD_VAL_DP_DESC
+                                FROM   COM_INTG_CD_DTL
+                                WHERE  INTG_CD_ID = 'CD01581'
+                                AND    APLY_ST_DT < TO_CHAR(SYSDATE, 'YYYYMMDD')
+                                AND    APLY_END_DT > TO_CHAR(SYSDATE, 'YYYYMMDD')
+                                AND    INTG_CD_VAL_CTNT = A.SR_KND_CD) AS SRC
+                              ,A.SR_KND_CD AS SRC_CD
+                              ,A.SR_KND_CD AS SR_KND_CD
+                              ,A.SR_AMD_SEQ AS ACT_SR_AMD_SEQ
+                              ,A.BKG_NO AS BKG_NO
+                              ,REPLACE(S.CUST_NM,CHR(13)||CHR(10),' ') AS SHIPPER
+                              ,REPLACE(C.CUST_NM,CHR(13)||CHR(10),' ') AS CONSIGNEE
+                     							  ,S.CUST_CNT_CD 
+                     							  ,S.CUST_SEQ
+							  ,(SELECT INTG_CD_VAL_DP_DESC 
+                                FROM COM_INTG_CD_DTL
+                                WHERE INTG_CD_ID = 'CD01716'
+                                AND    APLY_ST_DT < TO_CHAR(SYSDATE, 'YYYYMMDD')
+                                AND    APLY_END_DT > TO_CHAR(SYSDATE, 'YYYYMMDD')
+                                AND INTG_CD_VAL_CTNT = R.BKG_CTRT_TP_CD) AS BKG_CTRT_TP_CD
+                              ,DECODE(R.BKG_CTRT_TP_CD,'S',B.SC_NO,'R',B.RFA_NO,'T',B.TAA_NO) AS CONTRACT_NO
+                              ,Q.BKG_CZ_DESC
+                              ,B.POL_CD AS POL_CD
+                              ,B.POD_CD AS POD_CD
+                              ,B.DEL_CD AS DEL_CD
+                              ,DEL.CONTI_CD AS DEL_CONTI_CD
+                              ,B.PORT_CLZ_DT AS PCT_DATE
+                              ,(SELECT TRNK_ESTM_BDR_DT
+                                FROM   BKG_VVD_BDR_LOG BDR
+                                WHERE  B.VSL_CD = BDR.VSL_CD
+                                AND B.SKD_VOY_NO = BDR.SKD_VOY_NO
+                                AND B.SKD_DIR_CD = BDR.SKD_DIR_CD
+                                AND NVL(B.PRE_RLY_PORT_CD, B.POL_CD) = BDR.POL_CD
+                                AND NVL(B.PST_RLY_PORT_CD, B.POD_CD) = BDR.POD_CD
+                                AND ROWNUM = 1) AS TRNK_ESTM_BDR_DT
+                              ,A.SR_WRK_STS_DT AS SR_DATE
+                              ,TO_CHAR(A.CRNT_DT,'YYYY-MM-DD HH24:MI') AS LAST_DATE
+                              ,(SELECT INTG_CD_VAL_DP_DESC
+                                FROM   COM_INTG_CD_DTL
+                                WHERE  INTG_CD_ID = 'CD01579'
+                                AND    (APLY_ST_DT < TO_CHAR(SYSDATE, 'YYYYMMDD') AND APLY_END_DT > TO_CHAR(SYSDATE, 'YYYYMMDD'))
+                                AND    INTG_CD_VAL_CTNT = DECODE(B.BKG_STS_CD, 'X', 'XX', A.SR_CRNT_STS_CD)) AS QUEUE_STATUS
+                              ,DECODE(A.SR_CRNT_STS_CD,'DF','Y','N') AS FAX
+                              ,DECODE(A.DIFF_RMK,NULL,'','Y') AS MESSAGE_YN
+                              ,DECODE(A.SR_WRK_STS_CD,'P',(SELECT /*+ INDEX_DESC(BKG_SR_HIS XPKBKG_SR_HIS) */ DIFF_RMK 
+                                                           FROM BKG_SR_HIS
+                                                           WHERE SR_KND_CD = A.SR_KND_CD
+                                                           AND SR_NO = A.SR_NO
+                                                           AND BKG_NO = A.BKG_NO
+                                                           AND SR_STS_CD = 'PN'
+                                                           AND ROWNUM = 1),A.DIFF_RMK)  AS MESSAGE
+                              ,(SELECT BDR_FLG
+                                FROM   BKG_BL_DOC
+                                WHERE  BKG_NO = B.BKG_NO) AS BDR_FLG
+                                ,A.SR_CRNT_INFO_CD AS SR_CRNT_INFO_CD
+                              ,(SELECT MAX(SR_NO)
+                                FROM   BKG_SR_CRNT_RQST
+                                WHERE  SR_KND_CD = A.SR_KND_CD
+                                AND    BKG_NO = A.BKG_NO
+                                AND    SR_AMD_TP_CD = A.SR_AMD_TP_CD
+                                AND    SR_AMD_SEQ = A.SR_AMD_SEQ) AS MAX_SR_NO
+                              ,A.CRNT_USR_ID AS CRNT_USR_ID
+                              ,A.IMG_FILE_IP AS IMG_FILE_IP
+                              ,A.IMG_FILE_PATH_CTNT AS IMG_FILE_PATH_CTNT
+                              ,A.IMG_FILE_NM AS IMG_FILE_NM
+                              ,B.BKG_STS_CD AS BKG_STS_CD
+                              ,A.RTN_FM_USR_ID AS RTN_FM_USR_ID
+                              ,A.RTN_TO_USR_ID AS RTN_TO_USR_ID
+                              ,A.RTN_TO_RTN_USR_ID AS RTN_TO_RTN_USR_ID
+                              ,A.SR_CRNT_STS_CD AS SR_STS_CD
+                              ,A.PND_FLG AS PND_FLG  /* Y 일경우 PIC change 버튼 활성화*/
+                              ,A.SR_CRNT_STS_CD AS SR_CRNT_STS_CD
+                              ,CASE WHEN A.PIC_CNG_USR_ID IS NULL AND
+                                        (SELECT 'Y'
+							             FROM   BKG_SR_CRNT_RQST
+							             WHERE  BL_DOC_INP_FLG = 'Y' 
+                                         AND    BL_RT_FLG = 'Y' 
+                                         AND    BL_AUD_FLG = 'Y' 
+                                         AND    BL_DRFT_FAX_OUT_FLG = 'Y' 
+                                         AND    BKG_NO = A.BKG_NO 
+                                         AND    SR_AMD_TP_CD IN ('N', 'O') 
+                                         AND    ROWNUM = 1) = 'Y' THEN
+					                    (SELECT C.USR_ID||'('||C.USR_NM||')'
+					                     FROM   BKG_SR_HIS H, COM_USER C
+					                     WHERE  H.BKG_NO = A.BKG_NO 
+                                         AND    SR_STS_CD = 'AD'
+                                         AND    H.ATND_USR_ID = C.USR_ID
+                                         AND    H.ST_DT = (SELECT MAX(ST_DT)
+									                       FROM   BKG_SR_HIS
+									                       WHERE  BKG_NO = H.BKG_NO AND SR_STS_CD = 'AD')
+                                         AND    ROWNUM = 1
+                                         )
+				                   ELSE (SELECT C.USR_ID||'('||C.USR_NM||')' FROM COM_USER C WHERE C.USR_ID = A.PIC_CNG_USR_ID) 
+			                    END PIC_ID
+							  ,A.PIC_CNG_USR_ID AS PIC_CNG_ID
+							  ,A.INP_PIC_USR_ID
+							  ,A.RT_PIC_USR_ID
+                              ,NVL(DECODE(A.SR_CRNT_INFO_CD,'R'
+                              ,DECODE(NVL(A.RTN_TO_USR_ID,''),@[usr_id],'RT'),'T'
+                              ,DECODE('IN-SU','SU','TF'
+                              ,DECODE(NVL(A.RTN_TO_USR_ID,''),@[usr_id],'TF'))) ||
+                              DECODE(A.SR_CRNT_INFO_CD,'R'
+                              ,DECODE(NVL(A.RTN_FM_USR_ID,''),@[usr_id],'RF'),'T'
+                              ,DECODE(NVL(A.RTN_TO_USR_ID,''),@[usr_id],'TT')),'NM') AS FILTER
+                              ,NVL(A.BL_DOC_INP_FLG,'N') AS BL_DOC_INP_FLG
+                              ,NVL(A.BL_RT_FLG,'N') AS BL_RT_FLG
+                              ,NVL(A.BL_AUD_FLG,'N') AS BL_AUD_FLG
+                              ,NVL(A.BL_DRFT_FAX_OUT_FLG,'N') AS BL_DRFT_FAX_OUT_FLG
+                              ,NVL(A.BL_FNT_OFC_FLG,'N') AS BL_FNT_OFC_FLG
+                              ,DECODE(A.SR_WRK_STS_CD,'T',NULL,A.SR_WRK_STS_CD) AS SR_WRK_STS_CD
+                              ,A.SR_WRK_STS_USR_ID
+                              ,(SELECT U.USR_NM FROM COM_USER U WHERE U.USR_ID = A.SR_WRK_STS_USR_ID) SR_WRK_STS_USR_NM
+                              ,DECODE(A.SR_WRK_STS_CD,'P', A.SR_WRK_STS_USR_ID) PND_USR_ID
+                              ,DECODE(A.SR_WRK_STS_CD,'P',(SELECT U.USR_NM FROM COM_USER U WHERE U.USR_ID = A.SR_WRK_STS_USR_ID)) PND_USR_NM
+                              ,B.BKG_OFC_CD
+                              ,A.SR_NO
+                              ,TO_CHAR(BKG_GET_DCT_FNC(A.BKG_NO),'YYYY-MM-DD') AS DOC_CCT
+                              ,RC_INP_FLG
+                              ,TO_CHAR(SR_WRK_STS_DT,'YYYY-MM-DD') AS SR_WRK_STS_DT
+                              ,A.FAX_LOG_REF_NO
+                              ,(SELECT S.EML_SUBJ_CTNT FROM BKG_SR_FAX S WHERE S.SR_NO = A.SR_NO  AND S.FAX_LOG_REF_NO = A.FAX_LOG_REF_NO AND S.SR_KND_CD = A.SR_KND_CD) AS EML_SUBJ_CTNT
+                              ,(SELECT H.RTN_TO_USR_EML || '☜☞' || H.DIFF_RMK FROM BKG_SR_HIS H 
+                              WHERE H.BKG_NO = A.BKG_NO 
+                              AND   H.SR_NO = A.SR_NO 
+                              AND   H.SR_KND_CD = A.SR_KND_CD
+                              AND   H.SR_HIS_SEQ = (SELECT MAX(H2.SR_HIS_SEQ)  
+                                                    FROM   BKG_SR_HIS H2 
+                                                    WHERE  H.BKG_NO   = H2.BKG_NO  
+                                                    AND    H.SR_NO    = H2.SR_NO 
+                                                    AND    H.SR_KND_CD = H2.SR_KND_CD)
+                              ) AS BKG_HIS_VALUES
+                              ,VVD.SLAN_CD      
+                              ,VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD AS VVD_CD 
+							  ,TO_CHAR(VPS.VPS_ETD_DT,'YYYY-MM-DD') AS VPS_ETD_DT
+                              ,(SELECT COUNT(1) FROM BKG_SR_HIS H ,BKG_SR_CRNT_RQST RQ  WHERE H.BKG_NO = A.BKG_NO  AND H.SR_STS_CD = 'SR' AND H.SR_KND_CD = RQ.SR_KND_CD AND H.SR_NO = RQ.SR_NO AND H.BKG_NO = RQ.BKG_NO) AS SR_AMD_SEQ 	
+                              ,COALESCE((SELECT 'Y' FROM   BKG_CSTMS_ADV_BL CS WHERE CS.BKG_NO = B.BKG_NO  AND CS.BL_NO = B.BL_NO AND ROWNUM = 1),
+                              
+                                ( -- 구주
+                                SELECT 'Y'
+                                FROM   BKG_CSTMS_EUR_BL      A
+                                      ,BKG_CSTMS_ADV_EUR_RCV R
+                                WHERE  A.BL_NO = B.BL_NO
+                                AND    R.EUR_EDI_MSG_TP_ID = 'A' 
+                                AND    A.MSG_SND_NO = R.MSG_RCV_NO 
+                                AND	   R.ACK_RCV_STS_CD = 'A'
+                                AND    R.EDI_RCV_SEQ =  (SELECT MAX(R2.EDI_RCV_SEQ)
+                                              				FROM   BKG_CSTMS_ADV_EUR_RCV R2
+                                              				WHERE  R2.EUR_EDI_MSG_TP_ID = 'A' 
+                                                      		AND    R2.MSG_RCV_NO = R.MSG_RCV_NO
+                                                      		--AND    R2.EDI_RCV_DT = R.EDI_RCV_DT
+                                                           )
+                                AND 	ROWNUM =1
+                                ),(SELECT 'Y' FROM BKG_NTC_HIS NC
+                                   WHERE NC.BKG_NO = B.BKG_NO
+                                     AND NC.NTC_KND_CD= 'IM'
+                                     AND NC.EDI_ID = 'MEXCUS'  --Mexico 세관 전송 내역 
+                                     AND ROWNUM = 1)
+                                 ,'N' -- 전송되지 않음
+                              ) AS  CSTMS_MF_TP_CD
+                             ,XTER.BKG_UPLD_STS_CD
+                             ,B.OB_SREP_CD
+                             ,A.SR_AMD_TP_CD
+                             ,B.OB_SLS_OFC_CD
+                             ,XTER.BL_NO_CTNT
+                             ,XTER.XTER_SNDR_ID
+                             ,XTER.XTER_RQST_NO
+                             ,XTER.XTER_RQST_SEQ
+                             ,XTER.DOC_TP_CD
+                             ,B.SPLIT_FLG
+							,(SELECT DISTINCT RGN_OFC_CD
+                               FROM  BKG_EML_ACCT_STUP 
+                               WHERE BKG_OFC_CD = B.BKG_OFC_CD
+                               AND DELT_FLG = 'N') RGN_OFC_CD
+                             ,CASE WHEN NVL(XTER.SPLIT_STS_CD,' ')= ' ' THEN NVL((SELECT DECODE(COUNT(1),0,'','S') FROM BKG_XTER_RQST_MST M2 WHERE M2.BKG_NO = B.BKG_NO AND M2.SPLIT_STS_CD IN ('W','S','F')),A.SPLIT_STS_CD) ELSE XTER.SPLIT_STS_CD END SPLIT_STS_CD 
+                             ,NVL(NVL((SELECT BXRM.XTER_RQST_VIA_CD 
+                    						 FROM   BKG_XTER_RQST_MST BXRM 
+                    						 WHERE  BXRM.BKG_NO = B.BKG_NO 
+                    						 AND    BXRM.DOC_TP_CD = 'S' 
+                    						 AND    TO_CHAR(BXRM.UPLD_GDT,'YYYYMMDDHH24MISS')||BXRM.XTER_RQST_SEQ = 
+        				   							(SELECT MAX(TO_CHAR(BXRM1.UPLD_GDT,'YYYYMMDDHH24MISS')||BXRM1.XTER_RQST_SEQ)
+                  									FROM   BKG_XTER_RQST_MST BXRM1
+                  									WHERE  BXRM1.BKG_NO = B.BKG_NO
+													AND    BXRM1.UPLD_GDT IS NOT NULL
+                  									AND    BXRM1.DOC_TP_CD = 'S'))
+                 						,DECODE(B.XTER_SI_CD,'NIS', 'OFF', 'APS', 'OFF',B.XTER_SI_CD) )
+										,(SELECT INTG_CD_VAL_DP_DESC
+                   						  FROM   COM_INTG_CD_DTL
+                   						  WHERE  INTG_CD_ID = 'CD01581'
+                                          AND    (APLY_ST_DT < TO_CHAR(SYSDATE, 'YYYYMMDD') AND APLY_END_DT > TO_CHAR(SYSDATE, 'YYYYMMDD'))
+                                          AND    INTG_CD_VAL_CTNT = A.SR_KND_CD))  AS XTER_SI_CD
+                       FROM   BKG_SR_CRNT_RQST A
+                             ,BKG_BOOKING B
+                             ,BKG_XTER_RQST_MST XTER
+                             ,BKG_CUSTOMER S
+                             ,BKG_CUSTOMER C
+                             ,BKG_CUSTOMER N
+                             ,BKG_CUSTOMER F
+                             ,MDM_LOCATION POR, MDM_LOCATION POL, MDM_LOCATION POD, MDM_LOCATION DEL
+                             ,BKG_VVD VVD
+                             ,BKG_RATE R
+                             ,BKG_CNTR_CZ Q
+							 ,VSK_VSL_PORT_SKD VPS
+                       WHERE A.BKG_NO = B.BKG_NO
+                       AND A.DPCS_OFC_CD = NVL(@[dpcs_ofc_cd], A.DPCS_OFC_CD)
+                     --  AND   A.SR_CRNT_STS_CD <> 'XX'
+                       AND   A.XTER_SNDR_ID       = XTER.XTER_SNDR_ID(+)
+                       AND   A.XTER_RQST_NO       = XTER.XTER_RQST_NO(+)
+                       AND   A.XTER_RQST_SEQ      = XTER.XTER_RQST_SEQ(+)
+                       AND    NVL(XTER.SNACCS_MSG_TP_CD, ' ')  NOT IN ( 'SAT050', 'SAT054' )
+                       
+                       AND   B.POR_CD = POR.LOC_CD(+)
+                       AND 	 B.POL_CD = POL.LOC_CD(+)
+                       AND 	 B.POD_CD = POD.LOC_CD(+)
+                       AND 	 B.DEL_CD = DEL.LOC_CD(+)
+
+                       AND   VPS.VSL_CD(+)         =   VVD.VSL_CD
+                       AND   VPS.SKD_VOY_NO(+)     =   VVD.SKD_VOY_NO
+                       AND   VPS.SKD_DIR_CD(+)     =   VVD.SKD_DIR_CD
+                       AND   VPS.CLPT_IND_SEQ(+)   =   VVD.POL_CLPT_IND_SEQ
+                       AND	 VPS.VPS_PORT_CD(+)    =   VVD.POL_CD
+
+                       AND   R.BKG_NO = A.BKG_NO
+                       AND   Q.BKG_NO = A.BKG_NO
+                       AND   Q.BKG_CZ_STS_CD = 'CQ'
+
+                       AND   S.BKG_NO(+) = A.BKG_NO
+                       AND   S.BKG_CUST_TP_CD(+) = 'S'
+                       AND   C.BKG_NO(+) = A.BKG_NO
+                       AND   C.BKG_CUST_TP_CD(+) = 'C'
+                       AND   N.BKG_NO(+) = A.BKG_NO
+                       AND   N.BKG_CUST_TP_CD(+) = 'N'
+                       AND   F.BKG_NO(+) = A.BKG_NO
+                       AND   F.BKG_CUST_TP_CD(+) = 'F'
+                       AND   VVD.BKG_NO = B.BKG_NO
+                       AND   VVD.VSL_PRE_PST_CD || VVD.VSL_SEQ =   (SELECT MIN(BV.VSL_PRE_PST_CD || BV.VSL_SEQ) 
+                                                  	FROM   BKG_VVD BV
+                                                  	WHERE  BV.BKG_NO = VVD.BKG_NO)
+
+                       /* Duration */
+                       #if (''==${bkg_no} && ''!=${dura_from_dt} && ''!=${dura_to_dt})
+					   	#if (${prd_flg} == 'T')
+                       	AND   A.SR_WRK_STS_DT >= TO_DATE(@[dura_from_dt],'YYYY-MM-DD')
+                       	AND   A.SR_WRK_STS_DT < TO_DATE(@[dura_to_dt],'YYYY-MM-DD') + 1
+					   	#else
+                       	AND   A.CRNT_DT >= TO_DATE(@[dura_from_dt],'YYYY-MM-DD')
+                       	AND   A.CRNT_DT < TO_DATE(@[dura_to_dt],'YYYY-MM-DD') + 1
+						#end
+                       #end
+                       /* Input */
+                       #if (''!=${input})
+                       AND   @[input] = NVL(A.BL_DOC_INP_FLG,'N')
+                       #end
+                       /* Rate */
+                       #if (''!=${rate})
+                       AND   @[rate] = NVL(A.BL_RT_FLG,'N')
+                       #end
+                       /* Qa */
+                       #if (''!=${qa})
+                       AND   @[qa] = NVL(A.BL_AUD_FLG,'N')
+                       #end
+                       /* Fax */
+                       #if (''!=${fax})
+                       AND   @[fax] = NVL(A.BL_DRFT_FAX_OUT_FLG,'N')
+                       #end
+                       /* VVD */
+                       #if (''!=${vvd_cd})
+                       AND   SUBSTRB(@[vvd_cd],1,4) = VVD.VSL_CD
+                       AND   SUBSTRB(@[vvd_cd],5,4) = VVD.SKD_VOY_NO
+                       AND   SUBSTRB(@[vvd_cd],9,1) = VVD.SKD_DIR_CD
+                       #end
+                       /* POL */
+                       #if (''!=${pol_cd})
+                       AND   B.POL_CD LIKE RTRIM(@[pol_cd]) ||'%'
+                       #end
+                       /* POD */
+                       #if (''!=${pod_cd})
+                       AND   B.POD_CD = @[pod_cd]
+                       #end
+                       /* Booking No */
+                       #if (''!=${bkg_no})
+                       AND   B.BKG_NO LIKE @[bkg_no]||'%'
+                       #end
+                       /* Booking Office */
+                       #if (''!=${bkg_ofc_cd})
+                       AND   B.BKG_OFC_CD LIKE '%'||@[bkg_ofc_cd]||'%'
+                       #end
+                       /* Contract */
+                       #if (''!=${contract_no})
+                      	#if (${bkg_ctrt_tp_cd} == 'S')
+                       AND   B.SC_NO = @[contract_no]
+                      	#elseif (${bkg_ctrt_tp_cd} == 'R')
+                       AND   B.RFA_NO = @[contract_no]
+                      	#elseif (${bkg_ctrt_tp_cd} == 'T')
+                       AND   B.TAA_NO = @[contract_no]
+                      	#end
+                       #end
+                       /* STS */
+                       #if ('X'==${sts} || 'F' == ${sr_amd_tp_cd})
+                       AND   'XX' = A.SR_CRNT_STS_CD
+                       #elseif (''!=${sts} && 'A'!=${sts})
+                       AND   @[sts] = A.SR_WRK_STS_CD
+                       AND	 A.SR_CRNT_STS_CD <> 'XX'
+                       #else
+                       AND	 A.SR_CRNT_STS_CD <> 'XX'
+                       #end
+                       /* SRC */
+                       #if (${src_cd} != '') 
+                       AND   @[src_cd] = A.SR_KND_CD
+                       #end
+                       /* S/R KIND */
+                       #if (${sr_amd_tp_cd} != '' && ${sr_amd_tp_cd} != 'L') 
+                       AND   @[sr_amd_tp_cd] = A.SR_AMD_TP_CD 
+                       #end
+                       /* LANE */
+                       #if (${slan_cd} != '' && ${slan_cd} != 'All') 
+                       AND   @[slan_cd] = VVD.SLAN_CD 
+                       #end
+
+                       #if (${set_qry_where} != '') 
+                          ${set_qry_where} )
+                 	   #end
+                      ## Customer Type에 따른 Customer Code 및 Customer Name이 조건으로 들어온 경우 <S>
+                      #if (${cust_cnt_cd} != '')
+                      	#if (${bkg_cust_tp_cd} == 'S')
+                      		AND S.CUST_CNT_CD = @[cust_cnt_cd]
+                      	#elseif (${bkg_cust_tp_cd} == 'C')
+                      		AND C.CUST_CNT_CD = @[cust_cnt_cd]
+                        #elseif (${bkg_cust_tp_cd} == 'N')
+                      		AND N.CUST_CNT_CD = @[cust_cnt_cd]
+                      	#elseif (${bkg_cust_tp_cd} == 'F')
+                      		AND F.CUST_CNT_CD = @[cust_cnt_cd]
+                      	#end
+                      #end
+                      
+                      #if (${cust_seq} != '')
+                      	#if (${bkg_cust_tp_cd} == 'S')
+                      		AND S.CUST_SEQ = @[cust_seq]
+                      	#elseif (${bkg_cust_tp_cd} == 'C')
+                      		AND C.CUST_SEQ = @[cust_seq]
+                        #elseif (${bkg_cust_tp_cd} == 'N')
+                      		AND N.CUST_SEQ = @[cust_seq]
+                      	#elseif (${bkg_cust_tp_cd} == 'F')
+                      		AND F.CUST_SEQ = @[cust_seq]
+                      	#end
+                      #end
+                      
+                      #if (${cust_nm} != '')
+                      	#if (${bkg_cust_tp_cd} == 'S')
+                      		AND UPPER(S.CUST_NM) LIKE @[cust_nm] || '%'
+                      	#elseif (${bkg_cust_tp_cd} == 'C')
+                      		AND UPPER(C.CUST_NM) LIKE @[cust_nm] || '%'
+                        #elseif (${bkg_cust_tp_cd} == 'N')
+                      		AND UPPER(N.CUST_NM) LIKE @[cust_nm] || '%'
+                      	#elseif (${bkg_cust_tp_cd} == 'F')
+                      		AND UPPER(F.CUST_NM) LIKE @[cust_nm] || '%'
+                      	#end
+                      #end
+                      ## Customer Type에 따른 Customer Code 및 Customer Name이 조건으로 들어온 경우 <E>
+					
+                      #if (${srep_cd} != '') 
+                          AND NVL(B.OB_SREP_CD, XTER.SREP_CD) = @[srep_cd]
+                      #end
+                          AND B.BKG_STS_CD != 'X'
+
+                      #if (${split_only_flg} != '') 
+                          AND (CASE WHEN NVL(XTER.SPLIT_STS_CD,' ')= ' ' THEN (SELECT DECODE(COUNT(1),0,'','S') FROM BKG_XTER_RQST_MST M2 WHERE M2.BKG_NO = B.BKG_NO AND M2.SPLIT_STS_CD IN ('W','S','F')) ELSE XTER.SPLIT_STS_CD END)     IN ('W','S','F')
+                      #end
+
+                       ) X
+             WHERE 1=1
+             #if (${return_to} != '') 
+	             AND   @[return_to] = X.RETURN_FROM_CD
+             #end
+			 #if (${pic_id} !='')
+ 		     	AND (UPPER(INP_PIC_USR_ID) = UPPER(@[pic_id]) OR UPPER(RT_PIC_USR_ID) = UPPER(@[pic_id]))
+			 #end
+             ORDER BY SRC,BL_DOC_INP_FLG,BL_RT_FLG,BL_AUD_FLG,BL_DRFT_FAX_OUT_FLG,BKG_NO ) Z
+)
+WHERE  RNUM BETWEEN NVL(@[rows_per_page],50) * (NVL(@[curr_page],1)-1)+1
+AND     NVL(@[rows_per_page],50) * NVL(@[curr_page],1)			]]></sql>
+			<params>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="dpcs_ofc_cd" type="12" value="" out="N"/>
+				<param name="dura_from_dt" type="12" value="" out="N"/>
+				<param name="dura_to_dt" type="12" value="" out="N"/>
+				<param name="input" type="12" value="" out="N"/>
+				<param name="rate" type="12" value="" out="N"/>
+				<param name="qa" type="12" value="" out="N"/>
+				<param name="fax" type="12" value="" out="N"/>
+				<param name="vvd_cd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="bkg_ofc_cd" type="12" value="" out="N"/>
+				<param name="contract_no" type="12" value="" out="N"/>
+				<param name="sts" type="12" value="" out="N"/>
+				<param name="src_cd" type="12" value="" out="N"/>
+				<param name="sr_amd_tp_cd" type="12" value="" out="N"/>
+				<param name="slan_cd" type="12" value="" out="N"/>
+				<param name="cust_cnt_cd" type="12" value="" out="N"/>
+				<param name="cust_seq" type="12" value="" out="N"/>
+				<param name="cust_nm" type="12" value="" out="N"/>
+				<param name="srep_cd" type="12" value="" out="N"/>
+				<param name="return_to" type="12" value="" out="N"/>
+				<param name="pic_id" type="12" value="" out="N"/>
+				<param name="rows_per_page" type="12" value="" out="N"/>
+				<param name="curr_page" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

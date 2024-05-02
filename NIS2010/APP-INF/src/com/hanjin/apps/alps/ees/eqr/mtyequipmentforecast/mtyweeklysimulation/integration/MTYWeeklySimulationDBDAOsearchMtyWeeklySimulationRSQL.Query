@@ -1,0 +1,2090 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="MTYWeeklySimulationDBDAOsearchMtyWeeklySimulationRSQL">
+			<desc><![CDATA[weekly simulation을 조회]]></desc>
+			<sql><![CDATA[
+/*
+--IN : Inventory  CIM에서 추출된 INVENTORY   
+--RI : Reposition In  COD에서 추출된 Repostion In  
+--OT : Other(LT/ST/OW)  Balance Report 에서 추출된 Other Value(LT/ST/OW) 
+--IF : IB Forecast  Balance Report 에서 추출된 IB Forecast  
+--OF : OB Forecast  Balance Report 에서 추출된 OB Forecast 
+--RO : Reposition Out  Balance Report 에서 추출된 Reposition Out 
+--IC : IC  MOVEMENT IC 수량정보  
+
+--:loc_grp_cd -- L/E/S
+--:loc_cd     -- KRPUS, CNSHA
+--:ofc_cd     -- HGHBS(항저우),  HOUBB(휴스턴), INCBO(인천), NBOBB (닝보지점) 
+--:level_cd   -- 1,2,3 (3일때만 검색조건 적용)
+--:head_week  -- grid head 주차정보(1 : -1주차, 2 : 0주차, 3: 1주차, 4 : 2주차, 5 : 3주차, 6 : 4주차)
+*/
+
+WITH 
+BASIC_WEEK AS
+(
+    SELECT PLN_YR||PLN_WK WEEK
+          ,TO_CHAR(TO_DATE(WK_ST_DT , 'YYYYMMDD'), 'YYYYMMDD') WK_ST_DT
+          ,TO_CHAR(TO_DATE(WK_END_DT, 'YYYYMMDD'), 'YYYYMMDD') WK_END_DT       
+          ,ROWNUM-1 ROW_SEQ 
+    FROM EQR_WK_PRD
+    WHERE WK_ST_DT  >= TO_CHAR(SYSDATE-(7*3), 'YYYYMMDD') -- -2주차부터
+    AND   WK_END_DT <= TO_CHAR(SYSDATE+(7*5), 'YYYYMMDD') -- +4주차까지
+    ORDER BY ROWNUM
+)
+
+-- 지역검색조건으로 사용
+,DUMMY_LOCATION AS
+(
+
+#if ( ${present_flag} == 'L') 
+    SELECT DISTINCT LCC_CD LOC_CD 
+#elseif( ${present_flag} == 'E' )
+    SELECT DISTINCT ECC_CD LOC_CD
+#else
+    SELECT DISTINCT SCC_CD LOC_CD  
+#end
+    
+    FROM MDM_EQ_ORZ_CHT 
+    WHERE RCC_CD IN ('CNSHA', 'CNHKG', 'TWTPE', 'KRSEL', 'JPTYO', 'SGSIN') -- 하드코딩
+    AND  DELT_FLG = 'N'
+
+#if( ${condition_value} != '' ) -- RCC : ALL 일대는 쿼리 감춤
+  #if(${condition_flag} == 'R')
+	 AND   RCC_CD = @[condition_value]
+
+ #elseif( ${condition_flag} == 'L' )
+     #if    ( ${condition_value} == 'CNSZP' )
+     AND   ECC_CD IN ('CNCWN','CNSHU','CNYIT')
+     #elseif( ${condition_value} == 'JPTYO' )
+     AND   ECC_CD IN ('JPTYO','JPYOK')
+     #elseif( ${condition_value} == 'JPOSA' )
+     AND   ECC_CD IN ('JPOSA','JPUKB','JPNGO')
+     #else
+     AND   LCC_CD = @[condition_value]
+     #end
+
+ #elseif( ${condition_flag} == 'E')
+     #if    ( ${condition_value} == 'CNCWN' )
+     AND   SCC_CD = 'CNCWN'
+     #elseif( ${condition_value} == 'KRPUS' )
+     AND   SCC_CD = 'KRPUS'
+     #elseif( ${condition_value} == 'KRKAN' )
+     AND   SCC_CD = 'KRKAN'
+     #else
+	 AND   ECC_CD = @[condition_value]        
+     #end 
+
+ #else    --SCC
+	 AND   SCC_CD = @[condition_value]    
+ #end
+#end
+  
+    -- 지점 office 검색범위 (CDO_EQ, 지역본부 OFFICE 는 아래조건을 제거함)
+#if( ${level_cd} == '3' ) 
+    AND LCC_CD IN (
+                      SELECT LCC_CD
+                      FROM MDM_EQ_ORZ_CHT                         
+                      WHERE SCC_CD IN (                                     
+                                          SELECT SCC_CD                      
+                                          FROM MDM_LOCATION                  
+                                          WHERE LOC_CD IN ( SELECT LOC_CD FROM MDM_ORGANIZATION WHERE OFC_CD = @[ofc_cd] )                            
+                                      )      
+                  )
+#end                    
+)
+
+-- 좌측 헤더
+,GRID_HEAD AS
+(
+    SELECT A.LOC_CD
+          ,B.CODE
+          ,B.NAME
+          ,B.SORT
+          ,@[present_flag] LOC_GRP_CD
+    FROM      
+    (
+#if( ${present_flag} == 'L'  )  -- ALL
+        SELECT DISTINCT LCC_CD LOC_CD
+#elseif( ${present_flag} == 'E' )   
+        SELECT DISTINCT ECC_CD LOC_CD  
+#else  --SCC일때
+        SELECT DISTINCT SCC_CD LOC_CD   
+#end       
+        FROM MDM_EQ_ORZ_CHT
+        WHERE RCC_CD IN ('CNSHA', 'CNHKG', 'TWTPE', 'KRSEL', 'JPTYO', 'SGSIN') -- 하드코딩
+        AND  DELT_FLG = 'N'
+        -- 지점 office 검색범위 (CDO_EQ, 지역본부 OFFICE 는 아래조건을 제거함)
+#if( ${level_cd} == '3' ) 
+        AND LCC_CD IN (
+                         SELECT LCC_CD
+                         FROM MDM_EQ_ORZ_CHT                         
+                         WHERE SCC_CD IN (                                     
+                                             SELECT SCC_CD                      
+                                             FROM MDM_LOCATION                  
+                                             WHERE LOC_CD IN ( SELECT LOC_CD FROM MDM_ORGANIZATION WHERE OFC_CD = @[ofc_cd] )                            
+                                          )      
+                      )
+#end                
+        
+#if( ${condition_value} != '' ) -- RCC : ALL 일대는 쿼리 감춤
+  #if(${condition_flag} == 'R')
+	 AND   RCC_CD = @[condition_value]
+
+ #elseif( ${condition_flag} == 'L' )
+     #if    ( ${condition_value} == 'CNSZP' )
+     AND   ECC_CD IN ('CNCWN','CNSHU','CNYIT')
+     #elseif( ${condition_value} == 'JPTYO' )
+     AND   ECC_CD IN ('JPTYO','JPYOK')
+     #elseif( ${condition_value} == 'JPOSA' )
+     AND   ECC_CD IN ('JPOSA','JPUKB','JPNGO')
+     #else
+     AND   LCC_CD = @[condition_value]
+     #end
+
+ #elseif( ${condition_flag} == 'E')
+     #if    ( ${condition_value} == 'CNCWN' )
+     AND   SCC_CD = 'CNCWN'
+     #elseif( ${condition_value} == 'KRPUS' )
+     AND   SCC_CD = 'KRPUS'
+     #elseif( ${condition_value} == 'KRKAN' )
+     AND   SCC_CD = 'KRKAN'
+     #else
+	 AND   ECC_CD = @[condition_value]        
+     #end 
+
+ #else    --SCC
+	 AND   SCC_CD = @[condition_value]    
+ #end
+#end
+        
+    ) A,
+    (
+        SELECT 'IN' CODE, 'Inventory' NAME,       '1' SORT FROM DUAL UNION ALL
+        SELECT 'RI' CODE, 'Reposition In' NAME,   '2' SORT FROM DUAL UNION ALL
+        SELECT 'OT' CODE, 'Other(LT/ST/OW)' NAME, '3' SORT FROM DUAL UNION ALL
+        SELECT 'IF' CODE, 'MG Forecast' NAME,     '4' SORT FROM DUAL UNION ALL
+        SELECT 'OF' CODE, 'OP Forecast' NAME,     '5' SORT FROM DUAL UNION ALL
+        SELECT 'RO' CODE, 'Reposition Out' NAME,  '6' SORT FROM DUAL UNION ALL
+        SELECT 'IC' CODE, 'IC' NAME,              '7' SORT FROM DUAL UNION ALL  
+        SELECT 'BA' CODE, 'Balance' NAME,         '8' SORT FROM DUAL          
+    ) B
+    ORDER BY LOC_CD,SORT
+)
+
+#if( ${head_week} != 1 )  -- 1주차 아닌 경우만 조회
+,ADD_DAY_SCC AS
+(
+     SELECT SCC_CD 
+     FROM MDM_EQ_ORZ_CHT 
+     WHERE RCC_CD IN ('CNSHA', 'CNHKG', 'TWTPE', 'KRSEL', 'JPTYO', 'SGSIN') -- 하드코딩                           
+
+#if( ${condition_value} != '' ) -- RCC : ALL 일대는 쿼리 감춤
+  #if(${condition_flag} == 'R')
+	 AND   RCC_CD = @[condition_value]
+ #elseif( ${condition_flag} == 'L' )
+     AND   LCC_CD = @[condition_value]
+ #elseif( ${condition_flag} == 'E')
+	 AND   ECC_CD = @[condition_value]        
+ #else    --SCC
+	 AND   SCC_CD = @[condition_value]    
+ #end
+#end  
+)
+
+-- REPO IN 집계 LCC 가중치
+,ADD_DAY AS
+(
+    SELECT B.LCC_CD
+          ,B.ECC_CD
+          ,B.SCC_CD
+          ,B.LOC_CD
+          ,NVL(A.REPO_ADD_DYS, 0) DAYS -- 테이블에 등록되지 않은 LCC는 0
+    FROM EQR_WK_PRD_ADD_DY A,
+         (                                  
+             SELECT DISTINCT A.LCC_CD, A.ECC_CD, A.SCC_CD, B.LOC_CD 
+             FROM MDM_EQ_ORZ_CHT A,
+                  MDM_LOCATION B,
+                  ADD_DAY_SCC C
+             WHERE A.SCC_CD = B.SCC_CD
+             AND   B.SCC_CD = C.SCC_CD                
+             AND A.DELT_FLG = 'N'                                                                                           
+         ) B
+    WHERE A.LCC_CD(+) = B.LCC_CD -- 테이블에 등록되지 않은 LCC 0으로 조회                
+)
+
+,DIVISION AS 
+(
+	SELECT	L4, L3, L2, L1, M0, R1, R2
+	FROM	(
+				SELECT  LAG(PLN_YR||PLN_WK,4)		OVER (ORDER BY PLN_YR,PLN_WK)	L4,
+                        LAG(PLN_YR||PLN_WK,3)		OVER (ORDER BY PLN_YR,PLN_WK)	L3,
+						LAG(PLN_YR||PLN_WK,2)		OVER (ORDER BY PLN_YR,PLN_WK)	L2,
+						LAG(PLN_YR||PLN_WK,1)		OVER (ORDER BY PLN_YR,PLN_WK)	L1,
+						PLN_YR||PLN_WK										        M0,
+						LEAD(PLN_YR||PLN_WK,1)		OVER (ORDER BY PLN_YR,PLN_WK)	R1,
+						LEAD(PLN_YR||PLN_WK,2)		OVER (ORDER BY PLN_YR,PLN_WK)	R2
+				FROM	EQR_WK_PRD
+			)
+	WHERE   M0  = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ = @[head_week]) -- -1WEEK	
+)	
+
+,REPOIN_VVD AS
+(
+	SELECT DISTINCT VVD
+    FROM
+    (
+    SELECT WEEKDIVISION
+          ,WEEK
+          ,DIV
+          ,VVD
+          ,LANE
+          ,REMARKFLAG
+          ,DCLPTSQL
+          ,REMARK
+          ,CODCFMCTSCD
+          ,FIRSTETB
+          ,MNLINPFLG
+    FROM
+    (
+        SELECT WEEKDIVISION
+              ,WEEK
+              ,DIV
+              ,VVD
+              ,LANE
+              ,REMARKFLAG
+              ,DCLPTSQL
+              ,REMARK
+              ,CODCFMCTSCD
+              ,FIRSTETB
+              ,MNLINPFLG
+              ,ROW_NUMBER() OVER(PARTITION BY WEEKDIVISION, WEEK, VVD, LANE, REMARKFLAG, DCLPTSQL, REMARK ORDER BY FIRSTETB ASC) RN -- ETB 가 다르고 동일 VVD 출현시 제거		
+        FROM
+        (  
+        SELECT
+        		/*+	ORDERED USE_NL ( DST ORG  OCNT OSCNT WEK EVD RMK )
+        		INDEX ( ORG XPKVSK_VSL_PORT_SKD )
+        		INDEX ( OCNT XPKMDM_COUNTRY )
+        		INDEX ( OSCNT XPKMDM_SUBCONTINENT )
+        		INDEX ( WEK XAK1EQR_WK_PRD )
+        		*/
+        
+        		DECODE( WEK.PLN_YR||WEK.PLN_WK, DIV.L4,	'-1',
+												DIV.L3,	'0',
+                                                DIV.L2,	'1',
+        										DIV.L1,	'2',
+        										DIV.M0,	'3',
+        										DIV.R1,	'4',
+        										DIV.R2,	'5',
+        												NULL) weekDivision,
+        												/*	WEEK_DIV	*/
+        
+        		WEK.PLN_YR||WEK.PLN_WK			week,	/*	WEEK		*/
+        
+        		NVL(EVD.COD_CFM_STS_CD,'I')		div,	/*	DIV			*/
+        
+        		ORG.VSL_CD||ORG.SKD_VOY_NO||ORG.SKD_DIR_CD vvd,
+        		ORG.SLAN_CD						lane,	/*	LANE		*/
+        
+        		DECODE(NVL(RMK.DIFF_RMK,'N'),'N','N','Y') remarkFlag,			/*	REMARK_FLAG	*/	
+        		DST.CLPT_SEQ			dclptsql,	/* Asis First Port Seq */
+        		RMK.DIFF_RMK			remark,
+        		DECODE( EVD.COD_CFM_STS_CD, NULL, '1', '2' ) codcfmctscd,		/* WORK_FLAG : 1:BayPlan, 2:Simulated, 3:MTY BKG, 4:Tuning VVD */
+        		DST.VPS_ETB_DT			firstetb,
+        		EVD.MNL_INP_FLG			mnlInpFlg
+        
+        FROM	
+        		(
+        
+        			SELECT	
+        					/*+  ORDERED USE_NL ( PERIOD VPS2 CNT2 SCNT2 ) */
+        					VPS2.SLAN_CD							SLAN_CD     ,
+        					VPS2.VSL_CD								VSL_CD      ,			
+        					VPS2.SKD_VOY_NO							SKD_VOY_NO  ,		
+        					VPS2.SKD_DIR_CD							SKD_DIR_CD	, 
+        					TO_CHAR(VPS2.VPS_ETB_DT,'YYYYMMDD')		VPS_ETB_DT	,
+        					
+        					VPS2.CLPT_SEQ							CLPT_SEQ    ,	
+        					/*
+        					VPS2.VPS_PORT_CD						VPS_PORT_CD ,
+        					*/
+        					(
+        						SELECT  /*+ INDEX_DESC( VPS1 XAK4VSK_VSL_PORT_SKD ) */
+        								VPS1.VPS_PORT_CD||VPS1.CLPT_IND_SEQ
+        						FROM    VSK_VSL_PORT_SKD    VPS1
+        						WHERE   VPS2.VSL_CD				=	VPS1.VSL_CD
+        						AND		VPS2.SKD_VOY_NO			=	VPS1.SKD_VOY_NO
+        						AND		VPS2.SKD_DIR_CD			=	VPS1.SKD_DIR_CD
+        						AND		VPS2.CLPT_SEQ			>	VPS1.CLPT_SEQ
+        					--	AND     NVL(VPS1.SKD_CNG_STS_CD,	' ') <> 'S' /* 2010.05.10 Display All Port */
+        						AND     NVL(VPS1.VPS_PORT_CD,	' ') NOT IN ('PAPAC', 'EGSUZ', 'EGPSD')
+        						AND		SUBSTR(VPS1.VPS_PORT_CD,1,2) NOT IN ( 'SA','AE','AU','IN','IR','PK','ES' ) /* 2010.03.23 By YHNam : Skip Ports In ( 'SA','AE','AU','IN','IR','PK' ) */ 
+        						AND     ROWNUM = 1
+        
+        					)										FM_PKEY												
+        			FROM	
+        					(
+        						SELECT	M2_START	START_DATE,
+        								P2_END 		END_DATE				
+        						FROM	(
+        									SELECT  /*+ INDEX_FFS( EQR_WK_PRD  XAK2EQR_WK_PRD ) */ 
+        											LAG(WK_ST_DT,3)		OVER (ORDER BY PLN_YR,PLN_WK)	M2_START, -- -3주차부터 조회                                            
+        											PLN_YR||PLN_WK										CUR_WEEK,
+        											LEAD(WK_END_DT,2)	OVER (ORDER BY PLN_YR,PLN_WK)	P2_END                                                                                 
+        									FROM	EQR_WK_PRD    
+        								)
+        						WHERE	CUR_WEEK	=	(SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ = @[head_week]) -- -1WEEK		
+        					)					PERIOD	,
+        
+        					VSK_VSL_PORT_SKD	VPS2,	
+        					MDM_COUNTRY			CNT2,	
+        					MDM_SUBCONTINENT	SCNT2			
+        
+        			WHERE	VPS2.VPS_ETB_DT		BETWEEN	TO_DATE(PERIOD.START_DATE,	'YYYYMMDD')
+        										AND		TO_DATE(PERIOD.END_DATE,	'YYYYMMDD') + 0.99999
+        		--	AND		NVL(VPS2.SKD_CNG_STS_CD,' ') <> 'S' /* 2010.05.10 Display All Port */
+        			AND     NVL(VPS2.VPS_PORT_CD,	' ') NOT IN ('PAPAC', 'EGSUZ', 'EGPSD')
+        			AND		SUBSTR(VPS2.VPS_PORT_CD,1,2) NOT IN ( 'SA','AE','AU','IN','IR','PK','ES' ) /* 2010.03.23 By YHNam : Skip Ports In ( 'SA','AE','AU','IN','IR','PK' ) */
+        			AND		VPS2.CLPT_SEQ		<>	'1'
+        			AND		CNT2.CNT_CD			=	SUBSTR(VPS2.VPS_PORT_CD, 1, 2)
+        			AND		CNT2.SCONTI_CD		=	SCNT2.SCONTI_CD
+        			AND     ( SCNT2.CONTI_CD		=    'A'  or ( SCNT2.CONTI_CD = 'F'  and CNT2.CNT_CD = 'ZA' and VPS2.SLAN_CD = 'SFX' ) )    
+        		
+        		)					DST		,
+        		VSK_VSL_PORT_SKD	ORG		,
+        		MDM_COUNTRY			OCNT	,	
+        		MDM_SUBCONTINENT	OSCNT	,
+        		--MDM_DTL_REV_LANE	RLN		,
+        		(
+                    SELECT	/*+ INDEX_FFS( BSA_VVD_MST XPKBSA_VVD_MST ) */ 
+        					DISTINCT TRD_CD, SUBSTR(RLANE_CD,1, 3) LANE_CD
+                    FROM	BSA_VVD_MST   -- 108 건
+        			WHERE   SUBSTR(RLANE_CD,1, 3) <> 'SFX'			
+        		)                   TRD     ,
+        		EQR_WK_PRD			WEK		,
+        		DIVISION            DIV     ,
+        		EQR_MTY_COD_VVD		EVD		,
+        		EQR_MTY_COD_RMK     RMK
+        WHERE   ORG.VSL_CD			=	DST.VSL_CD
+        AND		ORG.SKD_VOY_NO		=	DST.SKD_VOY_NO
+        AND		ORG.SKD_DIR_CD		=	DST.SKD_DIR_CD
+        AND		ORG.VPS_PORT_CD		=	SUBSTR(DST.FM_PKEY,1,5)
+        AND		ORG.CLPT_IND_SEQ	=	SUBSTR(DST.FM_PKEY,6,2)
+        AND		OCNT.CNT_CD			=	SUBSTR(ORG.VPS_PORT_CD, 1, 2)
+        AND		OCNT.SCONTI_CD		=	OSCNT.SCONTI_CD
+        -- AND     OSCNT.CONTI_CD		<>    'A'  
+        
+        AND		ORG.SLAN_CD			=	TRD.LANE_CD
+        AND	(
+		       ( SUBSTR(TRD.TRD_CD,2,1) = 'P' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) =  'M' )
+		       OR		
+		       ( SUBSTR(TRD.TRD_CD,2,1) = 'E' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) =  'E' )
+               OR
+               ( SUBSTR(TRD.TRD_CD,2,1) = 'M' AND TRD.TRD_CD != 'EMS' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) =  'M' )
+		       OR 
+               ( SUBSTR(TRD.TRD_CD,2,1) = 'M' AND TRD.TRD_CD = 'EMS' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) IN ('M', 'E')  )
+
+        -- 러시아 NAKHODKA(나홋카) 벙커링 추가, 2013-08-14, 신용찬
+        -- 러시아 SLAVYANKA(슬라브양카) 벙커링 추가, 2013-09-06, 신용찬
+		OR
+	    ( SUBSTR(TRD.TRD_CD,2,1) = 'P' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) =  'E'                                AND (SUBSTR(DST.FM_PKEY,1,5)= 'RUNJK' OR SUBSTR(DST.FM_PKEY,1,5)= 'RUSKA')) 
+		OR		
+		( SUBSTR(TRD.TRD_CD,2,1) = 'E' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) =  'E'                                AND (SUBSTR(DST.FM_PKEY,1,5)= 'RUNJK' OR SUBSTR(DST.FM_PKEY,1,5)= 'RUSKA'))
+        OR
+        ( SUBSTR(TRD.TRD_CD,2,1) = 'M' AND TRD.TRD_CD != 'EMS' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) =  'E'        AND (SUBSTR(DST.FM_PKEY,1,5)= 'RUNJK' OR SUBSTR(DST.FM_PKEY,1,5)= 'RUSKA'))
+		OR 
+        ( SUBSTR(TRD.TRD_CD,2,1) = 'M' AND TRD.TRD_CD = 'EMS' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) IN ('M', 'E')  AND (SUBSTR(DST.FM_PKEY,1,5)= 'RUNJK' OR SUBSTR(DST.FM_PKEY,1,5)= 'RUSKA'))	
+
+        		
+            )
+        AND     TRD.TRD_CD IN ('TPS','AES','IAS','EMS') 
+        AND		DST.VPS_ETB_DT		BETWEEN		WEK.WK_ST_DT
+        							AND			WEK.WK_END_DT
+        AND		ORG.VSL_CD			=	EVD.VSL_CD			(+)
+        AND		ORG.SKD_VOY_NO		=	EVD.SKD_VOY_NO		(+)
+        AND		ORG.SKD_DIR_CD		=	EVD.SKD_DIR_CD		(+)
+        AND		'S'					=	EVD.COD_CFM_DIV_CD	(+)
+        AND		ORG.VSL_CD			=	RMK.VSL_CD			(+)
+        AND		ORG.SKD_VOY_NO		=	RMK.SKD_VOY_NO		(+)
+        AND		ORG.SKD_DIR_CD		=	RMK.SKD_DIR_CD		(+)
+        AND		'S'					=	RMK.COD_CFM_DIV_CD	(+) 
+        UNION ALL
+        SELECT	DISTINCT	/*__________________________________________________________________________________ MTY BKG Data */
+        
+        		DECODE( VD.N1ST_ETB_YRWK	,	DV.L4,	'-1',	
+												DV.L3,	'0',
+                                                DV.L2,	'1',
+        										DV.L1,	'2',
+        										DV.M0,	'3',
+        										DV.R1,	'4',
+        										DV.R2,	'5',
+        											NULL)	weekDivision,		/*	WEEK_DIV	*/
+        		VD.N1ST_ETB_YRWK							week,				/*	WEEK		*/
+        		NVL(SV.COD_CFM_STS_CD,VD.COD_CFM_STS_CD)	div,				/*	DIV			*/
+        		VD.VSL_CD||VD.SKD_VOY_NO||VD.SKD_DIR_CD 	vvd,				/*	VSL_CD		*/			
+        		VD.SLAN_CD									lane,				/*	LANE		*/
+        		DECODE(NVL(RMK.DIFF_RMK,'N'),'N','N','Y') 	remarkFlag,			/*	REMARK_FLAG	*/
+        	--	1 dclptsql,
+        		(
+        			SELECT	/*+ INDEX ( VPS1 XAK4VSK_VSL_PORT_SKD ) */
+        					VPS1.CLPT_SEQ
+        			FROM	VSK_VSL_PORT_SKD	VPS1,
+        			        MDM_COUNTRY         CNT,    
+        					MDM_SUBCONTINENT    SCT   
+        
+        			WHERE	VPS1.VSL_CD			=	VD.VSL_CD              
+        			AND		VPS1.SKD_VOY_NO		=	VD.SKD_VOY_NO          
+        			AND		VPS1.SKD_DIR_CD		=	VD.SKD_DIR_CD
+        			AND     NVL(VPS1.VPS_PORT_CD,     ' ') NOT IN ('LKCMB', 'JOAQJ')    
+        			AND		SUBSTR(VPS1.VPS_PORT_CD,1,2) NOT IN ( 'SA','AE','AU','IN','IR','PK','ES' )
+        							/* 2010.03.23 By YHNam : Skip Ports In ( 'SA','AE','AU','IN','IR','PK' ) */ 
+        			AND     SUBSTR(VPS1.VPS_PORT_CD,1,2) = CNT.CNT_CD
+                    AND     CNT.SCONTI_CD		=    SCT.SCONTI_CD
+        			AND     ( SCT.CONTI_CD        =    'A' or ( SCT.CONTI_CD = 'F'  and CNT.CNT_CD = 'ZA' and VPS1.SLAN_CD = 'SFX' ) )                    /* Only Asisa Port */
+        			AND		ROWNUM				=	1
+        		)											dclptsql,
+        		RMK.DIFF_RMK								remark,				/*	REMARK		*/
+        		
+        		DECODE( SV.COD_CFM_STS_CD, NULL, '3', '2' ) codcfmctscd,		/*	_______________________________________> WORK_FLAG	*/
+        		'21001231'				firstetb,
+        		VD.MNL_INP_FLG			mnlInpFlg
+        FROM    DIVISION            DV,
+        		EQR_MTY_COD_VVD		VD,
+        		EQR_MTY_COD_PORT	PT,
+        		EQR_MTY_COD_VVD		SV,
+        		EQR_MTY_COD_RMK     RMK
+        WHERE	VD.N1ST_ETB_YRWK IN ( DV.L4, DV.L3, DV.L2, DV.L1, DV.M0, DV.R1, DV.R2 )
+        AND		VD.COD_CFM_DIV_CD	=	'B'			/*	SIMULATION DIVISION */
+        --AND		VD.COD_CFM_STS_CD	=	'B'			/*	MTY BKG DATA		 */
+        AND		VD.VSL_CD			=	PT.VSL_CD		
+        AND		VD.SKD_VOY_NO		=	PT.SKD_VOY_NO	
+        AND		VD.SKD_DIR_CD		=	PT.SKD_DIR_CD	
+        AND		VD.COD_CFM_DIV_CD	=	PT.COD_CFM_DIV_CD	
+        AND		'D'					=	PT.LODG_DCHG_DIV_CD
+        AND		VD.VSL_CD			=	SV.VSL_CD			(+)
+        AND		VD.SKD_VOY_NO		=	SV.SKD_VOY_NO		(+)
+        AND		VD.SKD_DIR_CD		=	SV.SKD_DIR_CD		(+)
+        AND		'S'					=	SV.COD_CFM_DIV_CD	(+)
+        AND	 	'N'     			= 	SV.MNL_INP_FLG (+)                /* <================================ 추가 */
+        AND		VD.VSL_CD			=	RMK.VSL_CD  (+)
+        AND		VD.SKD_VOY_NO		=	RMK.SKD_VOY_NO (+)
+        AND		VD.SKD_DIR_CD		=	RMK.SKD_DIR_CD (+)
+        AND		'S'	                =	RMK.COD_CFM_DIV_CD (+)
+        
+        UNION ALL
+        
+        /* To Get Arelady Simulated Data Without Vessel Schedule */
+        
+        SELECT	/*+ ORDERED USE_NL( DV VD PT ) INDEX( VD XAK1EQR_MTY_COD_VVD ) */
+                DISTINCT		
+        		DECODE	( 
+        					VD.N1ST_ETB_YRWK , 
+                            DV.L4, '-1',
+                            DV.L3, '0',
+                            DV.L2, '1',
+        					DV.L1, '2',
+        					DV.M0, '3',
+        					DV.R1, '4',
+        					DV.R2, '5',
+        					NULL
+        				)									weekDivision,	/* WEEK_DIV */
+        		VD.N1ST_ETB_YRWK							week		,	/* WEEK  */
+        		VD.COD_CFM_STS_CD							div			,	/* DIV   */
+        		VD.VSL_CD||VD.SKD_VOY_NO||VD.SKD_DIR_CD		vvd			,	/* VSL_CD  */   
+        		VD.SLAN_CD									lane		,	/* LANE  */
+        		DECODE(NVL(RMK.DIFF_RMK,'N'),'N','N','Y')	remarkFlag	,   /* REMARK_FLAG */
+        		1 dclptsql,
+        		RMK.DIFF_RMK									remark		,	/* REMARK  */
+        		'4'											codcfmctscd	,	/* WORK_FLAG : 1:BayPlan, 2:Simulated, 3:MTY BKG, 4:Tuning VVD */
+        		VD.N1ST_ETB_YRWK							firstetb,
+        		VD.MNL_INP_FLG								mnlinpflg
+        
+        FROM    DIVISION            DV,
+        		EQR_MTY_COD_VVD		VD,
+        		EQR_MTY_COD_PORT	PT,
+        		EQR_MTY_COD_RMK     RMK
+        WHERE	VD.N1ST_ETB_YRWK IN ( DV.L4, DV.L3, DV.L2, DV.L1, DV.M0, DV.R1, DV.R2 )
+        AND		VD.COD_CFM_DIV_CD   =	'S'   /* SIMULATION DIVISION */
+        AND		VD.VSL_CD			=	PT.VSL_CD  
+        AND		VD.SKD_VOY_NO		=	PT.SKD_VOY_NO 
+        AND		VD.SKD_DIR_CD		=	PT.SKD_DIR_CD 
+        AND		VD.COD_CFM_DIV_CD	=	PT.COD_CFM_DIV_CD 
+        AND		'D'					=	PT.LODG_DCHG_DIV_CD
+        AND		'Y'     			= 	VD.MNL_INP_FLG                 /* <================================ 추가 */
+        AND		VD.VSL_CD			=	RMK.VSL_CD  (+)
+        AND		VD.SKD_VOY_NO		=	RMK.SKD_VOY_NO (+)
+        AND		VD.SKD_DIR_CD		=	RMK.SKD_DIR_CD (+)
+        AND		VD.COD_CFM_DIV_CD	=	RMK.COD_CFM_DIV_CD (+)
+        ) 
+    ) 
+    WHERE RN=1 -- ETB 가 다르고 동일 VVD 출현시 제거
+    )
+)
+
+#end
+
+SELECT CASE WHEN LOC_CD IS NULL THEN 'TOTAL'
+			ELSE LOC_CD||'('||LOC_GRP_CD||')' END  LOC_CD
+	  ,LOC_GRP_CD
+	  ,CODE
+  	  ,NAME
+	  ,SORT
+	  ,WEEK
+	  ,GTOTAL
+	  ,DTOTAL
+	  ,STOTAL
+	  ,D2_Q
+      ,D4_Q
+      ,D5_Q
+      ,D7_Q
+      ,R2_Q
+      ,R5_Q
+      ,R9_Q
+      ,O2_Q
+      ,S2_Q
+      ,O4_Q
+      ,S4_Q
+      ,F2_Q
+      ,A2_Q
+      ,F4_Q
+      ,A4_Q
+      ,F5_Q   
+      ,D2_F	--del 버튼 여부(글씨 색)
+      ,D4_F
+      ,D5_F
+      ,D7_F
+      ,R2_F
+      ,R5_F
+      ,R9_F
+      ,O2_F
+      ,S2_F
+      ,O4_F
+      ,S4_F
+      ,F2_F
+      ,A2_F
+      ,F4_F
+      ,A4_F
+      ,F5_F
+	  ,CASE WHEN LOC_CD IS NULL THEN NULL
+			ELSE '+' END TREE
+	  ,@[condition_value] ORI_LOC_CD
+	  ,@[ori_loc_cd] ORI_ORI_LOC_CD
+	  ,@[ori_ori_loc_cd] ORI_ORI_ORI_LOC_CD
+	  ,@[head_week] HEAD_WEEK
+FROM
+(
+-- RCC : ALL일때 표현 (RCC : ALL)
+#if ( ${condition_value} == '' && ${present_flag} == 'L' )
+SELECT A.RCC_CD LOC_CD
+      ,'R' LOC_GRP_CD
+      ,A.CODE
+      ,A.NAME
+      ,A.SORT
+      ,A.WEEK  
+      ,SUM(A.GTOTAL) GTOTAL
+      ,SUM(A.DTOTAL) DTOTAL
+      ,SUM(A.STOTAL) STOTAL
+      ,SUM(A.D2_Q) D2_Q
+      ,SUM(A.D4_Q) D4_Q
+      ,SUM(A.D5_Q) D5_Q
+      ,SUM(A.D7_Q) D7_Q
+      ,SUM(A.R2_Q) R2_Q
+      ,SUM(A.R5_Q) R5_Q
+      ,SUM(A.R9_Q) R9_Q
+      ,SUM(A.O2_Q) O2_Q
+      ,SUM(A.S2_Q) S2_Q
+      ,SUM(A.O4_Q) O4_Q
+      ,SUM(A.S4_Q) S4_Q
+      ,SUM(A.F2_Q) F2_Q
+      ,SUM(A.A2_Q) A2_Q
+      ,SUM(A.F4_Q) F4_Q
+      ,SUM(A.A4_Q) A4_Q
+      ,SUM(A.F5_Q) F5_Q   
+      ,'N' D2_F	--del 버튼 여부(글씨 색)
+      ,'N' D4_F
+      ,'N' D5_F
+      ,'N' D7_F
+      ,'N' R2_F
+      ,'N' R5_F
+      ,'N' R9_F
+      ,'N' O2_F
+      ,'N' S2_F
+      ,'N' O4_F
+      ,'N' S4_F
+      ,'N' F2_F
+      ,'N' A2_F
+      ,'N' F4_F
+      ,'N' A4_F
+      ,'N' F5_F
+FROM
+(
+#end
+SELECT LOC_CD
+      ,(SELECT DISTINCT RCC_CD FROM MDM_EQ_ORZ_CHT X WHERE X.LCC_CD = LOC_CD) RCC_CD
+      ,LOC_GRP_CD
+      ,CODE
+      ,NAME
+      ,SORT
+      ,WEEK
+      ,SUM(D2_Q)+SUM(D4_Q)+SUM(D5_Q)+SUM(D7_Q)+SUM(R2_Q)+SUM(R5_Q)+SUM(R9_Q)+SUM(O2_Q)+SUM(S2_Q)+SUM(O4_Q)+SUM(S4_Q)+SUM(F2_Q)+SUM(A2_Q)+SUM(F4_Q)+SUM(A4_Q)+SUM(F5_Q) GTOTAL
+      ,SUM(D2_Q)+SUM(D4_Q)+SUM(D5_Q)+SUM(D7_Q) DTOTAL
+      ,SUM(R2_Q)+SUM(R5_Q)+SUM(R9_Q)+SUM(O2_Q)+SUM(S2_Q)+SUM(O4_Q)+SUM(S4_Q)+SUM(F2_Q)+SUM(A2_Q)+SUM(F4_Q)+SUM(A4_Q)+SUM(F5_Q) STOTAL            
+      ,SUM(D2_Q) D2_Q
+      ,SUM(D4_Q) D4_Q
+      ,SUM(D5_Q) D5_Q
+      ,SUM(D7_Q) D7_Q
+      ,SUM(R2_Q) R2_Q
+      ,SUM(R5_Q) R5_Q
+      ,SUM(R9_Q) R9_Q
+      ,SUM(O2_Q) O2_Q
+      ,SUM(S2_Q) S2_Q
+      ,SUM(O4_Q) O4_Q
+      ,SUM(S4_Q) S4_Q
+      ,SUM(F2_Q) F2_Q
+      ,SUM(A2_Q) A2_Q
+      ,SUM(F4_Q) F4_Q
+      ,SUM(A4_Q) A4_Q
+      ,SUM(F5_Q) F5_Q
+
+      ,MAX(D2_F) D2_F
+      ,MAX(D4_F) D4_F
+      ,MAX(D5_F) D5_F
+      ,MAX(D7_F) D7_F
+      ,MAX(R2_F) R2_F
+      ,MAX(R5_F) R5_F
+      ,MAX(R9_F) R9_F
+      ,MAX(O2_F) O2_F
+      ,MAX(S2_F) S2_F
+      ,MAX(O4_F) O4_F
+      ,MAX(S4_F) S4_F
+      ,MAX(F2_F) F2_F
+      ,MAX(A2_F) A2_F
+      ,MAX(F4_F) F4_F
+      ,MAX(A4_F) A4_F
+      ,MAX(F5_F) F5_F  
+FROM 
+(      
+
+    SELECT B.LOC_CD
+          ,B.LOC_GRP_CD
+          ,B.CODE
+          ,B.NAME
+          ,B.SORT
+          
+          ,(SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]) WEEK
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'D2', A.CNTR_QTY))),0) D2_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'D4', A.CNTR_QTY))),0) D4_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'D5', A.CNTR_QTY))),0) D5_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'D7', A.CNTR_QTY))),0) D7_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'R2', A.CNTR_QTY))),0) R2_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'R5', A.CNTR_QTY))),0) R5_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'R9', A.CNTR_QTY))),0) R9_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'O2', A.CNTR_QTY))),0) O2_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'S2', A.CNTR_QTY))),0) S2_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'O4', A.CNTR_QTY))),0) O4_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'S4', A.CNTR_QTY))),0) S4_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'F2', A.CNTR_QTY))),0) F2_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'A2', A.CNTR_QTY))),0) A2_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'F4', A.CNTR_QTY))),0) F4_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'A4', A.CNTR_QTY))),0) A4_Q
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'F5', A.CNTR_QTY))),0) F5_Q
+       
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'D2', A.TMP_SAV_FLG))),'N') D2_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'D4', A.TMP_SAV_FLG))),'N') D4_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'D5', A.TMP_SAV_FLG))),'N') D5_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'D7', A.TMP_SAV_FLG))),'N') D7_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'R2', A.TMP_SAV_FLG))),'N') R2_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'R5', A.TMP_SAV_FLG))),'N') R5_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'R9', A.TMP_SAV_FLG))),'N') R9_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'O2', A.TMP_SAV_FLG))),'N') O2_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'S2', A.TMP_SAV_FLG))),'N') S2_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'O4', A.TMP_SAV_FLG))),'N') O4_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'S4', A.TMP_SAV_FLG))),'N') S4_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'F2', A.TMP_SAV_FLG))),'N') F2_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'A2', A.TMP_SAV_FLG))),'N') A2_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'F4', A.TMP_SAV_FLG))),'N') F4_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'A4', A.TMP_SAV_FLG))),'N') A4_F
+          ,NVL(DECODE(A.WKY_SIM_TP_CD, B.CODE, DECODE(WEEK, (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=@[head_week]), DECODE(A.CNTR_TPSZ_CD, 'F5', A.TMP_SAV_FLG))),'N') F5_F
+       
+    FROM 
+    (
+    
+        -- INVENTORY ------------------------------------------------------------------
+        -- INVENTORY (-1주차)
+        SELECT A.FCAST_YRWK WEEK
+              ,A.LOC_CD
+              ,A.LOC_GRP_CD
+              ,A.WKY_SIM_TP_CD
+              ,A.CNTR_TPSZ_CD
+              ,A.CNTR_QTY
+              ,'N' TMP_SAV_FLG         
+        FROM EQR_MTY_WKY_SIM A
+            ,DUMMY_LOCATION B
+        WHERE A.FCAST_YRWK = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=1) -- -1주차      
+        AND   A.LOC_GRP_CD = @[present_flag] 
+        AND   A.WKY_SIM_TP_CD = 'IN' -- INVENTORY
+        AND   A.LOC_CD      = B.LOC_CD
+        
+        -- INVENTORY (0주차)     
+        UNION ALL
+        SELECT A.BSE_DT WEEK
+              ,A.LOC_CD
+              ,A.LOC_GRP_CD
+              ,'IN' WKY_SIM_TP_CD
+              ,A.CNTR_TPSZ_CD
+              ,SUM(A.CNTR_QTY) CNTR_QTY
+              ,'N' TMP_SAV_FLG       
+        FROM  CIM_ETC_INVT A
+             ,DUMMY_LOCATION B
+        WHERE A.CO_CD ='H'
+        AND   A.LOC_GRP_CD = @[present_flag]
+        AND   A.INVT_USE_TP_CD = '1'
+        AND   A.BSE_DT = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ = 2) -- 0주차    
+        AND   A.LOC_CD = B.LOC_CD
+        GROUP BY A.BSE_DT
+                ,A.LOC_CD
+                ,A.LOC_GRP_CD
+                ,A.CNTR_TPSZ_CD
+        
+        -- REPO IN ------------------------------------------------------------------
+        UNION ALL
+        SELECT WEEK
+              ,LOC_CD
+              ,LOC_GRP_CD
+              ,WKY_SIM_TP_CD
+              ,CNTR_TPSZ_CD
+              ,NVL(SUM(CNTR_QTY),0) CNTR_QTY
+              ,MAX(TMP_SAV_FLG)  TMP_SAV_FLG
+        FROM
+        (
+            --SELECT ROW_NUMBER() OVER (PARTITION BY WEEK, LOC_CD, CNTR_TPSZ_CD ORDER BY TMP_SAV_FLG DESC) DP_SEQ
+            --      ,WEEK
+            --      ,LOC_CD
+            --      ,LOC_GRP_CD
+            --      ,WKY_SIM_TP_CD
+            --      ,CNTR_TPSZ_CD
+            --      ,CNTR_QTY
+            --      ,TMP_SAV_FLG
+            --FROM
+            --(      
+#if(${head_week} == 1)
+                -- -1주차 수동입력
+                SELECT A.FCAST_YRWK WEEK
+                      ,A.LOC_CD
+                      ,A.LOC_GRP_CD
+                      ,A.WKY_SIM_TP_CD
+                      ,A.CNTR_TPSZ_CD
+                      ,A.CNTR_QTY
+                      ,A.TMP_SAV_FLG
+                FROM EQR_MTY_WKY_SIM A
+                    ,DUMMY_LOCATION B   
+                --WHERE A.FCAST_YRWK BETWEEN (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=1) AND (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=6) -- -1주차~+4주차
+                WHERE A.FCAST_YRWK =(SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=1) -- -1주차 만 수집(20130315)     
+                AND   A.LOC_GRP_CD    = @[present_flag] --L/E/S
+                AND   A.WKY_SIM_TP_CD = 'RI'        -- REPOSITION IN
+                AND   A.LOC_CD        = B.LOC_CD
+                --AND   A.TMP_SAV_FLG   = 'Y'
+
+#else -- 2,3,4,5,6 일때 가동
+                
+    			-- REPO IN DETAIL(EES_EQR_5009에서 수기입력) 은 적색으로 표시됨.
+				SELECT A.WEEK
+                     #if ( ${present_flag} == 'L')
+                      ,C.LCC_CD LOC_CD
+                     #elseif( ${present_flag} == 'E')
+                      ,C.ECC_CD LOC_CD    
+                     #else  --'S'
+                      ,C.SCC_CD LOC_CD                          
+                     #end
+			          ,@[present_flag] LOC_GRP_CD
+			          ,'RI' WKY_SIM_TP_CD
+			          ,A.CNTR_TPSZ_CD
+			          ,NVL(SUM(A.CNTR_QTY),0) CNTR_QTY
+			          ,'Y' TMP_SAV_FLG -- 0보다 큰 값만 추출
+    			FROM 
+    			(
+    				SELECT X.WEEK
+				          ,Y.LOC_CD
+                          ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+                          ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(A.D2_FCAST_QTY,0) 
+                                WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(A.D4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(A.D5_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(A.D7_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(A.R2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(A.R5_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(A.R9_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(A.O2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(A.O4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(A.S2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(A.S4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(A.F2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(A.F4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(A.F5_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(A.A2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(A.A4_FCAST_QTY,0)       
+                                END CNTR_QTY                           
+    				FROM EQR_MTY_BAL_RPT_DCHG_MNL A
+ 				        ,COM_INTG_CD_DTL B
+				        ,BASIC_WEEK X  
+ 				        ,ADD_DAY Y
+    				WHERE B.INTG_CD_ID        = 'CD00830'  
+    				AND   A.ETD_DT BETWEEN TO_DATE(X.WK_ST_DT, 'YYYYMMDD') - Y.DAYS AND TO_DATE(X.WK_END_DT, 'YYYYMMDD') - Y.DAYS+0.99999  
+    				AND   A.LOC_CD = Y.LOC_CD    
+    				AND   X.ROW_SEQ = @[head_week] -- 0주차                    
+    			) A,
+                (
+                    SELECT A.LCC_CD, A.ECC_CD, A.SCC_CD, B.LOC_CD
+                    FROM MDM_EQ_ORZ_CHT A
+                        ,MDM_LOCATION B
+                    WHERE A.SCC_CD = B.SCC_CD     
+                ) C
+                WHERE A.LOC_CD(+)  = C.LOC_CD
+    			GROUP BY A.WEEK 
+                     #if ( ${present_flag} == 'L' )
+                        ,C.LCC_CD 
+                     #elseif ( ${present_flag} == 'E' )
+                        ,C.ECC_CD 
+                     #else  --'E'
+                        ,C.SCC_CD                             
+                     #end  
+
+                        ,A.CNTR_TPSZ_CD
+    			HAVING  NVL(SUM(A.CNTR_QTY),0) > 0
+    
+#end
+                
+              #if( ${head_week} == 3 || ${head_week} == 4 || ${head_week} == 5 || ${head_week} == 6 )  
+                -- +1WEEK, +2WEEK, +3WEEK, +4WEEK 에서만 사용
+                -- Repo In (COD SIMULATION, PLUS OTHER추출)
+                UNION ALL
+             
+                SELECT A.WEEK WEEK
+                      ,A.LOC_CD                                          
+                      ,@[present_flag] LOC_GRP_CD
+                      ,'RI' WKY_SIM_TP_CD
+                      ,A.CNTR_TPSZ_CD
+                      ,SUM(A.CNTR_QTY) CNTR_QTY
+                      ,'N' TMP_SAV_FLG                   
+                FROM 
+                (   
+                    -- PLUS OTHER 
+                    -- INP_YRWK가 -1WEEK 가 곧 현재주차에 사용된다.
+                    SELECT A.FCAST_YRWK WEEK
+                          ,A.LOC_CD
+                          ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+                          ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(A.D2_FCAST_QTY,0) 
+                                WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(A.D4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(A.D5_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(A.D7_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(A.R2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(A.R5_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(A.R9_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(A.O2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(A.O4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(A.S2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(A.S4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(A.F2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(A.F4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(A.F5_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(A.A2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(A.A4_FCAST_QTY,0)       
+                                END CNTR_QTY
+                    FROM EQR_MTY_BAL_RPT_OTR A
+                        ,COM_INTG_CD_DTL B
+                        ,DUMMY_LOCATION C   
+                    WHERE B.INTG_CD_ID        = 'CD00830'         
+                    AND   A.INP_YRWK          = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=1) -- +other는 -1WEEK가 곧 현재주차로 인식된다.
+                    AND   A.LOC_CD            = C.LOC_CD
+                    AND   A.LOC_GRP_CD        = @[present_flag]
+                    AND   A.MTY_BAL_OTR_TP_CD = 2 -- PLUS OTHER (REPO IN 에 포함)
+
+                    UNION ALL
+
+
+                    -- COD SIMULATION 
+                    SELECT A.WEEK WEEK
+
+                         #if ( ${present_flag} == 'L')
+                          ,C.LCC_CD LOC_CD
+                         #elseif( ${present_flag} == 'E')
+                          ,C.ECC_CD LOC_CD    
+                         #else  --'S'
+                          ,C.SCC_CD LOC_CD                          
+                         #end
+ 
+                            
+                          ,A.CNTR_TPSZ_CD
+                          ,SUM(A.CNTR_QTY) CNTR_QTY                
+                    FROM 
+                    ( 
+                    	-- BAY PLAN, I
+                        SELECT /*+ NO_MERGE(B) */ B.WEEK
+                   	          ,A.VSL_CD
+                              ,A.SKD_VOY_NO
+                              ,A.SKD_DIR_CD
+                              ,B.SLAN_CD
+                              ,A.POD_CD
+                              ,B.YD_CD
+                              ,B.VPS_ETB_DT ETB_DT
+                              ,'I' DIV
+                              ,A.CNTR_TPSZ_CD
+                              ,COUNT(1) CNTR_QTY
+                        FROM OPF_BAY_PLN_LDIS A,
+                        ( 
+                            SELECT /*+ ORDERED USE_NL(A) INDEX(A XAK10VSK_VSL_PORT_SKD) */
+                                   A.VSL_CD
+                                  ,A.SKD_VOY_NO
+                                  ,A.SKD_DIR_CD
+                                  ,A.SLAN_CD
+                                  ,A.VPS_PORT_CD
+                                  ,A.YD_CD
+                                  ,A.VPS_ETB_DT
+                                  ,X.WEEK                           
+                            FROM ADD_DAY Y
+                                ,BASIC_WEEK X
+                                ,VSK_VSL_PORT_SKD A
+                                ,REPOIN_VVD Z
+                            WHERE A.VPS_PORT_CD(+) = Y.LOC_CD 
+                            AND   X.ROW_SEQ        = @[head_week] -- 0주차 
+                            AND   A.VPS_PORT_CD IN (
+                                                        SELECT /*+ NO_UNNEST */ A.LOC_CD 
+                                                        FROM MDM_LOCATION A
+                                                            ,ADD_DAY_SCC C 
+                                                        WHERE A.SCC_CD = C.SCC_CD
+                                                    )
+                                                             
+                            AND   A.VPS_ETB_DT BETWEEN TO_DATE(X.WK_ST_DT, 'YYYYMMDD') - Y.DAYS AND TO_DATE(X.WK_END_DT, 'YYYYMMDD') - Y.DAYS+0.99999                              
+                            AND   A.CLPT_IND_SEQ = '1'	      
+                            AND   A.VSL_CD     = SUBSTR(Z.VVD, 0, 4)
+                            AND   A.SKD_VOY_NO = SUBSTR(Z.VVD, 5, 4)
+                            AND   A.SKD_DIR_CD = SUBSTR(Z.VVD, 9, 1)
+                                            
+                        ) B
+                        WHERE A.LODG_DCHG_IND_CD =	'C'
+                        AND	  A.FULL_MTY_CD	     =	'E'
+                        AND	  A.CRR_CD		     =	'SML'
+                        AND   A.VSL_CD           = B.VSL_CD
+                        AND   A.SKD_VOY_NO       = B.SKD_VOY_NO
+                        AND   A.SKD_DIR_CD       = B.SKD_DIR_CD
+                        AND   A.POD_CD           = B.VPS_PORT_CD
+                        GROUP BY B.WEEK
+                                ,A.VSL_CD
+                                ,A.SKD_VOY_NO
+                                ,A.SKD_DIR_CD
+                                ,B.SLAN_CD
+                                ,A.POD_CD
+                                ,B.YD_CD
+                                ,B.VPS_ETB_DT
+                                ,A.CNTR_TPSZ_CD
+                
+                        UNION ALL
+                        
+                        -- SIMULATION, CONFIRMATION, BASIC 
+                        SELECT /*+ NO_MERGE(Z) ORDERED */ Z.WEEK
+                              ,Z.VSL_CD
+                              ,Z.SKD_VOY_NO
+                              ,Z.SKD_DIR_CD
+                              ,Z.SLAN_CD
+                              ,Z.VPS_PORT_CD POD_CD
+                              ,Z.YD_CD
+                              ,Z.VPS_ETB_DT ETB_DT
+                              ,P.COD_CFM_DIV_CD DIV
+                              ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+                              ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(P.D2_QTY,0) 
+                                    WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(P.D4_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(P.D5_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(P.D7_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(P.R2_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(P.R5_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(P.R9_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(P.O2_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(P.O4_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(P.S2_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(P.S4_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(P.F2_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(P.F4_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(P.F5_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(P.A2_QTY,0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(P.A4_QTY,0)       
+                                    END CNTR_QTY
+                        FROM (
+                                SELECT /*+ ORDERED USE_NL(A) INDEX(A XAK10VSK_VSL_PORT_SKD) */ 
+                                       A.VSL_CD
+                                      ,A.SKD_VOY_NO
+                                      ,A.SKD_DIR_CD
+                                      ,A.SLAN_CD
+                                      ,A.VPS_PORT_CD
+                                      ,A.YD_CD
+                                      ,A.VPS_ETB_DT
+                                      ,X.WEEK
+                                FROM ADD_DAY Y
+                                    ,BASIC_WEEK X 
+                                    ,VSK_VSL_PORT_SKD A
+                                    ,REPOIN_VVD Z     
+                                WHERE A.VPS_PORT_CD(+)    = Y.LOC_CD 
+                                AND   X.ROW_SEQ           = @[head_week] -- 0주차                                                                  
+                                AND   A.VPS_PORT_CD IN (
+                                                          SELECT /*+ NO_UNNEST */ A.LOC_CD 
+                                                          FROM MDM_LOCATION A
+                                                              ,ADD_DAY_SCC C 
+                                                          WHERE A.SCC_CD = C.SCC_CD                                                          
+                                                       )                                                 
+                                                      
+                                AND	  A.VPS_ETB_DT BETWEEN TO_DATE(X.WK_ST_DT, 'YYYYMMDD') - Y.DAYS  AND TO_DATE(X.WK_END_DT, 'YYYYMMDD') - Y.DAYS+0.99999   
+                                AND   A.CLPT_IND_SEQ      = '1'	 
+                                AND   A.VSL_CD     = SUBSTR(Z.VVD, 0, 4)
+                                AND   A.SKD_VOY_NO = SUBSTR(Z.VVD, 5, 4)
+                                AND   A.SKD_DIR_CD = SUBSTR(Z.VVD, 9, 1)     
+                                                             		        
+                            ) Z
+                            ,EQR_MTY_COD_PORT P 
+							,EQR_MTY_COD_VVD  V                       
+                            ,COM_INTG_CD_DTL B 
+                                                                                      
+                        WHERE B.INTG_CD_ID      = 'CD00830'                               
+                        AND	  V.VSL_CD			=	P.VSL_CD
+                        AND	  V.SKD_VOY_NO		=	P.SKD_VOY_NO
+                        AND	  V.SKD_DIR_CD		=	P.SKD_DIR_CD
+                        AND	  V.COD_CFM_DIV_CD	=	P.COD_CFM_DIV_CD
+                        AND	  'D'				=	P.LODG_DCHG_DIV_CD
+                        AND   P.VSL_CD          = Z.VSL_CD
+                        AND   P.SKD_VOY_NO      = Z.SKD_VOY_NO
+                        AND   P.SKD_DIR_CD      = Z.SKD_DIR_CD
+                        AND   P.PORT_CD         = Z.VPS_PORT_CD   
+                                                                 
+                    ) A,
+                    (
+                        SELECT VSL_CD
+                              ,SKD_VOY_NO
+                              ,SKD_DIR_CD
+                              ,VPS_PORT_CD
+                              ,DIV
+                              ,WEEK
+                        FROM 
+                        (    
+                            -- VVD 별 I/S/C 확인
+                            SELECT /*+ ORDERED USE_NL(B) INDEX(B XAK10VSK_VSL_PORT_SKD) */
+                                   ROW_NUMBER() OVER(PARTITION BY B.VSL_CD, B.SKD_VOY_NO, B.SKD_DIR_CD, B.VPS_PORT_CD ORDER BY NVL(A.COD_CFM_STS_CD,'I') DESC) RN
+                                  ,B.VSL_CD
+                                  ,B.SKD_VOY_NO
+                                  ,B.SKD_DIR_CD
+                                  ,B.VPS_PORT_CD
+                                  ,NVL(A.COD_CFM_STS_CD,'I') DIV
+                                  ,X.WEEK
+                            FROM ADD_DAY Y
+                                ,BASIC_WEEK X                                
+                                ,VSK_VSL_PORT_SKD B
+                                ,EQR_MTY_COD_VVD A
+                            WHERE B.VSL_CD        = A.VSL_CD(+)
+                            AND   B.SKD_VOY_NO    = A.SKD_VOY_NO(+)
+                            AND   B.SKD_DIR_CD    = A.SKD_DIR_CD(+)  
+                            AND   X.ROW_SEQ       = @[head_week] -- 0주차   
+                            AND   B.VPS_PORT_CD(+)= Y.LOC_CD                              
+                            AND   B.VPS_PORT_CD IN (
+                                                          SELECT /*+ NO_UNNEST */ A.LOC_CD 
+                                                          FROM MDM_LOCATION A
+                                                              ,ADD_DAY_SCC C 
+                                                          WHERE A.SCC_CD = C.SCC_CD       
+                                                   )
+                                                                                                                                            
+                            AND   B.VPS_ETB_DT BETWEEN TO_DATE(X.WK_ST_DT, 'YYYYMMDD') - Y.DAYS AND TO_DATE(X.WK_END_DT, 'YYYYMMDD') - Y.DAYS+0.99999   
+
+                            AND   B.CLPT_IND_SEQ = '1'                                                         
+                            AND   NVL(B.SKD_CNG_STS_CD,' ') <> 'S' -- SKIP SKD 제외
+                          
+                        ) 
+                        WHERE RN = 1 -- 동일vvd 에서 B,C 가 동시에 출현하는 경우 C 만 수집   
+                    ) B,
+                    (
+                        SELECT A.LCC_CD, A.ECC_CD, A.SCC_CD, B.LOC_CD
+                        FROM MDM_EQ_ORZ_CHT A
+                            ,MDM_LOCATION B
+                        WHERE A.SCC_CD = B.SCC_CD     
+                    ) C
+                    WHERE A.WEEK       = B.WEEK
+                    AND   A.VSL_CD     = B.VSL_CD
+                    AND   A.SKD_VOY_NO = B.SKD_VOY_NO
+                    AND   A.SKD_DIR_CD = B.SKD_DIR_CD
+                    AND   A.POD_CD     = B.VPS_PORT_CD
+                    AND   A.DIV        = B.DIV
+                    AND   A.POD_CD(+)  = C.LOC_CD
+                    
+                    GROUP BY A.WEEK 
+
+                         #if ( ${present_flag} == 'L' )
+                            ,C.LCC_CD 
+                         #elseif ( ${present_flag} == 'E' )
+                            ,C.ECC_CD 
+                         #else  --'E'
+                            ,C.SCC_CD                             
+                         #end  
+
+                            ,A.CNTR_TPSZ_CD
+
+                ) A 
+                GROUP BY A.WEEK
+                        ,A.LOC_CD                                          
+                        ,A.CNTR_TPSZ_CD    
+
+            #elseif( ${head_week} == 2 )  
+                -- Current Week 에서만 사용 (VD 동일지역 이송을 뺀 로직이 추가됨)
+                -- Repo In (PLUS OTHER +COD SIMULATION - 동일지역 VD이송 제거 )
+                UNION ALL
+             
+                SELECT A.WEEK WEEK
+                      ,A.LOC_CD                                          
+                      ,@[present_flag] LOC_GRP_CD
+                      ,'RI' WKY_SIM_TP_CD
+                      ,A.CNTR_TPSZ_CD
+                      ,SUM(A.CNTR_QTY) CNTR_QTY
+                      ,'N' TMP_SAV_FLG                   
+                FROM 
+                (   
+                    -- PLUS OTHER 
+                    -- INP_YRWK가 -1WEEK 가 곧 현재주차에 사용된다.
+                    SELECT A.FCAST_YRWK WEEK
+                          ,A.LOC_CD
+                          ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+                          ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(A.D2_FCAST_QTY,0) 
+                                WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(A.D4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(A.D5_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(A.D7_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(A.R2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(A.R5_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(A.R9_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(A.O2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(A.O4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(A.S2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(A.S4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(A.F2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(A.F4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(A.F5_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(A.A2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(A.A4_FCAST_QTY,0)       
+                                END CNTR_QTY
+                    FROM EQR_MTY_BAL_RPT_OTR A
+                        ,COM_INTG_CD_DTL B
+                        ,DUMMY_LOCATION C   
+                    WHERE B.INTG_CD_ID        = 'CD00830'         
+                    AND   A.INP_YRWK          = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=1) -- +other는 -1WEEK가 곧 현재주차로 인식된다.
+                    AND   A.LOC_CD            = C.LOC_CD
+                    AND   A.LOC_GRP_CD        = @[present_flag]
+                    AND   A.MTY_BAL_OTR_TP_CD = 2 -- PLUS OTHER (REPO IN 에 포함)
+
+                    UNION ALL
+					-- COD SIMULATION - 동일지역 VD 데이터
+
+                    SELECT A.WEEK WEEK
+
+                         #if ( ${present_flag} == 'L' )
+                          ,C.LCC_CD LOC_CD
+                         #elseif( ${present_flag} == 'E' )
+                          ,C.ECC_CD LOC_CD    
+                         #else  --'S'
+                          ,C.SCC_CD LOC_CD                          
+                         #end 
+                           
+                          ,A.CNTR_TPSZ_CD
+                          ,SUM(A.CNTR_QTY) CNTR_QTY                
+                    FROM 
+                    ( 
+                        SELECT B.WEEK WEEK
+                              ,B.VSL_CD
+                              ,B.SKD_VOY_NO
+                              ,B.SKD_DIR_CD
+                              ,B.SLAN_CD
+                              ,B.YD_CD    
+                              ,B.CNTR_TPSZ_CD               
+                              -- RI 수량 - VD 수량 빼기(결과값이 0보다 작으면 0처리)                                                                 
+                              ,CASE WHEN SUM(NVL(B.CNTR_QTY,0)-NVL(A.CNTR_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.CNTR_QTY,0)-NVL(A.CNTR_QTY,0)) END CNTR_QTY         
+                        FROM
+                        (   
+                            -- MVMT VD  ( LCC별 시작일부터 이번주 월요일까지 )
+                            SELECT X.WEEK
+                                  ,A.VSL_CD
+                                  ,A.SKD_VOY_NO
+                                  ,A.SKD_DIR_CD
+                                  ,A.VSL_LANE_CD 
+                                  ,A.YD_CD
+                                  ,A.ETD_DT ETB_DT
+				        		  ,A.CNTR_TPSZ_CD
+				        		  ,SUM(A.CNTR_QTY) CNTR_QTY                                                                       
+                            FROM EQR_MTY_BAL_RPT_DCHG_SNAP A        
+                                ,BASIC_WEEK X      
+                                ,ADD_DAY Y                                      
+                            WHERE A.ETD_DT BETWEEN TO_DATE(X.WK_ST_DT, 'YYYYMMDD') - Y.DAYS AND TO_DATE((SELECT TO_CHAR(NEXT_DAY(SYSDATE, 2)-7, 'YYYYMMDD') FROM DUAL), 'YYYYMMDD')+0.99999                      
+                            AND   X.ROW_SEQ        = @[head_week] -- 현재주차
+                            AND   SUBSTR(A.YD_CD, 0, 5)  = Y.LOC_CD (+)   
+		                	GROUP BY X.WEEK
+                                    ,A.VSL_CD
+                                    ,A.SKD_VOY_NO
+                                    ,A.SKD_DIR_CD
+                                    ,A.VSL_LANE_CD
+                                    ,A.YD_CD
+                                    ,A.ETD_DT
+                                    ,A.CNTR_TPSZ_CD
+                        
+                        ) A
+				        ,(
+                            -- COD SIMULATION 
+                            SELECT A.WEEK
+                                  ,A.VSL_CD
+                                  ,A.SKD_VOY_NO
+                                  ,A.SKD_DIR_CD
+                                  ,A.SLAN_CD
+                                  ,A.YD_CD          
+                                  ,A.CNTR_TPSZ_CD
+                                  ,SUM(A.CNTR_QTY) CNTR_QTY                
+                            FROM 
+                            ( 
+                            	-- BAY PLAN, I
+                                SELECT /*+ NO_MERGE(B) */ B.WEEK -->SQL TUNNING
+                           	          ,A.VSL_CD
+                                      ,A.SKD_VOY_NO
+                                      ,A.SKD_DIR_CD
+                                      ,B.SLAN_CD
+                                      ,A.POD_CD
+                                      ,B.YD_CD
+                                      ,B.VPS_ETB_DT ETB_DT
+                                      ,'I' DIV
+                                      ,A.CNTR_TPSZ_CD
+                                      ,COUNT(1) CNTR_QTY
+                                FROM OPF_BAY_PLN_LDIS A,
+                                ( 
+                                    SELECT /*+ ORDERED USE_NL(A) INDEX(A XAK10VSK_VSL_PORT_SKD) */ --> SQL TUNNING
+                                           A.VSL_CD
+                                          ,A.SKD_VOY_NO
+                                          ,A.SKD_DIR_CD
+                                          ,A.SLAN_CD
+                                          ,A.VPS_PORT_CD
+                                          ,A.YD_CD
+                                          ,A.VPS_ETB_DT
+                                          ,X.WEEK                           
+                                    FROM ADD_DAY Y   --> SQL TUNNING
+                                        ,BASIC_WEEK X                                           
+                                        ,VSK_VSL_PORT_SKD A
+                                        ,REPOIN_VVD Z                                                                                                                           
+                                    WHERE A.VPS_PORT_CD(+) = Y.LOC_CD 
+                                    AND   X.ROW_SEQ        = @[head_week] -- 0주차
+                                    AND   A.VPS_PORT_CD IN (
+                                                               SELECT /*+ NO_UNNEST */ A.LOC_CD --> SQL TUNNING
+                                                               FROM MDM_LOCATION A
+                                                                   ,ADD_DAY_SCC C 
+                                                               WHERE A.SCC_CD = C.SCC_CD       
+                                                            )
+        
+                                    AND   A.VPS_ETB_DT BETWEEN TO_DATE(X.WK_ST_DT, 'YYYYMMDD') - Y.DAYS AND TO_DATE(X.WK_END_DT, 'YYYYMMDD') - Y.DAYS+0.99999                              
+                                    AND   A.CLPT_IND_SEQ = '1'	 
+                                    AND   A.VSL_CD     = SUBSTR(Z.VVD, 0, 4)
+                                    AND   A.SKD_VOY_NO = SUBSTR(Z.VVD, 5, 4)
+                                    AND   A.SKD_DIR_CD = SUBSTR(Z.VVD, 9, 1)                                     
+                        
+                                ) B
+                                WHERE A.LODG_DCHG_IND_CD =	'C'
+                                AND	  A.FULL_MTY_CD	     =	'E'
+                                AND	  A.CRR_CD		     =	'SML'
+                                AND   A.VSL_CD           = B.VSL_CD
+                                AND   A.SKD_VOY_NO       = B.SKD_VOY_NO
+                                AND   A.SKD_DIR_CD       = B.SKD_DIR_CD
+                                AND   A.POD_CD           = B.VPS_PORT_CD
+                                GROUP BY B.WEEK
+                                        ,A.VSL_CD
+                                        ,A.SKD_VOY_NO
+                                        ,A.SKD_DIR_CD
+                                        ,B.SLAN_CD
+                                        ,A.POD_CD
+                                        ,B.YD_CD
+                                        ,B.VPS_ETB_DT
+                                        ,A.CNTR_TPSZ_CD
+                        
+                                UNION ALL
+                                
+                                -- SIMULATION, CONFIRMATION, BASIC 
+                                SELECT /*+ NO_MERGE(Z) ORDERED */ Z.WEEK  --> SQL TUNNING
+                                      ,Z.VSL_CD
+                                      ,Z.SKD_VOY_NO
+                                      ,Z.SKD_DIR_CD
+                                      ,Z.SLAN_CD
+                                      ,Z.VPS_PORT_CD POD_CD
+                                      ,Z.YD_CD
+                                      ,Z.VPS_ETB_DT ETB_DT
+                                      ,P.COD_CFM_DIV_CD DIV
+                                      ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+                                      ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(P.D2_QTY,0) 
+                                            WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(P.D4_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(P.D5_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(P.D7_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(P.R2_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(P.R5_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(P.R9_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(P.O2_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(P.O4_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(P.S2_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(P.S4_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(P.F2_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(P.F4_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(P.F5_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(P.A2_QTY,0)       
+                                            WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(P.A4_QTY,0)       
+                                            END CNTR_QTY
+                                FROM (
+                                        SELECT /*+ ORDERED USE_NL(A) INDEX(A XAK10VSK_VSL_PORT_SKD) */ A.VSL_CD  --> SQL TUNNING
+                                              ,A.SKD_VOY_NO
+                                              ,A.SKD_DIR_CD
+                                              ,A.SLAN_CD
+                                              ,A.VPS_PORT_CD
+                                              ,A.YD_CD
+                                              ,A.VPS_ETB_DT
+                                              ,X.WEEK
+                                        FROM ADD_DAY Y
+                                            ,BASIC_WEEK X 
+                                            ,VSK_VSL_PORT_SKD A 
+                                            ,REPOIN_VVD Z     
+                                        WHERE A.VPS_PORT_CD(+)    = Y.LOC_CD  
+                                        AND   X.ROW_SEQ           = @[head_week] -- 0주차                                                                                                                                     
+                                        AND   A.VPS_PORT_CD IN (
+                                                                   SELECT /*+ NO_UNNEST */ A.LOC_CD 
+                                                                   FROM MDM_LOCATION A
+                                                                       ,ADD_DAY_SCC C 
+                                                                   WHERE A.SCC_CD = C.SCC_CD       
+                                                               )   
+                                        AND	  A.VPS_ETB_DT BETWEEN TO_DATE(X.WK_ST_DT, 'YYYYMMDD') - Y.DAYS  AND TO_DATE(X.WK_END_DT, 'YYYYMMDD') - Y.DAYS+0.99999      
+                                        AND   A.CLPT_IND_SEQ      = '1'	                                               
+                                        AND   A.VSL_CD     = SUBSTR(Z.VVD, 0, 4)
+                                        AND   A.SKD_VOY_NO = SUBSTR(Z.VVD, 5, 4)
+                                        AND   A.SKD_DIR_CD = SUBSTR(Z.VVD, 9, 1)                                                                 
+ 		                
+                                    ) Z                                     
+                                    ,EQR_MTY_COD_PORT P 
+                                    ,EQR_MTY_COD_VVD  V                       
+                                    ,COM_INTG_CD_DTL B 
+                                                                                                 
+                                WHERE Z.VSL_CD          = P.VSL_CD
+                                AND   Z.SKD_VOY_NO      = P.SKD_VOY_NO
+                                AND   Z.SKD_DIR_CD      = P.SKD_DIR_CD
+                                AND   Z.VPS_PORT_CD     = P.PORT_CD                                                             
+                                AND	  P.VSL_CD			= V.VSL_CD
+                                AND	  P.SKD_VOY_NO		= V.SKD_VOY_NO
+                                AND	  P.SKD_DIR_CD		= V.SKD_DIR_CD
+                                AND	  P.COD_CFM_DIV_CD	= V.COD_CFM_DIV_CD
+                                AND	  'D' = P.LODG_DCHG_DIV_CD
+                                AND   B.INTG_CD_ID      = 'CD00830'  
+                                                             
+                            ) A,
+                            (
+                                SELECT VSL_CD
+                                      ,SKD_VOY_NO
+                                      ,SKD_DIR_CD
+                                      ,VPS_PORT_CD
+                                      ,DIV
+                                      ,WEEK
+                                FROM 
+                                (    
+                                    -- VVD 별 I/S/C 확인
+                                    SELECT /*+ ORDERED USE_NL(B) INDEX(B XAK10VSK_VSL_PORT_SKD) */
+                                           ROW_NUMBER() OVER(PARTITION BY B.VSL_CD, B.SKD_VOY_NO, B.SKD_DIR_CD, B.VPS_PORT_CD ORDER BY NVL(A.COD_CFM_STS_CD,'I') DESC) RN
+                                          ,B.VSL_CD
+                                          ,B.SKD_VOY_NO
+                                          ,B.SKD_DIR_CD
+                                          ,B.VPS_PORT_CD
+                                          ,NVL(A.COD_CFM_STS_CD,'I') DIV
+                                          ,X.WEEK
+                                    FROM ADD_DAY Y
+                                        ,BASIC_WEEK X
+                                        ,VSK_VSL_PORT_SKD B
+                                        ,EQR_MTY_COD_VVD A                                                                              
+                            		WHERE B.VSL_CD        = A.VSL_CD(+)
+                            		AND   B.SKD_VOY_NO    = A.SKD_VOY_NO(+)
+                            		AND   B.SKD_DIR_CD    = A.SKD_DIR_CD(+)  
+                            		AND   X.ROW_SEQ       = @[head_week] -- 0주차   
+                            		AND   B.VPS_PORT_CD(+)= Y.LOC_CD                              
+                            		AND   B.VPS_PORT_CD IN (
+                           		                               	  SELECT /*+ NO_UNNEST */ A.LOC_CD 
+                            		                              FROM MDM_LOCATION A
+                           		                                   ,ADD_DAY_SCC C 
+                            		                              WHERE A.SCC_CD = C.SCC_CD       
+                                                  			)
+                                                                                                                                            
+                            		AND   B.VPS_ETB_DT BETWEEN TO_DATE(X.WK_ST_DT, 'YYYYMMDD') - Y.DAYS AND TO_DATE(X.WK_END_DT, 'YYYYMMDD') - Y.DAYS+0.99999   
+
+                            		AND   B.CLPT_IND_SEQ = '1'                                                         
+                            		AND   NVL(B.SKD_CNG_STS_CD,' ') <> 'S' -- SKIP SKD 제외
+
+                                  
+                                ) 
+                                WHERE RN = 1 -- 동일vvd 에서 B,C 가 동시에 출현하는 경우 C 만 수집   
+                            ) B
+                            WHERE A.WEEK       = B.WEEK
+                            AND   A.VSL_CD     = B.VSL_CD
+                            AND   A.SKD_VOY_NO = B.SKD_VOY_NO
+                            AND   A.SKD_DIR_CD = B.SKD_DIR_CD
+                            AND   A.POD_CD     = B.VPS_PORT_CD
+                            AND   A.DIV        = B.DIV
+                            
+                            GROUP BY A.WEEK
+                                    ,A.VSL_CD
+                                    ,A.SKD_VOY_NO
+                                    ,A.SKD_DIR_CD
+                                    ,A.SLAN_CD
+                                    ,A.YD_CD          
+                                    ,A.CNTR_TPSZ_CD
+                        
+				        ) B --COD SIMULATION 종료
+                        WHERE  A.VSL_CD      (+) = B.VSL_CD
+                        AND    A.SKD_VOY_NO  (+) = B.SKD_VOY_NO
+                        AND    A.SKD_DIR_CD  (+) = B.SKD_DIR_CD
+                        AND    A.VSL_LANE_CD (+) = B.SLAN_CD
+                        AND    A.YD_CD       (+) = B.YD_CD
+				        AND    A.CNTR_TPSZ_CD(+) = B.CNTR_TPSZ_CD	                
+                        
+                        GROUP BY B.WEEK
+                                ,B.VSL_CD
+                                ,B.SKD_VOY_NO
+                                ,B.SKD_DIR_CD
+                                ,B.SLAN_CD
+                                ,B.YD_CD  
+                                ,B.CNTR_TPSZ_CD 
+				    ) A
+                    ,(
+                        SELECT A.LCC_CD, A.ECC_CD, A.SCC_CD, B.LOC_CD, C.YD_CD
+                        FROM MDM_EQ_ORZ_CHT A
+                            ,MDM_LOCATION B
+                            ,MDM_YARD C
+                        WHERE A.SCC_CD = B.SCC_CD
+                        AND   B.LOC_CD = C.LOC_CD  
+                    ) C
+                    WHERE A.YD_CD(+)  = C.YD_CD
+                    
+                    GROUP BY A.WEEK 
+
+                         #if( ${present_flag} == 'L' )
+                            ,C.LCC_CD 
+                         #elseif( ${present_flag} == 'E')
+                            ,C.ECC_CD 
+                         #else    --SCC
+                            ,C.SCC_CD                             
+                         #end  
+
+                            ,A.CNTR_TPSZ_CD
+
+                ) A  -- PLUS OTHER + COD SIMULATION(-동일지역 VD)
+                GROUP BY A.WEEK
+                        ,A.LOC_CD                                          
+                        ,A.CNTR_TPSZ_CD 
+
+
+			#end                                
+
+
+        --    )
+        )
+        --WHERE DP_SEQ = 1 -- 유저수정 데이터를 우선으로 추출
+        GROUP BY WEEK
+                ,LOC_CD        
+                ,LOC_GRP_CD
+                ,WKY_SIM_TP_CD
+                ,CNTR_TPSZ_CD
+                --,TMP_SAV_FLG
+        
+        -- LT/ST/OW ------------------------------------------------------------------
+        -- LT/ST/OW 전체데이터(-1,0,1,2,3,4)
+        UNION ALL
+        SELECT A.FCAST_YRWK WEEK
+              ,A.LOC_CD
+              ,A.LOC_GRP_CD
+              ,A.WKY_SIM_TP_CD
+              ,A.CNTR_TPSZ_CD
+              ,A.CNTR_QTY
+              ,A.TMP_SAV_FLG         
+        FROM EQR_MTY_WKY_SIM A
+            ,DUMMY_LOCATION B
+        WHERE A.FCAST_YRWK BETWEEN (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=1) AND (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=6) -- -1주차~+4주차
+        AND   A.LOC_GRP_CD    = @[present_flag] --L/E/S
+        AND   A.WKY_SIM_TP_CD = 'OT' -- LT/ST/OW
+        AND   A.LOC_CD        = B.LOC_CD
+        
+        -- MG FORECAST ------------------------------------------------------------------
+        UNION ALL
+        SELECT WEEK
+              ,LOC_CD
+              ,LOC_GRP_CD
+              ,WKY_SIM_TP_CD
+              ,CNTR_TPSZ_CD
+              ,NVL(SUM(CNTR_QTY),0) CNTR_QTY
+              ,TMP_SAV_FLG
+        FROM
+        (
+            SELECT ROW_NUMBER() OVER (PARTITION BY WEEK, LOC_CD, CNTR_TPSZ_CD ORDER BY TMP_SAV_FLG DESC) DP_SEQ
+                  ,WEEK
+                  ,LOC_CD
+                  ,LOC_GRP_CD
+                  ,WKY_SIM_TP_CD
+                  ,CNTR_TPSZ_CD
+                  ,CNTR_QTY
+                  ,TMP_SAV_FLG
+            FROM
+            (      
+                -- -1주차~+4주차 수동입력
+                SELECT A.FCAST_YRWK WEEK
+                      ,A.LOC_CD
+                      ,A.LOC_GRP_CD
+                      ,A.WKY_SIM_TP_CD
+                      ,A.CNTR_TPSZ_CD
+                      ,A.CNTR_QTY
+                      ,A.TMP_SAV_FLG
+                FROM EQR_MTY_WKY_SIM A 
+                    ,DUMMY_LOCATION B   
+                WHERE A.FCAST_YRWK BETWEEN (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=1) AND (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=6) -- -1주차~+4주차      
+                AND   A.LOC_GRP_CD = @[present_flag] --L/E/S
+                AND   A.WKY_SIM_TP_CD = 'IF' -- MG FORECAST
+                AND   A.LOC_CD        = B.LOC_CD
+                --AND   A.TMP_SAV_FLG   = 'Y'
+                
+			#if(${head_week} == 1)        -- -1주차 는 조회대상 제거
+                -- -1주차 는 조회대상 제거
+            #elseif( ${head_week} == 2 )  -- Current Week(0주차) 일때 사용
+                -- 0주차  BALANCE REPORT 데이터
+                UNION ALL
+                SELECT A.FCAST_YRWK WEEK
+                      ,A.LOC_CD
+                      ,A.LOC_GRP_CD 
+                      ,'IF' WKY_SIM_TP_CD
+                      ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+                      ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(SUM(D2_FCAST_QTY),0) 
+                            WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(SUM(D4_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(SUM(D5_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(SUM(D7_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(SUM(R2_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(SUM(R5_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(SUM(R9_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(SUM(O2_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(SUM(O4_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(SUM(S2_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(SUM(S4_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(SUM(F2_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(SUM(F4_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(SUM(F5_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(SUM(A2_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(SUM(A4_FCAST_QTY),0)       
+                            END CNTR_QTY
+                      ,'N' TMP_SAV_FLG      
+                FROM EQR_MTY_BAL_RPT A
+                    ,COM_INTG_CD_DTL B   
+                    ,DUMMY_LOCATION C      
+                WHERE A.CO_CD         = 'H'
+                AND   A.LOC_GRP_CD    = @[present_flag] --L/E/S
+                AND   A.MTY_BAL_TP_CD = '1'             --IF FORECAST
+                AND   A.LOC_CD        = C.LOC_CD        
+                AND   A.INP_YRWK   = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ = 1) -- -1주차
+                AND   B.INTG_CD_ID    = 'CD00830'
+                GROUP BY A.FCAST_YRWK 
+                        ,A.LOC_CD
+                        ,A.LOC_GRP_CD
+                        ,B.INTG_CD_VAL_CTNT         
+
+			#else  -- +1/+2/+3/+4 주차 일때 사용 (headweek = 3/4/5/6)
+                UNION ALL
+                -- +1주차~+4주차 BALANCE REPORT 데이터
+                SELECT WEEK
+                      ,LOC_CD
+                      ,LOC_GRP_CD
+                      ,'IF' WKY_SIM_TP_CD
+                      ,CNTR_TPSZ_CD
+                      ,CNTR_QTY
+                      ,TMP_SAV_FLG 
+                FROM
+                (            
+                    SELECT WEEK
+                          ,LOC_CD
+                          ,LOC_GRP_CD
+                          ,CNTR_TPSZ_CD
+                          ,DECODE(SUM(CNTR_QTY_1), NULL, SUM(CNTR_QTY_2), 0, SUM(CNTR_QTY_2), SUM(CNTR_QTY_1)) CNTR_QTY
+                          ,DECODE(SUM(CNTR_QTY_1), NULL, 'N', 0, 'N', 'X') TMP_SAV_FLG -- N:은 아무표시 없음, X : BOLD 로 표시함
+                    FROM   
+                    (      
+                        -- REPO PLAN ID 의 주차 기준
+                        SELECT A.FCAST_YRWK WEEK
+                              ,A.LOC_CD
+                              ,A.LOC_GRP_CD
+                              ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+                              ,0 CNTR_QTY_1                        
+                              ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(SUM(D2_FCAST_QTY),0) 
+                                    WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(SUM(D4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(SUM(D5_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(SUM(D7_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(SUM(R2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(SUM(R5_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(SUM(R9_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(SUM(O2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(SUM(O4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(SUM(S2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(SUM(S4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(SUM(F2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(SUM(F4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(SUM(F5_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(SUM(A2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(SUM(A4_FCAST_QTY),0)   
+                                    WHEN B.INTG_CD_VAL_CTNT='O5' THEN NVL(SUM(O5_FCAST_QTY),0)    
+                                    END CNTR_QTY_2          
+                        FROM EQR_MTY_BAL_RPT A
+                            ,COM_INTG_CD_DTL B   
+                            ,DUMMY_LOCATION C      
+                        WHERE A.CO_CD         = 'H'
+                        AND   A.LOC_GRP_CD    = @[present_flag] --L/E/S
+                        AND   A.MTY_BAL_TP_CD = '1' --IF FORECAST
+                        AND   A.LOC_CD        = C.LOC_CD      
+                        AND   A.INP_YRWK    = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ = 1)   -- WEEK주차
+                        AND   B.INTG_CD_ID    = 'CD00830'
+                        GROUP BY A.FCAST_YRWK 
+                                ,A.LOC_CD
+                                ,A.LOC_GRP_CD
+                                ,B.INTG_CD_VAL_CTNT     
+                        
+                        -- REPO PLAN ID +1주차의 데이터 
+                        UNION ALL
+                        SELECT A.FCAST_YRWK WEEK
+                              ,A.LOC_CD
+                              ,A.LOC_GRP_CD
+                              ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+                              ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(SUM(D2_FCAST_QTY),0) 
+                                    WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(SUM(D4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(SUM(D5_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(SUM(D7_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(SUM(R2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(SUM(R5_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(SUM(R9_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(SUM(O2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(SUM(O4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(SUM(S2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(SUM(S4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(SUM(F2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(SUM(F4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(SUM(F5_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(SUM(A2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(SUM(A4_FCAST_QTY),0)   
+                                    WHEN B.INTG_CD_VAL_CTNT='O5' THEN NVL(SUM(O5_FCAST_QTY),0)    
+                               END CNTR_QTY_1
+                              ,0 CNTR_QTY_2   
+                        FROM EQR_MTY_BAL_RPT A
+                            ,COM_INTG_CD_DTL B   
+                            ,DUMMY_LOCATION C      
+                        WHERE A.CO_CD         = 'H'
+                        AND   A.LOC_GRP_CD    = @[present_flag] --L/E/S
+                        AND   A.MTY_BAL_TP_CD = '1' --IF FORECAST
+                        AND   A.LOC_CD        = C.LOC_CD     
+                        AND   A.INP_YRWK    = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ = 2) -- WEEK + 1
+                        AND   B.INTG_CD_ID    = 'CD00830'
+                        GROUP BY A.FCAST_YRWK 
+                                ,A.LOC_CD
+                                ,A.LOC_GRP_CD
+                                ,B.INTG_CD_VAL_CTNT                            
+                    )
+                    GROUP BY WEEK
+                            ,LOC_CD
+                            ,LOC_GRP_CD
+                            ,CNTR_TPSZ_CD
+                )
+                WHERE CNTR_QTY > 0                
+
+
+    		#end
+            )
+        )
+        WHERE DP_SEQ = 1 -- 유저수정 데이터를 우선으로 추출
+        GROUP BY WEEK
+                ,LOC_CD        
+                ,LOC_GRP_CD
+                ,WKY_SIM_TP_CD
+                ,CNTR_TPSZ_CD
+                ,TMP_SAV_FLG
+        
+        
+        -- OP FORECAST ------------------------------------------------------------------
+        UNION ALL
+        SELECT WEEK
+              ,LOC_CD
+              ,LOC_GRP_CD
+              ,WKY_SIM_TP_CD
+              ,CNTR_TPSZ_CD
+              ,NVL(SUM(CNTR_QTY),0) CNTR_QTY
+              ,TMP_SAV_FLG
+        FROM
+        (
+            SELECT ROW_NUMBER() OVER (PARTITION BY WEEK, LOC_CD, CNTR_TPSZ_CD ORDER BY TMP_SAV_FLG DESC) DP_SEQ
+                  ,WEEK
+                  ,LOC_CD
+                  ,LOC_GRP_CD
+                  ,WKY_SIM_TP_CD
+                  ,CNTR_TPSZ_CD
+                  ,CNTR_QTY
+                  ,TMP_SAV_FLG
+            FROM
+            (      
+                -- -1주차~+4주차 수동입력
+                SELECT A.FCAST_YRWK WEEK
+                      ,A.LOC_CD
+                      ,A.LOC_GRP_CD
+                      ,A.WKY_SIM_TP_CD
+                      ,A.CNTR_TPSZ_CD
+                      ,A.CNTR_QTY
+                      ,A.TMP_SAV_FLG
+                FROM EQR_MTY_WKY_SIM A
+                    ,DUMMY_LOCATION B   
+                WHERE A.FCAST_YRWK BETWEEN (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=1) AND (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=6) -- -1주차~+4주차      
+                AND   A.LOC_GRP_CD    = @[present_flag] --L/E/S
+                AND   A.WKY_SIM_TP_CD = 'OF' -- OP FORECAST
+                AND   A.LOC_CD        = B.LOC_CD
+                --AND   A.TMP_SAV_FLG   = 'Y'
+                
+
+			#if(${head_week} == 1)        -- -1주차 는 조회대상 제거
+                -- -1주차 는 조회대상 제거
+            #elseif( ${head_week} == 2 )  -- Current Week(0주차) 일때 사용
+                -- 0주차  BALANCE REPORT 데이터
+                UNION ALL
+                SELECT A.FCAST_YRWK WEEK
+                      ,A.LOC_CD
+                      ,A.LOC_GRP_CD 
+                      ,'OF' WKY_SIM_TP_CD
+                      ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+                      ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(SUM(D2_FCAST_QTY),0) 
+                            WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(SUM(D4_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(SUM(D5_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(SUM(D7_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(SUM(R2_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(SUM(R5_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(SUM(R9_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(SUM(O2_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(SUM(O4_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(SUM(S2_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(SUM(S4_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(SUM(F2_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(SUM(F4_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(SUM(F5_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(SUM(A2_FCAST_QTY),0)       
+                            WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(SUM(A4_FCAST_QTY),0)       
+                            END CNTR_QTY
+                      ,'N' TMP_SAV_FLG      
+                FROM EQR_MTY_BAL_RPT A
+                    ,COM_INTG_CD_DTL B   
+                    ,DUMMY_LOCATION C      
+                WHERE A.CO_CD         = 'H'
+                AND   A.LOC_GRP_CD    = @[present_flag] --L/E/S
+                AND   A.MTY_BAL_TP_CD = '3'             --OUT FORECAST
+                AND   A.LOC_CD        = C.LOC_CD        
+                AND   A.INP_YRWK   = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ = 1) -- -1주차
+                AND   B.INTG_CD_ID    = 'CD00830'
+                GROUP BY A.FCAST_YRWK 
+                        ,A.LOC_CD
+                        ,A.LOC_GRP_CD
+                        ,B.INTG_CD_VAL_CTNT         
+
+			#else  -- +1/+2/+3/+4 주차 일때 사용 (headweek = 3/4/5/6)
+                UNION ALL
+                -- +1주차~+4주차 BALANCE REPORT 데이터
+                SELECT WEEK
+                      ,LOC_CD
+                      ,LOC_GRP_CD
+                      ,'OF' WKY_SIM_TP_CD
+                      ,CNTR_TPSZ_CD
+                      ,CNTR_QTY
+                      ,TMP_SAV_FLG 
+                FROM
+                (            
+                    SELECT WEEK
+                          ,LOC_CD
+                          ,LOC_GRP_CD
+                          ,CNTR_TPSZ_CD
+                          ,DECODE(SUM(CNTR_QTY_1), NULL, SUM(CNTR_QTY_2), 0, SUM(CNTR_QTY_2), SUM(CNTR_QTY_1)) CNTR_QTY
+                          ,DECODE(SUM(CNTR_QTY_1), NULL, 'N', 0, 'N', 'X') TMP_SAV_FLG -- N:은 아무표시 없음, X : BOLD 로 표시함
+                    FROM   
+                    (      
+                        -- REPO PLAN ID 의 주차 기준
+                        SELECT A.FCAST_YRWK WEEK
+                              ,A.LOC_CD
+                              ,A.LOC_GRP_CD
+                              ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+                              ,0 CNTR_QTY_1                        
+                              ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(SUM(D2_FCAST_QTY),0) 
+                                    WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(SUM(D4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(SUM(D5_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(SUM(D7_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(SUM(R2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(SUM(R5_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(SUM(R9_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(SUM(O2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(SUM(O4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(SUM(S2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(SUM(S4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(SUM(F2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(SUM(F4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(SUM(F5_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(SUM(A2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(SUM(A4_FCAST_QTY),0)   
+                                    WHEN B.INTG_CD_VAL_CTNT='O5' THEN NVL(SUM(O5_FCAST_QTY),0)    
+                                    END CNTR_QTY_2          
+                        FROM EQR_MTY_BAL_RPT A
+                            ,COM_INTG_CD_DTL B   
+                            ,DUMMY_LOCATION C      
+                        WHERE A.CO_CD         = 'H'
+                        AND   A.LOC_GRP_CD    = @[present_flag] --L/E/S
+                        AND   A.MTY_BAL_TP_CD = '3' --OUT FORECAST
+                        AND   A.LOC_CD        = C.LOC_CD      
+                        AND   A.INP_YRWK    = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ = 1)   -- WEEK주차
+                        AND   B.INTG_CD_ID    = 'CD00830'
+                        GROUP BY A.FCAST_YRWK 
+                                ,A.LOC_CD
+                                ,A.LOC_GRP_CD
+                                ,B.INTG_CD_VAL_CTNT     
+                        
+                        -- REPO PLAN ID +1주차의 데이터 
+                        UNION ALL
+                        SELECT A.FCAST_YRWK WEEK
+                              ,A.LOC_CD
+                              ,A.LOC_GRP_CD
+                              ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+                              ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(SUM(D2_FCAST_QTY),0) 
+                                    WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(SUM(D4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(SUM(D5_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(SUM(D7_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(SUM(R2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(SUM(R5_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(SUM(R9_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(SUM(O2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(SUM(O4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(SUM(S2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(SUM(S4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(SUM(F2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(SUM(F4_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(SUM(F5_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(SUM(A2_FCAST_QTY),0)       
+                                    WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(SUM(A4_FCAST_QTY),0)   
+                                    WHEN B.INTG_CD_VAL_CTNT='O5' THEN NVL(SUM(O5_FCAST_QTY),0)    
+                               END CNTR_QTY_1
+                              ,0 CNTR_QTY_2   
+                        FROM EQR_MTY_BAL_RPT A
+                            ,COM_INTG_CD_DTL B   
+                            ,DUMMY_LOCATION C      
+                        WHERE A.CO_CD         = 'H'
+                        AND   A.LOC_GRP_CD    = @[present_flag] --L/E/S
+                        AND   A.MTY_BAL_TP_CD = '3'             --OUT FORECAST
+                        AND   A.LOC_CD        = C.LOC_CD     
+                        AND   A.INP_YRWK    = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ = 2) -- WEEK + 1
+                        AND   B.INTG_CD_ID    = 'CD00830'
+                        GROUP BY A.FCAST_YRWK 
+                                ,A.LOC_CD
+                                ,A.LOC_GRP_CD
+                                ,B.INTG_CD_VAL_CTNT                            
+                    )
+                    GROUP BY WEEK
+                            ,LOC_CD
+                            ,LOC_GRP_CD
+                            ,CNTR_TPSZ_CD
+                )
+                WHERE CNTR_QTY > 0                
+
+
+    		#end
+            )
+        )
+        WHERE DP_SEQ = 1 -- 유저수정 데이터를 우선으로 추출
+        GROUP BY WEEK
+                ,LOC_CD        
+                ,LOC_GRP_CD
+                ,WKY_SIM_TP_CD
+                ,CNTR_TPSZ_CD
+                ,TMP_SAV_FLG
+        
+        -- REPO OUT ------------------------------------------------------------------
+        UNION ALL
+        SELECT WEEK
+              ,LOC_CD
+              ,LOC_GRP_CD
+              ,WKY_SIM_TP_CD
+              ,CNTR_TPSZ_CD
+              ,NVL(SUM(CNTR_QTY),0) CNTR_QTY
+              ,TMP_SAV_FLG
+        FROM
+        (
+            SELECT ROW_NUMBER() OVER (PARTITION BY WEEK, LOC_CD, CNTR_TPSZ_CD ORDER BY TMP_SAV_FLG DESC) DP_SEQ
+                  ,WEEK
+                  ,LOC_CD
+                  ,LOC_GRP_CD
+                  ,WKY_SIM_TP_CD
+                  ,CNTR_TPSZ_CD
+                  ,CNTR_QTY
+                  ,TMP_SAV_FLG
+            FROM
+            (      
+                -- -1주차~+4주차 수동입력
+                SELECT A.FCAST_YRWK WEEK
+                      ,A.LOC_CD
+                      ,A.LOC_GRP_CD
+                      ,A.WKY_SIM_TP_CD
+                      ,A.CNTR_TPSZ_CD
+                      ,A.CNTR_QTY
+                      ,A.TMP_SAV_FLG
+                FROM EQR_MTY_WKY_SIM A
+                    ,DUMMY_LOCATION B   
+                WHERE A.FCAST_YRWK BETWEEN (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=1) AND (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=6) -- -1주차~+4주차      
+                AND   A.LOC_GRP_CD    = @[present_flag]  -- L/E/S
+                AND   A.WKY_SIM_TP_CD = 'RO'      -- REPO OUT
+                AND   A.LOC_CD        = B.LOC_CD
+                --AND   A.TMP_SAV_FLG   = 'Y'
+                
+                UNION ALL
+
+				SELECT WEEK
+                      ,LOC_CD
+                      ,LOC_GRP_CD
+                      ,WKY_SIM_TP_CD
+                      ,CNTR_TPSZ_CD
+                      ,SUM(CNTR_QTY) AS CNTR_QTY
+                      ,TMP_SAV_FLG
+				FROM
+                (
+                    -- REPO OUT 포함 (MINUS OTHER )
+                    SELECT A.FCAST_YRWK WEEK
+                          ,A.LOC_CD
+                          ,A.LOC_GRP_CD
+                          ,'RO' WKY_SIM_TP_CD
+                          ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+                          ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(A.D2_FCAST_QTY,0) 
+                                WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(A.D4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(A.D5_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(A.D7_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(A.R2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(A.R5_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(A.R9_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(A.O2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(A.O4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(A.S2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(A.S4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(A.F2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(A.F4_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(A.F5_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(A.A2_FCAST_QTY,0)       
+                                WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(A.A4_FCAST_QTY,0)       
+                                END CNTR_QTY
+                          ,'N' TMP_SAV_FLG
+                    FROM EQR_MTY_BAL_RPT_OTR A
+                        ,COM_INTG_CD_DTL B
+                        ,DUMMY_LOCATION C   
+                    WHERE B.INTG_CD_ID        = 'CD00830'         
+                    AND   A.INP_YRWK          = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=1) -- -1WEEK (HARD CODING)
+                    AND   A.LOC_CD            = C.LOC_CD
+                    AND   A.LOC_GRP_CD        = @[present_flag]
+                    AND   A.MTY_BAL_OTR_TP_CD = '4' --MINUS OTHER (REPO OUT 에 포함)
+
+					UNION ALL
+
+                	-- 0주차~+4주차 REPO OUT 데이터
+                	SELECT A.FCAST_YRWK WEEK
+                	      ,A.LOC_CD
+                	      ,A.LOC_GRP_CD
+                	      ,'RO' WKY_SIM_TP_CD
+               	          ,B.INTG_CD_VAL_CTNT CNTR_TPSZ_CD 
+               	          ,CASE WHEN B.INTG_CD_VAL_CTNT='D2' THEN NVL(SUM(A.D2_FCAST_QTY),0)
+                                WHEN B.INTG_CD_VAL_CTNT='D4' THEN NVL(SUM(A.D4_FCAST_QTY),0)       
+               	                WHEN B.INTG_CD_VAL_CTNT='D5' THEN NVL(SUM(A.D5_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='D7' THEN NVL(SUM(A.D7_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R2' THEN NVL(SUM(A.R2_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R5' THEN NVL(SUM(A.R5_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='R9' THEN NVL(SUM(A.R9_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='O2' THEN NVL(SUM(A.O2_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='O4' THEN NVL(SUM(A.O4_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='S2' THEN NVL(SUM(A.S2_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='S4' THEN NVL(SUM(A.S4_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F2' THEN NVL(SUM(A.F2_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F4' THEN NVL(SUM(A.F4_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='F5' THEN NVL(SUM(A.F5_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='A2' THEN NVL(SUM(A.A2_FCAST_QTY),0)       
+                                WHEN B.INTG_CD_VAL_CTNT='A4' THEN NVL(SUM(A.A4_FCAST_QTY),0)       
+                                END CNTR_QTY
+                          ,'N' TMP_SAV_FLG      
+                    FROM EQR_MTY_BAL_RPT_REPO_OUT A
+                        ,COM_INTG_CD_DTL B   
+                        ,DUMMY_LOCATION C      
+                    WHERE A.LOC_GRP_CD    = @[present_flag] --L/E/S
+                    AND   A.LOC_CD        = C.LOC_CD
+                    AND   A.INP_YRWK   = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ = 1)  -- 1주차 
+                    AND   B.INTG_CD_ID    = 'CD00830'
+                    GROUP BY A.FCAST_YRWK 
+                            ,A.LOC_CD
+                            ,A.LOC_GRP_CD
+                            ,B.INTG_CD_VAL_CTNT   
+				)
+                GROUP BY WEEK
+                        ,LOC_CD
+                        ,LOC_GRP_CD
+                        ,WKY_SIM_TP_CD
+                        ,CNTR_TPSZ_CD
+                        ,TMP_SAV_FLG                                
+            )
+        )
+        WHERE DP_SEQ = 1 -- 유저수정 데이터를 우선으로 추출
+        GROUP BY WEEK
+                ,LOC_CD        
+                ,LOC_GRP_CD
+                ,WKY_SIM_TP_CD
+                ,CNTR_TPSZ_CD
+                ,TMP_SAV_FLG
+        
+        -- IC ------------------------------------------------------------------
+        -- IC (-1주차)
+        UNION ALL
+        SELECT A.FCAST_YRWK WEEK
+              ,A.LOC_CD
+              ,A.LOC_GRP_CD
+              ,A.WKY_SIM_TP_CD
+              ,A.CNTR_TPSZ_CD
+              ,A.CNTR_QTY
+              ,'N' TMP_SAV_FLG                     
+        FROM EQR_MTY_WKY_SIM A
+            ,DUMMY_LOCATION B
+        WHERE A.FCAST_YRWK    = (SELECT WEEK FROM BASIC_WEEK WHERE ROW_SEQ=1) -- -1주차      
+        AND   A.LOC_GRP_CD    = @[present_flag] 
+        AND   A.WKY_SIM_TP_CD = 'IC' -- IC
+        AND   A.LOC_CD        = B.LOC_CD   
+    
+    ) A,
+    GRID_HEAD B
+    WHERE A.LOC_CD(+)        = B.LOC_CD
+    AND   A.WKY_SIM_TP_CD(+) = B.CODE
+
+)
+-- RCC : ALL일때 표현 (RCC : ALL)
+#if ( ${condition_value} == '' && ${present_flag} == 'L')  
+GROUP BY LOC_CD -- LOC CD 별 전체합
+#else
+GROUP BY ROLLUP(LOC_CD) -- LOC CD 별 전체합
+#end
+        ,LOC_GRP_CD
+        ,CODE
+        ,NAME
+        ,SORT
+        
+-- RCC : ALL일때 표현 (RCC : ALL)
+#if ( ${condition_value} == '' && ${present_flag} == 'L')        
+) A
+GROUP BY ROLLUP(A.RCC_CD) -- RCC CD 별 전체합
+        ,A.LOC_GRP_CD
+        ,A.CODE
+        ,A.NAME
+        ,A.SORT
+        ,A.WEEK
+#end
+ORDER BY 1
+        ,SORT
+)			]]></sql>
+			<params>
+				<param name="condition_value" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="present_flag" type="12" value="" out="N"/>
+				<param name="head_week" type="12" value="" out="N"/>
+				<param name="ori_loc_cd" type="12" value="" out="N"/>
+				<param name="ori_ori_loc_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

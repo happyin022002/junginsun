@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SCReportDBDAOSearchChargeSummaryReportSummaryViewRSQL">
+			<desc><![CDATA[Charge Summary Report - Summary View Tab을 조회한다.
+2013.06.24 송호진 [CHM-201324516] MDM_CHARGE 에 새로 추가된 MDT_RAT_FLG 적용
+2013.07.04 전윤주 [CHM-201325625] Customer Classification 조건을 CC, RC, LC로 수정
+2014.06.02 최성환 [CHM-201430519]Charge Summary Report 로직 보완 요청
+2015.06.30 최성환 [CHM-201536493] Split03-주간 MAS Open에 따른 타모듈 프로그램 적용 요청]]></desc>
+			<sql><![CDATA[
+SELECT C1.REP_CHG_CD
+      ,DECODE ( C1.MDTR_CD, 'Y','YES','N','NO' ) AS MDTR_CD
+      ,C1.CHG_CD
+      ,C1.CUST_CLSS
+      ,C1.CUST_TP_CD
+      ,C1.RVIS_CNTR_CUST_TP_CD
+#if (${cust_grp_id} != '' )
+      ,C1.CUST_GRP_ID
+#end
+#if (${cust_cd} != '' )
+      ,C1.CUST_CD
+      ,C1.CTRT_CUST_CNT_CD
+      ,C1.CTRT_CUST_SEQ
+#end
+#if (${svc_scp_cd} != '')
+      ,C1.SVC_SCP_CD
+#end
+#if (${rhq_cd} != '')
+      ,C1.RHQ_CD
+#end
+#if (${ctrt_ofc_cd} != '' )
+      ,C1.CTRT_OFC_CD
+#end
+#if (${per_cd} != '' )
+      ,DECODE(C1.PER_CD, 'OT', 'Other', C1.PER_CD) PER_CD
+#end
+      ,SUM(C1.RAT_USD_CHG_AMT) RAT_USD_CHG_AMT
+      ,SUM(C1.TRF_USD_CHG_AMT) TRF_USD_CHG_AMT
+      ,ROUND(DECODE(SUM(C1.TRF_USD_CHG_AMT), 0, 0
+             ,SUM(C1.RAT_USD_CHG_AMT)/SUM(C1.TRF_USD_CHG_AMT)*100)
+            ,2) CLT_RATIO
+	  ,COUNT(C1.BKG_NO) BKG_COUNT
+FROM (
+        SELECT B1.REP_CHG_CD
+              ,B1.MDTR_CD
+              ,B1.CHG_CD
+              ,B1.CUST_CLSS
+              ,B1.CUST_TP_CD
+              ,B1.RVIS_CNTR_CUST_TP_CD
+      		  ,B1.CUST_GRP_ID
+   			  ,B1.CUST_CD
+			  ,B1.CTRT_CUST_CNT_CD
+              ,B1.CTRT_CUST_SEQ
+     		  ,B1.SVC_SCP_CD
+#if (${rhq_cd} != '')
+    		  ,B1.RHQ_CD
+#end
+    		  ,B1.CTRT_OFC_CD
+     		  ,B1.PER_CD
+		      -- BKG 별 CHG CODE 별로 SUM 한 후 마지막에 조건별로 다시 SUM함
+              ,B1.BKG_NO 
+              ,SUM(B1.TRF_USD_CHG_AMT) TRF_USD_CHG_AMT
+              ,(SELECT SUM(MAS_CONV_CURR_USD_FNC(CURR_CD, NVL(CHG_AMT, 0),TO_CHAR(SYSDATE, 'YYYYMM')))
+                 FROM BKG_CHG_RT B2
+                WHERE B2.BKG_NO = B1.BKG_NO
+                  AND B2.CHG_CD = B1.CHG_CD
+                  AND (DECODE((SELECT DECODE(RAT_UT_CD, 'BX', 'BX', 'BL', 'BL', CNTR_SZ_CD)
+                                FROM PRI_RAT_UT
+                               WHERE RAT_UT_CD(+) = B2.RAT_UT_CD) 
+                             ,'2', '20'
+                             ,'4', '40'
+                             ,'7', '45'
+                             ,'BX','BX'
+                             ,'BL','BL' --TRF RAT UT CODE를 PER 기준으로 환산하여 join 함
+                             ,'OT') = B1.PER_CD
+                        OR B1.PER_CD  IN ( 'BX', 'BL' )
+                       )
+                  AND B2.FRT_INCL_XCLD_DIV_CD <> 'I'
+                ) RAT_USD_CHG_AMT              
+         FROM ( 
+               SELECT  /*+ ORDERED USE_NL(A4) INDEX(A4 XPKMDM_CUSTOMER) INDEX(A1 XPKBKG_TRF_SCG_RT) */
+                       A3.REP_CHG_CD 
+                      ,A3.MDT_RAT_FLG MDTR_CD
+                      ,A1.CHG_CD
+                      ,CASE WHEN A4.NEW_KEY_ACCT_FLG =  'Y' THEN 'CC'
+                          --  WHEN A4.GLO_ACCT_FLG = 'Y' THEN 'GA'
+                            WHEN A4.RGN_ACCT_FLG =  'Y' THEN 'RC'
+                       ELSE 'LC'
+                       END CUST_CLSS
+                      ,(SELECT INTG_CD_VAL_DP_DESC FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00697' AND INTG_CD_VAL_CTNT(+) = A4.RVIS_CNTR_CUST_TP_CD) CUST_TP_CD
+                      ,A4.RVIS_CNTR_CUST_TP_CD
+                      ,A4.CUST_GRP_ID
+                      ,A2.CTRT_CUST_CNT_CD|| LPAD(A2.CTRT_CUST_SEQ, 6, '0')  CUST_CD
+                      ,A2.CTRT_CUST_CNT_CD
+                      ,A2.CTRT_CUST_SEQ
+                      ,A2.SVC_SCP_CD
+#if (${rhq_cd} != '')
+                      ,@[rhq_cd] RHQ_CD -- RHQ 조건이 들어올 때만
+#end 
+                      ,A2.CTRT_OFC_CD
+                      ,A1.RAT_UT_CD
+                      --20, 40, 45, BX, BL, OT 6가지 CODE로 GROUP BY 
+                      ,DECODE((SELECT DECODE(RAT_UT_CD, 'BX', 'BX', 'BL', 'BL', CNTR_SZ_CD)
+                              FROM PRI_RAT_UT
+                                WHERE RAT_UT_CD(+) = A1.RAT_UT_CD) 
+                             ,'2', '20'
+                             ,'4', '40'
+                             ,'7', '45'
+                             ,'BX','BX'
+                             ,'BL','BL'
+                             ,'OT') PER_CD 
+                      ,A1.BKG_NO
+                      ,MAS_CONV_CURR_USD_FNC(A1.CURR_CD, NVL(A1.CHG_AMT, 0),TO_CHAR(SYSDATE, 'YYYYMM')) TRF_USD_CHG_AMT            
+                FROM  
+                     BKG_BOOKING A2
+                    ,MDM_CUSTOMER A4
+                    ,BKG_TRF_SCG_RT A1 
+                    ,MDM_CHARGE A3              
+#if (${rhq_cd} != '' )
+-- RHQ 조건이 들어올 때만 조인됨
+                    ,(
+                      SELECT OFC_CD 
+                        FROM MDM_ORGANIZATION A
+                       WHERE DELT_FLG = 'N'
+                      START WITH A.OFC_CD  = @[rhq_cd]
+                      CONNECT BY PRIOR A.OFC_CD = A.PRNT_OFC_CD  
+                      ) A6 
+#end
+                WHERE A1.CHG_CD = A3.CHG_CD
+                  AND A3.DELT_FLG <> 'Y'
+                  AND A1.BKG_NO = A2.BKG_NO
+                  AND A2.BKG_STS_CD <> 'X'
+                  AND A2.BKG_CGO_TP_CD <> 'P'
+                  AND A2.CTRT_CUST_CNT_CD = A4.CUST_CNT_CD
+                  AND A2.CTRT_CUST_SEQ = A4.CUST_SEQ                  
+#if(${gubun} == '1')
+                  -- WEEK 로 조건이 들어올 때
+                  AND EXISTS ( SELECT BKG_NO
+                                FROM MAS_BKG_EXPN_DTL_WK
+                                WHERE 1=1
+                                
+	#if(${f_sls_mon} == '' )
+                                -- Year, Week만 들어올 때
+                                AND SUBSTR(SLS_YRMON,1,4)||COST_WK BETWEEN @[f_year]||@[f_fm_wk] AND @[f_year]||@[f_to_wk]
+    #end
+    #if(${f_sls_mon} != '' )
+                                 -- Year, Month ,Week 들어올 때
+                                AND  SUBSTR(SLS_YRMON,5,2) = @[f_sls_mon]
+    #end
+                                AND BKG_NO = A2.BKG_NO)
+#end
+#if (${gubun} == '2' )
+                  -- MONTH 로 조건이 들어올 때
+                  AND EXISTS (SELECT  /*+ INDEX (MAS_BKG_EXPN_DTL, XAK3MAS_BKG_EXPN_DTL) */  
+                                   BKG_NO
+                              FROM MAS_BKG_EXPN_DTL
+                              WHERE COST_YRMON BETWEEN @[f_year]||@[f_fm_mon] AND @[f_year]||@[f_to_mon]
+                              AND BKG_NO = A2.BKG_NO)          
+#end
+#if (${gubun} == '3' )
+                  -- Appl 로 조건이 들어올때
+                  AND EXISTS (SELECT BKG_NO
+                              FROM BKG_RATE
+                              WHERE RT_APLY_DT >= TO_DATE(@[start_dt], 'YYYY-MM-DD')
+                              AND RT_APLY_DT <= TO_DATE(@[end_dt], 'YYYY-MM-DD') + 0.99999
+                              AND BKG_NO = A2.BKG_NO)
+#end
+#if (${rhq_cd} != '' )
+                  AND A2.CTRT_OFC_CD =A6.OFC_CD
+#end
+#if (${rep_chg_cd} != '')
+                  AND A3.REP_CHG_CD = @[rep_chg_cd]
+#end
+#if (${chg_cd} != '' )
+                  AND A1.CHG_CD IN (${chg_cd})  
+#end
+#if (${cust_clss} == 'CC')
+                  AND NVL(A4.NEW_KEY_ACCT_FLG, 'N') = 'Y'
+#end 
+
+#if (${cust_clss} == 'RC')
+                  AND NVL(A4.RGN_ACCT_FLG, 'N') =  'Y' 
+#end 
+#if (${cust_clss} == 'LC')
+                  AND NVL(A4.NEW_KEY_ACCT_FLG, 'N')  <>  'Y' 
+                  AND NVL(A4.RGN_ACCT_FLG, 'N') <>  'Y'
+#end 
+#if (${cust_tp_cd} != 'A' && ${cust_tp_cd} != '' )
+                  AND A4.RVIS_CNTR_CUST_TP_CD = @[cust_tp_cd] 
+#end 
+#if (${cust_grp_id} != '' )
+                  AND A4.CUST_GRP_ID IN (${cust_grp_id}) 
+#end 
+#if (${cust_cd} != '' )
+                  AND A2.CTRT_CUST_CNT_CD||LPAD(A2.CTRT_CUST_SEQ, 6, '0')  IN (${cust_cd}) 
+#end 
+#if (${ctrt_ofc_cd} != '' )
+                  AND A2.CTRT_OFC_CD IN (${ctrt_ofc_cd}) 
+#end 
+#if (${svc_scp_cd} != '')
+                  AND A2.SVC_SCP_CD IN (${svc_scp_cd}) 
+#end
+#if (${mdtr_cd} != 'A')
+                  AND A3.MDT_RAT_FLG = @[mdtr_cd]
+#end
+                  ) B1
+        WHERE 1=1 
+#if (${per_cd} != '' )
+        AND B1.PER_CD  IN (${per_cd}) 
+#end  
+            
+    GROUP BY B1.REP_CHG_CD
+            ,B1.MDTR_CD
+            ,B1.CHG_CD
+            ,B1.CUST_CLSS
+            ,B1.CUST_TP_CD
+            ,B1.RVIS_CNTR_CUST_TP_CD
+        	,B1.CUST_GRP_ID
+        	,B1.CUST_CD
+			,B1.CTRT_CUST_CNT_CD
+        	,B1.CTRT_CUST_SEQ
+        	,B1.SVC_SCP_CD
+#if (${rhq_cd} != '')
+        	,B1.RHQ_CD
+#end
+        	,B1.CTRT_OFC_CD
+        	,B1.PER_CD
+            ,B1.BKG_NO
+)C1
+GROUP BY C1.REP_CHG_CD
+      ,C1.MDTR_CD
+      ,C1.CHG_CD
+      ,C1.CUST_CLSS
+      ,C1.RVIS_CNTR_CUST_TP_CD
+      ,C1.CUST_TP_CD
+#if (${cust_grp_id} != '' )
+      ,C1.CUST_GRP_ID
+#end
+#if (${cust_cd} != '' )
+      ,C1.CUST_CD
+      ,C1.CTRT_CUST_CNT_CD
+      ,C1.CTRT_CUST_SEQ
+#end
+#if (${svc_scp_cd} != '')
+      ,C1.SVC_SCP_CD
+#end
+#if (${rhq_cd} != '')
+      ,C1.RHQ_CD
+#end
+#if (${ctrt_ofc_cd} != '' )
+      ,C1.CTRT_OFC_CD
+#end
+#if (${per_cd} != '' )
+      ,C1.PER_CD
+#end			]]></sql>
+			<params>
+				<param name="rhq_cd" type="12" value="" out="N"/>
+				<param name="f_year" type="12" value="" out="N"/>
+				<param name="f_fm_wk" type="12" value="" out="N"/>
+				<param name="f_to_wk" type="12" value="" out="N"/>
+				<param name="f_sls_mon" type="12" value="" out="N"/>
+				<param name="f_fm_mon" type="12" value="" out="N"/>
+				<param name="f_to_mon" type="12" value="" out="N"/>
+				<param name="start_dt" type="12" value="" out="N"/>
+				<param name="end_dt" type="12" value="" out="N"/>
+				<param name="rep_chg_cd" type="12" value="" out="N"/>
+				<param name="cust_tp_cd" type="12" value="" out="N"/>
+				<param name="mdtr_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

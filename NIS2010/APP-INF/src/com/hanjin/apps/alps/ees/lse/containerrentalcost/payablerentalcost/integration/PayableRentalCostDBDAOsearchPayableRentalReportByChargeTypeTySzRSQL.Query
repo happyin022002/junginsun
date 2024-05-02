@@ -1,0 +1,258 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PayableRentalCostDBDAOsearchPayableRentalReportByChargeTypeTySzRSQL">
+			<desc><![CDATA[Payable Invoice 한 결과에 대하여 Charge Type & TP/SZ 별로 실적을 조회
+2010.11.12 남궁진호 [CHM-201007083-01]  total 부분의 avaerage 로직 에러 수정(==> total amout / total vol)]]></desc>
+			<sql><![CDATA[
+WITH PARAM AS (
+    SELECT 
+            @[report_type]  AS REPORT_TYPE,
+            @[period_stdt]  AS PERIOD_STDT,
+            @[period_eddt]  AS PERIOD_EDDT,
+            @[company]      AS COMPANY,
+            @[status]       AS STATUS,            
+            @[payable]      AS PAYABLE,
+            @[agmt_cty_cd]  AS AGMT_CTY_CD,
+            @[agmt_seq]     AS AGMT_SEQ,
+            @[vndr_seq]     AS VNDR_SEQ,
+            @[loc_tp]       AS LOC_TP,
+            @[loc_cd]       AS LOC_CD
+            
+    FROM    DUAL
+), XXX AS ( 
+SELECT
+               AA.CHARGE_TYPE CHARGE_TYPE,
+               AA.DIV DIV,
+               AA.G_TTL G_TTL,
+#foreach($key IN ${tysz})
+               $key ,
+#end 
+               AA.DIV_SEQ DIV_SEQ,
+               BB.DSP_SEQ DSP_SEQ
+         FROM(
+SELECT
+ CHARGE_TYPE ,
+ DECODE( DIV  , 1 ,'VOL' , 2 , 'AMT' , 3 , 'AVG') DIV ,  
+ CASE WHEN DIV = 3 THEN
+    DECODE(SUM(G_TTL) OVER (PARTITION BY CHARGE_TYPE ORDER BY CHARGE_TYPE, DIV ROWS BETWEEN 2 PRECEDING AND 2 PRECEDING), 0, 0,
+           ROUND(SUM(G_TTL) OVER (PARTITION BY CHARGE_TYPE ORDER BY CHARGE_TYPE, DIV ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING) /
+                 SUM(G_TTL) OVER (PARTITION BY CHARGE_TYPE ORDER BY CHARGE_TYPE, DIV ROWS BETWEEN 2 PRECEDING AND 2 PRECEDING), 2)
+    )
+ ELSE
+    G_TTL
+ END G_TTL,
+ #foreach($key IN ${tysz})
+  $key ,
+ #end  
+  DIV DIV_SEQ 
+FROM( SELECT
+                LSE_PAY_CHG_TP_CD CHARGE_TYPE,  
+                DIV,
+               #foreach($key IN ${tysz})
+                SUM(DECODE(CNTR_TPSZ_CD, '$key', FF, 0)) $key ,
+               #end 
+               (
+               #foreach($key IN ${tysz})
+                 #if($velocityCount < $tysz.size())
+                    SUM(DECODE(CNTR_TPSZ_CD, '$key', FF, 0)) +
+                 #else
+                    SUM(DECODE(CNTR_TPSZ_CD, '$key', FF, 0)) 
+                 #end
+               #end
+               ) G_TTL
+      FROM( SELECT
+     V1.LSE_PAY_CHG_TP_CD,
+     V1.CNTR_TPSZ_CD,
+     V2.DIV_SEQ DIV,
+     CASE V2.DIV_SEQ
+     WHEN 1 THEN NVL(V1.F1,0)
+     WHEN 2 THEN NVL(V1.F2,0)
+     WHEN 3 THEN NVL(V1.F3,0) 
+     WHEN 4 THEN NVL(V1.F1,0) + NVL(V1.F2,0) + NVL(V1.F3,0) 
+     END AS FF
+FROM
+(
+    SELECT 
+      LSE_PAY_CHG_TP_CD,
+      CNTR_TPSZ_CD,
+      COUNT(DISTINCT CNTR_NO) F1 ,
+      SUM(DECODE(P.PAYABLE, 'S', LTC.DSCR_COST_AMT+LTC.CR_AMT, LTC.TTL_COST_AMT+LTC.CR_AMT)) F2 , 
+      ROUND( (SUM(DECODE(P.PAYABLE, 'S', LTC.DSCR_COST_AMT+LTC.CR_AMT, LTC.TTL_COST_AMT+LTC.CR_AMT))  / COUNT(DISTINCT CNTR_NO)) * 100 ) / 100 F3
+    FROM LSE_PAY_RNTL_CHG_DTL LTC,
+         LSE_PAY_RNTL_CHG LTMP ,
+         PARAM P 
+    WHERE LTMP.CHG_COST_YRMON BETWEEN P.PERIOD_STDT AND P.PERIOD_EDDT
+      AND LTMP.LSE_PAY_RNTL_STS_CD = DECODE(P.PAYABLE, 'S', 'I', LTMP.LSE_PAY_RNTL_STS_CD)
+#if (${vndr_seq} != '')
+      AND LTMP.VNDR_SEQ = P.VNDR_SEQ
+#end
+#if (${lstm_cd_str} != '')
+      AND LTMP.LSTM_CD IN (
+       #foreach($key IN ${lstm_cd})
+         #if($velocityCount < $lstm_cd.size())
+           '$key',
+         #else
+           '$key'
+         #end
+      #end
+)
+#end
+#if (${agmt_seq} != '' )
+      AND LTMP.AGMT_CTY_CD  = P.AGMT_CTY_CD
+      AND LTMP.AGMT_SEQ     = P.AGMT_SEQ
+#end
+      AND LTMP.CHG_SEQ = LTC.CHG_SEQ
+      AND LTMP.AGMT_CTY_CD = LTC.AGMT_CTY_CD
+      AND LTMP.AGMT_SEQ    = LTC.AGMT_SEQ
+#if (${payable} == 'S')
+      AND NVL(LTC.CNTR_AUD_STS_CD, 'A') = 'A' -- Invoice Amount ( P.PAYABLE = 'S' )
+#end
+#if (${cntr_tpsz_cd_str} != '')
+      AND LTC.CNTR_TPSZ_CD IN (
+	        #foreach($key IN ${cntr_tpsz_cd})
+		        #if($velocityCount < $cntr_tpsz_cd.size())
+			        '$key',
+		        #else
+			        '$key'
+		        #end
+	        #end
+				)
+#end
+#if (${loc_cd} != '')
+   #if (${loc_tp} == 'R')
+      AND LTC.ONH_LOC_CD IN (SELECT RCC_CD FROM MDM_EQ_ORZ_CHT WHERE RCC_CD = P.LOC_CD)
+   #elseif (${loc_tp} == 'L')
+      AND LTC.ONH_LOC_CD IN (SELECT LCC_CD FROM MDM_EQ_ORZ_CHT WHERE LCC_CD = P.LOC_CD)
+   #elseif (${loc_tp} == 'S')
+      AND LTC.ONH_LOC_CD IN (SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = P.LOC_CD)
+   #elseif (${loc_tp} == 'C')
+      AND SUBSTR(LTC.ONH_LOC_CD, 0 , 2 ) = P.LOC_CD
+   #end
+#end
+
+#if (${charge_type_cd_str} != '')
+      AND LTC.LSE_PAY_CHG_TP_CD IN (
+      #foreach($key IN ${charge_type_cd})
+        #if($velocityCount < $charge_type_cd.size())
+            '$key',
+        #else
+            '$key'
+        #end
+      #end
+      )
+#end
+    GROUP BY LSE_PAY_CHG_TP_CD, CNTR_TPSZ_CD) V1,
+            ( SELECT 1 AS DIV_SEQ FROM DUAL UNION ALL
+              SELECT 2 AS DIV_SEQ FROM DUAL UNION ALL
+              SELECT 3 AS DIV_SEQ FROM DUAL             
+             ) V2
+         )   
+      GROUP BY LSE_PAY_CHG_TP_CD,  DIV )       
+      ORDER BY CHARGE_TYPE , DIV_SEQ ) AA ,
+               ( SELECT	 1 DSP_SEQ, 'PDM' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	 2 DSP_SEQ, 'PUC' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	 3 DSP_SEQ, 'PCR' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	 4 DSP_SEQ, 'LON' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	 5 DSP_SEQ, 'LOF' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	 6 DSP_SEQ, 'DOC' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	 7 DSP_SEQ, 'DCR' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	 8 DSP_SEQ, 'DII' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	 9 DSP_SEQ, 'DIO' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	10 DSP_SEQ, 'DPP' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	11 DSP_SEQ, 'WDP' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	12 DSP_SEQ, 'GTI' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	13 DSP_SEQ, 'GTO' CHARGE_TYPE FROM DUAL
+                 UNION ALL                                      
+                 SELECT	14 DSP_SEQ, 'OPL' CHARGE_TYPE FROM DUAL 
+                 UNION ALL                                      
+                 SELECT	15 DSP_SEQ, 'CRD' CHARGE_TYPE FROM DUAL
+                 UNION ALL                                      
+                 SELECT	16 DSP_SEQ, 'OTH' CHARGE_TYPE FROM DUAL ) BB
+         WHERE AA.CHARGE_TYPE = BB.CHARGE_TYPE
+         ORDER BY BB.DSP_SEQ , AA.DIV_SEQ )
+SELECT
+   CHARGE_TYPE,
+   DIV ,
+  #foreach($key IN ${tysz})
+   $key ,
+  #end  
+   G_TTL
+FROM XXX
+UNION ALL
+SELECT
+  CHARGE_TYPE,
+  DIV ,  
+ #foreach($key IN ${tysz})
+  $key ,
+ #end 
+  G_TTL
+FROM
+( SELECT
+   'G.TTL' CHARGE_TYPE,
+   DIV ,  
+  #foreach($key IN ${tysz})
+   SUM($key) $key ,
+  #end 
+   SUM(G_TTL) G_TTL
+  FROM XXX
+  WHERE DIV_SEQ <> 3
+  GROUP BY DIV , DIV_SEQ
+  ORDER BY DIV_SEQ )
+UNION ALL
+SELECT
+   'G.TTL' CHARGE_TYPE,
+   'AVG' DIV ,      
+  #foreach($key IN ${tysz})
+   case when A.$key    > 0 AND V.$key    > 0 then round((A.$key    / V.$key   ) * 100 ) / 100  else 0 end $key ,   
+  #end  
+   case when A.G_TTL > 0 AND V.G_TTL > 0 then round((A.G_TTL / V.G_TTL) * 100 ) / 100  else 0 end G_TTL
+FROM ( SELECT
+          'G.TTL' CHARGE_TYPE,
+         #foreach($key IN ${tysz})
+          SUM($key) $key,
+         #end 
+          SUM(G_TTL) G_TTL
+       FROM XXX 
+       WHERE DIV = 'VOL'
+       GROUP BY DIV , DIV_SEQ
+       ORDER BY DIV_SEQ ) V , 
+     ( SELECT
+          'G.TTL' CHARGE_TYPE,          
+         #foreach($key IN ${tysz})
+          SUM($key) $key,
+         #end
+          SUM(G_TTL) G_TTL
+       FROM XXX 
+       WHERE DIV = 'AMT'
+       GROUP BY DIV , DIV_SEQ
+       ORDER BY DIV_SEQ ) A 
+WHERE  V.CHARGE_TYPE = A.CHARGE_TYPE			]]></sql>
+			<params>
+				<param name="report_type" type="12" value="" out="N"/>
+				<param name="period_stdt" type="12" value="" out="N"/>
+				<param name="period_eddt" type="12" value="" out="N"/>
+				<param name="company" type="12" value="" out="N"/>
+				<param name="status" type="12" value="" out="N"/>
+				<param name="payable" type="12" value="" out="N"/>
+				<param name="agmt_cty_cd" type="12" value="" out="N"/>
+				<param name="agmt_seq" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="12" value="" out="N"/>
+				<param name="loc_tp" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

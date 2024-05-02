@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LongTxContainerMovementFinderDBDAOVLVDUpdateStatusRSQL">
+			<desc><![CDATA[* --------------------------------------------------------
+* History
+* 2013.07.02 김상수 [CHM-201325058-01] BKG/MVMT VL/VD unmatch Inquiry 기준 값 변경(Yard ->Location)   
+2013.08.23 최덕우 [CHM-201325812] [CTM] Bkg/MVMT VL/VD Unmatch Inquiry기능 보완 (Restuffing, TTL, RHQ)]]></desc>
+			<sql><![CDATA[
+WITH RSLT AS (SELECT CNTR.VVD,
+                     CNTR.LANE,
+                     CNTR.ETD,
+                     CNTR.PORT,
+                     CNTR.BKG_CGO_TP_CD,
+                     NVL(BKG.BKG_CNT, 0) AS BKG_CNT,
+                     NVL(CNTR.EDI, 0) AS EDI,
+                     NVL(CNTR.MAN, 0) AS MAN,
+                     NVL(CNTR.EDI + CNTR.MAN, 0) AS TOTAL,
+                     NVL(CNTR.EDI + CNTR.MAN - BKG.BKG_CNT, 0) AS RESULT
+                FROM
+-- BKG (S) -------------------------------------------------
+                     (SELECT VVD,
+                             ETD,
+                             PORT,
+                             BKG_CGO_TP_CD,
+                             COUNT(CNTR_NO) AS BKG_CNT
+                        FROM
+                             (SELECT BV.VSL_CD||BV.SKD_VOY_NO||BV.SKD_DIR_CD AS VVD,
+                                     VSK.ETD,
+#if (${p_status} == 'VL')
+                                     BV.POL_CD AS PORT,
+#else
+                                     BV.POD_CD AS PORT,
+#end
+                                     DECODE(BB.BKG_CGO_TP_CD, 'P', 'E', 'F') AS BKG_CGO_TP_CD,
+                                     BC.CNTR_NO
+                                FROM BKG_VVD BV,
+                                     BKG_CONTAINER BC,
+                                     BKG_BOOKING BB,
+                                     -- VSK_1 (S) ---------------------------
+                                     (SELECT DISTINCT
+                                             VS.VSL_CD,
+                                             VS.SKD_VOY_NO,
+                                             VS.SKD_DIR_CD,
+                                             ML.VSL_SLAN_CD,
+#if (${p_status} == 'VL')
+                                             (SELECT TO_CHAR(VPS_ETD_DT, 'YYYY-MM-DD HH24:MI')
+                                                FROM VSK_VSL_PORT_SKD
+                                               WHERE VSL_CD = VS.VSL_CD
+                                                 AND SKD_VOY_NO = VS.SKD_VOY_NO
+                                                 AND SKD_DIR_CD = VS.SKD_DIR_CD
+                                                 AND VPS_PORT_CD = VS.VPS_PORT_CD
+                                                 AND ROWNUM = 1) AS ETD,
+#else
+                                             (SELECT TO_CHAR(VPS_ETA_DT, 'YYYY-MM-DD HH24:MI')
+                                                FROM VSK_VSL_PORT_SKD
+                                               WHERE VSL_CD = VS.VSL_CD
+                                                 AND SKD_VOY_NO = VS.SKD_VOY_NO
+                                                 AND SKD_DIR_CD = VS.SKD_DIR_CD
+                                                 AND VPS_PORT_CD = VS.VPS_PORT_CD
+                                                 AND ROWNUM = 1) AS ETD,
+#end
+                                             SUBSTR(VS.YD_CD, 0, 5) AS PORT
+                                        FROM MDM_VSL_SVC_LANE ML,
+                                             VSK_VSL_PORT_SKD VS
+#if (${p_status} == 'VL')
+                                       WHERE VS.VPS_ETD_DT BETWEEN TO_DATE(@[p_date1], 'YYYY-MM-DD') AND TO_DATE(@[p_date2], 'YYYY-MM-DD') + 0.99999
+#else
+                                       WHERE VS.VPS_ETA_DT BETWEEN TO_DATE(@[p_date1], 'YYYY-MM-DD') AND TO_DATE(@[p_date2], 'YYYY-MM-DD') + 0.99999
+#end
+                                         AND DECODE(ML.VSL_SVC_TP_CD, 'O', 'F', 'T') = @[p_vsl_svc_tp_cd]
+                                         AND VS.SLAN_CD = ML.VSL_SLAN_CD
+#if (${sel_port} == 'PORT')
+                                         AND VS.VPS_PORT_CD LIKE @[p_yard1]||@[p_yard2]||'%'
+#end
+
+#if (${sel_port} == 'AREA')
+										AND @[area_cd] = (SELECT SYS_AREA_GRP_ID FROM COM_SYS_AREA_GRP_ID
+															WHERE CNT_CD = SUBSTR(VS.VPS_PORT_CD, 1, 2)
+																AND CO_IND_CD = 'H')
+#end
+                                      ) VSK
+                                      -- VSK_1 (E) ---------------------------
+                               WHERE 1 = 1
+#if (${p_vvd} != '')
+                                 AND VSK.VSL_CD = SUBSTR(@[p_vvd], 0, 4)
+                                 AND VSK.SKD_VOY_NO = SUBSTR(@[p_vvd], 5, 4)
+                                 AND VSK.SKD_DIR_CD = SUBSTR(@[p_vvd], 9, 1)
+#end
+                                 AND BB.BKG_STS_CD NOT IN ('X', 'S')
+                                 AND BV.VSL_CD = VSK.VSL_CD
+                                 AND BV.SKD_VOY_NO = VSK.SKD_VOY_NO
+                                 AND BV.SKD_DIR_CD = VSK.SKD_DIR_CD
+#if (${p_status} == 'VL')
+                                 AND BV.POL_CD = VSK.PORT
+#else
+                                 AND BV.POD_CD = VSK.PORT
+#end
+                                 AND BV.BKG_NO = BC.BKG_NO
+                                 AND BC.BKG_NO = BB.BKG_NO
+#if (${restuff} == 'Y')
+								 AND (BC.BKG_NO, BC.CNTR_NO) NOT IN (SELECT  CM.BKG_NO, CM.CNTR_NO
+																		FROM    CTM_MVMT_XCH    CX,
+                                                                            	CTM_MOVEMENT    CM
+                                                                    	WHERE   XCH_CNTR_NO = BC.CNTR_NO
+                                                                    		AND     XCH_CNTR_YR = BC.CNMV_YR
+                                                                    		AND     CM.CNTR_NO  = XCH_CNTR_NO
+                                                                    		AND     CM.CNMV_YR  = XCH_CNTR_YR
+                                                                    		AND     CM.CNMV_ID_NO = XCH_CNMV_ID_NO
+                                                                    		AND     ROWNUM = 1
+                                                                    )
+#end
+#if (${ttl} == 'Y')
+								AND ('TLL', SUBSTR(@[p_yard1], 1, 5)) <> (SELECT CNTR_STS_CD, LOC_CD FROM MST_CONTAINER	WHERE CNTR_NO = BC.CNTR_NO)
+#end
+                               GROUP BY BV.VSL_CD||BV.SKD_VOY_NO||BV.SKD_DIR_CD,
+                                        VSK.ETD,
+#if (${p_status} == 'VL')
+                                        BV.POL_CD,
+#else
+                                        BV.POD_CD,
+#end
+                                        DECODE(BB.BKG_CGO_TP_CD, 'P', 'E', 'F'),
+                                        BC.CNTR_NO
+                             )
+                       GROUP BY VVD,
+                                ETD,
+                                PORT,
+                                BKG_CGO_TP_CD
+                     ) BKG,
+-- BKG (E) -------------------------------------------------
+-- CNTR (S) ------------------------------------------------
+                     (SELECT VVD,
+                             LANE,
+                             ETD,
+                             PORT,
+                             BKG_CGO_TP_CD,
+                             MAX(DECODE(MVMT_INP_TP_CD, 'EDI', BKG_CNT, 0)) AS EDI,
+                             MAX(DECODE(MVMT_INP_TP_CD, 'MAN', BKG_CNT, 0)) AS MAN
+                        FROM
+                             (SELECT CTM.CRNT_VSL_CD||CTM.CRNT_SKD_VOY_NO||CTM.CRNT_SKD_DIR_CD AS VVD,
+                                     VSK.VSL_SLAN_CD AS LANE,
+                                     VSK.ETD,
+                                     SUBSTR(CTM.ORG_YD_CD, 0, 5) AS PORT,
+                                     DECODE(CTM.BKG_CGO_TP_CD, 'P', 'E', 'F') AS BKG_CGO_TP_CD,
+                                     DECODE(CTM.MVMT_INP_TP_CD, 'EDI', 'EDI', 'MAN') AS MVMT_INP_TP_CD,
+                                     COUNT(CTM.CNTR_NO) AS BKG_CNT
+                                FROM CTM_MOVEMENT CTM,
+                                     -- VSK_2 (S) ---------------------------
+                                     (SELECT DISTINCT
+                                             VS.VSL_CD,
+                                             VS.SKD_VOY_NO,
+                                             VS.SKD_DIR_CD,
+                                             ML.VSL_SLAN_CD,
+#if (${p_status} == 'VL')
+                                             (SELECT TO_CHAR(VPS_ETD_DT, 'YYYY-MM-DD HH24:MI')
+                                                FROM VSK_VSL_PORT_SKD
+                                               WHERE VSL_CD = VS.VSL_CD
+                                                 AND SKD_VOY_NO = VS.SKD_VOY_NO
+                                                 AND SKD_DIR_CD = VS.SKD_DIR_CD
+                                                 AND VPS_PORT_CD = VS.VPS_PORT_CD
+                                                 AND ROWNUM = 1) AS ETD,
+#else
+                                             (SELECT TO_CHAR(VPS_ETA_DT, 'YYYY-MM-DD HH24:MI')
+                                                FROM VSK_VSL_PORT_SKD
+                                               WHERE VSL_CD = VS.VSL_CD
+                                                 AND SKD_VOY_NO = VS.SKD_VOY_NO
+                                                 AND SKD_DIR_CD = VS.SKD_DIR_CD
+                                                 AND VPS_PORT_CD = VS.VPS_PORT_CD
+                                                 AND ROWNUM = 1) AS ETD,
+#end
+                                             SUBSTR(VS.YD_CD, 0, 5) AS PORT
+                                        FROM MDM_VSL_SVC_LANE ML,
+                                             VSK_VSL_PORT_SKD VS
+#if (${p_status} == 'VL')
+                                       WHERE VS.VPS_ETD_DT BETWEEN TO_DATE(@[p_date1], 'YYYY-MM-DD') AND TO_DATE(@[p_date2], 'YYYY-MM-DD') + 0.99999
+#else
+                                       WHERE VS.VPS_ETA_DT BETWEEN TO_DATE(@[p_date1], 'YYYY-MM-DD') AND TO_DATE(@[p_date2], 'YYYY-MM-DD') + 0.99999
+#end
+                                         AND DECODE(ML.VSL_SVC_TP_CD, 'O', 'F', 'T') = @[p_vsl_svc_tp_cd]
+                                         AND VS.SLAN_CD = ML.VSL_SLAN_CD
+#if (${sel_port} == 'PORT')
+                                         AND VS.VPS_PORT_CD LIKE @[p_yard1]||@[p_yard2]||'%'
+#end
+#if (${sel_port} == 'AREA')
+										AND @[area_cd] = (SELECT SYS_AREA_GRP_ID FROM COM_SYS_AREA_GRP_ID
+                                                       		WHERE CNT_CD = SUBSTR(VS.VPS_PORT_CD, 1, 2)
+                                                         		AND CO_IND_CD = 'H')
+#end
+                                      ) VSK
+                                      -- VSK_2 (E) ---------------------------
+                               WHERE 1 = 1
+#if (${p_vvd} != '')
+                                 AND VSK.VSL_CD = SUBSTR(@[p_vvd], 0, 4)
+                                 AND VSK.SKD_VOY_NO = SUBSTR(@[p_vvd], 5, 4)
+                                 AND VSK.SKD_DIR_CD = SUBSTR(@[p_vvd], 9, 1)
+#end
+                                 AND CTM.MVMT_STS_CD = @[p_status]
+                                 AND CTM.CRNT_VSL_CD = VSK.VSL_CD
+                                 AND CTM.CRNT_SKD_VOY_NO = VSK.SKD_VOY_NO
+                                 AND CTM.CRNT_SKD_DIR_CD = VSK.SKD_DIR_CD
+                                 AND SUBSTR(CTM.ORG_YD_CD, 0, 5) = VSK.PORT
+								 AND CTM.CNMV_EVNT_DT BETWEEN TO_DATE(@[p_date1], 'YYYY-MM-DD') - 7 AND TO_DATE(@[p_date2], 'YYYY-MM-DD') + 7.99999
+                               GROUP BY CTM.CRNT_VSL_CD||CTM.CRNT_SKD_VOY_NO||CTM.CRNT_SKD_DIR_CD,
+                                        VSK.VSL_SLAN_CD,
+                                        VSK.ETD,
+                                        SUBSTR(CTM.ORG_YD_CD, 0, 5),
+                                        DECODE(CTM.MVMT_INP_TP_CD, 'EDI', 'EDI', 'MAN'),
+                                        DECODE(CTM.BKG_CGO_TP_CD, 'P', 'E', 'F')
+                             )
+                        GROUP BY VVD,
+                                 LANE,
+                                 ETD,
+                                 PORT,
+                                 BKG_CGO_TP_CD
+                     ) CNTR
+-- CNTR (E) ------------------------------------------------
+               WHERE 1 = 1
+                 AND BKG.VVD(+) = CNTR.VVD
+                 AND BKG.PORT(+) = CNTR.PORT
+                 AND BKG.BKG_CGO_TP_CD(+) = CNTR.BKG_CGO_TP_CD
+             )
+-- END WITH STATEMENT
+
+
+
+SELECT VVD,
+       LANE,
+       ETD,
+       PORT,
+       SUM(BKG1) AS BKG1,
+       SUM(EDI1) AS EDI1,
+       SUM(MAN1) AS MAN1,
+       SUM(TOTAL1) AS TOTAL1,
+       SUM(RESULT1) AS RESULT1,
+       SUM(BKG2) AS BKG2,
+       SUM(EDI2) AS EDI2,
+       SUM(MAN2) AS MAN2,
+       SUM(TOTAL2) AS TOTAL2,
+       SUM(RESULT2) AS RESULT2
+  FROM
+       (SELECT VVD,
+               LANE,
+               ETD,
+               PORT,
+               BKG_CNT AS BKG1,
+               EDI AS EDI1,
+               MAN AS MAN1,
+               EDI + MAN AS TOTAL1,
+               EDI + MAN - BKG_CNT AS RESULT1,
+               0 AS BKG2,
+               0 AS EDI2,
+               0 AS MAN2,
+               0 AS TOTAL2,
+               0 AS RESULT2
+          FROM RSLT
+         WHERE BKG_CGO_TP_CD = 'F' --FULL CARGO
+
+         UNION ALL
+
+         SELECT VVD,
+                LANE,
+                ETD,
+                PORT,
+                0 AS BKG1,
+                0 AS EDI1,
+                0 AS MAN1,
+                0 AS TOTAL1,
+                0 AS RESULT1,
+                BKG_CNT AS BKG2,
+                EDI AS EDI2,
+                MAN AS MAN2,
+                EDI + MAN AS TOTAL2,
+                EDI + MAN - BKG_CNT AS RESULT2
+           FROM RSLT R
+          WHERE BKG_CGO_TP_CD = 'E' --EMPTY CARGO
+       )
+ GROUP BY VVD,
+          LANE,
+          ETD,
+          PORT
+ ORDER BY VVD,
+          ETD,
+          PORT			]]></sql>
+			<params>
+				<param name="p_date1" type="12" value="" out="N"/>
+				<param name="p_date2" type="12" value="" out="N"/>
+				<param name="p_vsl_svc_tp_cd" type="12" value="" out="N"/>
+				<param name="p_yard1" type="12" value="" out="N"/>
+				<param name="p_yard2" type="12" value="" out="N"/>
+				<param name="area_cd" type="12" value="" out="N"/>
+				<param name="p_vvd" type="12" value="" out="N"/>
+				<param name="p_status" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

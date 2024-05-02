@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="NetworkCostDBDAOSearchPortTariffDetailListRSQL">
+			<desc><![CDATA[2011.07.06 이석준 CHM-201111498-01
+                 터미널별 PSO 및 MAS Data 수정가능토록 조회 쿼리
+2014.12.12 [관리회계TF] COA_MON_VVD 에서 SUB_TRD_CD != 'IP' 
+2015.01.23 김시몬 [CHM-201533657] PM1,IMU 팬듈럼 Lane에 대해 100% Ratio적용, 운항통과료 100% Ratio적용
+2015.02.23 김시몬 PORT_RATIO, CNL_RATIO 구할때 sum에서 max로 변경
+2015.02.25 김시몬 하나의 월에 2개 주차로 동일 S.LANE /VVD가 존재할 경우 MAX 주차것으로 보여준다(2배로 보이지 않게)
+2015.04.01 김시몬 [관리회계개선TF] PSG LANE 팬듈럼 처리 추가]]></desc>
+			<sql><![CDATA[
+SELECT SLAN_CD
+      , VSL_CD
+      , SKD_VOY_NO
+      , SKD_DIR_CD
+      , SUBSTR(YD_CD, 1, 5) PORT_CD
+      , SUBSTR(YD_CD, 6, 2) CY_CD
+      , MAX(CURR_CD) CURR_CD
+      , MAX(PORT_USD_AMT) PORT_USD_AMT
+      , MAX(PORT_PSO_AMT) KEEP (DENSE_RANK FIRST ORDER BY PORT_USD_AMT DESC) PORT_PSO_AMT
+      , PORT_RATIO * 100 || '%' PORT_RATIO
+      , MAX(CNL_USD_AMT) KEEP (DENSE_RANK FIRST ORDER BY PORT_USD_AMT DESC) CNL_USD_AMT
+      , MAX(CNL_PSO_AMT) CNL_PSO_AMT
+      , CNL_RATIO * 100 || '%' CNL_RATIO
+      , MAX(CRE_DT) KEEP (DENSE_RANK FIRST ORDER BY PORT_USD_AMT DESC) CRE_DT
+      , MAX(CLPT_SEQ) KEEP (DENSE_RANK FIRST ORDER BY PORT_USD_AMT DESC) CLPT_SEQ
+   FROM
+        (SELECT SLAN_CD
+              , VSL_CD
+              , SKD_VOY_NO
+              , DIR_CD AS SKD_DIR_CD
+              , TML_CD
+              , YD_CD
+              , CURRENCY AS CURR_CD
+              , PORT_USD_AMT
+              , PSO_PORT_AMT * PORT_RATIO AS PORT_PSO_AMT
+              , PORT_RATIO
+              , CNL_USD_AMT
+              , PSO_CNL_AMT * CNL_RATIO AS CNL_PSO_AMT
+              , CNL_RATIO
+              , CRE_USR_ID
+              , WRK_DT AS CRE_DT
+              , CLPT_SEQ
+           FROM
+                (SELECT A1.SLAN_CD
+                      , A1.VSL_CD
+                      , A1.SKD_VOY_NO
+                      , A1.DIR_CD
+                      , A5.TML_CD
+                      , A4.YD_CD
+                      , 'USD' CURRENCY
+                      , SUM((CASE WHEN SUBSTR(NVL(A4.YD_CD, A5.TML_CD), 1, 5) IN ('EGSUZ', 'PAPAC') THEN 0
+                                  ELSE A6.INV_USD_AMT END) ) PSO_PORT_AMT
+                      , SUM(A5.PORT_USD_AMT) PORT_USD_AMT
+                      , MAX(CASE WHEN SUBSTR(NVL(A4.YD_CD, A5.TML_CD), 1, 5) NOT IN ('EGSUZ', 'PAPAC') THEN 
+                                      CASE WHEN A4.TURN_PORT_FLG = 'N' AND A4.TURN_PORT_IND_CD = 'N' THEN 1
+                                           WHEN A1.SLAN_CD IN ('IMU','PM1','PSG','HPM','CPM') THEN 1
+                                           ELSE 0.5
+                                      END
+                                 ELSE 0
+                            END) PORT_RATIO
+                      , SUM((CASE WHEN SUBSTR(NVL(A4.YD_CD, A5.TML_CD), 1, 5) IN ('EGSUZ', 'PAPAC') THEN A6.INV_USD_AMT 
+                                  ELSE 0 END) ) PSO_CNL_AMT
+                      , SUM(A5.CNL_USD_AMT) CNL_USD_AMT
+                      , MAX(CASE WHEN SUBSTR(NVL(A4.YD_CD, A5.TML_CD), 1, 5) IN ('EGSUZ', 'PAPAC') THEN 1 -- 운항통과료는 100% 계산
+                                      --CASE WHEN A4.TURN_PORT_FLG = 'N' AND A4.TURN_PORT_IND_CD = 'N' THEN 1
+                                      --     ELSE 0.5
+                                      --END
+                                 ELSE 0
+                            END) CNL_RATIO
+                      , A6.WRK_DT
+                      , A6.WRK_SEQ
+                      , MIN(A4.CLPT_SEQ) CLPT_SEQ
+                      , LAST_VALUE (A6.WRK_DT IGNORE NULLS) OVER (PARTITION BY A1.VSL_CD, A1.SKD_VOY_NO, A1.DIR_CD ) LST_WRK_DT
+                      , LAST_VALUE (A6.WRK_SEQ IGNORE NULLS) OVER (PARTITION BY A1.VSL_CD, A1.SKD_VOY_NO, A1.DIR_CD ) LST_WRK_SEQ
+                      , A5.CRE_USR_ID
+                  FROM --MAS_MON_VVD A1
+                       (
+                        SELECT COST_YRMON,SLS_YRMON,COST_WK,TRD_CD,RLANE_CD,SLAN_CD,IOC_CD,VSL_CD,SKD_VOY_NO,DIR_CD,N1ST_LODG_PORT_ETD_DT
+                          FROM MAS_MON_VVD A
+                         WHERE 1=1
+#if (${f_yrtype} == 'W')
+                           AND SLS_YRMON LIKE SUBSTR(@[f_yearweek],1,4) || '%' AND COST_WK = SUBSTR(@[f_yearweek], 6,2)
+#else
+                           AND COST_YRMON   = REPLACE(@[f_yearweek],'-')
+#end                             
+                           AND VSL_CD         = @[f_vsl_cd]
+                           AND SKD_VOY_NO     = @[f_skd_voy_no]
+                           AND DIR_CD         = @[f_dir_cd]    
+                           AND SLAN_CD        = @[f_slan_cd]  
+#if (${f_selrlane} != '' && ${f_selrlane} != 'All')
+                           AND RLANE_CD       = @[f_selrlane]
+#end                                                  
+                           AND SUB_TRD_CD    != 'IP'
+                           AND NVL(DELT_FLG, 'N') = 'N'
+                           AND (COST_YRMON,SLAN_CD,IOC_CD,VSL_CD,SKD_VOY_NO,DIR_CD,COST_WK) 
+                                  IN (SELECT COST_YRMON,SLAN_CD,IOC_CD,VSL_CD,SKD_VOY_NO,DIR_CD,MAX(COST_WK)
+                                        FROM MAS_MON_VVD
+                                       WHERE 1=1
+                                         AND VSL_CD         = @[f_vsl_cd]
+                                         AND SKD_VOY_NO     = @[f_skd_voy_no]
+                                         AND DIR_CD         = @[f_dir_cd]    
+                                         AND SLAN_CD        = @[f_slan_cd]  
+#if (${f_selrlane} != ''  && ${f_selrlane} != 'All')
+                                         AND RLANE_CD        = @[f_selrlane]
+#end                                         
+#if (${f_yrtype} == 'W')
+                                         AND SLS_YRMON LIKE SUBSTR(@[f_yearweek],1,4) || '%' AND COST_WK = SUBSTR(@[f_yearweek], 6,2)
+#else
+                                         AND COST_YRMON   = REPLACE(@[f_yearweek],'-')
+#end                                          
+                                         AND SUB_TRD_CD    != 'IP'
+                                         AND NVL(DELT_FLG, 'N') = 'N'
+                                       GROUP BY COST_YRMON,SLAN_CD,IOC_CD,VSL_CD,SKD_VOY_NO,DIR_CD
+                                     )                   
+                        ) A1
+                      , MAS_VSL_RGST A2
+                      , MAS_LANE_RGST A3
+                      , VSK_VSL_PORT_SKD A4
+                      , MAS_PORT_TRF A5
+                      , PSO_TGT_VVD_EXPN A6
+                  WHERE NVL(A3.DELT_FLG, 'N') = 'N'
+                    AND A1.VSL_CD             = A2.VSL_CD
+                    AND A2.VOP_CD             = 'SML'
+                    AND A1.TRD_CD             = A3.TRD_CD
+                    AND A1.RLANE_CD           = A3.RLANE_CD
+                    AND A1.IOC_CD             = A3.IOC_CD
+                    AND A1.DIR_CD             = A3.DIR_CD
+                    AND A3.TRD_CD            <> 'COM'
+                    AND A3.SUB_TRD_CD        <> 'IP'
+                    AND A3.VSL_LANE_TP_CD    IN ('JO', 'SC')
+                    AND TO_CHAR(A1.N1ST_LODG_PORT_ETD_DT, 'YYYYMMDD') 
+                        BETWEEN NVL(TO_CHAR(A2.VSL_APLY_FM_DT, 'YYYYMMDD'), '19000101') 
+                            AND NVL(TO_CHAR(A2.VSL_APLY_TO_DT, 'YYYYMMDD'), '99991231')
+                    AND A1.VSL_CD                    = A4.VSL_CD
+                    AND A1.SKD_VOY_NO                = A4.SKD_VOY_NO
+                    AND A1.DIR_CD                    = A4.SKD_DIR_CD
+                    AND A1.SLAN_CD                   = A4.SLAN_CD
+                    AND NVL(A4.SKD_CNG_STS_CD, 'N') <> 'S'
+                    AND A4.SLAN_CD                   =A5.SLAN_CD(+)
+                    AND A4.VSL_CD                    =A5.VSL_CD(+)
+                    AND A4.SKD_VOY_NO                =A5.SKD_VOY_NO(+)
+                    AND A4.SKD_DIR_CD                =A5.SKD_DIR_CD(+)
+                    AND A4.YD_CD          = A5.TML_CD(+)
+                    AND A4.VSL_CD         = A6.VSL_CD(+)
+                    AND A4.SKD_VOY_NO     = A6.SKD_VOY_NO(+)
+                    AND A4.SKD_DIR_CD     = A6.SKD_DIR_CD(+)
+                    AND A4.YD_CD          =A6.YD_CD(+)
+                    AND A6.PSO_BZTP_CD(+) = '7' 
+               GROUP BY A1.SLAN_CD
+                      , A1.VSL_CD
+                      , A1.SKD_VOY_NO
+                      , A1.DIR_CD
+                      , A4.YD_CD
+                      , A5.TML_CD
+                      , A6.WRK_DT
+                      , A6.WRK_SEQ
+                      , A1.VSL_CD
+                      , A1.SKD_VOY_NO
+                      , A1.DIR_CD
+                      , A5.CRE_USR_ID
+                )
+          WHERE (WRK_DT IS NULL OR WRK_DT||WRK_SEQ = LST_WRK_DT||LST_WRK_SEQ)
+        )
+GROUP BY SLAN_CD
+      , VSL_CD
+      , SKD_VOY_NO
+      , SKD_DIR_CD
+      , YD_CD
+      , PORT_RATIO
+      , CNL_RATIO
+ORDER BY CLPT_SEQ			]]></sql>
+			<params>
+				<param name="f_yearweek" type="12" value="" out="N"/>
+				<param name="f_vsl_cd" type="12" value="" out="N"/>
+				<param name="f_skd_voy_no" type="12" value="" out="N"/>
+				<param name="f_dir_cd" type="12" value="" out="N"/>
+				<param name="f_slan_cd" type="12" value="" out="N"/>
+				<param name="f_selrlane" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

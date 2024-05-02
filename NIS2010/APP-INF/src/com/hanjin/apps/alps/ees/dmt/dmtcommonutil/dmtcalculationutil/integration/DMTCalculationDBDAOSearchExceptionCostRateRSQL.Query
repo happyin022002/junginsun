@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="DMTCalculationDBDAOSearchExceptionCostRateRSQL">
+			<desc><![CDATA[Exception Cost Rate 정보
+EXPT_COST_AMT는 CNTR  Size별로 dmdt_trf_cd 및 term 에 따라 금액합계함.
+
+DET Amount = (CNTR_COST + OTR_COST + CY or DOR) * EX.EXPT_DYS + STOCK : DTIC, CTIC 인 경우, term 이 'O'(FO) 인 경우
+DEM Amount = (TML_COST + CNTR_COST + OTR_COST + CY or DOR) * EX.EXPT_DYS + STOCK : DEM Amount대상 이외 경우	]]></desc>
+			<sql><![CDATA[
+SELECT  1 AS INCUR_QTY
+        , DECODE(SUBSTR(@[cntr_tpsz_cd], 2, 1), '2', 1, 2)          AS INCUR_CNTR_TEU_KNT
+        , 1 AS EXPT_QTY
+        , DECODE(SUBSTR(@[cntr_tpsz_cd], 2, 1), '2', 1, 2)          AS EXPT_CNTR_TEU_KNT
+        , EX.INCUR_AMT                                              AS INCUR_AMT
+        , CO.YD_CD
+        , CO.YD_EXPT_COST_SEQ
+        , EX.EXPT_DYS                                               AS EXPT_DYS 
+        , ((CO.USD_COST_RT_AMT * EX.EXPT_DYS) + CO.USD_STK_AMT)     AS EXPT_COST_AMT
+        , 
+        CASE
+        WHEN (EX.CAL_FG = '2') AND EXP_RATE_FLG = 'Y' THEN
+            NVL(EX.EXPT_TRF_RT_ADJ_AMT, 0)                                 
+        ELSE
+            0
+        END                                                         AS EXPT_TRF_RT_ADJ_AMT 
+        , 
+        CASE
+        WHEN EXP_RATE_FLG = 'Y' THEN
+            CASE
+            WHEN (EX.CAL_FG <> '2') AND EXP_GUBUN IN ('YS', 'YB') THEN
+                -- Dual Type Exception & Rate 적용이 S/C 또는 Before 일 경우 현재 로직인 불안정하여 경우수에 따라서 로직을 구현함.
+                CASE
+                WHEN  ( EX.EXPT_FT_AMT = 0 AND EX.EXPT_TRF_RT_ADJ_AMT = 0 ) THEN
+                      0
+                WHEN  (EX.EXPT_FT_AMT = 0 AND EX.EXPT_TRF_RT_ADJ_AMT > 0 AND EX.INCUR_AMT >= EX.EXPT_TRF_RT_ADJ_AMT ) THEN
+                      EX.EXPT_TRF_RT_ADJ_AMT
+                WHEN  (EX.EXPT_FT_AMT = 0 AND EX.EXPT_TRF_RT_ADJ_AMT > 0 AND EX.INCUR_AMT <  EX.EXPT_TRF_RT_ADJ_AMT ) THEN
+                      EX.INCUR_AMT
+                WHEN  (EX.EXPT_FT_AMT > 0 AND EX.EXPT_TRF_RT_ADJ_AMT = 0 AND EX.INCUR_AMT >= EX.EXPT_FT_AMT         ) THEN
+                      EX.EXPT_FT_AMT
+                WHEN  (EX.EXPT_FT_AMT > 0 AND EX.EXPT_TRF_RT_ADJ_AMT = 0 AND EX.INCUR_AMT <  EX.EXPT_FT_AMT         ) THEN
+                      EX.INCUR_AMT
+                ELSE
+                      0
+                END
+            WHEN (EX.CAL_FG <> '2') AND ( EX.EXPT_TRF_RT_ADJ_AMT > 0  AND EXPT_FT_AMT = 0 )THEN
+                EX.EXPT_TRF_RT_ADJ_AMT     
+            ELSE
+                EX.EXPT_FT_AMT                                  -- 일반적인 경우
+            END                                      
+        ELSE
+            EX.EXPT_FT_AMT + EX.EXPT_TRF_RT_ADJ_AMT
+        END                                                         AS EXPT_FT_AMT
+FROM    (
+        SELECT  C.YD_CD,
+                C.YD_EXPT_COST_SEQ,
+                C.CURR_CD,
+#if (${dmdt_trf_cd} == 'DTIC' || ${dmdt_trf_cd} == 'CTIC' ) 
+                ROUND(DECODE( SUBSTR(@[cntr_tpsz_cd], 2, 1), 
+                      '2', ( NVL(C.CNTR_COST_20FT_RT_AMT, 0)
+                           + DECODE(@[term_cd], 'D', NVL(C.CHG_COST_DOR_RT_AMT, 0), NVL(C.CHG_COST_CY_RT_AMT, 0))
+                           + NVL(C.OTR_COST_20FT_RT_AMT, 0)),
+
+                		   ( NVL(C.CNTR_COST_40FT_RT_AMT, 0)
+                		   + DECODE(@[term_cd], 'D', NVL(C.CHG_COST_DOR_RT_AMT, 0), NVL(C.CHG_COST_CY_RT_AMT, 0))
+                           + NVL(C.OTR_COST_40FT_RT_AMT, 0))
+                		   ) * (1/G.USD_LOCL_XCH_RT), 2)                                         AS USD_COST_RT_AMT,
+#else
+                ROUND(DECODE( SUBSTR(@[cntr_tpsz_cd], 2, 1), 
+                      '2', ( DECODE(@[term_cd], 'O', 0, NVL(C.TML_COST_20FT_RT_AMT, 0)) + 
+                             NVL(C.CNTR_COST_20FT_RT_AMT, 0) + NVL(C.OTR_COST_20FT_RT_AMT, 0)),
+
+                		   ( DECODE(@[term_cd], 'O', 0, NVL(C.TML_COST_40FT_RT_AMT, 0)) + 
+                		     NVL(C.CNTR_COST_40FT_RT_AMT, 0) + NVL(C.OTR_COST_40FT_RT_AMT, 0)
+                		    )   ) * (1/G.USD_LOCL_XCH_RT), 2)                                    AS USD_COST_RT_AMT, 
+#end
+                ROUND(NVL(C.CNTR_COST_STK_AMT,0)* (1/G.USD_LOCL_XCH_RT), 2)                      AS USD_STK_AMT
+
+        FROM    DMT_YD_EXPT_COST C, GL_MON_XCH_RT G
+        WHERE   C.YD_CD             =  @[yd_cd]
+        AND     C.CFM_FLG           = 'Y'
+        AND     TO_DATE(SUBSTR(@[eta_dt], 1, 8),'YYYYMMDD') BETWEEN     C.EFF_DT
+                                                            AND         NVL(C.EXP_DT, TO_DATE(SUBSTR(@[eta_dt], 1, 8), 'YYYYMMDD')) + 0.99999
+        AND     G.ACCT_XCH_RT_YRMON = SUBSTR(@[fm_mvmt_dt], 1, 6)
+        AND     G.ACCT_XCH_RT_LVL   = 1
+        AND     G.CURR_CD           = C.CURR_CD
+        ) CO,
+        (
+        SELECT  (
+                CASE
+                WHEN TO_DATE(SUBSTR(@[to_mvmt_dt], 1, 8),'YYYYMMDD') <= TO_DATE(SUBSTR(@[expt_ft_end_dt], 1, 8), 'YYYYMMDD') THEN
+                        '1'
+                ELSE
+                        '2'
+                END
+                )                                                                               AS CAL_FG,
+                (
+                CASE
+                WHEN TO_DATE(SUBSTR(@[to_mvmt_dt], 1, 8), 'YYYYMMDD') <  TO_DATE(SUBSTR(@[expt_ft_end_dt], 1, 8), 'YYYYMMDD')  THEN 
+                    (TO_DATE(SUBSTR(@[to_mvmt_dt], 1, 8), 'YYYYMMDD') - TO_DATE(SUBSTR(@[dmdt_bzc_ft_end_dt], 1, 8), 'YYYYMMDD')) 
+                ELSE
+                    (TO_DATE(SUBSTR(@[expt_ft_end_dt],1,8), 'YYYYMMDD') - TO_DATE(SUBSTR(@[dmdt_bzc_ft_end_dt], 1, 8), 'YYYYMMDD'))
+                END
+                )                                                                               AS EXPT_DYS,
+                (
+                CASE
+                WHEN T2.DMDT_TRF_APLY_TP_CD= 'G' THEN
+                    'N'
+                WHEN T2.DMDT_TRF_APLY_TP_CD= 'B' THEN                     
+                    (
+                    SELECT  MAX('Y')
+                    FROM    DMT_CHG_CALC            S1,
+                            DMT_RFA_EXPT_TRF_DTL    S2
+                    WHERE   1=1
+                    AND     S1.RFA_EXPT_DAR_NO          = S2.RFA_EXPT_DAR_NO
+                    AND     S1.RFA_EXPT_MAPG_SEQ        = S2.RFA_EXPT_MAPG_SEQ
+                    AND     S1.RFA_EXPT_VER_SEQ         = S2.RFA_EXPT_VER_SEQ
+                    AND     S1.RFA_RQST_DTL_SEQ         = S2.RFA_RQST_DTL_SEQ
+                    AND     S1.CNTR_NO                  = @[cntr_no]   
+                    AND     S1.CNTR_CYC_NO              = @[cntr_cyc_no]
+                    AND     S1.DMDT_TRF_CD              = @[dmdt_trf_cd]
+                    AND     S1.DMDT_CHG_LOC_DIV_CD      = @[dmdt_chg_loc_div_cd]
+                    AND     S1.CHG_SEQ                  = @[chg_seq]
+                    AND     S2.RT_USE_FLG               = 'Y'
+                    )
+                ELSE
+                    (
+                    SELECT  MAX('Y')
+                    FROM	DMT_CHG_CALC            S1,
+                            DMT_SC_EXPT_GRP         S2,
+                    		PRI_SP_HDR              S3
+                    WHERE	1=1
+                    AND     S2.PROP_NO			        = S3.PROP_NO
+                    AND     S1.SC_NO                    = S3.SC_NO
+                    AND     S1.SC_EXPT_VER_SEQ          = S2.SC_EXPT_VER_SEQ
+                    AND	    S1.SC_EXPT_GRP_SEQ          = S2.SC_EXPT_GRP_SEQ
+                    AND     S1.CNTR_NO                  = @[cntr_no]   
+                    AND     S1.CNTR_CYC_NO              = @[cntr_cyc_no]
+                    AND     S1.DMDT_TRF_CD              = @[dmdt_trf_cd]
+                    AND     S1.DMDT_CHG_LOC_DIV_CD      = @[dmdt_chg_loc_div_cd]
+                    AND     S1.CHG_SEQ                  = @[chg_seq]
+                    AND     S2.RT_ADJ_FLG               = 'Y'
+                    )
+                END
+                )                                                                               AS EXP_RATE_FLG,
+                (
+                SELECT  ROUND((NVL(MAX(A.SC_RFA_EXPT_AMT), 0) - @[bzc_rt]) * (1/GL.USD_LOCL_XCH_RT), 2)  
+                FROM    DMT_CHG_CALC A 
+                WHERE   A.CNTR_NO                   = @[cntr_no]   
+                AND     A.CNTR_CYC_NO               = @[cntr_cyc_no]
+                AND     A.DMDT_TRF_CD               = @[dmdt_trf_cd]
+                AND     A.DMDT_CHG_LOC_DIV_CD       = @[dmdt_chg_loc_div_cd]
+                AND     A.CHG_SEQ                   = @[chg_seq]
+                )                                                                               AS EXPT_TRF_RT_ADJ_AMT,
+                (
+                SELECT  ROUND(NVL(MAX(A.ORG_CHG_AMT), 0) * (1/GL.USD_LOCL_XCH_RT), 2)
+                FROM    DMT_CHG_CALC A 
+                WHERE   A.CNTR_NO               = @[cntr_no]  
+                AND     A.CNTR_CYC_NO           = @[cntr_cyc_no]
+                AND     A.DMDT_TRF_CD           = @[dmdt_trf_cd]
+                AND     A.DMDT_CHG_LOC_DIV_CD   = @[dmdt_chg_loc_div_cd]
+                AND     A.CHG_SEQ               = @[chg_seq]
+                )                                                                               AS INCUR_AMT, 
+                ROUND(@[bzc_rt] * (1/GL.USD_LOCL_XCH_RT), 2)                                    AS EXPT_FT_AMT,
+                EXP_GUBUN
+        FROM    GL_MON_XCH_RT GL,
+                (
+                SELECT  NVL(DMDT_TRF_APLY_TP_CD, 'G')                    AS DMDT_TRF_APLY_TP_CD,
+                        DUL_TP_EXPT_FLG || NVL(DMDT_TRF_APLY_TP_CD, 'G') AS EXP_GUBUN
+                FROM    DMT_CHG_CALC
+                WHERE	1=1
+                AND     CNTR_NO                  = @[cntr_no]   
+                AND     CNTR_CYC_NO              = @[cntr_cyc_no]
+                AND     DMDT_TRF_CD              = @[dmdt_trf_cd]
+                AND     DMDT_CHG_LOC_DIV_CD      = @[dmdt_chg_loc_div_cd]
+                AND     CHG_SEQ                  = @[chg_seq]
+                AND     ROWNUM                   = 1
+                )   T2
+        WHERE   GL.ACCT_XCH_RT_YRMON    = SUBSTR(@[fm_mvmt_dt], 1, 6)
+        AND     GL.ACCT_XCH_RT_LVL      = '1'
+        AND     GL.CURR_CD              = (
+                                          SELECT  BZC_TRF_CURR_CD
+                                          FROM    DMT_CHG_CALC
+                                          WHERE   1=1
+                                          AND     CNTR_NO                  = @[cntr_no]   
+                                          AND     CNTR_CYC_NO              = @[cntr_cyc_no]
+                                          AND     DMDT_TRF_CD              = @[dmdt_trf_cd]
+                                          AND     DMDT_CHG_LOC_DIV_CD      = @[dmdt_chg_loc_div_cd]
+                                          AND     CHG_SEQ                  = @[chg_seq]
+                                          AND     ROWNUM                   = 1
+                                          )
+        ) EX			]]></sql>
+			<params>
+				<param name="cntr_tpsz_cd" type="12" value="" out="N"/>
+				<param name="term_cd" type="12" value="" out="N"/>
+				<param name="yd_cd" type="12" value="" out="N"/>
+				<param name="eta_dt" type="12" value="" out="N"/>
+				<param name="fm_mvmt_dt" type="12" value="" out="N"/>
+				<param name="to_mvmt_dt" type="12" value="" out="N"/>
+				<param name="expt_ft_end_dt" type="12" value="" out="N"/>
+				<param name="dmdt_bzc_ft_end_dt" type="12" value="" out="N"/>
+				<param name="cntr_no" type="12" value="" out="N"/>
+				<param name="cntr_cyc_no" type="12" value="" out="N"/>
+				<param name="dmdt_trf_cd" type="12" value="" out="N"/>
+				<param name="dmdt_chg_loc_div_cd" type="12" value="" out="N"/>
+				<param name="chg_seq" type="12" value="" out="N"/>
+				<param name="bzc_rt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

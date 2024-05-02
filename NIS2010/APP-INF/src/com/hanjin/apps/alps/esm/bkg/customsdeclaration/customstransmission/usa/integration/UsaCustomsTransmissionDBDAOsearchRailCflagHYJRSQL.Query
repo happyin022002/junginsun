@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="UsaCustomsTransmissionDBDAOsearchRailCflagHYJRSQL">
+			<desc><![CDATA[이전 Dspo Cd 별 Enter/Release Qty 합산하여 Cntr_Pck_Qty 와 동일할 경우, C-flag =Y or J. 아니면 N]]></desc>
+			<sql><![CDATA[
+SELECT 
+CASE        WHEN (TB.HOLD_QTY - TB.REMV_QTY) > 0 THEN 'H'
+            WHEN TB.PCK_QTY  = TB.Y_ENT_QTY AND TB.PCK_QTY = TB.Y_RLS_QTY THEN 'Y'
+            WHEN Y_TOT_FLG = 'Y' AND TB.PCK_QTY  = TB.Y_TOT_QTY THEN 'Y'
+            WHEN J_QTY = TB.PCK_QTY  THEN 'J'
+            ELSE 'N'
+       END new_cFLAG
+  FROM ( 
+		SELECT 
+         MAX(Y.Y_TOT_FLG) Y_TOT_FLG
+        ,MAX(Y.Y_TOT_QTY) Y_TOT_QTY
+        ,MAX( ( SELECT NVL(SUM(CM.PCK_QTY), 0) qty_69
+                  FROM BKG_CSTMS_ADV_BL A
+                  ,BKG_CSTMS_ADV_BL B
+                  ,BKG_CSTMS_ADV_CNTR C 
+                  ,BKG_CSTMS_ADV_CNTR_MF CM
+                 WHERE 1=1 
+                   AND C.CNT_CD     = 'US'
+                   AND C.CNTR_NO    LIKE TRIM( @[in_cntr] )||'%'
+                   AND B.BL_NO = @[bl_no]
+                   AND A.CNT_CD = B.CNT_CD
+                   AND A.VSL_CD     = B.VSL_CD
+                   AND A.SKD_VOY_NO = B.SKD_VOY_NO
+                   AND A.SKD_DIR_CD = B.SKD_DIR_CD
+                   AND C.CNT_CD     = A.CNT_CD
+                   AND C.BL_NO      = A.BL_NO
+                   AND A.MF_NO IS NULL
+                   AND C.CNT_CD = CM.CNT_CD
+                   AND C.BL_NO = CM.BL_NO
+                   AND C.CNTR_NO = CM.CNTR_NO
+             ) ) PCK_QTY
+            ,SUM(DECODE(CD.CSTMS_DIV_ID, 'CARGO_RLS_Y_CD', DECODE(CD.ATTR_CTNT1, 'ENTR', DECODE(CD.ATTR_CTNT2, 'PLUS', 1, 'MINUS', -1, 0) * RS.CNTR_QTY)))   Y_ENT_QTY
+            ,SUM(DECODE(CD.CSTMS_DIV_ID, 'CARGO_RLS_Y_CD', DECODE(CD.ATTR_CTNT1, 'RLSE', DECODE(CD.ATTR_CTNT2, 'PLUS', 1, 'MINUS', -1, 0) * RS.CNTR_QTY)))   Y_RLS_QTY
+            ,SUM(DECODE(CD.CSTMS_DIV_ID, 'CARGO_RLS_J_CD', DECODE(CD.ATTR_CTNT2, 'PLUS', 1, 'MINUS', -1, 0) * RS.CNTR_QTY ))    J_QTY
+            ,NVL(SUM(DECODE(CD.CSTMS_DIV_ID, 'CARGO_RLS_H_CD', RS.CNTR_QTY))    ,0) HOLD_QTY
+            ,NVL(SUM(DECODE(CD.CSTMS_DIV_ID, 'CARGO_RLS_R_CD', RS.CNTR_QTY))   ,0) REMV_QTY
+            , SUBSTR(  max( LPAD(CSTMS_SEQ,5,0)  ||rs.dspo_cd) ,6)  DSPO
+            , SUBSTR(  max( LPAD(CSTMS_SEQ,5,0)  ||rs.cstms_clr_cd) ,6)  oldCflag
+		  FROM    
+		      (SELECT CNT_CD, BL_NO,CSTMS_SEQ,CNTR_NO,CNTR_QTY,dspo_cd,cstms_clr_cd FROM  BKG_CSTMS_ADV_cntr_RSLT 
+		            UNION ALL
+		       SELECT 'US', @[bl_no], 10000, @[in_cntr], TO_NUMBER(@[icr_qty] ) , @[icr_code],  '' from dual  -- 수신 데이터가 선입력 되지 않아 UNION ALL처리
+		      )RS
+		      ,BKG_CSTMS_CD_CONV_CTNT CD
+              ,BKG_CSTMS_ADV_BL BL
+              ,(
+                SELECT CASE WHEN SUM(FLAG) > 1 THEN 'Y' ELSE 'N' END AS Y_TOT_FLG
+                      ,SUM(CNTR_QTY) Y_TOT_QTY
+                  FROM (
+                        SELECT DECODE(MAX(RS.DSPO_CD),NULL, 0, 1) AS FLAG
+                              ,SUM(DECODE(BL.PCK_QTY, RS.CNTR_QTY, 0, RS.CNTR_QTY)) AS CNTR_QTY
+                          FROM BKG_CSTMS_ADV_CNTR_RSLT RS
+                              ,BKG_CSTMS_ADV_BL BL
+                         WHERE BL.CNT_CD = 'US'
+                           AND BL.BL_NO = @[bl_no]
+                           AND rs.CNTR_NO LIKE TRIM( @[in_cntr]  )||'%'
+                           AND BL.CNT_CD = RS.CNT_CD
+                           AND BL.BL_NO = RS.BL_NO
+                           AND RS.DSPO_CD = '1C'
+                        UNION ALL
+                        SELECT 0 AS FLAG
+                              ,(SUM(RS.CNTR_QTY) * -1) AS CNTR_QTY
+                          FROM BKG_CSTMS_ADV_CNTR_RSLT RS
+                         WHERE RS.CNT_CD = 'US'
+                           AND RS.BL_NO = @[bl_no]
+                           AND rs.CNTR_NO LIKE TRIM( @[in_cntr]  )||'%'                           
+                           AND RS.DSPO_CD = '4A'
+                           AND RS.CSTMS_SEQ > 
+                               (SELECT MIN(CSTMS_SEQ) FROM BKG_CSTMS_ADV_CNTR_RSLT WHERE CNT_CD = 'US' AND BL_NO = @[bl_no] AND DSPO_CD = '1C')
+                        UNION ALL
+                        SELECT DECODE(MAX(RS.DSPO_CD),NULL, 0, 1) AS FLAG
+                              ,SUM(DECODE(BL.PCK_QTY, RS.CNTR_QTY, 0, RS.CNTR_QTY)) AS CNTR_QTY
+                          FROM BKG_CSTMS_ADV_CNTR_RSLT RS
+                              ,BKG_CSTMS_ADV_BL BL
+                         WHERE BL.CNT_CD = 'US'
+                           AND BL.BL_NO = @[bl_no]
+                           AND rs.CNTR_NO LIKE TRIM( @[in_cntr]  )||'%'
+                           AND BL.CNT_CD = RS.CNT_CD
+                           AND BL.BL_NO = RS.BL_NO
+                           AND RS.DSPO_CD = '1W'
+                        UNION ALL
+                        SELECT DECODE(MAX(RS.DSPO_CD),NULL, 0, 1) AS FLAG
+                              ,SUM(DECODE(BL.PCK_QTY, RS.CNTR_QTY, 0, DECODE(SUBSTR(RS.ENTR_NO, 1, 3), 'V5N', 0, RS.CNTR_QTY))) AS CNTR_QTY
+                          FROM BKG_CSTMS_ADV_CNTR_RSLT RS
+                              ,BKG_CSTMS_ADV_BL BL
+                         WHERE BL.CNT_CD = 'US'
+                           AND BL.BL_NO = @[bl_no]
+                           AND rs.CNTR_NO LIKE TRIM( @[in_cntr]  )||'%'
+                           AND BL.CNT_CD = RS.CNT_CD
+                           AND BL.BL_NO = RS.BL_NO
+                           AND RS.DSPO_CD = '1J'
+                       )
+                ) Y
+		 WHERE RS.CNT_CD   = 'US'
+		   AND RS.BL_NO    = @[bl_no]
+		   AND rs.CNTR_NO LIKE TRIM( @[in_cntr]  )||'%'
+           AND RS.CNT_CD   = BL.CNT_CD
+           AND RS.BL_NO    = BL.BL_NO
+		   AND RS.CNT_CD   = CD.CNT_CD(+)
+		   AND RS.DSPO_CD  = CD.ATTR_CTNT3(+)
+#if (${cstms_seq} != '') 
+           AND RS.CSTMS_SEQ NOT IN (${cstms_seq})
+#end
+--           AND RS.CSTMS_SEQ <= NVL( :cstms_seq , 1000 )
+       ) TB			]]></sql>
+			<params>
+				<param name="in_cntr" type="12" value="" out="N"/>
+				<param name="bl_no" type="12" value="" out="N"/>
+				<param name="icr_qty" type="12" value="" out="N"/>
+				<param name="icr_code" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

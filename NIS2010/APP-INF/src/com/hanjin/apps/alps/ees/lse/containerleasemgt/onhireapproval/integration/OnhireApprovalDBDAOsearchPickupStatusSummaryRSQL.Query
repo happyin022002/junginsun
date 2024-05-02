@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="OnhireApprovalDBDAOsearchPickupStatusSummaryRSQL">
+			<desc><![CDATA[장단기 컨테이너 임차 계약 후 픽업승인에 대한 픽업 수량을 SUMMARY 한다.]]></desc>
+			<sql><![CDATA[
+SELECT   NVL(BB, 'G.TTL') AUTH_NO
+       , CC || LTRIM(TO_CHAR(DD , '000000')) AGMT_NO
+       , CC AGMT_CTY_CD
+       , DD AGMT_SEQ
+       , REF_NO
+       , CTRT_NO
+       , NVL(VNDR_ABBR_NM, ' ') VNDR_ABBR_NM
+       , SUM(FF) AS QTY_TOTAL
+         #foreach($key IN ${tysz})
+       , SUM(DECODE(EE, '$key', FF, 0)) $key
+         #end
+       , DECODE(DIV, 1, 'Auth VOL', 2, 'P/UP VOL', 3, 'Balance') DIVSION
+  FROM   (
+           SELECT   NVL(V1.BB, V2.BB) AS BB
+                  , NVL(V1.CC, V2.CC) AS CC
+                  , NVL(V1.DD, V2.DD) AS DD
+                  , NVL(V1.EE, V2.EE) AS EE
+                  , NVL(V1.GG, V2.GG) AS GG
+                  , NVL(V1.HH, V2.HH) AS HH
+                  , CASE V3.DIV_SEQ WHEN 1 THEN NVL(V2.FF, 0)
+                                    WHEN 2 THEN NVL(V1.FF, 0)
+                                    WHEN 3 THEN NVL(V2.FF, 0) - NVL(V1.FF, 0)
+                    END AS FF
+                  , V3.DIV_SEQ AS DIV
+                  , NVL(V2.REF_NO, V1.REF_NO) REF_NO
+                  , NVL(V2.CTRT_NO, V1.CTRT_NO) CTRT_NO
+                  , NVL(V2.VNDR_ABBR_NM, V1.VNDR_ABBR_NM) VNDR_ABBR_NM
+           FROM     (
+                      SELECT   A.CNTR_AUTH_NO BB
+                             , A.AGMT_CTY_CD CC
+                             , A.AGMT_SEQ DD
+                             , B.CNTR_TPSZ_CD EE
+                             , COUNT(A.CNTR_NO) FF
+                             , B.LSTM_CD GG
+                             , DECODE(A.CNTR_OLD_VAN_FLG , 'Y', 'O' , 'N', 'N') HH
+                             , LA.REF_NO
+                             , LA.LSE_CTRT_NO CTRT_NO
+                             , MV.VNDR_LGL_ENG_NM VNDR_ABBR_NM
+                      FROM     MST_CNTR_STS_HIS A
+                             , MST_CONTAINER B
+                             , LSE_AGREEMENT LA
+                             , MDM_VENDOR MV
+                      WHERE    1 = 1
+                      AND      A.CNTR_NO = B.CNTR_NO
+                      AND      SUBSTR(NVL(A.CNTR_STS_RMK, ' '), 1, 6) <> 'SELLOE'
+                      AND      A.CNTR_LSTM_CNG_FLG = 'N'
+                      AND      A.CNTR_STS_CD IN ('LSI','OWN')
+                      AND      A.AGMT_SEQ <> 999990
+                      AND      A.CNTR_AUTH_NO > ' '
+                      AND      LA.AGMT_CTY_CD = A.AGMT_CTY_CD
+                      AND      LA.AGMT_SEQ = A.AGMT_SEQ
+                      AND      MV.VNDR_SEQ = LA.VNDR_SEQ
+#if (${loc_cd} != '' )
+                      AND	   DECODE(@[loc_tp], 'R', A.RCC_CD, 'L', A.LCC_CD, 'S', A.SCC_CD) = @[loc_cd] 
+#end
+
+                      AND      TO_DATE(SUBSTR(A.CNTR_AUTH_NO, 6,8), 'YYYYMMDD') BETWEEN TO_DATE(@[period_stdt], 'YYYYMMDD') AND TO_DATE(@[period_eddt], 'YYYYMMDD')
+                                 
+#if (${auth_no} != '' )
+                      AND      A.CNTR_AUTH_NO      = @[auth_no]
+#end
+
+#if (${lstm_cd_str} != '' )
+                      AND      B.LSTM_CD          IN ( #foreach($key IN ${lstm_cd})
+                                                 #if($velocityCount < $lstm_cd.size())
+                                                    '$key',
+                                                 #else
+                                                    '$key'
+                                                 #end
+                                             #end )
+#end
+
+#if (${cntr_tpsz_cd_str} != '' ) 
+                      AND      B.CNTR_TPSZ_CD     IN ( #foreach($key IN ${cntr_tpsz_cd})
+                                                   #if($velocityCount < $cntr_tpsz_cd.size())
+                                                      '$key',
+                                                   #else
+                                                      '$key'
+                                                   #end
+                                               #end )
+#end
+
+#if (${agmt_seq} != '' )                              
+                      AND      A.AGMT_CTY_CD       = @[agmt_cty_cd]
+                      AND      A.AGMT_SEQ          = @[agmt_seq]
+#end
+
+#if (${pkup_due_dt} != '' )
+                      AND      EXISTS ( SELECT   1
+                                    FROM     LSE_ONH_APRO S
+                                    WHERE    S.CNTR_ONH_AUTH_NO  = A.CNTR_AUTH_NO
+                                    AND      S.AGMT_CTY_CD       = A.AGMT_CTY_CD
+                                    AND      S.AGMT_SEQ          = A.AGMT_SEQ
+                                    AND      S.PKUP_DUE_DT      <= TO_DATE(@[pkup_due_dt], 'YYYYMMDD')
+                                    AND      ROWNUM              = 1
+                                  )
+#end
+
+#if (${new_van_tp_cd} == 'N' )
+                      AND      A.CNTR_OLD_VAN_FLG  = 'N'
+#elseif(${new_van_tp_cd} == 'O' )
+                      AND      A.CNTR_OLD_VAN_FLG  = 'Y'
+#end
+
+                      GROUP BY A.CNTR_AUTH_NO
+                             , A.AGMT_CTY_CD
+                             , A.AGMT_SEQ
+                             , B.CNTR_TPSZ_CD
+                             , B.LSTM_CD
+                             , DECODE(A.CNTR_OLD_VAN_FLG , 'Y', 'O' , 'N', 'N')
+                             , REF_NO
+                             , LSE_CTRT_NO
+                             , VNDR_LGL_ENG_NM
+                    ) V1 
+                    FULL OUTER JOIN
+                    (
+                      SELECT   A.CNTR_ONH_AUTH_NO BB
+                             , A.AGMT_CTY_CD CC
+                             , A.AGMT_SEQ DD
+                             , B.CNTR_TPSZ_CD EE
+                             , B.ONH_QTY FF
+                             , A.LSTM_CD GG
+                             , B.NEW_VAN_TP_CD HH
+                             , LA.REF_NO
+                             , LA.LSE_CTRT_NO CTRT_NO
+                             , MV.VNDR_LGL_ENG_NM VNDR_ABBR_NM
+                      FROM     LSE_ONH_APRO A
+                             , LSE_ONH_APRO_QTY B
+                             , LSE_AGREEMENT LA
+                             , MDM_VENDOR MV
+                      WHERE    1 = 1
+                      AND      A.CNTR_ONH_AUTH_NO = B.CNTR_ONH_AUTH_NO
+                      AND      A.AGMT_CTY_CD = B.AGMT_CTY_CD
+                      AND      A.AGMT_SEQ = B.AGMT_SEQ
+                      AND      B.ONH_QTY <> 0
+                      AND      A.DELT_FLG = 'N'
+                      AND      LA.AGMT_CTY_CD = A.AGMT_CTY_CD
+                      AND      LA.AGMT_SEQ = A.AGMT_SEQ
+                      AND      MV.VNDR_SEQ = LA.VNDR_SEQ
+
+#if (${loc_cd} != '' )
+                      AND     A.ONH_LOC_CD         IN ( SELECT DISTINCT LCC_CD
+                                                    FROM   MDM_EQ_ORZ_CHT A
+                                                    WHERE  DECODE(@[loc_tp], 'R', A.RCC_CD, 'L', A.LCC_CD, 'S', A.SCC_CD) = @[loc_cd])
+#end
+
+                      AND     TO_DATE(SUBSTR(B.CNTR_ONH_AUTH_NO , 6,8), 'YYYYMMDD') BETWEEN TO_DATE(@[period_stdt], 'YYYYMMDD') AND TO_DATE(@[period_eddt], 'YYYYMMDD')
+
+#if (${auth_no} != '' )
+                      AND     A.CNTR_ONH_AUTH_NO  = @[auth_no] 
+#end
+
+#if (${lstm_cd_str} != '' )
+                      AND     A.LSTM_CD           IN ( #foreach($key IN ${lstm_cd})
+                                                      #if($velocityCount < $lstm_cd.size())
+                                                        '$key',
+                                                      #else
+                                                        '$key'
+                                                      #end
+                                                    #end )
+#end
+
+#if (${cntr_tpsz_cd_str} != '' )
+                      AND     B.CNTR_TPSZ_CD      IN ( #foreach($key IN ${cntr_tpsz_cd})
+                                                        #if($velocityCount < $cntr_tpsz_cd.size())
+                                                           '$key',
+                                                        #else
+                                                           '$key'
+                                                        #end
+                                                    #end )
+#end
+
+#if (${agmt_seq} != '' )
+                      AND     A.AGMT_CTY_CD       = @[agmt_cty_cd] 
+                      AND     A.AGMT_SEQ          = @[agmt_seq] 
+#end
+
+#if (${pkup_due_dt} != '' )
+                      AND     A.PKUP_DUE_DT      <= TO_DATE(@[pkup_due_dt], 'YYYYMMDD')
+#end
+
+#if (${new_van_tp_cd} != '' )
+                      AND     B.NEW_VAN_TP_CD      = @[new_van_tp_cd]
+#else 
+                      AND     B.NEW_VAN_TP_CD      IN ('N', 'O')
+#end                
+
+                    ) V2
+           ON       V1.BB = V2.BB
+           AND      V1.CC = V2.CC
+           AND      V1.DD = V2.DD
+           AND      V1.EE = V2.EE
+           AND      V1.GG = V2.GG
+           AND      V1.HH = V2.HH
+                  , ( SELECT LEVEL AS DIV_SEQ FROM DUAL CONNECT BY LEVEL <= 3 ) V3
+#if (${bal_tp} == '0' )
+           WHERE NVL(V1.FF,0) = NVL(V2.FF,0)
+#elseif (${bal_tp} == '1' )
+           WHERE NVL(V1.FF,0) != NVL(V2.FF,0)
+#end
+         )
+GROUP BY GROUPING SETS ((BB,CC,DD,DIV,REF_NO,CTRT_NO,VNDR_ABBR_NM), (DIV))
+ORDER BY BB
+       , CC
+       , DD
+       , DIV 			]]></sql>
+			<params>
+				<param name="loc_tp" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="period_stdt" type="12" value="" out="N"/>
+				<param name="period_eddt" type="12" value="" out="N"/>
+				<param name="auth_no" type="12" value="" out="N"/>
+				<param name="agmt_cty_cd" type="12" value="" out="N"/>
+				<param name="agmt_seq" type="12" value="" out="N"/>
+				<param name="pkup_due_dt" type="12" value="" out="N"/>
+				<param name="new_van_tp_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

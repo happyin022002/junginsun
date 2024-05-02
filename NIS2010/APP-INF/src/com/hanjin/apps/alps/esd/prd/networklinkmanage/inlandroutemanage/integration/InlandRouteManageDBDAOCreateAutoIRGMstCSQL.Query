@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="InlandRouteManageDBDAOCreateAutoIRGMstCSQL">
+			<desc><![CDATA[inland route를 생성해야 할 것의 마스터 정보를 생성]]></desc>
+			<sql><![CDATA[
+INSERT INTO PRD_INLND_ROUT_MST
+( 
+      ROUT_ORG_NOD_CD
+    , ROUT_DEST_NOD_CD
+    , ROUT_SEQ
+    , PRIO_SEQ
+    , INLND_ROUT_BKG_FLG
+    , PCTL_IO_BND_CD
+    , CRE_OFC_CD
+    , INLND_ROUT_TMP_FLG
+    , DELT_FLG
+    , HUB_NOD_CD
+    , TRSP_MOD_CD
+    , FULL_RTN_YD_CD
+    , FULL_PKUP_YD_CD
+    , CRE_USR_ID
+    , CRE_DT
+    , UPD_USR_ID
+    , UPD_DT
+    , AUTO_IRG_FLG
+)
+SELECT SUBQ.ROUT_ORG_NOD_CD
+     , SUBQ.ROUT_DEST_NOD_CD
+     , TO_NUMBER(@[rout_seq]) AS ROUT_SEQ
+     , 9999 AS PRIOR_SEQ  -- 가장 낮은 값을 기본으로 한다.(Park Mangeon 20100713)
+     , 'N' AS INLND_ROUT_BKG_FLG
+     , SUBQ.PCTL_IO_BND_CD
+     , @[ofc_cd]
+     , 'Y' AS INLND_ROUT_TMP_FLG
+     , 'N' AS DELT_FLG
+     , (SELECT HLOC.HUB_LOC_CD
+         FROM PRD_HUB_LOC_MTCH HLOC
+        WHERE HLOC.PORT_CD = SUBSTR(DECODE(PCTL_IO_BND_CD, 'O', SUBQ.ROUT_DEST_NOD_CD, SUBQ.ROUT_ORG_NOD_CD), 1,5)
+          AND HLOC.LOC_CD = SUBSTR(DECODE(PCTL_IO_BND_CD, 'O', SUBQ.ROUT_ORG_NOD_CD, SUBQ.ROUT_DEST_NOD_CD), 1,5)
+        ) AS HUB_NOD_CD
+     , SUBQ.TRSP_MOD_CD
+     , SUBQ.FULL_RTN_YD_CD
+     , SUBQ.FULL_PKUP_YD_CD
+     , @[usr_id]
+     , SYSDATE
+     , @[usr_id]
+     , SYSDATE
+     , 'Y'
+FROM (
+       SELECT MAX(RDTL.ROUT_ORG_NOD_CD) AS ROUT_ORG_NOD_CD
+             , MAX(RDTL.ROUT_DEST_NOD_CD) AS ROUT_DEST_NOD_CD
+             , RDTL.PCTL_IO_BND_CD
+             , DECODE( MAX(DECODE(ERNK.TRSP_MOD_CD, 'TD', 100, 0))
+                     + MAX(DECODE(ERNK.TRSP_MOD_CD, 'RD',  10, 0))
+                     + MAX(DECODE(ERNK.TRSP_MOD_CD, 'WD',   1, 0))
+                     , 111, 'TR' -- 모델에 없는 경우로 해당 경우 TR로 임시처리 (Park Mangeon 20100713)
+                     , 110, 'TR', 101, 'TW', 100, 'TD'
+                     ,  11, 'RW',  10, 'RD'
+                     ,   1, 'WD', NULL ) AS TRSP_MOD_CD
+             , SUBSTR(MIN(LPAD(RDTL.PCTL_SEQ, 3, ' ') || RDTL.ORG_NOD_CD ),4, 7) AS FULL_RTN_YD_CD
+             , SUBSTR(MAX(LPAD(RDTL.PCTL_SEQ, 3, ' ') || RDTL.DEST_NOD_CD), 4,7) AS FULL_PKUP_YD_CD
+        FROM PRD_PROD_CTL_ROUT_DTL RDTL
+           , PRD_INLND_EACH_LNK ERNK
+        WHERE ( RDTL.PCTL_NO, RDTL.PCTL_SEQ )
+                 IN (SELECT PCTL_NO, PCTL_SEQ
+                    FROM (
+                        SELECT RDTL.PCTL_NO, RDTL.PCTL_SEQ
+                             , MIN(DECODE(RDTL.ROUT_ORG_NOD_CD, RDTL.ORG_NOD_CD, RDTL.PCTL_SEQ)) OVER (PARTITION BY RDTL.PCTL_IO_BND_CD) SEQ_FM
+                             , MAX(DECODE(RDTL.ROUT_DEST_NOD_CD, RDTL.DEST_NOD_CD, RDTL.PCTL_SEQ)) OVER (PARTITION BY RDTL.PCTL_IO_BND_CD) SEQ_TO
+                         FROM PRD_PROD_CTL_ROUT_DTL RDTL
+                         WHERE RDTL.PCTL_NO = @[pctl_no]
+                         AND RDTL.PCTL_IO_BND_CD = @[io_bnd_cd]
+                         AND RDTL.TRSP_MOD_CD <> 'X'
+                         AND RDTL.ROUT_SEQ = -1 )-- 향후 Sequence 반영을 감안해 999999999에서 -1로 대체함
+
+                       WHERE PCTL_SEQ BETWEEN SEQ_FM AND SEQ_TO )
+         AND PCTL_IO_BND_CD = @[io_bnd_cd]
+         AND RDTL.TRSP_MOD_CD <> 'X'
+         AND ERNK.LNK_ORG_NOD_CD(+) = RDTL.ORG_NOD_CD
+         AND ERNK.LNK_DEST_NOD_CD(+) = RDTL.DEST_NOD_CD
+         AND ERNK.TRSP_MOD_CD(+) = RDTL.TRSP_MOD_CD
+         GROUP BY RDTL.PCTL_IO_BND_CD
+     ) SUBQ			]]></sql>
+			<params>
+				<param name="rout_seq" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="pctl_no" type="12" value="" out="N"/>
+				<param name="io_bnd_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

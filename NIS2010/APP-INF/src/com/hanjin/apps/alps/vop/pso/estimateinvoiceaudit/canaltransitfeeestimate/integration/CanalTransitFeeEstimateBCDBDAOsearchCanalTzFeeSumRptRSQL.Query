@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CanalTransitFeeEstimateBCDBDAOsearchCanalTzFeeSumRptRSQL">
+			<desc><![CDATA[searchCanalTzFeeSumRpt
+2014.08.12 이윤정 [CHM-201431550] Canal Transit List내 Pay to 조회 로직 변경 (기존에 MDM에서 보여주는 방식에서 PSO_CNL_TZ_FEE 에서 지정된 Vendor 를 보여주도록 로직 변경)
+2015.02.02  [CHM-201533847] PORT내 SKIP여부 처리]]></desc>
+			<sql><![CDATA[
+SELECT 
+   pay_to
+  ,lane
+  ,vvd
+  ,transit_date trns_dt
+  ,DECODE (flg,0, py_due_dt) py_due_dt
+  ,decode(flg, 0, decode(advance_payment_sts, 'Q',1, 'A',10, 'P',12, 0), -1) adv_py_sts
+  ,advance_payment_revmonth adv_py_rev_mon
+  ,invoice_sts
+  ,decode(flg, 0, decode(invoice_sts, 'Q',1, 'Q1',1, 'Q2',2,'Q3',3,'Q4',4,'Q5',5,'Q6',6,'Q7',7,'Q8',8,'Q9',9,'A',10,'P',12, 0), -1) inv_sts
+  ,invoice_revmonth inv_rev_mon
+  ,decode(flg, 1, decode(msa,'Q',1, 'A',10, 0), -1) msa
+  ,result rslt
+  , ESEQ
+  , ISEQ
+  , YD_CD
+  , CALL_SEQ
+  ,'' revyrmon
+  ,'' port_cd
+  ,vndr_seq vndr_seq
+  ,'' vsl_slan_cd
+FROM (  
+    SELECT  (   
+                SELECT  VNDR_LGL_ENG_NM
+                FROM    MDM_VENDOR
+                WHERE   PAY_TO      = VNDR_SEQ
+                AND     DELT_FLG    = 'N'
+            ) PAY_TO,
+            DECODE(VVDSUBTTLFLG, 1, NULL, LANE) LANE, VVD,
+            DECODE(VVDSUBTTLFLG, 1, NULL, TRANSIT_DATE) TRANSIT_DATE, 
+            (select TO_CHAR(NVL(p.ap_pay_dt,x.due_dt), 'YYYY-MM-DD') 
+			   from pso_charge x, ap_pay_inv p
+			  where x.ISS_CTY_CD = T11.ISS_CTY_CD 
+			  and x.SO_SEQ = T11.SO_SEQ
+			  and x.inv_no = p.inv_no(+)
+			  and p.delt_flg(+) = 'N'
+			  ) py_due_dt,
+            DECODE(VVDSUBTTLFLG, 1, NULL, ADVANCE_PAYMENT_STS) ADVANCE_PAYMENT_STS,
+            DECODE(VVDSUBTTLFLG, 1, NULL, ADVANCE_PAYMENT_REVMONTH) ADVANCE_PAYMENT_REVMONTH, DECODE(VVDSUBTTLFLG, 1, NULL, INVOICE_STS) INVOICE_STS,
+            DECODE(VVDSUBTTLFLG, 1, NULL, INVOICE_REVMONTH) INVOICE_REVMONTH,
+            DECODE(VVDSUBTTLFLG, 0, NULL, (
+                                            SELECT  PSO_MSA_STS_CD
+                                            FROM    PSO_MSA
+                                            WHERE   REV_YRMON   = replace(@[revyrmon],'-', '')/*'200906'*/
+                                            AND     VNDR_SEQ    = PAY_TO
+                                            )) MSA,
+            DECODE(VVDSUBTTLFLG, 1, NULL, RESULT) RESULT
+            , ISS_CTY_CD
+            , SO_SEQ
+            , ESEQ
+            , ISEQ
+            , PAY_TO VNDR_SEQ
+            , VVDSUBTTLFLG FLG
+            , YD_CD
+			, CALL_SEQ
+    FROM
+           (
+            SELECT  GROUPING(VSL_CD||SKD_VOY_NO||SKD_DIR_CD) VVDSUBTTLFLG,
+                    PAY_TO, MAX(LANE) LANE, VSL_CD||SKD_VOY_NO||SKD_DIR_CD VVD,--VSL_CD, SKD_VOY_NO, SKD_DIR_CD,
+                    MAX(TRANSIT_DATE) TRANSIT_DATE, MAX(ADVANCE_PAYMENT_STS) ADVANCE_PAYMENT_STS,
+                    MAX(ADVANCE_PAYMENT_REVMONTH) ADVANCE_PAYMENT_REVMONTH, MAX(INVOICE_STS) INVOICE_STS,
+                    MAX(INVOICE_REVMONTH) INVOICE_REVMONTH, MAX(RESULT) RESULT
+                    ,MAX(ISS_CTY_CD) ISS_CTY_CD
+                    ,MAX(SO_SEQ) SO_SEQ
+                    ,MAX(ESEQ) ESEQ
+                    ,MAX(ISEQ) ISEQ
+                    ,YD_CD
+					,MAX(CALL_SEQ) CALL_SEQ
+            FROM    (
+                    SELECT  
+--                            (
+--                                SELECT  CNL_AGN_VNDR_SEQ
+--                                FROM    MDM_VSL_SVC_LANE T1
+--                                WHERE   T1.VSL_SLAN_CD  = T2.VSL_SLAN_CD
+--                            ) PAY_TO,
+CNL_AGN_VNDR_SEQ AS PAY_TO,
+                            (
+                                SELECT  VSL_SLAN_CD
+                                FROM    MDM_VSL_SVC_LANE T1
+                                WHERE   VSL_SLAN_CD  = T2.VSL_SLAN_CD
+                            ) LANE
+                            ,T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD,T3.YD_CD,
+                            (
+                                SELECT  TO_CHAR(VPS_ETD_DT, 'YYYY-MM-DD')
+                                FROM    VSK_VSL_PORT_SKD
+                                WHERE   VSL_CD       = T3.VSL_CD
+                                AND     SKD_VOY_NO   = T3.SKD_VOY_NO
+                                AND     SKD_DIR_CD   = T3.SKD_DIR_CD
+                                AND     VPS_PORT_CD  = SUBSTR(T3.YD_CD, 1, 5)
+                                AND     YD_CD        = T3.YD_CD 
+                            ) AS TRANSIT_DATE     
+                            ,(
+                                NVL((	SELECT DECODE(INV_STS_CD,'D','P',CNL_TZ_PROC_STS_CD)
+										  FROM PSO_CNL_TZ_FEE A, PSO_CHARGE B, AP_PAY_INV D
+									  	 WHERE A.ISS_CTY_CD   = B.ISS_CTY_CD(+)
+										   AND A.SO_SEQ       = B.SO_SEQ(+)
+										   AND B.INV_RGST_NO  = D.INV_RGST_NO(+)
+										   AND A.VSL_CD       = T3.VSL_CD
+										   AND A.SKD_VOY_NO   = T3.SKD_VOY_NO
+										   AND A.SKD_DIR_CD   = T3.SKD_DIR_CD
+										   AND A.YD_CD        = T3.YD_CD
+										   AND A.CNL_TZ_BZTP_CD = 'E'  ), 'X')
+                            ) AS ADVANCE_PAYMENT_STS
+                            ,(
+                                NVL((SELECT  REV_YRMON
+                                    FROM    PSO_CNL_TZ_FEE
+                                    WHERE   VSL_CD       = T3.VSL_CD
+                                    AND     SKD_VOY_NO   = T3.SKD_VOY_NO
+                                    AND     SKD_DIR_CD   = T3.SKD_DIR_CD
+                                    AND     YD_CD        = T3.YD_CD
+                                    AND     'E'          = CNL_TZ_BZTP_CD), '')
+                            ) AS ADVANCE_PAYMENT_REVMONTH
+                            ,(
+     					  	 NVL((
+      							  SELECT
+            					  DECODE(D.INV_STS_CD,'D','P', CNL_TZ_PROC_STS_CD ||
+            						decode(CNL_TZ_PROC_STS_CD, 'Q',(
+               						 SELECT  NVL(SUM(DECODE(CNL_TZ_BZTP_CD||CNL_TZ_PROC_STS_CD, 'IQ', 1, 0)), 0)
+                					 FROM    PSO_CNL_TZ_FEE A
+                					 WHERE   VSL_CD       = T3.VSL_CD
+                					 AND     SKD_VOY_NO   = T3.SKD_VOY_NO
+                					 AND     SKD_DIR_CD   = T3.SKD_DIR_CD
+                					 AND     YD_CD        = T3.YD_CD
+                					 AND     'I'          = CNL_TZ_BZTP_CD))
+        							)            
+        						FROM    PSO_CNL_TZ_FEE A, PSO_CHARGE B, AP_PAY_INV D
+        						WHERE   A.ISS_CTY_CD   = B.ISS_CTY_CD(+)
+        						AND   A.SO_SEQ       = B.SO_SEQ(+)
+        						AND   B.INV_RGST_NO  = D.INV_RGST_NO(+)
+        						AND   A.VSL_CD       = T3.VSL_CD
+        						AND   A.SKD_VOY_NO   = T3.SKD_VOY_NO
+        						AND   A.SKD_DIR_CD   = T3.SKD_DIR_CD
+        						AND   A.YD_CD        = T3.YD_CD
+        						AND     'I'          = CNL_TZ_BZTP_CD
+        						AND     NTC_YRMON    = replace(@[revyrmon],'-', '')/*'200906'*/)
+    						, '')
+
+                            ) AS INVOICE_STS    
+                            ,(
+                                NVL((SELECT  REV_YRMON
+                                    FROM    PSO_CNL_TZ_FEE
+                                    WHERE   VSL_CD       = T3.VSL_CD
+                                    AND     SKD_VOY_NO   = T3.SKD_VOY_NO
+                                    AND     SKD_DIR_CD   = T3.SKD_DIR_CD
+                                    AND     'I'          = CNL_TZ_BZTP_CD
+                                    AND     YD_CD        = T3.YD_CD  
+                                    AND     NTC_YRMON    = replace(@[revyrmon],'-', '')/*'200906'*/), '')
+                            ) AS INVOICE_REVMONTH
+                            ,(
+                                NVL((SELECT  MAX(DIFF_RMK)
+                                    FROM    PSO_CNL_TZ_FEE
+                                    WHERE   VSL_CD       = T3.VSL_CD
+                                    AND     SKD_VOY_NO   = T3.SKD_VOY_NO
+                                    AND     SKD_DIR_CD   = T3.SKD_DIR_CD
+                                    AND     YD_CD        = T3.YD_CD   
+                    --                AND     ('E', 'I'          = CNL_TZ_BZTP_CD
+                                    AND     NTC_YRMON    = replace(@[revyrmon],'-', '')/*'200906'*/), '')
+                            ) AS RESULT      
+                            ,(SELECT ISS_CTY_CD FROM PSO_CNL_TZ_FEE
+                                    WHERE   VSL_CD       = T3.VSL_CD
+                                    AND     SKD_VOY_NO   = T3.SKD_VOY_NO
+                                    AND     SKD_DIR_CD   = T3.SKD_DIR_CD
+                                    AND     YD_CD        = T3.YD_CD
+                                    AND     'E'          = CNL_TZ_BZTP_CD) ISS_CTY_CD
+                            ,(SELECT SO_SEQ FROM PSO_CNL_TZ_FEE
+                                    WHERE   VSL_CD       = T3.VSL_CD
+                                    AND     SKD_VOY_NO   = T3.SKD_VOY_NO
+                                    AND     SKD_DIR_CD   = T3.SKD_DIR_CD
+                                    AND     YD_CD        = T3.YD_CD
+                                    AND     'E'          = CNL_TZ_BZTP_CD) SO_SEQ
+                            ,(SELECT MAX(CALL_SEQ) FROM PSO_CNL_TZ_FEE
+                                    WHERE   VSL_CD       = T3.VSL_CD
+                                    AND     SKD_VOY_NO   = T3.SKD_VOY_NO
+                                    AND     SKD_DIR_CD   = T3.SKD_DIR_CD
+                                    AND     YD_CD        = T3.YD_CD
+                                    AND     'E'          = CNL_TZ_BZTP_CD) ESEQ
+                            ,(SELECT MAX(CALL_SEQ) FROM PSO_CNL_TZ_FEE
+                                    WHERE   VSL_CD       = T3.VSL_CD
+                                    AND     SKD_VOY_NO   = T3.SKD_VOY_NO
+                                    AND     SKD_DIR_CD   = T3.SKD_DIR_CD
+                                    AND     YD_CD        = T3.YD_CD
+                                    AND     NTC_YRMON    = replace(@[revyrmon],'-', '')
+                                    AND     'I'          = CNL_TZ_BZTP_CD) ISEQ
+							,NVL (
+                                              (SELECT   MAX(x.CALL_SEQ)
+                                                 FROM   PSO_CNL_TZ_FEE x
+                                                WHERE   x.PSO_BZTP_CD =
+                                                           T1.PSO_BZTP_CD
+                                                        AND T1.VSL_CD = x.VSL_CD
+                                                        AND T1.SKD_VOY_NO =
+                                                              x.SKD_VOY_NO
+                                                        AND T1.SKD_DIR_CD =
+                                                              x.SKD_DIR_CD
+                                                        AND T1.VSL_CD = x.VSL_CD
+                                                        AND x.YD_CD = T3.YD_CD),
+                                              1
+                                           )     /*TODO : FOR TEST GARA DATA*/
+                                              CALL_SEQ
+                    FROM    ( -- CHM-201431550 : Canal Transit List내 Pay to 조회 로직 변경 
+                                SELECT PSO_BZTP_CD,VSL_CD,SKD_VOY_NO,SKD_DIR_CD,CNL_AGN_VNDR_SEQ,YD_CD
+                                FROM (
+                                        SELECT PSO_BZTP_CD,VSL_CD,SKD_VOY_NO,SKD_DIR_CD,CNL_AGN_VNDR_SEQ,YD_CD
+                                        ,CNT,CASE WHEN CNT > 1 AND CNL_AGN_VNDR_SEQ IS NULL THEN 'N' ELSE 'Y' END DIS
+                                        FROM (
+                                                SELECT  PSO_BZTP_CD, VSL_CD,SKD_VOY_NO,SKD_DIR_CD
+                                                       ,CNL_AGN_VNDR_SEQ,YD_CD
+                                                       ,COUNT(1) OVER (PARTITION BY PSO_BZTP_CD, VSL_CD,SKD_VOY_NO,SKD_DIR_CD,CNL_AGN_VNDR_SEQ) CNT
+                                                       ,MIN(SORT) SORT
+                                                  FROM    (
+                                                        SELECT  5 PSO_BZTP_CD, VSL_CD,SKD_VOY_NO,SKD_DIR_CD, CNL_AGN_VNDR_SEQ, 'T' SORT,
+                                                                 ( SELECT DECODE(VNDR_CNT_CD,'EG','EGSUZT1','PAPACT1')  
+                                                                     FROM MDM_VENDOR 
+                                                                    WHERE VNDR_SEQ = M.CNL_AGN_VNDR_SEQ ) AS YD_CD
+                                                        FROM    PSO_TGT_VVD T, VSK_CNL_VNDR M
+                                                        WHERE   PSO_BZTP_CD = '5'
+                                                        AND     EXPN_YRMON = replace(@[revyrmon],'-', '')--'200906'                   
+                                                        AND     T.VSL_SLAN_CD = M.VSL_SLAN_CD                 
+                                                        UNION ALL
+                                                        SELECT 5 PSO_BZTP_CD, VSL_CD,SKD_VOY_NO,SKD_DIR_CD,vndr_seq AS CNL_AGN_VNDR_SEQ, 'C',YD_CD
+                                                         FROM    PSO_CNL_TZ_FEE
+                                                        WHERE   PSO_BZTP_CD = '5'
+                                                        AND     NTC_YRMON = replace(@[revyrmon],'-', '')--'200906'
+                                                    )        
+                                                GROUP BY PSO_BZTP_CD, VSL_CD,SKD_VOY_NO,SKD_DIR_CD,CNL_AGN_VNDR_SEQ,YD_CD
+                                        )
+                                        WHERE 1=1
+                                        AND 'Y' = (CASE WHEN CNT > 1 AND SORT = 'T' THEN 'N' ELSE 'Y' END)--PSO_TGT_VVD 와 PSO_CNL_TZ_FEE 다른 Vendor 를 가진경우 PSO_TGT_VVD 조회 결과는 무시.
+                                )
+                                GROUP BY PSO_BZTP_CD, VSL_CD,SKD_VOY_NO,SKD_DIR_CD,CNL_AGN_VNDR_SEQ,YD_CD
+                            ) T1, VSK_VSL_SKD T2, PSO_TGT_YD_SKD T3
+                    WHERE   T1.VSL_CD       = T2.VSL_CD     (+)
+                    AND     T1.SKD_VOY_NO   = T2.SKD_VOY_NO (+)
+                    AND     T1.SKD_DIR_CD   = T2.SKD_DIR_CD (+)
+                    AND     T1.VSL_CD       = T3.VSL_CD     (+)
+                    AND     T1.SKD_VOY_NO   = T3.SKD_VOY_NO (+)
+                    AND     T1.SKD_DIR_CD   = T3.SKD_DIR_CD (+)
+                    AND     T1.PSO_BZTP_CD  = T3.PSO_BZTP_CD(+)
+                    AND     T1.YD_CD        = T3.YD_CD      (+)
+                    AND   ( NVL(T3.SKD_CNG_STS_CD,' ') <>  'S'
+                          OR (  NVL(T3.SKD_CNG_STS_CD,' ') =  'S'
+                                 AND  EXISTS ( SELECT * FROM PSO_CHARGE A, PSO_CHG_DTL B
+                                                WHERE A.ISS_CTY_CD  = B.ISS_CTY_CD
+                                                  AND A.SO_SEQ      = B.SO_SEQ
+                                                  AND B.VSL_CD      = T1.VSL_CD
+                                                  AND B.SKD_VOY_NO  = T1.SKD_VOY_NO
+                                                  AND B.SKD_DIR_CD  = T1.SKD_DIR_CD
+                                                  AND A.YD_CD       = T3.YD_CD )) )
+                    )
+            GROUP BY YD_CD, PAY_TO, ROLLUP (VSL_CD||SKD_VOY_NO||SKD_DIR_CD)
+            ) T11
+)        
+where 1 = 1
+  AND YD_CD IS NOT NULL
+#if( ${revyrmon}!='')
+AND replace(@[revyrmon],'-', '') = replace(@[revyrmon],'-', '')
+#end
+#if( ${port_cd}!='' && ${port_cd}!='All' )
+AND YD_CD = @[port_cd]
+#end
+#if( ${vndr_seq}!='')
+AND vndr_seq in (SELECT   REGEXP_SUBSTR (inlist,
+                                        '[^|]+',
+                                        1,
+                                        b.rn)
+                  FROM   (SELECT    @[vndr_seq] inlist FROM DUAL) a,
+                         (SELECT   ROWNUM rn
+                            FROM   dict
+                           WHERE   ROWNUM <= 571) b
+                 WHERE   b.rn <=
+                              LENGTH ( @[vndr_seq] )
+                            - LENGTH (REPLACE ( @[vndr_seq], '|', ''))
+                            + 1)
+#end
+#if( ${vsl_slan_cd}!='')
+AND LANE = @[vsl_slan_cd]
+#end
+order by pay_to, transit_date, lane, vvd			]]></sql>
+			<params>
+				<param name="revyrmon" type="12" value="" out="N"/>
+				<param name="port_cd" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="12" value="" out="N"/>
+				<param name="vsl_slan_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="VesselReportDBDAOVslDepRptNotRcvVORSQL">
+			<desc><![CDATA[주어진 조건에 대한 Lane별 Departure Report Not Receive 현황을 조회한다.
+
+History
+[CHM-201537930] Not Matched칼럼 미조회 Report 로직 수정]]></desc>
+			<sql><![CDATA[
+SELECT  VSL_SLAN_CD
+        , VSL_CD||SKD_VOY_NO||SKD_DIR_CD VVD
+        , VPS_PORT_CD
+        , NXT_PORT_CD
+        , CLPT_IND_SEQ
+		, TO_CHAR(VPS_ETD_DT, 'YYYY-MM-DD') AS VPS_ETD_DT
+        , VSL_ENG_NM
+FROM (
+        SELECT    T1.SLAN_CD AS VSL_SLAN_cD
+                , T1.VSL_CD
+                , T1.SKD_VOY_NO
+                , T1.SKD_DIR_CD
+                , T1.VPS_PORT_CD
+                , T1.NXT_PORT_CD
+                , T1.CLPT_IND_SEQ, T1.CLPT_SEQ
+                , T1.VPS_ETD_DT 
+                , DECODE((SELECT DISTINCT 'X'   FROM FCM_DEP_RPT WHERE VSL_CD=T1.VSL_CD
+                                                AND SKD_VOY_NO=T1.SKD_VOY_NO
+                                                AND SKD_DIR_CD=T1.SKD_DIR_CD
+                                                AND DEP_PORT_CD=T1.VPS_PORT_CD
+                                                AND CLPT_IND_SEQ=T1.CLPT_IND_SEQ
+                                                ), 'X', 1, 0) DEP_RPT_CNT
+                , T5.VSL_ENG_NM
+        FROM    (
+                SELECT     T3.SLAN_CD 
+                          , T3.VSL_CD
+                          , T3.SKD_VOY_NO
+                          , T3.SKD_DIR_CD
+                          , T3.VPS_ETA_DT
+                          , T3.VPS_ETB_DT
+                          , T3.VPS_ETD_DT
+                          , T3.TURN_PORT_IND_CD
+                          , T3.SKD_CNG_STS_CD
+                          , T4.VSL_SLAN_DIR_SEQ AS DIR_SEQ
+                          , T3.VPS_PORT_CD
+                          , T3.YD_CD
+                          , T3.CLPT_IND_SEQ
+                          , T3.CLPT_SEQ
+                          , T1.ACT_CRR_CD
+                          , LEAD(T3.VPS_PORT_CD  ) OVER (PARTITION BY T3.VSL_CD ORDER BY T3.SKD_VOY_NO, T4.VSL_SLAN_DIR_SEQ, T3.CLPT_SEQ)        AS NXT_PORT_CD
+                          , LEAD(T3.CLPT_SEQ     ) OVER (PARTITION BY T3.VSL_CD ORDER BY T3.SKD_VOY_NO, T4.VSL_SLAN_DIR_SEQ, T3.CLPT_SEQ)        AS NXT_CLPT_SEQ
+                
+                FROM        VSK_VSL_SKD T1
+                          , VSK_VSL_PORT_SKD T3
+                          , MDM_VSL_SVC_LANE_DIR T4
+                WHERE       1=1
+                AND         T1.VSL_CD       = T3.VSL_CD
+                AND         T1.SKD_VOY_NO   = T3.SKD_VOY_NO
+                AND         T1.SKD_DIR_CD   = T3.SKD_DIR_CD
+                AND         T3.SLAN_CD      = T4.VSL_SLAN_CD
+                AND         T3.SKD_DIR_CD   = T4.VSL_SLAN_DIR_CD
+                AND         T3.TURN_PORT_IND_CD NOT IN ('D', 'V', 'F')
+    		#if( ${fm_dt} != '' )
+        		AND T3.VPS_ETD_DT BETWEEN TO_DATE(REPLACE(@[fm_dt], '-', ''), 'YYYY-MM-DD')-10     -- UI Condition : Period From
+       			AND TO_DATE(REPLACE(@[to_dt], '-', ''), 'YYYY-MM-DD')+0365 -- UI Condition : Period To
+    		#end
+
+                ORDER BY    T3.VSL_CD, T3.SKD_VOY_NO, T4.VSL_SLAN_DIR_SEQ, T3.SKD_DIR_CD, T3.CLPT_SEQ
+        ) T1, MDM_VSL_SVC_LANE T2, MDM_VSL_CNTR T5
+        
+        WHERE 1=1
+        AND T1.SLAN_CD=T2.VSL_SLAN_CD
+        AND T1.VSL_CD=T5.VSL_CD
+        AND T2.VSL_SVC_TP_CD<>'O'
+        AND NVL(T1.ACT_CRR_CD, T5.CRR_CD)='SML'
+        AND T1.TURN_PORT_IND_CD IN ('Y','N')
+        AND NVL(T1.SKD_CNG_STS_CD, 'X')<>'S'
+    #if( ${fm_dt} != '' )
+        AND T1.VPS_ETD_DT BETWEEN TO_DATE(REPLACE(@[fm_dt], '-', ''), 'YYYY-MM-DD')     -- UI Condition : Period From
+        AND TO_DATE(REPLACE(@[to_dt], '-', ''), 'YYYY-MM-DD')+0.99999 -- UI Condition : Period To
+    #end
+    #if( ${vsl_slan_cd} != '' )								  
+    -- UI Condition : Lane Code
+        AND T1.SLAN_CD IN (                     
+            #foreach($sVslSlanCd in ${vel_vsl_slan_cd})  
+                '$sVslSlanCd',  
+                #end  
+                '') 
+    #end
+    #if( ${vsl_cd} != '' )
+        -- UI Condition : Vessel Code
+        AND T1.VSL_CD IN (                     
+            #foreach($sVslCd in ${vel_vsl_cd})  
+                '$sVslCd',  
+                #end  
+                '') 
+    #end
+    #if( ${vps_port_cd} != '' )
+        -- UI Condition : Port Code
+        AND T1.VPS_PORT_CD IN (                     
+            #foreach($sVpsPortCd in ${vel_vps_port_cd})  
+                '$sVpsPortCd',  
+                #end  
+                '') 
+    #end
+    #if( ${skd_dir_cd} != '' )
+        -- UI Condition : Direction Code
+        AND T1.SKD_DIR_CD=@[skd_dir_cd]
+    #end
+)
+WHERE   1=1
+AND DEP_RPT_CNT = 0
+ORDER BY VSL_CD, VPS_ETD_DT			]]></sql>
+			<params>
+				<param name="fm_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

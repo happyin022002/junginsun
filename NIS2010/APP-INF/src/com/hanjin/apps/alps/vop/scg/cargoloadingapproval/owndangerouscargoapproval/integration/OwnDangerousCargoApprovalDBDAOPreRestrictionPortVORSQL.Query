@@ -1,0 +1,496 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="OwnDangerousCargoApprovalDBDAOPreRestrictionPortVORSQL">
+			<desc><![CDATA[Pre Checking Report 화면의 Port Restrictions En-route 목록을 가져온다.]]></desc>
+			<sql><![CDATA[
+##------------------------------------------------------------------------------------
+##설명
+##1. WITH UN_NO_TBL : 컨테이너별 Un No. 의 임시 테이블을 생성한다.
+##2. PORT_RSTR_TBL1 : 1번에 대하여 Un No. 별  Port제한사항을 적용하여 임시 테이블을 생성한다.
+##3. PORT_RSTR_TBL2 : 1번에 대하여 Class 별 Port제한사항을 적용하여 임시 테이블을 생성한다.
+##4. VSL_RSTR_TBL1  : 1번에 대하여 Un No. 별  Vessel제한사항을 적용하여 임시 테이블을 생성한다. -by 이도형(2009.12.28)
+##5. BKG_VVD_TBL    : Port에 대한 Vessel 스케쥴 정보에서 자사(Booking)/타사(POL,POD)의 POL/POD 구간을 추출하여 임시 테이블을 생성한다.
+##6. ROUTE_TBL      : 4번에 대한 전체 Route를 구성한 임시 테이블을 생성한다.
+##7. <Main Query>   : 전체 Route에 대한 POL,POD,T/S,Pass,Skip Port를 기본적으로 구성한 후 컨테이너별 Un No.에 대한 Prohibition여부 정보 목록을 생성한다.
+##------------------------------------------------------------------------------------
+WITH UN_NO_TBL AS ( 
+##     SELECT TUN.IMDG_UN_NO 
+##          , TUN.IMDG_UN_NO_SEQ 
+##          , TUN.IMDG_CLSS_CD 
+##       FROM ( 
+##             SELECT UN.IMDG_UN_NO 
+##                  , UN.IMDG_UN_NO_SEQ 
+##                  , UN.IMDG_CLSS_CD 
+##               FROM SCG_IMDG_UN_NO UN 
+##              WHERE 1=1 
+##                AND ( 
+###foreach(${obj} in ${opt_obj}) 
+##                   (UN.IMDG_CLSS_CD   = '$obj.getImdgClssCd()' 
+##                AND UN.IMDG_UN_NO     = '$obj.getImdgUnNo()' 
+##                AND UN.IMDG_UN_NO_SEQ = '$obj.getImdgUnNoSeq()') 
+##     #if($velocityCount < ${obj_size}) 
+##                 OR 
+##     #end 
+###end 
+##                    ) 
+##             ) TUN 
+##      GROUP BY 
+##            TUN.IMDG_UN_NO 
+##          , TUN.IMDG_UN_NO_SEQ 
+##          , TUN.IMDG_CLSS_CD 
+#foreach(${obj} in ${opt_obj}) 
+		SELECT '$obj.getSpclCntrSeq()' AS SPCL_CNTR_SEQ 
+		     , '$obj.getSpclCgoSeq()'  AS SPCL_CGO_SEQ 
+		     , '$obj.getImdgUnNo()'    AS IMDG_UN_NO 
+		     , '$obj.getImdgUnNoSeq()' AS IMDG_UN_NO_SEQ 
+		     , '$obj.getImdgClssCd()'  AS IMDG_CLSS_CD 
+		  FROM DUAL 
+		#if($velocityCount < ${obj_size}) 
+		UNION ALL 
+		#end 
+#end 
+), 
+PORT_RSTR_TBL2 AS ( 
+		SELECT CC.PROHI_LOD_FLG 
+    		 , CC.PROHI_DCHG_FLG 
+             , CC.PROHI_TS_FLG
+    		 , CC.PROHI_PASS_FLG 
+    		 , CC.PORT_CD 
+    		 , UT.SPCL_CNTR_SEQ 
+    		 , UT.SPCL_CGO_SEQ 
+    		 , UT.IMDG_UN_NO 
+    		 , UT.IMDG_UN_NO_SEQ 
+    		 , CC.IMDG_CLSS_CD 
+    		 , CC.IMDG_PORT_RSTR_SEQ 
+		  FROM UN_NO_TBL          UT 
+		     , SCG_IMDG_PORT_RSTR CC 
+		 WHERE UT.IMDG_CLSS_CD   = CC.IMDG_CLSS_CD 
+		   AND CC.IMDG_UN_NO     IS NULL 
+		   AND CC.IMDG_UN_NO_SEQ IS NULL 
+),
+PORT_RSTR_TBL1 AS ( 
+		SELECT RR.PROHI_LOD_FLG 
+      	     , RR.PROHI_DCHG_FLG 
+             , RR.PROHI_TS_FLG
+      	     , RR.PROHI_PASS_FLG 
+      	     , RR.PORT_CD 
+	    	 , UT.SPCL_CNTR_SEQ 
+		     , UT.SPCL_CGO_SEQ 
+		     , UT.IMDG_UN_NO 
+		     , UT.IMDG_UN_NO_SEQ 
+		     , UT.IMDG_CLSS_CD 
+		     , RR.IMDG_PORT_RSTR_SEQ 
+             , 'U' AS R_TYPE
+             , (
+                SELECT DISTINCT 'Y'
+                  FROM SCG_IMDG_PORT_RSTR INC
+                 WHERE INC.IMDG_CLSS_CD   = RR.IMDG_CLSS_CD
+                   AND INC.PORT_CD        = RR.PORT_CD
+                   AND INC.IMDG_UN_NO     IS NULL
+                   AND INC.IMDG_UN_NO_SEQ IS NULL
+               ) C_TYPE
+		  FROM UN_NO_TBL          UT 
+		     , SCG_IMDG_PORT_RSTR RR 
+		 WHERE UT.IMDG_UN_NO     = RR.IMDG_UN_NO 
+		   AND UT.IMDG_UN_NO_SEQ = RR.IMDG_UN_NO_SEQ 
+		   AND UT.IMDG_CLSS_CD   = RR.IMDG_CLSS_CD 
+        UNION ALL
+        SELECT RT2.PROHI_LOD_FLG 
+      	     , RT2.PROHI_DCHG_FLG 
+             , RT2.PROHI_TS_FLG
+      	     , RT2.PROHI_PASS_FLG 
+      	     , RT2.PORT_CD 
+	    	 , RT2.SPCL_CNTR_SEQ 
+		     , RT2.SPCL_CGO_SEQ 
+		     , RT2.IMDG_UN_NO 
+		     , RT2.IMDG_UN_NO_SEQ 
+		     , RT2.IMDG_CLSS_CD 
+		     , RT2.IMDG_PORT_RSTR_SEQ 
+             , 'C' AS R_TYPE
+             , 'Y' AS C_TYPE
+          FROM PORT_RSTR_TBL2 RT2
+         WHERE (RT2.IMDG_UN_NO,RT2.IMDG_UN_NO_SEQ,RT2.IMDG_CLSS_CD,RT2.PORT_CD) NOT IN(
+                SELECT EXR.IMDG_UN_NO, EXR.IMDG_UN_NO_SEQ, EXR.IMDG_CLSS_CD, EXR.PORT_CD
+                  FROM SCG_IMDG_PORT_RSTR EXR
+                 WHERE EXR.IMDG_UN_NO     IS NOT NULL
+		           AND EXR.IMDG_UN_NO_SEQ IS NOT NULL
+		           AND EXR.IMDG_CLSS_CD   IS NOT NULL
+               )
+		), 
+VSL_RSTR_TBL1 AS (
+		SELECT 'N' PROHI_LOD_FLG
+    		 , 'N' PROHI_DCHG_FLG
+		     , 'Y' PROHI_TS_FLG
+		     , 'N' PROHI_PASS_FLG
+		     , 'T' PORT_TYPE
+		     , UT.SPCL_CNTR_SEQ
+		     , UT.SPCL_CGO_SEQ
+			 , UT.IMDG_UN_NO
+		     , UT.IMDG_UN_NO_SEQ
+			 , UT.IMDG_CLSS_CD
+		     , VR.IMDG_CRR_RSTR_SEQ
+	     FROM  UN_NO_TBL          UT
+    		 , SCG_IMDG_CRR_RSTR VR
+    	WHERE UT.IMDG_UN_NO     = VR.IMDG_UN_NO
+      	  AND UT.IMDG_UN_NO_SEQ = VR.IMDG_UN_NO_SEQ
+    	  AND UT.IMDG_CLSS_CD   = VR.IMDG_CLSS_CD
+	      AND VR.IMDG_CRR_RSTR_EXPT_CD = 'T'
+    	  AND VR.VSL_OPR_TP_CD = 'SML'
+),
+BKG_VVD_TBL AS 
+( 
+SELECT BV.BKG_NO
+     , BV.VSL_PRE_PST_CD
+     , BV.VSL_SEQ
+     , BV.SLAN_CD
+     , BV.VSL_CD
+     , BV.SKD_VOY_NO
+     , BV.SKD_DIR_CD
+     , BV.POL_CD
+     , BV.POD_CD
+     , VP1.CLPT_SEQ POL_SEQ
+     , VP2.CLPT_SEQ POD_SEQ    
+  FROM BKG_VVD          BV
+     , VSK_VSL_PORT_SKD VP1
+     , VSK_VSL_PORT_SKD VP2
+ WHERE BV.BKG_NO           = @[bkg_no]
+   AND BV.VSL_CD           = VP1.VSL_CD(+)
+   AND BV.SKD_VOY_NO       = VP1.SKD_VOY_NO(+)
+   AND BV.SKD_DIR_CD       = VP1.SKD_DIR_CD(+)
+   AND BV.SLAN_CD          = VP1.SLAN_CD(+)
+   AND BV.POL_CD           = VP1.VPS_PORT_CD(+)
+   AND BV.POL_CLPT_IND_SEQ = VP1.CLPT_IND_SEQ(+)
+   AND BV.VSL_CD           = VP2.VSL_CD(+)
+   AND BV.SKD_VOY_NO       = VP2.SKD_VOY_NO(+) 
+   AND BV.SKD_DIR_CD       = VP2.SKD_DIR_CD(+)
+   AND BV.SLAN_CD          = VP2.SLAN_CD(+)
+   AND BV.POD_CD           = VP2.VPS_PORT_CD(+)
+   AND BV.POD_CLPT_IND_SEQ = VP2.CLPT_IND_SEQ(+)
+UNION ALL
+SELECT '' BKG_NO
+     , 'T' VSL_PRE_PST_CD
+     , 0 VSL_SEQ
+     , VP.SLAN_CD
+     , VP.VSL_CD
+     , VP.SKD_VOY_NO
+     , VP.SKD_DIR_CD
+     , MAX(DECODE(VP.VPS_PORT_CD||VP.CLPT_IND_SEQ,@[pol_cd],VP.VPS_PORT_CD,'')) POL_CD 
+     , MAX(DECODE(VP.VPS_PORT_CD||VP.CLPT_IND_SEQ,@[pod_cd],VP.VPS_PORT_CD,'')) POD_CD 
+     , SUM(DECODE(VP.VPS_PORT_CD||VP.CLPT_IND_SEQ,@[pol_cd],VP.CLPT_SEQ, 0))    POL_SEQ
+     , SUM(DECODE(VP.VPS_PORT_CD||VP.CLPT_IND_SEQ,@[pod_cd],VP.CLPT_SEQ, 0))    POD_SEQ
+  FROM VSK_VSL_PORT_SKD VP
+ WHERE VP.VPS_PORT_CD||VP.CLPT_IND_SEQ IN(@[pol_cd],@[pod_cd])
+   AND VP.VSL_CD     = @[vsl_cd]
+   AND VP.SKD_VOY_NO = @[skd_voy_no]
+   AND VP.SKD_DIR_CD = @[skd_dir_cd]
+   AND VP.SLAN_CD    = @[slan_cd]
+ GROUP BY
+       VP.SLAN_CD
+     , VP.VSL_CD
+     , VP.SKD_VOY_NO
+     , VP.SKD_DIR_CD
+),
+ROUTE_TBL AS
+(
+SELECT TVP2.PORT_CD
+     , TVP2.ORDER_NUM1 ORDER_NUM1
+     , TVP2.ORDER_NUM2 ORDER_NUM2
+     , DECODE(TVP2.SKD_CNG_STS_CD,'S','S', DECODE(TVP2.POL_SEQ,1,'L',DECODE(TVP2.POD_SEQ,1,'D',DECODE(TVP2.PORT_CD,TVP2.POD_CD,'T','P')))) PORT_TYPE
+     , TVP2.VVD_CD
+  FROM 
+      (
+      SELECT TVP1.PORT_CD
+           , TVP1.POD_CD
+           , TVP1.ORDER_NUM1
+           , TVP1.ORDER_NUM2
+           , TVP1.SKD_CNG_STS_CD
+           , RANK() OVER(ORDER BY TVP1.ORDER_NUM1, TVP1.ORDER_NUM2)                              POL_SEQ
+           , DENSE_RANK() OVER(ORDER BY TVP1.ORDER_NUM1 DESC, TVP1.ORDER_NUM2 DESC)              POD_SEQ
+	       , ROW_NUMBER() OVER(PARTITION BY TVP1.PORT_CD, TVP1.CLPT_IND_SEQ ORDER BY TVP1.PORT_CD, TVP1.ORDER_NUM1) TS_DUP_NUM
+           , TVP1.VVD_CD
+        FROM 
+            (
+            SELECT VPS.VPS_PORT_CD                              AS PORT_CD
+                 , VT1.POD_CD                 
+                 , VT1.VSL_PRE_PST_CD||VT1.VSL_SEQ              AS ORDER_NUM1
+                 , VPS.CLPT_SEQ                                 AS ORDER_NUM2
+                 , VPS.CLPT_IND_SEQ
+                 , NVL(SKD_CNG_STS_CD,'')                       AS SKD_CNG_STS_CD
+                 , (VPS.VSL_CD||VPS.SKD_VOY_NO||VPS.SKD_DIR_CD) AS VVD_CD
+              FROM VSK_VSL_PORT_SKD VPS
+                 , BKG_VVD_TBL      VT1
+             WHERE VPS.VSL_CD     = VT1.VSL_CD
+               AND VPS.SKD_VOY_NO = VT1.SKD_VOY_NO
+               AND VPS.SKD_DIR_CD = VT1.SKD_DIR_CD
+               AND VPS.SLAN_CD    = VT1.SLAN_CD
+               AND VPS.CLPT_SEQ  >= VT1.POL_SEQ
+               AND VPS.CLPT_SEQ  <= VT1.POD_SEQ       
+             GROUP BY VPS.VPS_PORT_CD  
+                    , VT1.POD_CD     
+                    , VT1.VSL_PRE_PST_CD||VT1.VSL_SEQ      
+                    , VPS.CLPT_SEQ     
+                    , VPS.CLPT_IND_SEQ       
+                    , NVL(SKD_CNG_STS_CD,'')
+                    , (VPS.VSL_CD||VPS.SKD_VOY_NO||VPS.SKD_DIR_CD)
+             UNION ALL
+             SELECT VPS.VPS_PORT_CD                 AS PORT_CD
+                  , VT1.POD_CD                 
+                  , VT1.VSL_PRE_PST_CD||VT1.VSL_SEQ AS ORDER_NUM1 
+                  , 1                               AS ORDER_NUM2
+                  , '1'                             AS CLPT_IND_SEQ
+                  , 'X'                             AS SKD_CNG_STS_CD
+                  , ''                              AS VVD_CD
+              FROM VSK_VSL_PORT_SKD VPS
+                 , BKG_VVD_TBL      VT1   
+             WHERE VT1.VSL_CD IS NULL
+               AND (VPS.VPS_PORT_CD = VT1.POL_CD
+                OR VPS.VPS_PORT_CD = VT1.POD_CD)   
+             GROUP BY
+                   VPS.VPS_PORT_CD
+                 , VT1.POD_CD                 
+                 , VT1.VSL_PRE_PST_CD||VT1.VSL_SEQ
+             ) TVP1
+       ) TVP2
+ WHERE TVP2.TS_DUP_NUM = 1
+ ORDER BY TVP2.ORDER_NUM1, TVP2.ORDER_NUM2
+)
+SELECT FT.PORT_TYPE
+     , FT.PORT_CD
+     , FT.IMDG_CMPTN_AUTH_DESC
+	 , FT.RESTRICTION_REQ
+     , FT.TXT_DESC
+     , FT.SPCL_CNTR_SEQ
+     , FT.SPCL_CGO_SEQ
+     , FT.IMDG_UN_NO
+     , FT.IMDG_UN_NO_SEQ 
+     , FT.ORDER_NUM1
+     , FT.ORDER_NUM2
+     , FT.VVD_CD
+FROM (
+SELECT TT.PORT_TYPE 
+     , TT.PORT_CD 
+	 -- Prohibition/Restriction
+	 -- Restriction은 3가지 이나 Permit일때만 UI에 표시
+	 , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'Prohibition',TT.IMDG_CMPTN_AUTH_DESC,'Permit', 'Restriction',''),TT.IMDG_CMPTN_AUTH_DESC) AS IMDG_CMPTN_AUTH_DESC 
+     -- No Need/Permit/Declare
+	 , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'No Need',TT.IMDG_CMPTN_AUTH_DESC,'Declare',TT.IMDG_CMPTN_AUTH_DESC,'Permit',TT.IMDG_CMPTN_AUTH_DESC,''),DECODE(TT.IMDG_CMPTN_AUTH_DESC, 'Prohibition', '',TT.IMDG_CMPTN_AUTH_DESC)) AS RESTRICTION_REQ
+	 , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'Prohibition',TT.TXT_DESC,TT.TXT_DESC),TT.TXT_DESC)                         AS TXT_DESC
+	 , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'Prohibition',TT.SPCL_CNTR_SEQ,'Permit',TT.SPCL_CNTR_SEQ,''),TT.SPCL_CNTR_SEQ)               AS SPCL_CNTR_SEQ 
+	 , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'Prohibition',TT.SPCL_CGO_SEQ,'Permit',TT.SPCL_CGO_SEQ,''),TT.SPCL_CGO_SEQ)                 AS SPCL_CGO_SEQ 
+	 , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'Prohibition',TT.IMDG_UN_NO,'Permit',TT.IMDG_UN_NO,''),TT.IMDG_UN_NO)                     AS IMDG_UN_NO 
+	 , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'Prohibition',TT.IMDG_UN_NO_SEQ,'Permit',TT.IMDG_UN_NO_SEQ,''),TT.IMDG_UN_NO_SEQ)             AS IMDG_UN_NO_SEQ 
+     , TT.ORDER_NUM1
+     , TT.ORDER_NUM2
+     , TT.VVD_CD
+  FROM ( 
+		SELECT ST.PORT_TYPE 
+    		 , ST.PORT_CD 
+    		 , ST.IMDG_CMPTN_AUTH_DESC 
+    		 , ST.TXT_DESC 
+    		 , ST.SPCL_CNTR_SEQ 
+    	     , ST.SPCL_CGO_SEQ 
+    		 , ST.IMDG_UN_NO 
+    		 , ST.IMDG_UN_NO_SEQ 
+    		 , ST.ORDER_NUM1
+             , ST.ORDER_NUM2
+    		 , ROW_NUMBER() OVER(PARTITION BY ST.PORT_TYPE, ST.PORT_CD ORDER BY ST.ORDER_NUM1, ST.ORDER_NUM2, DECODE(NVL(ST.IMDG_CMPTN_AUTH_DESC,''),'Prohibition',0,'',1,2)) AS NUM
+             , ST.VVD_CD
+		  FROM ( 
+			SELECT DECODE(RT.PORT_TYPE,'S','Skip','L','POL','D','POD','T','T/S','Pass') PORT_TYPE 
+		         , RT.PORT_CD 
+        		 , DECODE(RT.PORT_TYPE,'S','',
+                          DECODE(                          
+                                CASE WHEN R.R_TYPE='C' THEN NULL  
+                                     ELSE
+                                         CASE WHEN ((R.IMDG_UN_NO=C.IMDG_UN_NO AND R.IMDG_UN_NO_SEQ=C.IMDG_UN_NO_SEQ) OR (R.C_TYPE IS NULL AND (R.IMDG_UN_NO!=C.IMDG_UN_NO OR R.IMDG_UN_NO_SEQ!=C.IMDG_UN_NO_SEQ)) OR C.IMDG_UN_NO IS NULL) THEN   
+                                                   CASE WHEN RT.PORT_TYPE='L' THEN
+                                                             CASE WHEN R.PROHI_LOD_FLG='Y' THEN 'Prohibition'                                                                  
+                                                                  ELSE DECODE(LD.IMDG_CMPTN_AUTH_CD,'P','Permit','D','Declare','N','No Need')
+                                                             END
+                                                        WHEN RT.PORT_TYPE='D' THEN
+                                                             CASE WHEN R.PROHI_DCHG_FLG='Y' THEN 'Prohibition'
+                                                                  ELSE DECODE(DD.IMDG_CMPTN_AUTH_CD,'P','Permit','D','Declare','N','No Need')
+                                                             END
+                                                        WHEN RT.PORT_TYPE='T' THEN
+                                                             CASE WHEN R.PROHI_TS_FLG='Y' THEN 'Prohibition'
+                                                                  ELSE DECODE(TD.IMDG_CMPTN_AUTH_CD,'P','Permit','D','Declare','N','No Need')
+                                                             END
+                                                        WHEN RT.PORT_TYPE='P' THEN
+                                                             CASE WHEN R.PROHI_PASS_FLG='Y' THEN 'Prohibition'
+                                                                  ELSE DECODE(PD.IMDG_CMPTN_AUTH_CD,'P','Permit','D','Declare','N','No Need')
+                                                             END
+                                                        ELSE 'X'
+                                                   END
+                                              ELSE 'X'
+                                         END
+                                END
+                                ,NULL,
+                                CASE WHEN (R.IMDG_UN_NO=C.IMDG_UN_NO AND R.IMDG_UN_NO_SEQ=C.IMDG_UN_NO_SEQ AND C.IMDG_UN_NO IS NOT NULL) THEN   
+                                          CASE WHEN RT.PORT_TYPE='L' THEN
+                                                    CASE WHEN C.PROHI_LOD_FLG='Y' THEN 'Prohibition'
+                                                         ELSE DECODE(LC.IMDG_CMPTN_AUTH_CD,'P','Permit','D','Declare','N','No Need')
+                                                    END
+                                               WHEN RT.PORT_TYPE='D' THEN
+                                                    CASE WHEN C.PROHI_DCHG_FLG='Y' THEN 'Prohibition'
+                                                         ELSE DECODE(DC.IMDG_CMPTN_AUTH_CD,'P','Permit','D','Declare','N','No Need')
+                                                    END
+                                               WHEN RT.PORT_TYPE='T' THEN
+                                                    CASE WHEN C.PROHI_TS_FLG='Y' THEN 'Prohibition'
+                                                         ELSE DECODE(TC.IMDG_CMPTN_AUTH_CD,'P','Permit','D','Declare','N','No Need')
+                                                    END
+                                               WHEN RT.PORT_TYPE='P' THEN
+                                                    CASE WHEN C.PROHI_PASS_FLG='Y' THEN 'Prohibition'
+                                                         ELSE DECODE(PC.IMDG_CMPTN_AUTH_CD,'P','Permit','D','Declare','N','No Need')
+                                                    END
+                                               ELSE 'X'
+                                          END
+                                     ELSE 'X'
+                                END
+                                ,'X','',
+                                CASE WHEN ((R.IMDG_UN_NO=C.IMDG_UN_NO AND R.IMDG_UN_NO_SEQ=C.IMDG_UN_NO_SEQ) OR (R.C_TYPE IS NULL AND (R.IMDG_UN_NO!=C.IMDG_UN_NO OR R.IMDG_UN_NO_SEQ!=C.IMDG_UN_NO_SEQ)) OR C.IMDG_UN_NO IS NULL) THEN   
+                                          CASE WHEN RT.PORT_TYPE='L' THEN
+                                                    CASE WHEN R.PROHI_LOD_FLG='Y' THEN 'Prohibition'                                                                  
+                                                         ELSE DECODE(LD.IMDG_CMPTN_AUTH_CD,'P','Permit','D','Declare','N','No Need')
+                                                    END
+                                               WHEN RT.PORT_TYPE='D' THEN
+                                                    CASE WHEN R.PROHI_DCHG_FLG='Y' THEN 'Prohibition'
+                                                         ELSE DECODE(DD.IMDG_CMPTN_AUTH_CD,'P','Permit','D','Declare','N','No Need')
+                                                    END
+                                               WHEN RT.PORT_TYPE='T' THEN
+                                                    CASE WHEN R.PROHI_TS_FLG='Y' THEN 'Prohibition'
+                                                         ELSE DECODE(TD.IMDG_CMPTN_AUTH_CD,'P','Permit','D','Declare','N','No Need')
+                                                    END
+                                               WHEN RT.PORT_TYPE='P' THEN
+                                                    CASE WHEN R.PROHI_PASS_FLG='Y' THEN 'Prohibition'
+                                                         ELSE DECODE(PD.IMDG_CMPTN_AUTH_CD,'P','Permit','D','Declare','N','No Need')
+                                                    END
+                                               ELSE 'X'
+                                          END
+                                     ELSE 'X'
+                                END
+                          )
+                   ) IMDG_CMPTN_AUTH_DESC 
+				 , DECODE(RT.PORT_TYPE,'S','',DECODE(R.R_TYPE,'U',DECODE(RT.PORT_TYPE,'L',LD.TXT_DESC,'D',DD.TXT_DESC,'T',TD.TXT_DESC,PD.TXT_DESC)
+                                                                 ,DECODE(RT.PORT_TYPE,'L',LC.TXT_DESC,'D',DC.TXT_DESC,'T',TC.TXT_DESC,PC.TXT_DESC))) TXT_DESC 
+        		 , DECODE(RT.PORT_TYPE,'S','',DECODE(R.R_TYPE,'U',R.SPCL_CNTR_SEQ,C.SPCL_CNTR_SEQ))               SPCL_CNTR_SEQ 
+        		 , DECODE(RT.PORT_TYPE,'S','',DECODE(R.R_TYPE,'U',R.SPCL_CGO_SEQ,C.SPCL_CGO_SEQ))                 SPCL_CGO_SEQ 
+        		 , DECODE(RT.PORT_TYPE,'S','',DECODE(R.R_TYPE,'U',R.IMDG_UN_NO,C.IMDG_UN_NO))                     IMDG_UN_NO 
+        		 , DECODE(RT.PORT_TYPE,'S','',DECODE(R.R_TYPE,'U',R.IMDG_UN_NO_SEQ,C.IMDG_UN_NO_SEQ))             IMDG_UN_NO_SEQ 
+        		 , RT.ORDER_NUM1
+                 , RT.ORDER_NUM2
+                 , RT.VVD_CD
+		      FROM ROUTE_TBL              RT
+        		 , PORT_RSTR_TBL1         R 
+        		 , SCG_IMDG_PORT_RSTR_DTL LD 
+        		 , SCG_IMDG_PORT_RSTR_DTL DD 
+                 , SCG_IMDG_PORT_RSTR_DTL TD
+        		 , SCG_IMDG_PORT_RSTR_DTL PD 
+        		 , PORT_RSTR_TBL2         C 
+        		 , SCG_IMDG_PORT_RSTR_DTL LC 
+        		 , SCG_IMDG_PORT_RSTR_DTL DC 
+                 , SCG_IMDG_PORT_RSTR_DTL TC
+        		 , SCG_IMDG_PORT_RSTR_DTL PC
+		     WHERE RT.PORT_CD             = R.PORT_CD(+)
+               AND RT.PORT_CD             = C.PORT_CD(+)
+		 
+      		   AND R.PORT_CD              = LD.PORT_CD(+) 
+      		   AND R.IMDG_PORT_RSTR_SEQ   = LD.IMDG_PORT_RSTR_SEQ(+) 
+      		   AND LD.PORT_PROHI_TP_CD(+) = 'L' 
+      		   AND R.PORT_CD              = DD.PORT_CD(+) 
+      		   AND R.IMDG_PORT_RSTR_SEQ   = DD.IMDG_PORT_RSTR_SEQ(+) 
+      		   AND DD.PORT_PROHI_TP_CD(+) = 'D' 
+               AND R.PORT_CD              = TD.PORT_CD(+) 
+      		   AND R.IMDG_PORT_RSTR_SEQ   = TD.IMDG_PORT_RSTR_SEQ(+) 
+      		   AND TD.PORT_PROHI_TP_CD(+) = 'T'
+      		   AND R.PORT_CD              = PD.PORT_CD(+) 
+      		   AND R.IMDG_PORT_RSTR_SEQ   = PD.IMDG_PORT_RSTR_SEQ(+) 
+      		   AND PD.PORT_PROHI_TP_CD(+) = 'P' 
+      		 
+      		   AND C.PORT_CD              = LC.PORT_CD(+) 
+      	       AND C.IMDG_PORT_RSTR_SEQ   = LC.IMDG_PORT_RSTR_SEQ(+) 
+      		   AND LC.PORT_PROHI_TP_CD(+) = 'L' 
+      		   AND C.PORT_CD              = DC.PORT_CD(+) 
+      		   AND C.IMDG_PORT_RSTR_SEQ   = DC.IMDG_PORT_RSTR_SEQ(+) 
+      		   AND DC.PORT_PROHI_TP_CD(+) = 'D' 
+               AND C.PORT_CD              = TC.PORT_CD(+) 
+      		   AND C.IMDG_PORT_RSTR_SEQ   = TC.IMDG_PORT_RSTR_SEQ(+) 
+      		   AND TC.PORT_PROHI_TP_CD(+) = 'T'
+      		   AND C.PORT_CD              = PC.PORT_CD(+) 
+      		   AND C.IMDG_PORT_RSTR_SEQ   = PC.IMDG_PORT_RSTR_SEQ(+) 
+      		   AND PC.PORT_PROHI_TP_CD(+) = 'P'
+
+			--Un No. 별  Vessel제한사항을 적용한다. -by 이도형(2009.12.28)--
+			UNION ALL
+			SELECT PORT_TYPE
+				 , PORT_CD
+				 , IMDG_CMPTN_AUTH_DESC
+				 , TXT_DESC
+				 , SPCL_CNTR_SEQ
+				 , SPCL_CGO_SEQ
+				 , IMDG_UN_NO
+				 , IMDG_UN_NO_SEQ
+				 , ORDER_NUM1
+				 , ORDER_NUM2
+                 , VVD_CD
+			FROM (
+				SELECT DECODE(RT.PORT_TYPE,'S','Skip','L','POL','D','POD','T','T/S','Pass') PORT_TYPE 
+			         , RT.PORT_CD 
+        			 , DECODE(RT.PORT_TYPE,'S','',
+							DECODE(RT.PORT_TYPE,'T',
+								DECODE(R.PROHI_TS_FLG,'Y','Prohibition',NULL)
+							)
+					   ) IMDG_CMPTN_AUTH_DESC
+    	        	 , DECODE(RT.PORT_TYPE,'S','',DECODE(RT.PORT_TYPE,'T','SML allow UN No. '||R.IMDG_UN_NO||' only for the direct calling from POL to POD')) TXT_DESC
+	    	         , DECODE(RT.PORT_TYPE,'S','',R.SPCL_CNTR_SEQ)             SPCL_CNTR_SEQ
+     	    	     , DECODE(RT.PORT_TYPE,'S','',R.SPCL_CGO_SEQ)              SPCL_CGO_SEQ
+          			 , DECODE(RT.PORT_TYPE,'S','',R.IMDG_UN_NO)                IMDG_UN_NO
+	            	 , DECODE(RT.PORT_TYPE,'S','',R.IMDG_UN_NO_SEQ)            IMDG_UN_NO_SEQ
+    	        	 , RT.ORDER_NUM1
+        	    	 , RT.ORDER_NUM2
+                     , RT.VVD_CD
+				  FROM ROUTE_TBL             RT
+	            	 , VSL_RSTR_TBL1         R
+				 WHERE RT.PORT_TYPE          = R.PORT_TYPE(+)
+				)
+			WHERE IMDG_CMPTN_AUTH_DESC IS NOT NULL
+			--Un No. 별  Vessel제한사항을 적용한다 끝. -by 이도형(2009.12.28)--
+
+		  ) ST 
+  ) TT 
+ WHERE NUM = 1 
+ OR IMDG_CMPTN_AUTH_DESC = 'Prohibition'
+ GROUP BY
+       TT.PORT_TYPE
+     , TT.PORT_CD
+     , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'Prohibition',TT.IMDG_CMPTN_AUTH_DESC,'Permit', 'Restriction',''),TT.IMDG_CMPTN_AUTH_DESC)
+	 , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'No Need',TT.IMDG_CMPTN_AUTH_DESC,'Declare',TT.IMDG_CMPTN_AUTH_DESC,'Permit',TT.IMDG_CMPTN_AUTH_DESC,''),DECODE(TT.IMDG_CMPTN_AUTH_DESC, 'Prohibition', '',TT.IMDG_CMPTN_AUTH_DESC))
+     , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'Prohibition',TT.TXT_DESC,TT.TXT_DESC),TT.TXT_DESC)
+     , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'Prohibition',TT.SPCL_CNTR_SEQ,'Permit',TT.SPCL_CNTR_SEQ,''),TT.SPCL_CNTR_SEQ)      
+     , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'Prohibition',TT.SPCL_CGO_SEQ,'Permit',TT.SPCL_CGO_SEQ,''),TT.SPCL_CGO_SEQ)          
+     , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'Prohibition',TT.IMDG_UN_NO,'Permit',TT.IMDG_UN_NO,''),TT.IMDG_UN_NO)               
+     , DECODE(TT.NUM,1,DECODE(TT.IMDG_CMPTN_AUTH_DESC,'Prohibition',TT.IMDG_UN_NO_SEQ,'Permit',TT.IMDG_UN_NO_SEQ,''),TT.IMDG_UN_NO_SEQ)         
+     , TT.ORDER_NUM1
+     , TT.ORDER_NUM2
+     , TT.VVD_CD
+) FT
+ ORDER BY
+       FT.ORDER_NUM1
+     , FT.ORDER_NUM2
+     , FT.SPCL_CNTR_SEQ
+     , TO_NUMBER(FT.SPCL_CGO_SEQ)
+     , FT.IMDG_UN_NO
+     , FT.IMDG_UN_NO_SEQ
+	 , FT.TXT_DESC DESC			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="slan_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

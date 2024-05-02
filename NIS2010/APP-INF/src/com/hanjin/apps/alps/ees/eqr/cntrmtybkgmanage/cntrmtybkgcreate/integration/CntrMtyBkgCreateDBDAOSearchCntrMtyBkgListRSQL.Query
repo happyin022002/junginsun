@@ -1,0 +1,443 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CntrMtyBkgCreateDBDAOSearchCntrMtyBkgListRSQL">
+			<desc><![CDATA[BKG NO 조회 및 PLAN 조회]]></desc>
+			<sql><![CDATA[
+SELECT DECODE(A.EQR_STS_CD, 'X', 'X', DECODE(A.BKG_STS_CD, 'X', 'S', A.BKG_STS_CD)) BKG_STS_CD  -- X : bkg cancel, S : Bkg vol=0, F : split or bkg vol>0
+      ,A.TRSP_MOD_CD
+      ,DECODE(A.VL_VD_DIV, 0, 'PLAN', 1, 'REPO BKG(VL)', 3, 'REPO BKG(VL)', 2, 'REPO BKG(VD)') DIV
+      ,A.MTY_BKG_NO
+      ,A.VSL_LANE_CD
+      ,A.VSL_CD||SKD_VOY_NO||SKD_DIR_CD VVD
+      ,A.MTY_ROB_FLG
+      ,A.POL_CD                         FM_YD_CD
+      ,A.VPS_ETD_DT                     FM_ETD_DT
+      ,A.POD_CD                         TO_YD_CD
+      ,A.VPS_ETB_DT                     TO_ETA_DT
+      ,A.CNTR_IMG
+      ,NULL TOTAL_VOL
+
+	#foreach( $key in ${arrtpsz}) 
+      ,A.QTY_$key
+	#end
+
+      ,A.EQ_REPO_PURP_CD
+      ,A.REPO_PLN_FB_RSN_CD
+      ,A.REPO_PLN_FB_RMK
+      ,B.OFC_CD   UPD_OFC
+      ,B.USR_NM    UPD_NAME
+      ,TO_CHAR(A.UPD_DT,'YYYY-MM-DD HH24:MI:SS') UPD_DT
+      
+      -- HIDDEN (PK)
+      ,A.VSL_CD
+      ,A.SKD_VOY_NO
+      ,A.SKD_DIR_CD
+      ,A.BKG_EXE_SEQ
+      
+      -- HIDDEN (OTHER)
+      ,A.MTY_BKG_FLG
+      ,A.MTY_BKG_SPLIT_FLG
+
+      -- SORT
+      ,A.ORD_SEQ   -- PLAN / EXEC 구분 (1 / 2)
+      ,A.VL_VD_DIV -- VL/ VD 구분 (1 / 2)
+      ,A.ORG_TO_LOC_CD
+      ,A.POL_CLPT_IND_SEQ
+      ,A.POD_CLPT_IND_SEQ
+FROM
+(
+    SELECT 1 ORD_SEQ
+          ,DECODE(E.VSL_SVC_TP_CD, NULL, 'W', 'O', 'W', 'V') TRSP_MOD_CD
+          ,A.VSL_CD
+          ,A.SKD_VOY_NO
+          ,A.SKD_DIR_CD
+          ,NULL BKG_EXE_SEQ
+          ,C.SLAN_CD VSL_LANE_CD
+          ,A.POL_CD
+          ,A.POD_CD
+          ,TO_CHAR(C.VPS_ETD_DT,'YYYY-MM-DD HH24:MI:SS') VPS_ETD_DT
+          ,TO_CHAR(D.VPS_ETB_DT,'YYYY-MM-DD HH24:MI:SS') VPS_ETB_DT
+          ,NULL MTY_BKG_FLG
+          ,NULL MTY_BKG_SPLIT_FLG 
+          ,NULL MTY_ROB_FLG 
+          ,9    CNTR_IMG    -- PLAN 은 이미지 표현 없애기 위해 9
+          ,0    VL_VD_DIV
+          ,NULL MTY_BKG_NO
+          ,NULL OLD_BKG_GRP_NO
+          ,NULL EQ_REPO_PURP_CD
+          ,NULL REPO_PLN_FB_RSN_CD
+          ,NULL REPO_PLN_FB_RMK
+    
+	#foreach( $key in ${arrtpsz}) 
+         ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, '$key', B.CNTR_QTY)),0) QTY_$key
+	#end
+    	
+          ,A.UPD_USR_ID 
+          ,A.UPD_DT   
+          
+          ,A.POL_CD ECC_CD
+          ,A.POD_CD ORG_TO_LOC_CD
+          ,NULL BKG_STS_CD
+          ,NULL EQR_STS_CD
+
+          ,NULL POL_CLPT_IND_SEQ
+          ,NULL POD_CLPT_IND_SEQ
+    FROM EQR_CTRL_MTY_DCHG_PLN     A
+        ,EQR_CTRL_MTY_DCHG_PLN_QTY B 
+        ,VSK_VSL_PORT_SKD          C
+        ,VSK_VSL_PORT_SKD          D
+        ,MDM_VSL_SVC_LANE          E
+    WHERE A.VSL_CD     = B.VSL_CD
+    AND   A.SKD_VOY_NO = B.SKD_VOY_NO
+    AND   A.SKD_DIR_CD = B.SKD_DIR_CD 
+    AND   A.POL_YD_CD  = B.POL_YD_CD
+    AND   A.POD_YD_CD  = B.POD_YD_CD
+    
+    AND   A.VSL_CD     = C.VSL_CD(+)
+    AND   A.SKD_VOY_NO = C.SKD_VOY_NO(+)
+    AND   A.SKD_DIR_CD = C.SKD_DIR_CD(+) 
+    AND   A.POL_CD     = C.VPS_PORT_CD(+) 
+    AND   C.CLPT_IND_SEQ = 1
+    
+    AND   A.VSL_CD     = D.VSL_CD(+)
+    AND   A.SKD_VOY_NO = D.SKD_VOY_NO(+)
+    AND   A.SKD_DIR_CD = D.SKD_DIR_CD(+) 
+    AND   A.POD_CD     = D.VPS_PORT_CD(+) 
+    AND   D.CLPT_IND_SEQ = 1      -- HARD CODING
+    
+    AND   C.SLAN_CD    = E.VSL_SLAN_CD(+)
+       
+    AND   A.MTY_PLN_SHW_FLG = 'Y' -- HARD CODING
+
+    #if ( ${divflag} == 1 )
+	    #if ( ${divdate} == 'F' )
+    -- < 검색조건 - PERIOD FM> -----------------
+    AND   C.VPS_ETD_DT BETWEEN TO_DATE(@[fromdate], 'YYYY-MM-DD') AND TO_DATE(@[todate], 'YYYY-MM-DD')+0.99999
+	    #else
+    -- < 검색조건 - PERIOD TO> -----------------
+    AND   D.VPS_ETB_DT BETWEEN TO_DATE(@[fromdate], 'YYYY-MM-DD') AND TO_DATE(@[todate], 'YYYY-MM-DD')+0.99999
+        #end
+
+    #else
+	    
+    -- < 검색조건 - VVD> -----------------
+    AND   A.VSL_CD     = SUBSTR(@[vvdname],0,4)
+    AND   A.SKD_VOY_NO = SUBSTR(@[vvdname],5,4) 
+    AND   A.SKD_DIR_CD = SUBSTR(@[vvdname],9,1)
+	    
+    #end
+
+    #if ( ${lane} != '' )
+    ---- < 검색조건 - LANE> -----------------
+    AND   C.SLAN_CD  = @[lane]
+    #end
+
+    #if ( ${fromlocation} != '') -- FROM LOCATION 있거나 
+    -- < 검색조건 - FROM LOCATION> -----------------
+    AND   A.POL_YD_CD IN (
+                            SELECT DISTINCT C.YD_CD
+                            FROM MDM_EQ_ORZ_CHT A
+                                ,MDM_LOCATION B
+                                ,MDM_YARD C               	    
+                            WHERE A.SCC_CD = B.SCC_CD 
+                            AND   B.LOC_CD = C.LOC_CD  
+                            AND   A.DELT_FLG = 'N'
+                            AND   B.DELT_FLG = 'N' 
+                            AND   C.DELT_FLG = 'N' 
+                        
+	    #if 	( ${fromstatus} == 'R' )
+                            AND   A.RCC_CD IN ( ${fromLocationText} )
+	    #elseif ( ${fromstatus} == 'L' )
+                            AND   A.LCC_CD IN ( ${fromLocationText} )
+	    #elseif ( ${fromstatus} == 'E' ) 
+                            AND   A.ECC_CD IN ( ${fromLocationText} )
+	    #elseif ( ${fromstatus} == 'S' )
+                            AND   A.SCC_CD IN ( ${fromLocationText} )
+	    #else
+                            AND   C.YD_CD  IN ( ${fromLocationText} )      
+	    #end                 
+                         )
+    #end
+
+    #if ( ${tolocation} != '') -- TO LOCATION 있거나
+    -- < 검색조건 - TO LOCATION> -----------------
+    AND   A.POD_YD_CD IN (
+                            SELECT DISTINCT C.YD_CD
+                            FROM MDM_EQ_ORZ_CHT A
+                                ,MDM_LOCATION B
+                                ,MDM_YARD C               	    
+                            WHERE A.SCC_CD = B.SCC_CD 
+                            AND   B.LOC_CD = C.LOC_CD  
+                            AND   A.DELT_FLG = 'N'
+                            AND   B.DELT_FLG = 'N' 
+                            AND   C.DELT_FLG = 'N' 
+	   	#if 	( ${tostatus} == 'R' )                        
+                            AND   A.RCC_CD IN ( ${toLocationText} )
+	   	#elseif ( ${tostatus} == 'L' )
+                            AND   A.LCC_CD IN ( ${toLocationText} )
+	   	#elseif ( ${tostatus} == 'E' ) 
+                            AND   A.ECC_CD IN ( ${toLocationText} )
+	   	#elseif ( ${tostatus} == 'S' )
+                            AND   A.SCC_CD IN ( ${toLocationText} )
+	   	#else
+                            AND   C.YD_CD  IN ( ${toLocationText} )      
+	   	#end                               
+                         )
+    #end
+  	    
+
+    GROUP BY A.VSL_CD
+          ,A.SKD_VOY_NO
+          ,A.SKD_DIR_CD
+          ,C.SLAN_CD
+          ,A.POL_CD
+          ,A.POD_CD
+          ,TO_CHAR(C.VPS_ETD_DT,'YYYY-MM-DD HH24:MI:SS')
+          ,TO_CHAR(D.VPS_ETB_DT,'YYYY-MM-DD HH24:MI:SS')
+          ,E.VSL_SVC_TP_CD
+          ,A.UPD_USR_ID 
+          ,A.UPD_DT  
+              
+    UNION ALL
+    
+    -- BOOKING EXECUTE
+    SELECT 2 ORD_SEQ
+          ,A.TRSP_MOD_CD
+          ,A.VSL_CD
+          ,A.SKD_VOY_NO
+          ,A.SKD_DIR_CD
+          ,A.BKG_EXE_SEQ
+          ,A.VSL_LANE_CD
+          ,A.POL_YD_CD
+          ,A.POD_YD_CD
+          ,TO_CHAR(A.POL_ETD_DT,'YYYY-MM-DD HH24:MI:SS') POL_ETD_DT
+          ,TO_CHAR(A.POD_ETB_DT,'YYYY-MM-DD HH24:MI:SS') POD_ETB_DT
+    
+          ,A.MTY_BKG_FLG
+          ,A.MTY_BKG_SPLIT_FLG
+          ,A.MTY_ROB_FLG
+          
+          ,CASE WHEN A.MTY_BKG_NO IS NULL THEN 9
+                WHEN (SELECT COUNT(1) FROM BKG_CONTAINER X WHERE X.BKG_NO = A.MTY_BKG_NO ) > 0 THEN 0 ELSE 1
+           END CNTR_IMG
+    
+          ,CASE WHEN A.MTY_BKG_FLG = 'Y' AND A.MTY_BKG_SPLIT_FLG = 'Y' THEN 2
+                WHEN A.MTY_BKG_FLG = 'Y' AND A.MTY_BKG_SPLIT_FLG = 'N' THEN 1
+                WHEN A.MTY_BKG_FLG = 'N' AND A.MTY_BKG_SPLIT_FLG = 'N' THEN 3
+           END VL_VD_DIV     
+
+          ,A.MTY_BKG_NO
+          ,A.OLD_BKG_GRP_NO 
+          ,A.EQ_REPO_PURP_CD
+          ,A.REPO_PLN_FB_RSN_CD
+          ,A.REPO_PLN_FB_RMK
+  
+	#foreach( $key in ${arrtpsz})
+          ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, '$key', DECODE(A.MTY_BKG_FLG, 'Y', C.OP_CNTR_QTY, A.CNTR_QTY))),0) QTY_$key
+	#end          	      
+          
+          ,DECODE(A.MTY_BKG_NO, NULL, A.UPD_USR_ID, D.UPD_USR_ID) UPD_USR_ID 
+          ,DECODE(A.MTY_BKG_NO, NULL, A.UPD_DT,     D.UPD_DT)     UPD_DT   
+    
+          ,A.ECC_CD    
+          ,DECODE(A.ORG_TO_ECC_CD, NULL, SUBSTR(A.POD_YD_CD, 0, 5), A.ORG_TO_ECC_CD) ORG_TO_ECC_CD
+          ,D.BKG_STS_CD
+          ,A.BKG_STS_CD EQR_STS_CD
+          ,A.POL_CLPT_IND_SEQ
+          ,A.POD_CLPT_IND_SEQ  
+    FROM (
+            SELECT A.TRSP_MOD_CD
+                  ,A.VSL_CD
+                  ,A.SKD_VOY_NO
+                  ,A.SKD_DIR_CD
+                  ,A.BKG_EXE_SEQ
+                  ,A.VSL_LANE_CD
+                  ,A.POL_YD_CD
+                  ,A.POD_YD_CD
+                  ,A.POL_ETD_DT
+                  ,A.POD_ETB_DT
+                  ,A.MTY_BKG_FLG
+                  ,A.MTY_BKG_SPLIT_FLG
+                  ,DECODE(A.MTY_ROB_FLG, 'N', '0', NULL, '0', 'Y', '1') MTY_ROB_FLG
+                  ,A.BKG_STS_CD
+                  ,A.MTY_BKG_NO
+                  ,A.OLD_BKG_GRP_NO 
+                  ,A.EQ_REPO_PURP_CD
+                  ,A.REPO_PLN_FB_RSN_CD
+                  ,A.REPO_PLN_FB_RMK
+                  ,B.CNTR_TPSZ_CD     
+                  ,B.CNTR_QTY 
+                  ,A.UPD_DT
+                  ,A.UPD_USR_ID
+                  ,C.LOC_CD ECC_CD
+                  ,(
+                       SELECT DISTINCT B.LOC_CD
+                       FROM MDM_LOCATION B
+                           ,MDM_YARD C               	    
+                       WHERE B.LOC_CD = C.LOC_CD   
+                       AND   C.YD_CD  = (                    
+                                           SELECT X.POD_YD_CD 
+                                           FROM EQR_CTRL_MTY_BKG_EXE X 
+                                           WHERE X.MTY_BKG_NO = A.OLD_BKG_GRP_NO
+                                           AND ROWNUM=1
+                                        )
+                   ) ORG_TO_ECC_CD
+                  ,A.POL_CLPT_IND_SEQ
+                  ,A.POD_CLPT_IND_SEQ                   
+            FROM EQR_CTRL_MTY_BKG_EXE     A
+                ,EQR_CTRL_MTY_BKG_EXE_QTY B
+                ,(
+                            SELECT DISTINCT B.LOC_CD, C.YD_CD
+                            FROM MDM_LOCATION B
+                                ,MDM_YARD C               	    
+                            WHERE B.LOC_CD = C.LOC_CD            
+                 ) C
+            WHERE A.TRSP_MOD_CD= B.TRSP_MOD_CD
+            AND   A.VSL_CD     = B.VSL_CD
+            AND   A.SKD_VOY_NO = B.SKD_VOY_NO
+            AND   A.SKD_DIR_CD = B.SKD_DIR_CD
+            AND   A.BKG_EXE_SEQ= B.BKG_EXE_SEQ 
+            AND   A.POL_YD_CD  = C.YD_CD(+)
+            
+            #if ( ${divflag} == 1 )
+            	#if ( ${divdate} == 'F' )
+            -- < 검색조건 - PERIOD FM> -----------------
+            AND   A.POL_ETD_DT BETWEEN TO_DATE(@[fromdate], 'YYYY-MM-DD') AND TO_DATE(@[todate], 'YYYY-MM-DD')+0.99999
+            	#else
+            -- < 검색조건 - PERIOD TO> -----------------
+            AND   A.POD_ETB_DT BETWEEN TO_DATE(@[fromdate], 'YYYY-MM-DD') AND TO_DATE(@[todate], 'YYYY-MM-DD')+0.99999
+                #end
+
+            #else
+
+            -- < 검색조건 - VVD> -----------------
+            AND   A.VSL_CD     = SUBSTR(@[vvdname],0,4)
+            AND   A.SKD_VOY_NO = SUBSTR(@[vvdname],5,4)
+            AND   A.SKD_DIR_CD = SUBSTR(@[vvdname],9,1)
+
+            #end   
+
+            #if ( ${lane} != '' )
+            ---- < 검색조건 - LANE> -----------------
+            AND   A.VSL_LANE_CD = @[lane]
+            #end
+            
+            #if ( ${fromlocation} != '') -- FROM LOCATION 있거나 FROM 선택이면 
+            -- < 검색조건 - FROM LOCATION> -----------------
+            AND   A.POL_YD_CD IN (
+                                    SELECT DISTINCT C.YD_CD
+                                    FROM MDM_EQ_ORZ_CHT A
+                                        ,MDM_LOCATION B
+                                        ,MDM_YARD C               	    
+                                    WHERE A.SCC_CD = B.SCC_CD 
+                                    AND   B.LOC_CD = C.LOC_CD  
+                                    AND   A.DELT_FLG = 'N'
+                                    AND   B.DELT_FLG = 'N' 
+                                    AND   C.DELT_FLG = 'N' 
+                                    
+            	#if 	( ${fromstatus} == 'R' )
+                                    AND   A.RCC_CD IN ( ${fromLocationText} )
+            	#elseif ( ${fromstatus} == 'L' )
+                                    AND   A.LCC_CD IN ( ${fromLocationText} )
+            	#elseif ( ${fromstatus} == 'E' ) 
+                                    AND   A.ECC_CD IN ( ${fromLocationText} )
+            	#elseif ( ${fromstatus} == 'S' )
+                                    AND   A.SCC_CD IN ( ${fromLocationText} )
+            	#else
+                                    AND   C.YD_CD  IN ( ${fromLocationText} )      
+            	#end                 
+                                 )
+            #end
+            
+            	
+            #if ( ${tolocation} != '') -- TO LOCATION 있거나 TO 선택이면
+            -- < 검색조건 - TO LOCATION> -----------------
+            AND   A.POD_YD_CD IN (
+                                    SELECT DISTINCT C.YD_CD
+                                    FROM MDM_EQ_ORZ_CHT A
+                                        ,MDM_LOCATION B
+                                        ,MDM_YARD C               	    
+                                    WHERE A.SCC_CD = B.SCC_CD 
+                                    AND   B.LOC_CD = C.LOC_CD  
+                                    AND   A.DELT_FLG = 'N'
+                                    AND   B.DELT_FLG = 'N' 
+                                    AND   C.DELT_FLG = 'N' 
+            	#if 	( ${tostatus} == 'R' )                        
+                                    AND   A.RCC_CD IN ( ${toLocationText} )
+            	#elseif ( ${tostatus} == 'L' )
+                                    AND   A.LCC_CD IN ( ${toLocationText} )
+            	#elseif ( ${tostatus} == 'E' ) 
+                                    AND   A.ECC_CD IN ( ${toLocationText} )
+            	#elseif ( ${tostatus} == 'S' )
+                                    AND   A.SCC_CD IN ( ${toLocationText} )
+            	#else
+                                    AND   C.YD_CD  IN ( ${toLocationText} )      
+            	#end                               
+                                 )
+            #end     
+            
+         
+          
+         
+        ) A
+        ,BKG_QUANTITY             C
+        ,BKG_BOOKING              D
+    WHERE A.MTY_BKG_NO   = C.BKG_NO(+)
+    AND   A.CNTR_TPSZ_CD = C.CNTR_TPSZ_CD(+)
+    AND   A.MTY_BKG_NO   = D.BKG_NO(+)
+    
+    GROUP BY A.TRSP_MOD_CD
+            ,A.VSL_CD
+            ,A.SKD_VOY_NO
+            ,A.SKD_DIR_CD
+            ,A.BKG_EXE_SEQ
+            ,A.VSL_LANE_CD
+            ,A.POL_YD_CD
+            ,A.POD_YD_CD
+            ,TO_CHAR(A.POL_ETD_DT,'YYYY-MM-DD HH24:MI:SS')
+            ,TO_CHAR(A.POD_ETB_DT,'YYYY-MM-DD HH24:MI:SS')
+            ,A.MTY_BKG_FLG 
+            ,A.MTY_BKG_SPLIT_FLG
+            ,A.MTY_ROB_FLG
+            ,A.MTY_BKG_NO
+            ,A.OLD_BKG_GRP_NO 
+            ,A.EQ_REPO_PURP_CD
+            ,A.REPO_PLN_FB_RSN_CD
+            ,A.REPO_PLN_FB_RMK
+            ,A.ECC_CD   
+            ,A.ORG_TO_ECC_CD
+            ,D.BKG_STS_CD
+            ,A.BKG_STS_CD
+            ,DECODE(A.MTY_BKG_NO, NULL, A.UPD_USR_ID, D.UPD_USR_ID) 
+            ,DECODE(A.MTY_BKG_NO, NULL, A.UPD_DT,     D.UPD_DT)  
+            ,A.POL_CLPT_IND_SEQ
+            ,A.POD_CLPT_IND_SEQ   
+) A
+,COM_USER B
+WHERE   A.UPD_USR_ID   = B.USR_ID(+)
+
+#if ( ${itemNameText} != '' )
+-- < 검색조건 - ITEM> -----------------
+AND  A.TRSP_MOD_CD IN ( ${itemNameText} ) -- V/W
+#end
+
+ORDER BY A.VSL_CD
+        ,A.SKD_VOY_NO
+        ,A.SKD_DIR_CD
+        ,A.ECC_CD        -- FROM
+        ,A.ORG_TO_LOC_CD -- TO
+        ,A.ORD_SEQ
+        ,A.MTY_BKG_NO
+        ,A.BKG_EXE_SEQ
+        ,A.VPS_ETD_DT                     
+        ,A.VPS_ETB_DT			]]></sql>
+			<params>
+				<param name="fromdate" type="12" value="" out="N"/>
+				<param name="todate" type="12" value="" out="N"/>
+				<param name="vvdname" type="12" value="" out="N"/>
+				<param name="lane" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

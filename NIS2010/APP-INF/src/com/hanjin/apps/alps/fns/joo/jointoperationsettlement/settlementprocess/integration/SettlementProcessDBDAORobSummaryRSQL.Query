@@ -1,0 +1,350 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SettlementProcessDBDAORobSummaryRSQL">
+			<desc><![CDATA[ROB 컨테이너 조회]]></desc>
+			<sql><![CDATA[
+WITH SKD AS (
+        SELECT
+             AA.VSL_CD
+            ,AA.SKD_VOY_NO
+            ,AA.SKD_DIR_CD  
+            ,AA.VPS_PORT_CD
+            ,AA.TML_CD
+            ,AA.SPLIT_NO
+            ,AA.CLPT_SEQ
+            ,AA.VPS_ETD_DT
+            ,AA.YD_CD
+            ,AA.CLPT_IND_SEQ
+            ,CASE WHEN V.RDR_FLG = 'Y' THEN 'R'
+                  WHEN V.RDR_FLG = 'N' THEN ''
+                  ELSE DECODE(AA.VPS_PORT_CD,H.PORT_CD,'R','')
+                  END AS RDR_FLG
+           , (
+               SELECT DECODE(INTG_CD_VAL_DP_DESC, NULL, INTG_CD_VAL_DESC, INTG_CD_VAL_DP_DESC) AS CODE_DESC
+                 FROM COM_INTG_CD_DTL
+                WHERE INTG_CD_ID = 'CD01821'
+                  AND INTG_CD_VAL_CTNT = AA.PORT_SKD_STS_CD
+             ) AS PORT_SKD_STS
+           , MIN(AA.VSL_CD || AA.SKD_VOY_NO || AA.SKD_DIR_CD || AA.VPS_ETD_DT) OVER (PARTITION BY AA.VSL_CD || AA.SKD_VOY_NO || AA.SKD_DIR_CD) AS VVD_ETD_GROUP
+        FROM
+        (
+            SELECT               
+                     K.VSL_CD
+                    ,K.SKD_VOY_NO
+                    ,K.SKD_DIR_CD       
+                    ,SUBSTR(K.YD_CD,1,5) 	AS VPS_PORT_CD
+                    ,SUBSTR(K.YD_CD,6,2) 	AS TML_CD
+                    ,K.CLPT_IND_SEQ 		AS SPLIT_NO 
+                    ,K.CLPT_IND_SEQ
+                    ,TO_CHAR(K.VPS_ETD_DT,'YYYYMMDDHH24MISS') AS VPS_ETD_DT
+                    ,K.CLPT_SEQ
+                    ,K.SLAN_CD            
+                    ,K.YD_CD 
+                    ,K.PORT_SKD_STS_CD
+               FROM VSK_VSL_PORT_SKD K
+              WHERE SLAN_CD LIKE @[rlane_cd] || '%'
+				AND K.VPS_ETD_DT BETWEEN TO_DATE(@[pre_fr] || '000000' , 'YYYY-MM-DDHH24MISS') AND TO_DATE(@[pre_to] || '235959' , 'YYYY-MM-DDHH24MISS')
+                AND TURN_PORT_IND_CD NOT IN ('D', 'V', 'F')
+                AND NVL(K.SKD_CNG_STS_CD, 'A') <>  'S'  
+				#if (${vvd} != '') 
+				AND K.VSL_CD || K.SKD_VOY_NO || K.SKD_DIR_CD LIKE @[vvd] || '%' 
+				#end
+				#if (${skd_dir_cd} != '') 
+				AND K.SKD_DIR_CD = @[skd_dir_cd]
+				#end
+        ) AA, RDR_HEADER H, JOO_RDR_PORT V        
+        WHERE 1=1
+        AND AA.VSL_CD 		= H.VSL_CD(+)
+        AND AA.SKD_VOY_NO 	= H.VOY_NO(+)
+        AND AA.SKD_DIR_CD 	= H.DIR_CD(+)  
+        AND AA.VPS_PORT_CD 	= H.PORT_CD(+)
+        AND AA.VSL_CD       = V.VSL_CD(+)
+        AND AA.SKD_VOY_NO   = V.SKD_VOY_NO(+)
+        AND AA.SKD_DIR_CD   = V.SKD_DIR_CD(+)  
+        AND AA.VPS_PORT_CD  = V.VPS_PORT_CD(+)  
+        AND AA.SPLIT_NO     = V.CLPT_IND_SEQ(+)
+        AND AA.SLAN_CD      = V.SLAN_CD(+)
+        AND AA.YD_CD        = V.YD_CD(+)
+)
+SELECT TGT.REV_YRMON
+     , TGT.REV_YRMON_SEQ
+     , TGT.JO_STL_STS_CD
+     , NVL(TGT.STL_TGT_FLG,'0') AS STL_TGT_FLG
+     , NVL(TGT.STL_TGT_FLG,'0') AS STL_TGT_FLG2
+     , NVL(TGT.STL_CLZ_FLG,'0') AS STL_CLZ_FLG
+     , (
+        SELECT NVL(MAX(J3.ACCT_YRMON),'999912') AS ACCT_YRMON 
+          FROM JOO_STL_TGT J2, JOO_SETTLEMENT J3
+         WHERE J2.REV_YRMON = TGT.REV_YRMON
+           AND J2.REV_YRMON_SEQ = TGT.REV_YRMON_SEQ
+           AND J2.ACCT_YRMON = J3.ACCT_YRMON(+)
+           AND J2.STL_VVD_SEQ = J3.STL_VVD_SEQ(+)
+           AND J2.STL_SEQ = J3.STL_SEQ(+)
+       ) ACCT_YRMON
+     , VVD_ETD_GROUP
+     , (
+			SELECT 
+				NVL(SUM(CASE WHEN LENGTH(E.SLP_TP_CD||E.SLP_FUNC_CD||E.SLP_OFC_CD||TO_CHAR(TO_DATE(E.SLP_ISS_DT,'YYYYMMDD'),'RRMMDD')||E.SLP_SER_NO) > 0 
+						 THEN DECODE(A.RE_DIVR_CD,'R',A.STL_LOCL_AMT,A.STL_LOCL_AMT*-1) 
+						 ELSE 0
+						 END
+					),0) AS STL_LOCL_AMT
+			FROM    JOO_SETTLEMENT  A
+				   ,JOO_STL_DTL     B
+				   ,JOO_STL_CMB_DTL D
+				   ,JOO_STL_CMB     E       
+				   ,JOO_CSR R
+			WHERE  1=1
+			AND    A.ACCT_YRMON  = B.ACCT_YRMON (+) 
+			AND    A.STL_VVD_SEQ = B.STL_VVD_SEQ(+)
+			AND    A.STL_SEQ     = B.STL_SEQ    (+)
+		-------------------------------------------    
+			AND    A.TRD_CD = ROB.TRD_CD
+		    AND    A.JO_CRR_CD = ROB.CRR_CD
+		    AND    A.RE_DIVR_CD = ROB.RE_DIVR_CD
+			AND    A.JO_STL_ITM_CD = 'R/F'
+			AND    A.VSL_CD = ROB.VSL_CD
+			AND    A.SKD_VOY_NO = ROB.SKD_VOY_NO
+			AND    A.SKD_DIR_CD = ROB.SKD_DIR_CD
+		-------------------------------------------        
+			AND    E.RVS_CMB_FLG  = 'N'
+			AND    E.RJCT_CMB_FLG = 'N'
+			AND    A.ACCT_YRMON  = D.ACCT_YRMON
+			AND    A.STL_VVD_SEQ = D.STL_VVD_SEQ
+			AND    A.STL_SEQ     = D.STL_SEQ
+			AND    E.ACCT_YRMON  = D.ACCT_YRMON
+			AND    E.JO_CRR_CD   = D.JO_CRR_CD
+			AND    E.STL_CMB_SEQ = D.STL_CMB_SEQ
+			AND    E.RE_DIVR_CD  = D.RE_DIVR_CD
+			AND    E.SLP_SER_NO IS NOT NULL
+			AND    NVL(E.RVS_CMB_FLG ,'N') = 'N'
+			AND    NVL(E.RJCT_CMB_FLG,'N') = 'N'
+			AND    E.SLP_FUNC_CD = R.SLP_FUNC_CD
+			AND    E.SLP_OFC_CD = R.SLP_OFC_CD
+			AND    E.SLP_ISS_DT = R.SLP_ISS_DT
+			AND    E.SLP_SER_NO = R.SLP_SER_NO    
+       ) AS RF_20FT_CNTR_STL_AMT
+     , (
+			SELECT 
+				NVL(SUM(CASE WHEN LENGTH(E.SLP_TP_CD||E.SLP_FUNC_CD||E.SLP_OFC_CD||TO_CHAR(TO_DATE(E.SLP_ISS_DT,'YYYYMMDD'),'RRMMDD')||E.SLP_SER_NO) > 0 
+						 THEN DECODE(A.RE_DIVR_CD,'R',A.STL_LOCL_AMT,A.STL_LOCL_AMT*-1) 
+						 ELSE 0
+						 END
+					),0) AS STL_LOCL_AMT
+			FROM    JOO_SETTLEMENT  A
+				   ,JOO_STL_DTL     B
+				   ,JOO_STL_CMB_DTL D
+				   ,JOO_STL_CMB     E       
+				   ,JOO_CSR R
+			WHERE  1=1
+			AND    A.ACCT_YRMON  = B.ACCT_YRMON (+) 
+			AND    A.STL_VVD_SEQ = B.STL_VVD_SEQ(+)
+			AND    A.STL_SEQ     = B.STL_SEQ    (+)
+		-------------------------------------------    
+			AND    A.TRD_CD = ROB.TRD_CD
+		    AND    A.JO_CRR_CD = ROB.CRR_CD
+		    AND    A.RE_DIVR_CD = ROB.RE_DIVR_CD
+			AND    A.JO_STL_ITM_CD = 'OUS'
+			AND    A.VSL_CD = ROB.VSL_CD
+			AND    A.SKD_VOY_NO = ROB.SKD_VOY_NO
+			AND    A.SKD_DIR_CD = ROB.SKD_DIR_CD
+		-------------------------------------------        
+			AND    E.RVS_CMB_FLG  = 'N'
+			AND    E.RJCT_CMB_FLG = 'N'
+			AND    A.ACCT_YRMON  = D.ACCT_YRMON
+			AND    A.STL_VVD_SEQ = D.STL_VVD_SEQ
+			AND    A.STL_SEQ     = D.STL_SEQ
+			AND    E.ACCT_YRMON  = D.ACCT_YRMON
+			AND    E.JO_CRR_CD   = D.JO_CRR_CD
+			AND    E.STL_CMB_SEQ = D.STL_CMB_SEQ
+			AND    E.RE_DIVR_CD  = D.RE_DIVR_CD
+			AND    E.SLP_SER_NO IS NOT NULL
+			AND    NVL(E.RVS_CMB_FLG ,'N') = 'N'
+			AND    NVL(E.RJCT_CMB_FLG,'N') = 'N'
+			AND    E.SLP_FUNC_CD = R.SLP_FUNC_CD
+			AND    E.SLP_OFC_CD = R.SLP_OFC_CD
+			AND    E.SLP_ISS_DT = R.SLP_ISS_DT
+			AND    E.SLP_SER_NO = R.SLP_SER_NO    
+       ) AS OVR_USD_SLT_AMT 
+--     , DECODE(RL.ALL_TEU2,0,J.ALOC_TEU_KNT,RL.ALL_TEU2) AS ALL_TEU 
+--     , DECODE(RL.ALL_WGT2,0,J.ALOC_TEU_WGT,ALL_WGT2) 	  AS ALL_WGT 
+     , TGT.JO_STL_RMK_CD  AS RMK_FLG
+     , TGT.JO_STL_RMK  AS RMK
+     , NVL(ROB.TRD_CD,'XXX') AS TRD_CD
+     , 'SML' AS CRR_CD                --
+     , NVL(ROB.RLANE_CD,'XXXXX') AS RLANE_CD
+     , ROB.RE_DIVR_CD
+     , SKD.VSL_CD
+     , SKD.SKD_VOY_NO
+     , SKD.SKD_DIR_CD
+     , SKD.VPS_PORT_CD
+     , SKD.TML_CD
+     , NVL(ROB.YD_CD ,'XXXXXXX') AS YD_CD
+     , SKD.CLPT_IND_SEQ
+     , SKD.VPS_ETD_DT
+     , SKD.RDR_FLG
+     , SKD.PORT_SKD_STS 
+     , ROB.REV_DIR_CD
+     , ROB.ROB_CNTR_WGT		AS GRAND_TTL_WGT
+     , ROB.FCNTR_20FT_KNT 	AS FULL_20
+     , ROB.MCNTR_20FT_KNT	AS MT_20
+     , ROB.FCNTR_40FT_KNT	AS FULL_40
+     , ROB.MCNTR_40FT_KNT	AS MT_40
+     , ROB.HC_20FT_FCNTR_KNT	AS HC_LD_20		
+     , ROB.HC_20FT_MCNTR_KNT	AS HC_BSA_20 
+     , ROB.HC_40FT_FCNTR_KNT	AS HC_LD_40 
+     , ROB.HC_40FT_MCNTR_KNT	AS HC_BSA_40 
+     , ROB.FCNTR_45FT_KNT		AS HC_LD_45
+     , ROB.MCNTR_45FT_KNT		AS HC_BSA_45 
+     , ROB.AWK_CNTR_KNT			AS AK_UNIT
+     , ROB.RF_20FT_CNTR_KNT		AS RF_20_QTY
+     , ROB.RF_ROB_CNTR_KNT 		AS RF_RDR_QTY
+     , ROB.RF_40FT_ROB_CNTR_KNT AS RF_RDR_40_QTY
+     , ROB.RF_40FT_CNTR_KNT		AS RF_40_QTY
+     , ROB.DG_20FT_CNTR_KNT		AS DG_20
+     , ROB.DG_40FT_CNTR_KNT		AS DG_40
+     , ROB.OVR_VOID_SLT_QTY 	AS AK_VOID
+     , DECODE(ROB.ROB_ENBL_FLG,'Y','P','NP')	AS PASS
+     , '1' AS SUB_CHK
+     , NVL(BKG.ROB_CNTR_WGT, 0)	    	AS BKG_GRAND_TTL_WGT
+     , NVL(BKG.FCNTR_20FT_KNT, 0)   	AS BKG_FULL_20
+     , NVL(BKG.MCNTR_20FT_KNT, 0)   	AS BKG_MT_20
+     , NVL(BKG.FCNTR_40FT_KNT, 0)   	AS BKG_FULL_40
+     , NVL(BKG.MCNTR_40FT_KNT, 0)   	AS BKG_MT_40
+     , NVL(BKG.HC_20FT_FCNTR_KNT, 0)	AS BKG_HC_LD_20		
+     , NVL(BKG.HC_20FT_MCNTR_KNT, 0)	AS BKG_HC_BSA_20 
+     , NVL(BKG.HC_40FT_FCNTR_KNT, 0)	AS BKG_HC_LD_40 
+     , NVL(BKG.HC_40FT_MCNTR_KNT, 0)	AS BKG_HC_BSA_40 
+     , NVL(BKG.FCNTR_45FT_KNT, 0)		AS BKG_HC_LD_45
+     , NVL(BKG.MCNTR_45FT_KNT, 0)		AS BKG_HC_BSA_45 
+     , NVL(BKG.AWK_CNTR_KNT, 0)			AS BKG_AK_UNIT
+     , NVL(BKG.RF_20FT_CNTR_KNT, 0)		AS BKG_RF_20_QTY
+     , NVL(BKG.RF_ROB_CNTR_KNT, 0) 		AS BKG_RF_RDR_QTY
+     , NVL(BKG.RF_40FT_ROB_CNTR_KNT, 0) AS BKG_RF_RDR_40_QTY
+     , NVL(BKG.RF_40FT_CNTR_KNT, 0)		AS BKG_RF_40_QTY
+     , NVL(BKG.DG_20FT_CNTR_KNT, 0)		AS BKG_DG_20
+     , NVL(BKG.DG_40FT_CNTR_KNT, 0)		AS BKG_DG_40
+     , NVL(BKG.OVR_VOID_SLT_QTY, 0) 	AS BKG_AK_VOID
+     -- JOO BSA AGMT 데이터 출력 DECODE(PORT_BSA, NULL, ALL_BSA, PORT_BSA) 1순위 : PORT별설정, 2순위 ALL설정, 3순위 NULL
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_20FT_OVR_RTO, 0),        NVL(PRT_BSA.JO_20FT_OVR_RTO, 0)) * 2        AS JO_20FT_N1ST_RTO
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_20FT_SUB_TEU_QTY, 0),    NVL(PRT_BSA.JO_20FT_SUB_TEU_QTY, 0))		AS JO_20FT_SUB_TEU_QTY
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_40FT_OVR_RTO, 0),        NVL(PRT_BSA.JO_40FT_OVR_RTO, 0)) * 2        AS JO_40FT_N1ST_RTO
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_40FT_SUB_TEU_QTY, 0),    NVL(PRT_BSA.JO_40FT_SUB_TEU_QTY, 0))		AS JO_40FT_SUB_TEU_QTY
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_45FT_UND_RTO, 0),        NVL(PRT_BSA.JO_45FT_UND_RTO, 0)) * 2        AS JO_45FT_N1ST_RTO
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_45FT_OVR_RTO, 0),        NVL(PRT_BSA.JO_45FT_OVR_RTO, 0)) * 2		AS JO_45FT_N2ND_RTO
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_45FT_SUB_TEU_QTY, 0),    NVL(PRT_BSA.JO_45FT_SUB_TEU_QTY, 0))		AS JO_45FT_SUB_TEU_QTY	
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_RND_RULE_LVL, 4),        NVL(PRT_BSA.JO_RND_RULE_LVL, 4))    		AS JO_RND_RULE_LVL
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_TON_TEU_QTY, 0),         NVL(PRT_BSA.JO_TON_TEU_QTY, 0)) 			AS TEU_QTY  
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_OVR_BSA_TEU_QTY, 0),     NVL(PRT_BSA.JO_OVR_BSA_TEU_QTY, 0))         AS ALL_TEU
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_OVR_TON_WGT, 0),         NVL(PRT_BSA.JO_OVR_TON_WGT, 0))             AS ALL_WGT
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_OVR_BSA_TEU_QTY, 0),     NVL(PRT_BSA.JO_OVR_BSA_TEU_QTY, 0))         AS ALL_TEU2
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.JO_OVR_TON_WGT, 0),         NVL(PRT_BSA.JO_OVR_TON_WGT, 0))             AS ALL_WGT2
+     , '0' AS mt_teu
+     , '0' AS mt_wt 
+     , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.PORT_CD, 0),         NVL(PRT_BSA.PORT_CD, 0))             AS PORT_CD
+	 , DECODE(PRT_BSA.TRD_CD,   NULL,   NVL(ALL_BSA.PORT_SEQ, 0),         NVL(PRT_BSA.PORT_SEQ, 0))             AS PORT_SEQ
+
+     , CASE WHEN PRT_BSA.TRD_CD IS NULL AND ALL_BSA.TRD_CD IS NULL THEN ''
+            WHEN PRT_BSA.TRD_CD IS NOT NULL THEN 'P'
+       ELSE 'A'
+       END BSA_FLG
+     , 'IST'  AS SOURCE
+
+
+  FROM SKD SKD
+     , JOO_ROB_CNTR_SMRY ROB
+     , JOO_BKG_CNTR_SMRY BKG
+     , JOO_BSA_AGMT ALL_BSA
+     , JOO_BSA_AGMT PRT_BSA
+     , JOO_LODG_TGT TGT
+ WHERE 1 = 1
+   -- SKD ROB DATA JOIN START --------------------
+   AND SKD.VSL_CD = ROB.VSL_CD(+)
+   AND SKD.SKD_VOY_NO = ROB.SKD_VOY_NO(+)
+   AND SKD.SKD_DIR_CD = ROB.SKD_DIR_CD(+)
+   AND SKD.VPS_PORT_CD = ROB.VPS_PORT_CD(+)
+   AND SKD.YD_CD = ROB.YD_CD(+)
+   AND SKD.CLPT_IND_SEQ = ROB.CLPT_IND_SEQ(+)
+   -- SKD ROB DATA JOIN END ----------------------
+   ----- ROB BKG DATA JOIN START -----------------
+   AND ROB.VSL_CD = BKG.VSL_CD(+)
+   AND ROB.SKD_VOY_NO = BKG.SKD_VOY_NO(+)
+   AND ROB.SKD_DIR_CD = BKG.SKD_DIR_CD(+)
+   AND ROB.VPS_PORT_CD = BKG.VPS_PORT_CD(+)
+   AND ROB.YD_CD = BKG.YD_CD(+)
+   AND ROB.CLPT_IND_SEQ = BKG.CLPT_IND_SEQ(+)
+   AND ROB.TRD_CD = BKG.TRD_CD(+)
+   AND ROB.RLANE_CD = BKG.RLANE_CD(+)
+   ----- ROB BKG DATA JOIN END --------------------
+   
+   ----- BSA ALL DATA JOIN START ------------------
+   AND ROB.TRD_CD = ALL_BSA.TRD_CD(+)
+   AND ROB.RLANE_CD = ALL_BSA.RLANE_CD(+)
+   AND ROB.VSL_CD = ALL_BSA.VSL_CD(+)
+   AND ROB.SKD_VOY_NO = ALL_BSA.SKD_VOY_NO(+)
+   AND ROB.SKD_DIR_CD = ALL_BSA.SKD_DIR_CD(+)
+   AND ALL_BSA.JO_CRR_CD(+) = 'SML'
+   AND ROB.RE_DIVR_CD = ALL_BSA.RE_DIVR_CD(+)
+   AND ALL_BSA.PORT_CD(+) = 'ALL'
+   AND ALL_BSA.DELT_FLG(+) = 'N'
+   AND ALL_BSA.RE_DIVR_CD(+) = 'E'
+   ----- BSA PORT ALL DATA JOIN END ---------------
+   
+   ----- BSA PORT 개별 DATA JOIN START ------------
+   AND ROB.TRD_CD = PRT_BSA.TRD_CD(+)
+   AND ROB.RLANE_CD = PRT_BSA.RLANE_CD(+)
+   AND ROB.VSL_CD = PRT_BSA.VSL_CD(+)
+   AND ROB.SKD_VOY_NO = PRT_BSA.SKD_VOY_NO(+)
+   AND ROB.SKD_DIR_CD = PRT_BSA.SKD_DIR_CD(+)
+   AND ROB.VPS_PORT_CD = PRT_BSA.PORT_CD(+)
+   AND ROB.CLPT_IND_SEQ = PRT_BSA.PORT_SEQ(+)
+   AND PRT_BSA.JO_CRR_CD(+) = 'SML'
+   AND ROB.RE_DIVR_CD = PRT_BSA.RE_DIVR_CD(+)
+   AND PRT_BSA.DELT_FLG(+) = 'N'	
+   AND PRT_BSA.RE_DIVR_CD(+) = 'E'
+   ----- BSA PORT 개별 DATA JOIN END --------------
+   ----- LODG TGT DATA JOIN START -----------------
+   AND ROB.TRD_CD = NVL(TGT.TRD_CD(+),'XXX')
+   AND TGT.CRR_CD(+) = 'SML'
+   AND ROB.RLANE_CD = NVL(TGT.RLANE_CD(+),'XXXXX')
+   AND ROB.VSL_CD = TGT.VSL_CD(+)
+   AND ROB.SKD_VOY_NO = TGT.SKD_VOY_NO(+)
+   AND ROB.SKD_DIR_CD = TGT.SKD_DIR_CD(+)
+   AND ROB.VPS_PORT_CD = TGT.VPS_PORT_CD(+)
+   AND ROB.YD_CD = NVL(TGT.YD_CD(+),'XXXXXXX')
+   AND ROB.CLPT_IND_SEQ  = TGT.CLPT_IND_SEQ(+)
+   AND TGT.RE_DIVR_CD(+) = 'E'
+   ----- LODG TGT DATA JOIN END -------------------
+
+   AND ROB.RLANE_CD(+) LIKE @[rlane_cd] || '%'
+   AND ROB.VPS_ETD_DT(+) BETWEEN TO_DATE(@[pre_fr] || '000000' , 'YYYY-MM-DDHH24MISS') AND TO_DATE(@[pre_to] || '235959' , 'YYYY-MM-DDHH24MISS')
+   #if (${vvd} != '') 
+   AND SKD.VSL_CD || SKD.SKD_VOY_NO || SKD.SKD_DIR_CD LIKE @[vvd] || '%' 
+   #end
+   #if (${skd_dir_cd} != '') 
+   AND SKD.SKD_DIR_CD = @[skd_dir_cd]
+   #end
+   #if (${opt_tgt} == 'T') 
+   AND TGT.STL_TGT_FLG = '1'
+   #end
+   #if (${opt_tgt} == 'N')
+   AND TGT.STL_TGT_FLG(+) = '0' 
+   #end
+   #if (${opt_clz} == 'C') 
+   AND TGT.STL_CLZ_FLG = '1'
+   #end
+   #if (${opt_clz} == 'N')
+   AND TGT.STL_CLZ_FLG(+) = '0' 
+   #end
+ORDER BY SUBSTR(VVD_ETD_GROUP, 10), SKD.VSL_CD || SKD.SKD_VOY_NO || SKD.SKD_DIR_CD, SKD.VPS_ETD_DT, SKD.VPS_PORT_CD, ROB.CRR_CD			]]></sql>
+			<params>
+				<param name="rlane_cd" type="12" value="" out="N"/>
+				<param name="pre_fr" type="12" value="" out="N"/>
+				<param name="pre_to" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

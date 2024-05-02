@@ -1,0 +1,257 @@
+/*=========================================================
+*Copyright(c) 2017 CyberLogitec
+*@FileName : BLDocumentationCMDBDAOCmVOUSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2017.10.27
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2017.10.27 
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.bkg.outbounddocumentation.outboundblmgt.bldocumentation.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class BLDocumentationCMDBDAOCmVOUSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * 2017.10.27 iylee CNTR_MF_NO 값
+	  * e-Booking 에서 Upload 하는 경우에만, Manifest No가 NULL이면 Update 하지 않음.
+	  * </pre>
+	  */
+	public BLDocumentationCMDBDAOCmVOUSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cntr_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cntr_mf_mk_desc",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("dcgo_flg",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cntr_mf_gds_desc",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("hamo_trf_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("wpm_trt_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("awk_cgo_flg",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("upd_usr_id",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("bkg_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("hngr_flg",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("dcgo_seq",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cntr_mf_seq",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("pck_tp_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cmdt_hs_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("ncm_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("pck_qty",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cntr_mf_wgt",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cntr_mf_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("meas_qty",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.esm.bkg.outbounddocumentation.outboundblmgt.bldocumentation.integration").append("\n"); 
+		query.append("FileName : BLDocumentationCMDBDAOCmVOUSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("#if (${ca_flg} == 'Y') " ).append("\n"); 
+		query.append("UPDATE BKG_CNTR_MF_DESC_HIS" ).append("\n"); 
+		query.append("SET    PCK_QTY          = @[pck_qty]" ).append("\n"); 
+		query.append(",	PCK_TP_CD        = @[pck_tp_cd]" ).append("\n"); 
+		query.append(",	CNTR_MF_WGT      = @[cntr_mf_wgt]" ).append("\n"); 
+		query.append(",	MEAS_QTY         = @[meas_qty]" ).append("\n"); 
+		query.append(",	DCGO_FLG         = DECODE(@[dcgo_flg], '1', 'Y', 'N')" ).append("\n"); 
+		query.append(",	BB_CGO_FLG       = NVL((SELECT BB_CGO_FLG FROM BKG_CNTR_HIS WHERE BKG_NO = @[bkg_no] AND CNTR_NO = @[cntr_no] AND CORR_NO = 'TMP0000001'), 'N')" ).append("\n"); 
+		query.append(",	AWK_CGO_FLG      = DECODE(@[awk_cgo_flg], '1', 'Y', 'N')" ).append("\n"); 
+		query.append(",	RC_FLG           = NVL((SELECT RC_FLG FROM BKG_CNTR_HIS WHERE BKG_NO = @[bkg_no] AND CNTR_NO = @[cntr_no] AND CORR_NO = 'TMP0000001'), 'N')" ).append("\n"); 
+		query.append(",	RD_CGO_FLG       = NVL((SELECT RD_CGO_FLG FROM BKG_CNTR_HIS WHERE BKG_NO = @[bkg_no] AND CNTR_NO = @[cntr_no] AND CORR_NO = 'TMP0000001'), 'N')" ).append("\n"); 
+		query.append(",	HNGR_FLG         = DECODE(@[hngr_flg], '1', 'Y', 'N')" ).append("\n"); 
+		query.append(",	CNTR_MF_MK_DESC  = REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(@[cntr_mf_mk_desc], chr(13)||chr(10), '▤') , chr(10),''), chr(13), '▤'), chr(9), ' '), '▤' ,chr(13)||chr(10))" ).append("\n"); 
+		query.append(",	CNTR_MF_GDS_DESC = REGEXP_REPLACE(REGEXP_REPLACE(@[cntr_mf_gds_desc], '[[:space:]]', ' '), '( ){2,}', ' ')" ).append("\n"); 
+		query.append("#if (${from_ebkg} == 'Y' && ${cntr_mf_no} == '')" ).append("\n"); 
+		query.append("#else" ).append("\n"); 
+		query.append(",	CNTR_MF_NO       = @[cntr_mf_no]" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append(",	HAMO_TRF_CD      = @[hamo_trf_cd]" ).append("\n"); 
+		query.append(",	CMDT_HS_CD       = @[cmdt_hs_cd]" ).append("\n"); 
+		query.append(",	NCM_NO           = @[ncm_no]" ).append("\n"); 
+		query.append(",	DCGO_SEQ		 = @[dcgo_seq]" ).append("\n"); 
+		query.append(",   WPM_TRT_CD       = DECODE(@[wpm_trt_cd],'N/A','A',@[wpm_trt_cd])" ).append("\n"); 
+		query.append(",	UPD_USR_ID       = @[upd_usr_id]" ).append("\n"); 
+		query.append(",	UPD_DT           = sysdate" ).append("\n"); 
+		query.append("WHERE  BKG_NO       = @[bkg_no]" ).append("\n"); 
+		query.append("AND    CORR_NO      = 'TMP0000001'" ).append("\n"); 
+		query.append("AND    CNTR_NO      = @[cntr_no]" ).append("\n"); 
+		query.append("AND	   CNTR_MF_SEQ  = @[cntr_mf_seq]" ).append("\n"); 
+		query.append("#else " ).append("\n"); 
+		query.append("UPDATE BKG_CNTR_MF_DESC SET" ).append("\n"); 
+		query.append("	PCK_QTY          = @[pck_qty]" ).append("\n"); 
+		query.append(",	PCK_TP_CD        = @[pck_tp_cd]" ).append("\n"); 
+		query.append(",	CNTR_MF_WGT      = @[cntr_mf_wgt]" ).append("\n"); 
+		query.append(",	MEAS_QTY         = @[meas_qty]" ).append("\n"); 
+		query.append(",	DCGO_FLG         = DECODE(@[dcgo_flg], '1', 'Y', 'N')" ).append("\n"); 
+		query.append(",	BB_CGO_FLG       = NVL((SELECT BB_CGO_FLG FROM BKG_CONTAINER WHERE BKG_NO = @[bkg_no] AND CNTR_NO = @[cntr_no]), 'N')" ).append("\n"); 
+		query.append(",	AWK_CGO_FLG      = DECODE(@[awk_cgo_flg], '1', 'Y', 'N')" ).append("\n"); 
+		query.append(",	RC_FLG           = NVL((SELECT RC_FLG FROM BKG_CONTAINER WHERE BKG_NO = @[bkg_no] AND CNTR_NO = @[cntr_no]), 'N')" ).append("\n"); 
+		query.append(",	RD_CGO_FLG       = NVL((SELECT RD_CGO_FLG FROM BKG_CONTAINER WHERE BKG_NO = @[bkg_no] AND CNTR_NO = @[cntr_no]), 'N')" ).append("\n"); 
+		query.append(",	HNGR_FLG         = DECODE(@[hngr_flg], '1', 'Y', 'N')" ).append("\n"); 
+		query.append(",	CNTR_MF_MK_DESC  = REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(@[cntr_mf_mk_desc], chr(13)||chr(10), '▤') , chr(10),''), chr(13), '▤'), chr(9), ' '), '▤' ,chr(13)||chr(10))" ).append("\n"); 
+		query.append(",	CNTR_MF_GDS_DESC = REGEXP_REPLACE(REGEXP_REPLACE(@[cntr_mf_gds_desc], '[[:space:]]', ' '), '( ){2,}', ' ')" ).append("\n"); 
+		query.append("#if (${from_ebkg} == 'Y' && ${cntr_mf_no} == '')" ).append("\n"); 
+		query.append("#else" ).append("\n"); 
+		query.append(",	CNTR_MF_NO       = @[cntr_mf_no]" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append(",	HAMO_TRF_CD      = @[hamo_trf_cd]" ).append("\n"); 
+		query.append(",	CMDT_HS_CD       = @[cmdt_hs_cd]" ).append("\n"); 
+		query.append(",	NCM_NO           = @[ncm_no]" ).append("\n"); 
+		query.append(",	DCGO_SEQ		 = @[dcgo_seq]" ).append("\n"); 
+		query.append(",   WPM_TRT_CD       = @[wpm_trt_cd]" ).append("\n"); 
+		query.append(",	UPD_USR_ID       = @[upd_usr_id]" ).append("\n"); 
+		query.append(",	UPD_DT           = sysdate" ).append("\n"); 
+		query.append("WHERE  BKG_NO       = @[bkg_no]" ).append("\n"); 
+		query.append("AND    CNTR_NO      = @[cntr_no]" ).append("\n"); 
+		query.append("AND	   CNTR_MF_SEQ  = @[cntr_mf_seq]" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+
+	}
+}

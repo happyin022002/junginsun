@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="GeneralBookingListSearchDBDAOsearchPreCheckForCodeAccuracyUnmatchRSQL">
+			<desc><![CDATA[Consignee, Nofity의 code accuracy를 조회한다.]]></desc>
+			<sql><![CDATA[
+/* Query 복잡도를 줄이기 위해 With 사용 Global Temporary 사용안함 */
+WITH SUBQ AS (
+    SELECT BKGM.BKG_NO
+         , BKGM.SAM_CNEE_NTFY_FLG
+         , BKGM.CUST_TO_ORD_FLG
+         , BKGM.POD_CD
+         , BKGM.DEL_CD
+         , BCST.VAL_NM
+         , BCST.CUST_CNT_CD
+         , BCST.CUST_SEQ
+         , BCST.BKG_CUST_TP_CD
+         , CVAL.CUST_CNT_CD AS VAL_CUST_CNT_CD -- Validation으로 찾은 것
+         , CVAL.CUST_SEQ    AS VAL_CUST_SEQ    -- Validation으로 찾은 것
+         , CVAL.VAL_CUST_ADDR AS VAL_CUST_ADDR -- Validation으로 찾은 것 
+         , ROW_NUMBER () OVER (PARTITION BY BCST.BKG_NO
+                                          , BCST.BKG_CUST_TP_CD 
+                               ORDER BY CNTC.ROWID  -- inbound contact person에  정보가 있는 것이 우선으로 처리된다.
+                                      , DECODE(CVAL.CUST_CNT_CD, SUBSTR(BKGM.DEL_CD,1,2), 1, BCST.CUST_CNT_CD, 2, 3) -- 가능한 정보의 정합성이 높은 쪽으로 유도한다.
+--                                      , DECODE(DOFC.EQ_CTRL_OFC_CD, NULL, 1, 0)  -- 가능한 정보가 많은 것이 선택되도록 한다.
+                                      , DECODE(ECTT.OFC_CD, NULL, 1, 0)  -- 가능한 정보가 많은 것이 선택되도록 한다.
+                                      , DECODE(MLOC.LOC_CD, NULL, 1, 0)  -- 가능한 정보가 많은 것이 선택되도록 한다.
+                                      , CVAL.ROWID  -- 기타 다른 것은 rowid에 따라 처리한다.
+                              ) ODR
+         , BCST.MTCH_FLG
+         , BCST.VAL_CD
+         , BCST.VAL_FAX_NO AS VAL_FAX_NO_BL
+         , BCST.VAL_NM AS VAL_NM_BL
+         , BCST.CUST_EML AS CUST_EML_BL
+         , BCST.CUST_FAX_NO AS CUST_FAX_NO_BL
+         , BCST.CUST_ADDR AS CUST_ADDR_BL
+         , BCST.CUST_NM AS CUST_NM_BL
+         , BCST.CUST_SEQ AS CUST_SEQ_BL
+         , BCST.CUST_CNT_CD AS CUST_CNT_CD_BL
+         , BKGM.BL_NO
+         , MLOC.EQ_CTRL_OFC_CD
+--         , DOFC.HNDL_OFC_CD
+    FROM BKG_BOOKING BKGM
+         JOIN BKG_VVD BVVD
+         ON ( BVVD.BKG_NO = BKGM.BKG_NO
+#if ( ${ts_flg} != 'Y')     
+              AND BVVD.POL_CD = BKGM.POL_CD
+#else
+              AND BVVD.POL_CD = BKGM.PRE_RLY_PORT_CD
+#end
+              AND BKGM.BKG_STS_CD NOT IN ('X', 'S') -- 무효한 bkg제거 -- AS IS와 동일하게 하기위해 추가 20091124
+              AND BKGM.BL_NO IS NOT NULL  -- AS IS와 동일하게 하기위해 추가 20091124
+              AND BKGM.BKG_CGO_TP_CD IN ('F', 'R') -- full, revenue empty container
+            ) 
+#if (${sch_tp} == 'D') 
+         JOIN VSK_VSL_PORT_SKD VSKD 
+         ON ( BVVD.VSL_CD         = VSKD.VSL_CD 
+              AND BVVD.SKD_VOY_NO = VSKD.SKD_VOY_NO
+              AND BVVD.SKD_DIR_CD = VSKD.SKD_DIR_CD
+              AND BVVD.POL_CD     = VSKD.VPS_PORT_CD
+              AND BVVD.POL_CLPT_IND_SEQ = VSKD.CLPT_IND_SEQ 
+            )
+#end
+         JOIN BKG_CUSTOMER BCST  -- BOOKING CUSTOMER
+         ON ( BKGM.BKG_NO = BCST.BKG_NO
+             AND BCST.BKG_CUST_TP_CD IN ('C', 'N')
+             AND (
+                      (BKGM.SAM_CNEE_NTFY_FLG = 'N' 
+                       AND BKGM.CUST_TO_ORD_FLG = 'N' 
+                       AND BCST.BKG_CUST_TP_CD IN ('C', 'N') 
+                      )
+                   OR (BKGM.SAM_CNEE_NTFY_FLG = 'Y' 
+                       AND BCST.BKG_CUST_TP_CD = 'C'
+                      )
+                   OR (BKGM.CUST_TO_ORD_FLG = 'Y' 
+                       AND BCST.BKG_CUST_TP_CD = 'N'
+                      )
+                 )
+             AND BCST.MTCH_FLG = 'N' -- Not Auto Match
+             AND (   BCST.VAL_CD IS NULL -- Not Execute Manual Validation
+                  OR BCST.VAL_CD = 'X' -- Auto-Cancel된 것은 Un-Match Customer List에 조회되어야 한다. 20100201
+                 )
+             AND TRIM(REPLACE(REPLACE(BCST.CUST_NM, CHR(10), ''), CHR(13), '')) IS NOT NULL -- 고객명 없으면 처리안함 (20090716)
+            )
+         LEFT OUTER JOIN BKG_CUST_CD_VAL CVAL
+         ON (CVAL.VAL_CUST_NM = BCST.VAL_NM  -- NAME MATCH
+             AND CVAL.DELT_FLG = 'N' 
+             AND NVL(CVAL.NMD_CUST_FLG, 'N')  <> 'Y')
+         LEFT OUTER JOIN BKG_IB_CUST_CNTC CNTC
+         ON (CNTC.OFC_CD = @[ofc_cd]
+             AND CNTC.CUST_CNT_CD = CVAL.CUST_CNT_CD
+             AND CNTC.CUST_SEQ = CVAL.CUST_SEQ )
+         LEFT OUTER JOIN MDM_LOCATION MLOC
+         ON (MLOC.LOC_CD = BKGM.DEL_CD )
+         LEFT OUTER JOIN BKG_IB_CUST_CNTC ECTT
+         ON (ECTT.OFC_CD = MLOC.EQ_CTRL_OFC_CD
+             AND ECTT.CUST_CNT_CD = CVAL.CUST_CNT_CD
+             AND ECTT.CUST_SEQ = CVAL.CUST_SEQ )
+--         LEFT OUTER JOIN BKG_AN_DEST_OFC_STUP DOFC
+--         ON (DOFC.EQ_CTRL_OFC_CD = MLOC.EQ_CTRL_OFC_CD 
+--             AND DOFC.DEST_OFC_CNTC_CD = 'I' )
+     WHERE 1=1
+
+#if (${sch_tp} == 'V') 
+       AND BVVD.VSL_CD     = substr(@[vvd],1,4)      -- VVD (OPTIONAL 1)
+       AND BVVD.SKD_VOY_NO = substr(@[vvd],5,4)   -- VVD (OPTIONAL 1)
+       AND BVVD.SKD_DIR_CD = substr(@[vvd],9,1)   -- VVD (OPTIONAL 1)
+       AND BVVD.POL_CD     = @[pol_cd] -- (OPTIONAL 3)
+#elseif (${sch_tp} == 'D') 
+       AND VSKD.VPS_ETD_DT BETWEEN TO_DATE(@[vps_etd_dt_start], 'YYYYMMDD') 
+                               AND (TO_DATE(@[vps_etd_dt_end], 'YYYYMMDD') +1)  -- DURATION (OPTIO함L 2)
+       AND VSKD.VPS_PORT_CD = @[pol_cd] -- (OPTIONAL 3)
+#elseif (${sch_tp} == 'B') 
+       AND BKGM.BL_NO = @[bl_no]  -- BL NO (OPTIONAL 5-1)
+#else
+       AND 1 = 0
+#end
+#if (${sch_tp} != 'B' && ${pod_cd} != '') 
+       AND BKGM.POD_CD = @[pod_cd] -- (OPTIONAL)
+#end
+#if (${sch_tp} != 'B' && ${del_cd} != '') 
+       AND BKGM.DEL_CD LIKE @[del_cd] || '%'  -- DELIVERY PORT CD (OPTIONAL 4)
+#end
+)
+, RSLT AS ( 
+    SELECT DENSE_RANK() OVER (ORDER BY SUBQ.VAL_NM
+                                     , SUBQ.VAL_CUST_CNT_CD || LPAD(DECODE(SUBQ.VAL_CUST_SEQ, 0, NULL,SUBQ.VAL_CUST_SEQ) , 6, '0')
+                                     , SUBSTR(SUBQ.CUST_ADDR_BL, 1, 10) 
+                                     , NVL(SUBQ.VAL_CUST_CNT_CD || LPAD(DECODE(SUBQ.VAL_CUST_SEQ, 0, NULL,SUBQ.VAL_CUST_SEQ) , 6, '0'), SUBQ.VAL_NM)
+                                     , SUBQ.CUST_CNT_CD || LPAD(DECODE(SUBQ.CUST_SEQ, 0, NULL,SUBQ.CUST_SEQ) , 6, '0') 
+                             ) AS GRP_SEQ
+         , ROW_NUMBER() OVER (PARTITION BY SUBQ.VAL_NM
+                                     , SUBQ.VAL_CUST_CNT_CD || LPAD(DECODE(SUBQ.VAL_CUST_SEQ, 0, NULL,SUBQ.VAL_CUST_SEQ) , 6, '0')
+                                     , SUBSTR(SUBQ.CUST_ADDR_BL, 1, 10) 
+                                     , NVL(SUBQ.VAL_CUST_CNT_CD || LPAD(DECODE(SUBQ.VAL_CUST_SEQ, 0, NULL,SUBQ.VAL_CUST_SEQ) , 6, '0'), SUBQ.VAL_NM)
+                                     , SUBQ.CUST_CNT_CD || LPAD(DECODE(SUBQ.CUST_SEQ, 0, NULL,SUBQ.CUST_SEQ) , 6, '0') 
+                              ORDER BY 1
+                             )                AS MEMBER_ODR
+         , COUNT(1) OVER (PARTITION BY SUBQ.VAL_NM
+                                     , SUBQ.VAL_CUST_CNT_CD || LPAD(DECODE(SUBQ.VAL_CUST_SEQ, 0, NULL,SUBQ.VAL_CUST_SEQ) , 6, '0')
+                                     , SUBSTR(SUBQ.CUST_ADDR_BL, 1, 10) 
+                                     , NVL(SUBQ.VAL_CUST_CNT_CD || LPAD(DECODE(SUBQ.VAL_CUST_SEQ, 0, NULL,SUBQ.VAL_CUST_SEQ) , 6, '0'), SUBQ.VAL_NM)
+                                     , SUBQ.CUST_CNT_CD || LPAD(DECODE(SUBQ.CUST_SEQ, 0, NULL,SUBQ.CUST_SEQ) , 6, '0') 
+                          ) AS MEMBER_CNT
+         , SUBQ.BKG_NO
+         , SUBQ.BKG_CUST_TP_CD
+         , SUBQ.BL_NO
+         , SUBQ.CUST_CNT_CD || LPAD(DECODE(SUBQ.CUST_SEQ, 0, NULL,SUBQ.CUST_SEQ) , 6, '0') AS MDM_CUST_CD
+         , MCST.CUST_LGL_ENG_NM  AS MDM_CUST_NM
+         , MADR.VAL_CUST_ADDR    AS MDM_CUST_ADDR
+         , SUBQ.CUST_CNT_CD_BL   AS BKG_CUST_CNT_CD
+         , SUBQ.CUST_SEQ_BL      AS BKG_CUST_SEQ
+         , SUBQ.CUST_NM_BL       AS BKG_CUST_NM
+         , SUBQ.CUST_ADDR_BL     AS BKG_CUST_ADDR
+         , SUBQ.VAL_CUST_CNT_CD || LPAD(DECODE(SUBQ.VAL_CUST_SEQ, 0, NULL,SUBQ.VAL_CUST_SEQ) , 6, '0') AS VAL_CUST_CD
+         , VCST.CUST_LGL_ENG_NM  AS VAL_CUST_NM
+         , SUBQ.VAL_CUST_ADDR    AS VAL_CUST_ADDR
+         , SUBQ.VAL_CUST_CNT_CD || LPAD(DECODE(SUBQ.VAL_CUST_SEQ, 0, NULL,SUBQ.VAL_CUST_SEQ) , 6, '0') AS COR_CUST_CD
+         , SUBQ.VAL_NM
+      FROM SUBQ
+           LEFT OUTER JOIN MDM_CUSTOMER MCST     -- Booking에 입력한 코드에 대한 고객명을 얻기 위함
+           ON (MCST.CUST_CNT_CD = SUBQ.CUST_CNT_CD 
+               AND MCST.CUST_SEQ = SUBQ.CUST_SEQ  
+              )
+           LEFT OUTER JOIN BKG_CUST_CD_VAL MADR  -- Booking에 입력한 코드에 대한 주소를 얻기 위함
+           ON (MADR.CUST_CNT_CD = SUBQ.CUST_CNT_CD 
+               AND MADR.CUST_SEQ = SUBQ.CUST_SEQ  
+              )
+           LEFT OUTER JOIN MDM_CUSTOMER VCST ON
+              ( VCST.CUST_CNT_CD = SUBQ.VAL_CUST_CNT_CD
+                AND VCST.CUST_SEQ = SUBQ.VAL_CUST_SEQ
+              )
+     WHERE ODR = 1
+) -- END OF RSLT
+SELECT RSLT.GRP_SEQ
+     , DECODE(DMUX.RNUM, 2,       0, -1) AS GRP_IMG_IDX
+     , DECODE(DMUX.RNUM, 2,       1, DECODE(RSLT.MEMBER_CNT, 1, 1, 2)) AS LVL_CD  -- Member Count가 1이면 단독 Leaf, 아니면 Group의 Leaf
+     , DECODE(DMUX.RNUM, 2, GRP_SEQ, DECODE(RSLT.MEMBER_CNT, 1, RSLT.GRP_SEQ, NULL)) GRP_SEQ_VIEW
+     , RSLT.VAL_CUST_CD
+     , RSLT.BKG_CUST_NM
+     , DECODE(DMUX.RNUM, 2, '', RSLT.BKG_NO ) AS BKG_NO
+     , DECODE(DMUX.RNUM, 2, '', RSLT.BKG_CUST_TP_CD ) AS BKG_CUST_TP_CD
+     , DECODE(DMUX.RNUM, 2, '', DECODE(RSLT.BKG_CUST_TP_CD, 'C', 'CNEE', 'NTFY')) AS BKG_CUST_TP_CD_VIEW
+     , DECODE(DMUX.RNUM, 2, '', RSLT.BL_NO ) AS BL_NO
+     , RSLT.MDM_CUST_CD
+     , RSLT.MDM_CUST_NM
+     , RSLT.MDM_CUST_ADDR
+     , RSLT.BKG_CUST_CNT_CD
+     , RSLT.BKG_CUST_SEQ
+     , RSLT.BKG_CUST_ADDR
+     , RSLT.VAL_CUST_NM
+     , RSLT.VAL_CUST_ADDR
+     , RSLT.COR_CUST_CD
+  FROM RSLT
+     , (SELECT ROWNUM RNUM
+          FROM COM_INTG_CD
+         WHERE ROWNUM < DECODE(@[excel_flg], 'Y', 2,3)) DMUX -- Excel일 경우 그룹 record는 나오면 안된다.
+ WHERE DMUX.RNUM IN(1, DECODE(RSLT.MEMBER_ODR, 2, 2, 0))
+ ORDER BY RSLT.GRP_SEQ
+        , DECODE(DMUX.RNUM, 2,       0, -1) DESC			]]></sql>
+			<params>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="vps_etd_dt_start" type="12" value="" out="N"/>
+				<param name="vps_etd_dt_end" type="12" value="" out="N"/>
+				<param name="bl_no" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="del_cd" type="12" value="" out="N"/>
+				<param name="excel_flg" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

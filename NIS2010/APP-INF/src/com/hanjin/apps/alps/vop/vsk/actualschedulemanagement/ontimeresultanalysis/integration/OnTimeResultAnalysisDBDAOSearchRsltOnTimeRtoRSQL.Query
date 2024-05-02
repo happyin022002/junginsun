@@ -1,0 +1,362 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="OnTimeResultAnalysisDBDAOSearchRsltOnTimeRtoRSQL">
+			<desc><![CDATA[VSK_VSL_SKD_RSLT 테이블 조회]]></desc>
+			<sql><![CDATA[
+/********************************************************************************************/
+-- Period 1 
+-- 1. TTL_CALL01    : Total Calling Count
+-- 2. ONTIME_CALL01 : On-Time Calling Count
+-- 3. DUR_RATIO01   : 정시율 Round((ONTIME_CALL01 / TTL_CALL01) * 100), 1)
+-------------------------------------------------------------------------------------------
+-- Period 2 
+-- 1. TTL_CALL02    : Total Calling Count
+-- 2. ONTIME_CALL02 : On-Time Calling Count
+-- 3. DUR_RATIO02   : 정시율 Round((ONTIME_CALL02 / TTL_CALL02) * 100), 1)
+-------------------------------------------------------------------------------------------
+-- Period 1 과 Period 2 에 차이(기간에 정시율 변화 추이를 표시)
+-- DIFF_RAT = (DUR_RATIO01) - (DUR_RATIO02)
+-------------------------------------------------------------------------------------------
+-- Max Date(start_date1, start_date2, end_date1, end_date2) 중 가장 큰 날짜가 기준이 됨.
+-- 1. TTL_CALL03    : Max Date에 년도 ~ 해당 월까지 Calling Count
+-- 2. ONTIME_CALL03 : Max Date에 년도 ~ 해당 월까지 On-Time Calling Count
+-- 3. DUR_RATIO03   : 정시율 Round((ONTIME_CALL03 / TTL_CALL03) * 100), 1)
+-------------------------------------------------------------------------------------------
+-- A. Total Call수 = SUM(DECODE(VSKD_RSLT_XCLD_CD, :ratio_opt, 0, 'S', 0, 1))
+-- ratio_opt컬럼에 의미는?
+-- 1. A : Arrival On-time Ratio 산출 선택시
+--        VSKD_RSLT_XCLD_CD = 'A'는 Arrival 표시되지 않음란 의미로,실적 생성시 ATA를 입력
+--        입력하지 못하는 상태임으로 실적(COUNT)에서는 누락시킨다는 의미이다.
+-- 2. D : Departure On-time Ratio 산출 선택시
+--        VSKD_RSLT_XCLD_CD = 'D'는 Departure 표시되지 않음란 의미로,실적 생성시 ATD를 입력
+--        입력하지 못하는 상태임으로 실적(COUNT)에서는 누락시킨다는 의미이다.
+-- 3. S : Arrival, Departure On-time Ratio 산출 선택시 모두 누락 시킨다.Skip Call에 의미
+--        VSKD_RSLT_XCLD_CD = 'S'는 Skip Calling를 의미함으로 실적(COUNT)에서는 누락시킨다.
+-- B. On Time Calling 수 :
+--    SUM(DECODE(VSKD_RSLT_XCLD_CD, :ratio_opt, 0, 'S', 0, 
+--               DECODE(SIGN(:ontime_opt - 
+--                            DECODE(:delay_opt || :ratio_opt
+--                             , 'EA', XCLD_BRTH_DLAY_HRS
+--                             , 'ED', XCLD_DEP_DLAY_HRS
+--                             , 'IA', INCL_BRTH_DLAY_HRS
+--                             , 'ID', INCL_DEP_DLAY_HRS))
+--                       , -1, 0, 1)) )
+/********************************************************************************************/
+
+SELECT GRP_ID
+       , TTL_CALL01, ONTIME_CALL01, NVL(DUR_RATIO01, 0) AS DUR_RATIO01
+       , TTL_CALL02, ONTIME_CALL02, NVL(DUR_RATIO02, 0) AS DUR_RATIO02
+       , (NVL(DUR_RATIO01,0) - NVL(DUR_RATIO02,0)) AS DIFF_RAT
+       , TTL_CALL03
+       , ONTIME_CALL03
+       , DUR_RATIO03
+FROM   ( /* Period 1 과 Period 2에 합집합 */
+       SELECT  T0.GRP_ID
+               , T1.TTL_CALL AS TTL_CALL01, T1.ONTIME_CALL AS ONTIME_CALL01, DECODE(T1.TTL_CALL, 0, 0, ROUND((T1.ONTIME_CALL / T1.TTL_CALL) * 100, 1) ) AS DUR_RATIO01
+               , T2.TTL_CALL AS TTL_CALL02, T2.ONTIME_CALL AS ONTIME_CALL02, DECODE(T2.TTL_CALL, 0, 0, ROUND((T2.ONTIME_CALL / T2.TTL_CALL) * 100, 1) ) AS DUR_RATIO02
+               , T3.TTL_CALL AS TTL_CALL03, T3.ONTIME_CALL AS ONTIME_CALL03, DECODE(T3.TTL_CALL, 0, 0, ROUND((T3.ONTIME_CALL / T3.TTL_CALL) * 100, 1) ) AS DUR_RATIO03
+       FROM    (
+#if (${grp_id} == 'A') 
+               SELECT  T1.VPS_PORT_CD || ' (' || T1.SKD_DIR_CD || ')' AS GRP_ID
+#elseif (${grp_id} == 'B') 
+               SELECT  T1.VSL_CD AS GRP_ID
+#elseif (${grp_id} == 'C') 
+               SELECT  T2.VSL_SLAN_CD AS GRP_ID
+#end
+               FROM    VSK_VSL_SKD_RSLT  T1,
+                       VSK_VSL_SKD       T2,
+                       MDM_VSL_CNTR      T3
+               WHERE   1 = 1
+               AND     T1.VSL_CD         = T2.VSL_CD
+               AND     T1.SKD_VOY_NO     = T2.SKD_VOY_NO
+               AND     T1.SKD_DIR_CD     = T2.SKD_DIR_CD
+               AND     T1.VSL_CD         = T3.VSL_CD
+
+#if (${upd_usr_id} != '')
+               AND     T1.UPD_USR_ID     = @[upd_usr_id]
+#end
+
+#if (${crr_cd} != '')
+               AND     NVL(T2.ACT_CRR_CD, T3.CRR_CD)         = @[crr_cd]
+#end
+               AND     T1.ACT_INP_YRMON >= TO_CHAR(TO_DATE(@[start_date1], 'YYYY-MM'), 'YYYYMM')
+               AND     T1.ACT_INP_YRMON <= TO_CHAR(TO_DATE(@[end_date1], 'YYYY-MM'), 'YYYYMM')
+#if (${vsl_cd} != '')
+               AND     T1.VSL_CD         = @[vsl_cd]
+#end
+#if (${vsl_slan_cd} != '')
+               AND     T2.VSL_SLAN_CD    = @[vsl_slan_cd]
+#end
+#if (${vps_port_cd} != '')
+               AND     VPS_PORT_CD       = @[vps_port_cd]
+#end
+--               AND      (NVL(SKD_CNG_STS_CD, ' ')||CLPT_IND_SEQ) NOT IN (' 2')
+               UNION
+#if (${grp_id} == 'A') 
+               SELECT  T1.VPS_PORT_CD || ' (' || T1.SKD_DIR_CD || ')' AS GRP_ID
+#elseif (${grp_id} == 'B') 
+               SELECT  T1.VSL_CD AS GRP_ID
+#elseif (${grp_id} == 'C') 
+               SELECT  T2.VSL_SLAN_CD AS GRP_ID
+#end
+               FROM    VSK_VSL_SKD_RSLT  T1,
+                       VSK_VSL_SKD       T2,
+                       MDM_VSL_CNTR      T3
+               WHERE   1                = 1
+               AND     T1.VSL_CD        = T2.VSL_CD
+               AND     T1.SKD_VOY_NO    = T2.SKD_VOY_NO
+               AND     T1.SKD_DIR_CD    = T2.SKD_DIR_CD
+               AND     T1.VSL_CD        = T3.VSL_CD
+
+#if (${upd_usr_id} != '')
+               AND     T1.UPD_USR_ID     = @[upd_usr_id]
+#end
+
+#if (${crr_cd} != '')
+               AND     NVL(T2.ACT_CRR_CD, T3.CRR_CD)           = @[crr_cd]
+#end
+               AND     T1.ACT_INP_YRMON >= TO_CHAR(TO_DATE(@[start_date2], 'YYYY-MM'), 'YYYYMM')
+               AND     T1.ACT_INP_YRMON <= TO_CHAR(TO_DATE(@[end_date2], 'YYYY-MM'), 'YYYYMM')
+#if (${vsl_cd} != '')
+               AND     T1.VSL_CD           = @[vsl_cd]
+#end
+#if (${vsl_slan_cd} != '')
+               AND     T2.VSL_SLAN_CD      = @[vsl_slan_cd]
+#end
+#if (${vps_port_cd} != '')
+               AND     VPS_PORT_CD          = @[vps_port_cd]
+#end
+--               AND      (NVL(SKD_CNG_STS_CD, ' ')||CLPT_IND_SEQ) NOT IN (' 2')
+#if (${grp_id} == 'A') 
+               GROUP BY T1.VPS_PORT_CD || ' (' || T1.SKD_DIR_CD || ')'     
+#elseif (${grp_id} == 'B') 
+               GROUP BY T1.VSL_CD
+#elseif (${grp_id} == 'C') 
+               GROUP BY T2.VSL_SLAN_CD
+#end
+               )T0,
+               ( /* Period 1 집합 */
+#if (${grp_id} == 'A') 
+               SELECT   T1.VPS_PORT_CD || ' (' || T1.SKD_DIR_CD || ')' AS GRP_ID,
+#elseif (${grp_id} == 'B') 
+               SELECT   T1.VSL_CD AS GRP_ID,
+#elseif (${grp_id} == 'C') 
+               SELECT   T2.VSL_SLAN_CD AS GRP_ID,
+#end
+                        SUM	(	CASE	WHEN T1.SKD_CNG_STS_CD	= 'S' 	OR T1.VSKD_RSLT_XCLD_CD = 'S' 	THEN 0
+										WHEN @[ratio_opt]		= 'D'									THEN DECODE(ACT_DEP_DT,NULL,0,1)
+										ELSE 1
+								END
+							) TTL_CALL
+					,
+                        SUM	(	CASE	WHEN T1.SKD_CNG_STS_CD 	= 'S' 	OR T1.VSKD_RSLT_XCLD_CD = 'S' 	THEN 0
+								 		WHEN @[ratio_opt]		= 'D'									THEN DECODE(ACT_DEP_DT,NULL,0,1)
+										ELSE
+												DECODE(SIGN(@[ontime_opt] - DECODE	(@[delay_opt] || @[ratio_opt]
+																								, 'EA'
+																								, T1.XCLD_BRTH_DLAY_HRS
+																								, 'ED'
+																								, T1.XCLD_DEP_DLAY_HRS
+																								, 'IA'
+																								, T1.INCL_BRTH_DLAY_HRS
+																								, 'ID'
+																								, T1.INCL_DEP_DLAY_HRS
+																					)
+															), -1, 0, 1)
+							 	END 
+							) ONTIME_CALL
+               FROM     VSK_VSL_SKD_RSLT     T1,
+                        VSK_VSL_SKD          T2,
+                        MDM_VSL_CNTR         T3
+               WHERE    1 = 1
+               AND      T1.VSL_CD         = T2.VSL_CD
+               AND      T1.SKD_VOY_NO     = T2.SKD_VOY_NO
+               AND      T1.SKD_DIR_CD     = T2.SKD_DIR_CD
+               AND      T1.VSL_CD         = T3.VSL_CD
+
+#if (${upd_usr_id} != '')
+               AND     T1.UPD_USR_ID     = @[upd_usr_id]
+#end
+
+#if (${crr_cd} != '')
+               AND      NVL(T2.ACT_CRR_CD, T3.CRR_CD)      = @[crr_cd]
+#end
+               AND      T1.ACT_INP_YRMON >= TO_CHAR(TO_DATE(@[start_date1], 'YYYY-MM'), 'YYYYMM')
+               AND      T1.ACT_INP_YRMON <= TO_CHAR(TO_DATE(@[end_date1], 'YYYY-MM'), 'YYYYMM')
+#if (${vsl_cd} != '')
+               AND      T1.VSL_CD           = @[vsl_cd]
+#end
+#if (${vsl_slan_cd} != '')
+               AND      T2.VSL_SLAN_CD      = @[vsl_slan_cd]
+#end
+#if (${vps_port_cd} != '')
+               AND      VPS_PORT_CD          = @[vps_port_cd]
+#end
+--               AND      (NVL(SKD_CNG_STS_CD, ' ')||CLPT_IND_SEQ) NOT IN (' 2')
+#if (${grp_id} == 'A') 
+               GROUP BY T1.VPS_PORT_CD || ' (' || T1.SKD_DIR_CD || ')'     
+#elseif (${grp_id} == 'B') 
+               GROUP BY T1.VSL_CD
+#elseif (${grp_id} == 'C') 
+               GROUP BY T2.VSL_SLAN_CD
+#end
+               )T1,
+               ( /* Period 2 집합 */
+#if (${grp_id} == 'A') 
+               SELECT   T1.VPS_PORT_CD || ' (' || T1.SKD_DIR_CD || ')' AS GRP_ID,
+#elseif (${grp_id} == 'B') 
+               SELECT   T1.VSL_CD AS GRP_ID,
+#elseif (${grp_id} == 'C') 
+               SELECT   T2.VSL_SLAN_CD AS GRP_ID,
+#end
+                        SUM	(	CASE	WHEN T1.SKD_CNG_STS_CD	= 'S' 	OR T1.VSKD_RSLT_XCLD_CD = 'S' 	THEN 0
+										WHEN @[ratio_opt]		= 'D'									THEN DECODE(ACT_DEP_DT,NULL,0,1)
+										ELSE 1
+								END
+							) TTL_CALL
+					,
+                        SUM	(	CASE	WHEN T1.SKD_CNG_STS_CD 	= 'S' 	OR T1.VSKD_RSLT_XCLD_CD = 'S' 	THEN 0
+								 		WHEN @[ratio_opt]		= 'D'									THEN DECODE(ACT_DEP_DT,NULL,0,1)
+										ELSE
+												DECODE(SIGN(@[ontime_opt] - DECODE	(@[delay_opt] || @[ratio_opt]
+																								, 'EA'
+																								, T1.XCLD_BRTH_DLAY_HRS
+																								, 'ED'
+																								, T1.XCLD_DEP_DLAY_HRS
+																								, 'IA'
+																								, T1.INCL_BRTH_DLAY_HRS
+																								, 'ID'
+																								, T1.INCL_DEP_DLAY_HRS
+																					)
+															), -1, 0, 1)
+							 	END 
+							) ONTIME_CALL
+                FROM    VSK_VSL_SKD_RSLT     T1,
+                        VSK_VSL_SKD          T2,
+                        MDM_VSL_CNTR         T3
+                WHERE   1 = 1
+                AND     T1.VSL_CD          = T2.VSL_CD
+                AND     T1.SKD_VOY_NO      = T2.SKD_VOY_NO
+                AND     T1.SKD_DIR_CD      = T2.SKD_DIR_CD
+                AND     T1.VSL_CD          = T3.VSL_CD
+
+#if (${upd_usr_id} != '')
+               AND     T1.UPD_USR_ID     = @[upd_usr_id]
+#end
+
+#if (${crr_cd} != '')
+                AND      NVL(T2.ACT_CRR_CD, T3.CRR_CD)         = @[crr_cd]
+#end
+                AND      T1.ACT_INP_YRMON >= TO_CHAR(TO_DATE(@[start_date2], 'YYYY-MM'), 'YYYYMM')
+                AND      T1.ACT_INP_YRMON <= TO_CHAR(TO_DATE(@[end_date2], 'YYYY-MM'), 'YYYYMM')
+#if (${vsl_cd} != '')
+                AND      T1.VSL_CD         = @[vsl_cd]
+#end
+#if (${vsl_slan_cd} != '')
+                AND      T2.VSL_SLAN_CD    = @[vsl_slan_cd]
+#end
+#if (${vps_port_cd} != '')
+                AND      VPS_PORT_CD       = @[vps_port_cd]
+#end
+--                AND     (NVL(SKD_CNG_STS_CD, ' ')||CLPT_IND_SEQ) NOT IN (' 2')
+#if (${grp_id} == 'A') 
+                GROUP BY T1.VPS_PORT_CD || ' (' || T1.SKD_DIR_CD || ')'     
+#elseif (${grp_id} == 'B') 
+                GROUP BY T1.VSL_CD
+#elseif (${grp_id} == 'C') 
+                GROUP BY T2.VSL_SLAN_CD
+#end
+                ) T2,
+                ( /* 입력 받은 Date 중에서 가장 큰 YYYY-MM에 해당하는 YYYY-01부터 YYYY-MM(Max Date)까지에 Call Count & On-Time Call */
+#if (${grp_id} == 'A') 
+                SELECT   T1.VPS_PORT_CD || ' (' || T1.SKD_DIR_CD || ')' AS GRP_ID,
+#elseif (${grp_id} == 'B') 
+                SELECT   T1.VSL_CD AS GRP_ID,
+#elseif (${grp_id} == 'C') 
+                SELECT   T2.VSL_SLAN_CD AS GRP_ID,
+#end
+                        SUM	(	CASE	WHEN T1.SKD_CNG_STS_CD	= 'S' 	OR T1.VSKD_RSLT_XCLD_CD = 'S' 	THEN 0
+										WHEN @[ratio_opt]		= 'D'									THEN DECODE(ACT_DEP_DT,NULL,0,1)
+										ELSE 1
+								END
+							) TTL_CALL
+					,
+                        SUM	(	CASE	WHEN T1.SKD_CNG_STS_CD 	= 'S' 	OR T1.VSKD_RSLT_XCLD_CD = 'S' 	THEN 0
+								 		WHEN @[ratio_opt]		= 'D'									THEN DECODE(ACT_DEP_DT,NULL,0,1)
+										ELSE
+												DECODE(SIGN(@[ontime_opt] - DECODE	(@[delay_opt] || @[ratio_opt]
+																								, 'EA'
+																								, T1.XCLD_BRTH_DLAY_HRS
+																								, 'ED'
+																								, T1.XCLD_DEP_DLAY_HRS
+																								, 'IA'
+																								, T1.INCL_BRTH_DLAY_HRS
+																								, 'ID'
+																								, T1.INCL_DEP_DLAY_HRS
+																					)
+															), -1, 0, 1)
+							 	END 
+							) ONTIME_CALL
+                 FROM    VSK_VSL_SKD_RSLT     T1,
+                         VSK_VSL_SKD          T2,
+                         MDM_VSL_CNTR         T3
+                 WHERE   1 = 1
+                 AND     T1.VSL_CD         = T2.VSL_CD
+                 AND     T1.SKD_VOY_NO     = T2.SKD_VOY_NO
+                 AND     T1.SKD_DIR_CD     = T2.SKD_DIR_CD
+                 AND     T1.VSL_CD         = T3.VSL_CD
+
+#if (${upd_usr_id} != '')
+                 AND     T1.UPD_USR_ID     = @[upd_usr_id]
+#end
+
+#if (${crr_cd} != '')
+                 AND     NVL(T2.ACT_CRR_CD, T3.CRR_CD)        = @[crr_cd]
+#end
+
+                 AND     T1.ACT_INP_YRMON >= SUBSTR(@[sum_date], 1, 4)||'01'
+                 AND     T1.ACT_INP_YRMON <= TO_CHAR(TO_DATE(@[sum_date], 'YYYY-MM'), 'YYYYMM')
+
+#if (${vsl_cd} != '')
+                 AND      T1.VSL_CD        = @[vsl_cd]
+#end
+#if (${vsl_slan_cd} != '')
+                 AND      T2.VSL_SLAN_CD   = @[vsl_slan_cd]
+#end
+#if (${vps_port_cd} != '')
+                 AND      VPS_PORT_CD      = @[vps_port_cd]
+#end
+--                 AND      (NVL(SKD_CNG_STS_CD, ' ')||CLPT_IND_SEQ) NOT IN (' 2')
+#if (${grp_id} == 'A') 
+                 GROUP BY T1.VPS_PORT_CD || ' (' || T1.SKD_DIR_CD || ')'     
+#elseif (${grp_id} == 'B') 
+                 GROUP BY T1.VSL_CD
+#elseif (${grp_id} == 'C') 
+                 GROUP BY T2.VSL_SLAN_CD
+#end
+               ) T3
+               WHERE   1 = 1
+               AND     T0.GRP_ID = T1.GRP_ID (+)
+               AND     T0.GRP_ID = T2.GRP_ID (+)
+               AND     T0.GRP_ID = T3.GRP_ID (+)
+          )
+ORDER BY GRP_ID			]]></sql>
+			<params>
+				<param name="upd_usr_id" type="12" value="" out="N"/>
+				<param name="crr_cd" type="12" value="" out="N"/>
+				<param name="start_date1" type="12" value="" out="N"/>
+				<param name="end_date1" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="vsl_slan_cd" type="12" value="" out="N"/>
+				<param name="vps_port_cd" type="12" value="" out="N"/>
+				<param name="start_date2" type="12" value="" out="N"/>
+				<param name="end_date2" type="12" value="" out="N"/>
+				<param name="ratio_opt" type="12" value="" out="N"/>
+				<param name="ontime_opt" type="12" value="" out="N"/>
+				<param name="delay_opt" type="12" value="" out="N"/>
+				<param name="sum_date" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

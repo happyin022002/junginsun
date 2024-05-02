@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="RFAReportDBDAORsltPriRpRetroInfoVORSQL">
+			<desc><![CDATA[2014.11.25 [CHM-201432700] 최성환 Retroactive RFA Minimization관련 시스템 개발요청(Month/Creation Date를 기준으로 Retroactive RFA 승인건수 Monitoring을 위한 Report)]]></desc>
+			<sql><![CDATA[
+SELECT  HDR.RFA_NO                                                                           AS RFA_NO
+      , MN.PROP_NO                                                                           AS PROP_NO
+      , MN.AMDT_SEQ                                                                          AS AMDT_SEQ
+      ---------------------------------------------------------------------------------------------------
+      , TO_CHAR (MN.EFF_DT, 'YYYYMMDD')                                                      AS EFF_DT
+      , TO_CHAR (MN.EXP_DT, 'YYYYMMDD')                                                      AS EXP_DT
+      , TO_CHAR (MN.CRE_DT, 'YYYYMMDD')                                                      AS CRE_DT
+      ----------------------------------------------------------------------------------------------------
+      , MN.PROP_OFC_CD                                                                       AS PROP_OFC_CD
+      , MN.PROP_SREP_CD                                                                      AS PROP_SREP_CD
+      ,(SELECT USR_NM
+          FROM COM_USER
+         WHERE USR_ID = (SELECT EMPE_CD
+                  FROM MDM_SLS_REP
+                 WHERE SREP_CD = MN.PROP_SREP_CD ))                                          AS PROP_SREP_NM
+      ----------------------------------------------------------------------------------------------------
+     , PROG.PROG_USR_ID                                                                      AS PROP_APRO_STAFF_CD
+     , (SELECT C.USR_NM
+          FROM COM_USER C
+         WHERE C.USR_ID = PROG.PROG_USR_ID)                                                  AS PROP_APRO_STAFF_NM
+     , PROG.PROG_OFC_CD                                                                      AS PROP_APRO_OFC_CD
+     , TO_CHAR (PROG.PROG_DT, 'YYYYMMDD')                                                    AS PROP_APRO_DT       
+      ----------------------------------------------------------------------------------------------------
+    -- , SCP.SVC_SCP_CD                                                                        AS SVC_SCP_CD
+	 , PRI_UTILS_PKG.JOIN_ROWS_VAR_FUNC (CURSOR(SELECT DISTINCT SCP.SVC_SCP_CD
+                                  				  FROM PRI_RP_SCP_MN SCP
+                                 				 WHERE SCP.PROP_NO = MN.PROP_NO
+  								   				   AND SCP.AMDT_SEQ = MN.AMDT_SEQ  ) , ', ') AS SVC_SCP_CD 
+      ----------------------------------------------------------------------------------------------------
+      , (SELECT INTG_CD_VAL_DESC 
+           FROM COM_INTG_CD_DTL 
+          WHERE INTG_CD_VAL_CTNT = MN.PRC_CTRT_CUST_TP_CD 
+            AND INTG_CD_ID = 'CD00697') 													 AS PRC_CTRT_CUST_TP_NM
+	  , MN.CTRT_CUST_CNT_CD																	 AS CTRT_CUST_CNT_CD
+      , MN.CTRT_CUST_SEQ											                         AS CTRT_CUST_SEQ
+      , MN.CTRT_CUST_CNT_CD||LPAD(TO_CHAR(MN.CTRT_CUST_SEQ),6,'0')                           AS CTRT_CUST_CD
+      , (SELECT CUST_LGL_ENG_NM
+          FROM MDM_CUSTOMER
+         WHERE CUST_CNT_CD = MN.CTRT_CUST_CNT_CD
+           AND CUST_SEQ = MN.CTRT_CUST_SEQ )                                                 AS CTRT_CUST_NM
+      ----------------------------------------------------------------------------------------------------
+      , MN.RFA_CTRT_TP_CD                                                                    AS RFA_CTRT_TP_CD
+      , (SELECT INTG_CD_VAL_DP_DESC 
+           FROM COM_INTG_CD_DTL 
+          WHERE INTG_CD_ID = 'CD03264' 
+            AND INTG_CD_VAL_CTNT = MN.RFA_CTRT_TP_CD)                                        AS RFA_CTRT_TP_NM      
+      ----------------------------------------------------------------------------------------------------      
+      , RTRO.RTRO_NOTE_CD																	 AS RTRO_NOTE_CD
+      , (SELECT INTG_CD_VAL_DESC 
+           FROM COM_INTG_CD_DTL 
+          WHERE INTG_CD_VAL_CTNT = RTRO.RTRO_NOTE_CD 
+            AND INTG_CD_ID = 'CD03344')													 	 AS RTRO_NOTE_NM
+      , RTRO.RTRO_NOTE_CTNT 																 AS RTRO_NOTE_CTNT
+	  ----------------------------------------------------------------------------------------------------  
+	  ,'' AS APRO_FROM_DT   -- PARAM VO 
+	  ,'' AS APRO_TO_DT		-- PARAM VO 
+	  ,'' AS DT_TYPE		-- PARAM VO 
+	  ---------------------------------------------------------------------------------------------------- 
+  FROM PRI_RP_HDR HDR
+      ,PRI_RP_MN MN	  
+--      ,(
+--        SELECT T1.*
+--          FROM PRI_RP_PROG T1
+--             , (SELECT PROP_NO
+--                     , AMDT_SEQ
+--                     , MAX(PROP_PROG_SEQ) MAX_PROP_PROG_SEQ
+--                  FROM PRI_RP_PROG
+--                 WHERE PROP_STS_CD = 'A' 
+--                 GROUP BY PROP_NO
+--                     , AMDT_SEQ) T2
+--         WHERE T1.PROP_NO = T2.PROP_NO
+--           AND T1.AMDT_SEQ = T2.AMDT_SEQ
+--           AND T1.PROP_PROG_SEQ = T2.MAX_PROP_PROG_SEQ    
+--       ) PROG   
+      ,(
+        SELECT *
+          FROM (SELECT T.*
+                     , ROW_NUMBER () OVER(PARTITION BY PROP_NO, AMDT_SEQ
+                         ORDER BY PROP_NO, AMDT_SEQ, PROP_PROG_SEQ DESC) AS RNUM
+                  FROM PRI_RP_PROG T
+                 WHERE PROP_STS_CD = 'A' ) PROG_MAX
+         WHERE RNUM < 2
+       ) PROG        
+      ,PRI_RP_RTRO_NOTE RTRO
+WHERE HDR.PROP_NO = MN.PROP_NO
+  AND MN.PROP_NO = PROG.PROP_NO 
+  AND MN.AMDT_SEQ = PROG.AMDT_SEQ 
+  AND PROG.PROP_STS_CD = 'A'
+  AND MN.PROP_STS_CD = 'A'  			-- 현재 Approve 대상만 조회
+  AND MN.PROP_APRO_DT IS NOT NULL
+  AND MN.RFA_CTRT_TP_CD IN ('C','S')	-- G (Guideline 제외)
+  AND MN.PROP_NO = RTRO.PROP_NO
+  AND MN.AMDT_SEQ = RTRO.AMDT_SEQ
+-------------------------------------------------------------------------------------------------------  조회 조건 추가 시작
+#if (${dt_type} == 'APRO')
+	AND PROG.PROG_DT           <= TO_DATE(@[exp_dt], 'YYYY-MM-DD') + 0.99999 -- Approval Date(To:235959) 
+	AND PROG.PROG_DT           >= TO_DATE(@[eff_dt], 'YYYY-MM-DD') -- Approval Date(From)
+#else 
+	AND MN.EFF_DT              <= TO_DATE(@[exp_dt], 'YYYY-MM-DD') -- Effective Date(To) 
+	AND MN.EXP_DT              >= TO_DATE(@[eff_dt], 'YYYY-MM-DD') -- Effective Date(From)
+#end
+
+#if (${rfa_no} != '')
+	AND   HDR.RFA_NO = @[rfa_no]						-- RFA No
+#end
+#if (${prop_ofc_cd} != '')
+	AND MN.PROP_OFC_CD = @[prop_ofc_cd]					-- Request Office
+#end
+#if (${prop_srep_cd} != '')
+	AND MN.PROP_SREP_CD = @[prop_srep_cd]				-- Sales Rep.
+#end
+#if (${prop_apro_staff_cd} != '')
+	AND PROG.PROG_USR_ID IN (SELECT USR_ID FROM COM_USER WHERE UPPER(USR_NM) LIKE UPPER('%'||@[prop_apro_staff_cd]||'%'))		-- PROP_APRO_STAFF_CD
+#end
+#if (${prop_apro_ofc_cd} != '')
+	AND PROG.PROG_OFC_CD = @[prop_apro_ofc_cd]			-- PROP_APRO_OFC_CD
+#end
+#if (${ctrt_cust_cnt_cd} != '' && ${ctrt_cust_seq} != '') 
+	AND MN.CTRT_CUST_CNT_CD = @[ctrt_cust_cnt_cd] 		-- Customer
+	AND MN.CTRT_CUST_SEQ    = @[ctrt_cust_seq]    		-- Customer
+#end
+#if (${rfa_ctrt_tp_cd} != '')
+	AND MN.RFA_CTRT_TP_CD = @[rfa_ctrt_tp_cd]			-- RFA Type
+#end
+#if (${rtro_note_cd} != '')
+	AND RTRO.RTRO_NOTE_CD = @[rtro_note_cd]				-- NOTE code
+#end
+-------------------------------------------------------------------------------------------------------  조회 조건 추가 끝
+  ORDER BY PROG.PROG_DT DESC			]]></sql>
+			<params>
+				<param name="exp_dt" type="12" value="" out="N"/>
+				<param name="eff_dt" type="12" value="" out="N"/>
+				<param name="rfa_no" type="12" value="" out="N"/>
+				<param name="prop_ofc_cd" type="12" value="" out="N"/>
+				<param name="prop_srep_cd" type="12" value="" out="N"/>
+				<param name="prop_apro_staff_cd" type="12" value="" out="N"/>
+				<param name="prop_apro_ofc_cd" type="12" value="" out="N"/>
+				<param name="ctrt_cust_cnt_cd" type="12" value="" out="N"/>
+				<param name="ctrt_cust_seq" type="12" value="" out="N"/>
+				<param name="rfa_ctrt_tp_cd" type="12" value="" out="N"/>
+				<param name="rtro_note_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

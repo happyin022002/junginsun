@@ -1,0 +1,129 @@
+/*=========================================================
+*Copyright(c) 2015 CyberLogitec
+*@FileName : BookingHistoryMgtDBDAOSearchBkgEurTroRSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2015.07.01
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2015.07.01 
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.bkg.bookingcommon.bookinghistorymgt.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class BookingHistoryMgtDBDAOSearchBkgEurTroRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * BookingHistoryMgtDBDAOSearchBkgEurTroRSQL
+	  * </pre>
+	  */
+	public BookingHistoryMgtDBDAOSearchBkgEurTroRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("bkg_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.esm.bkg.bookingcommon.bookinghistorymgt.integration").append("\n"); 
+		query.append("FileName : BookingHistoryMgtDBDAOSearchBkgEurTroRSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT BKG_NO" ).append("\n"); 
+		query.append(", IO_BND_CD" ).append("\n"); 
+		query.append(", TRO_SEQ" ).append("\n"); 
+		query.append(", RQST_SUB_SEQ" ).append("\n"); 
+		query.append(", CNTR_NO" ).append("\n"); 
+		query.append(", CNTR_TPSZ_CD" ).append("\n"); 
+		query.append(", DCGO_SEQ" ).append("\n"); 
+		query.append(", RC_SEQ" ).append("\n"); 
+		query.append(", AWK_CGO_SEQ" ).append("\n"); 
+		query.append(", HLG_TP_CD" ).append("\n"); 
+		query.append(", CGO_WGT" ).append("\n"); 
+		query.append(", CNTR_PKUP_YD_CD" ).append("\n"); 
+		query.append(", TO_CHAR(CNTR_PKUP_DT, 'YYYY-MM-DD HH24:MI') CNTR_PKUP_DT" ).append("\n"); 
+		query.append(", CNTR_RTN_YD_CD" ).append("\n"); 
+		query.append(", TO_CHAR(CNTR_RTN_DT, 'YYYY-MM-DD HH24:MI') CNTR_RTN_DT" ).append("\n"); 
+		query.append(", EUR_TRNS_TP_CD" ).append("\n"); 
+		query.append(", DRP_OFF_PKUP_YD_CD" ).append("\n"); 
+		query.append(", CMDT_CD" ).append("\n"); 
+		query.append(", REP_CMDT_CD" ).append("\n"); 
+		query.append(", REP_CMDT_DESC" ).append("\n"); 
+		query.append(", BKG_TRSP_MZD_CD" ).append("\n"); 
+		query.append(", SPCL_INSTR_RMK" ).append("\n"); 
+		query.append(", TRO_PROC_CD" ).append("\n"); 
+		query.append(", CXL_FLG" ).append("\n"); 
+		query.append(", CSTMS_CLR_NO" ).append("\n"); 
+		query.append("--, ALL_IN_RT_FLG" ).append("\n"); 
+		query.append(", ALL_IN_RT_CD" ).append("\n"); 
+		query.append(", CURR_CD" ).append("\n"); 
+		query.append(", VAT_FLG" ).append("\n"); 
+		query.append(", T1_DOC_FLG" ).append("\n"); 
+		query.append(", TRNS_REV_AMT" ).append("\n"); 
+		query.append(", SO_CTY_CD" ).append("\n"); 
+		query.append(", SO_SEQ_NO" ).append("\n"); 
+		query.append(", ACT_CNT_CD" ).append("\n"); 
+		query.append(", ACT_CUST_SEQ" ).append("\n"); 
+		query.append(", CORR_NO" ).append("\n"); 
+		query.append(", CORR_FLG" ).append("\n"); 
+		query.append(", CFM_FLG" ).append("\n"); 
+		query.append(", CFM_USR_ID" ).append("\n"); 
+		query.append(", CFM_OFC_CD" ).append("\n"); 
+		query.append(", TO_CHAR(CFM_DT, 'YYYY-MM-DD HH24:MI:SS') CFM_DT" ).append("\n"); 
+		query.append(", TO_CHAR(CFM_UPD_DT, 'YYYY-MM-DD HH24:MI:SS') CFM_UPD_DT" ).append("\n"); 
+		query.append(", CFM_HLG_TP_CD" ).append("\n"); 
+		query.append("--, CFM_ALL_IN_RT_FLG" ).append("\n"); 
+		query.append(", CFM_ALL_IN_RT_CD " ).append("\n"); 
+		query.append(", CFM_CURR_CD" ).append("\n"); 
+		query.append(", CFM_REV_AMT" ).append("\n"); 
+		query.append(", CFM_VAT_FLG" ).append("\n"); 
+		query.append(", PCTL_NO" ).append("\n"); 
+		query.append(", ADD_REV_RMK" ).append("\n"); 
+		query.append(", CRE_OFC_CD" ).append("\n"); 
+		query.append(", CRE_USR_ID" ).append("\n"); 
+		query.append(", TO_CHAR(CRE_DT, 'YYYY-MM-DD HH24:MI:SS') CRE_DT" ).append("\n"); 
+		query.append(", UPD_USR_ID" ).append("\n"); 
+		query.append(", TO_CHAR(UPD_DT, 'YYYY-MM-DD HH24:MI:SS') UPD_DT" ).append("\n"); 
+		query.append("  FROM BKG_EUR_TRO" ).append("\n"); 
+		query.append(" WHERE BKG_NO = @[bkg_no]" ).append("\n"); 
+
+	}
+}

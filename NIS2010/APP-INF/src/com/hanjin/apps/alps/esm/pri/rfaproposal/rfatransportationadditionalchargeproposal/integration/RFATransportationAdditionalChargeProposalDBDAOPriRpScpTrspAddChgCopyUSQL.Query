@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="RFATransportationAdditionalChargeProposalDBDAOPriRpScpTrspAddChgCopyUSQL">
+			<desc><![CDATA[RFA Copy 데이터의 Arbitrary 값을 변경.
+2015.08.27 전지예 [CHM-201537719] Arbitrary RFA copy 시 발생하는 currency error 수정요청
+2015.11.10 SELCMU/김현경 [CHM-201538112] Tariff 변경시 현 RFA 상 Arbitiary 탭 미반영 로직수정]]></desc>
+			<sql><![CDATA[
+UPDATE /*+ bypass_ujvc*/ 
+(SELECT        G.PROP_NO,
+               G.AMDT_SEQ,
+               G.SVC_SCP_CD,
+               G.ADD_CHG_TP_CD,
+               G.ORG_DEST_TP_CD,
+               G.ADD_CHG_SEQ,
+               G.PROP_FRT_RT_AMT,
+               G.CURR_CD,
+               G.OPTM_TRSP_MOD_FLG,
+               G.FIC_ROUT_CMB_TP_CD,
+               G.FIC_RT_USE_STS_CD,
+               G.FIC_GLINE_RT_AMT,
+               G.FIC_GLINE_UPD_DT,
+               X.FIC_RT_USE_STS_CD AS RT_USE_STS_CD,
+               X.FIC_ROUT_CMB_TP_CD AS ROUT_CMB_TP_CD,
+               X.OPTM_TRSP_MOD_FLG AS TRSP_MOD_FLG,
+               X.FIC_GLINE_RT_AMT AS GLINE_RT_AMT,
+               X.FIC_LOCL_CURR_CD,
+               X.FIC_GLINE_LOCL_RT_AMT,
+               (SELECT USD_LOCL_XCH_RT * NVL(X.FIC_GLINE_RT_AMT, 0) RATE
+                  FROM GL_MON_XCH_RT
+                 WHERE 1 = 1
+                       AND ACCT_XCH_RT_YRMON = (SELECT MAX(ACCT_XCH_RT_YRMON)
+                                                  FROM GL_MON_XCH_RT
+                                                 WHERE 1 = 1
+                                                       AND ACCT_XCH_RT_LVL = '1'
+                                                       AND CURR_CD = G.CURR_CD
+                                                       AND ACCT_XCH_RT_YRMON <= TO_CHAR(X.EFF_DT, 'YYYYMM')
+                                                       )
+                       AND ACCT_XCH_RT_LVL = '1'
+                       AND CURR_CD = G.CURR_CD              
+               ) CUR_RT_AMT
+          FROM PRI_RP_SCP_TRSP_ADD_CHG G,
+               (SELECT PROP_NO,
+                       AMDT_SEQ,
+                       SVC_SCP_CD,
+                       ADD_CHG_TP_CD,
+                       ORG_DEST_TP_CD,
+                       ADD_CHG_SEQ,
+                       REGEXP_SUBSTR(FIC_RT_USE_STS_CD, '[^|]+', 1, 1) FIC_RT_USE_STS_CD,
+                       REGEXP_SUBSTR(FIC_RT_USE_STS_CD, '[^|]+', 1, 2) FIC_ROUT_CMB_TP_CD,
+                       REGEXP_SUBSTR(FIC_RT_USE_STS_CD, '[^|]+', 1, 3) OPTM_TRSP_MOD_FLG,
+                       TRIM(REGEXP_SUBSTR(FIC_RT_USE_STS_CD, '[^|]+', 1, 4)) FIC_GLINE_RT_AMT,
+                       TRIM(REGEXP_SUBSTR(FIC_RT_USE_STS_CD, '[^|]+', 1, 5)) FIC_LOCL_CURR_CD,
+                       TRIM(REGEXP_SUBSTR(FIC_RT_USE_STS_CD, '[^|]+', 1, 6)) FIC_GLINE_LOCL_RT_AMT,
+                       TO_CHAR(SYSDATE, 'YYYYMMDD') FIC_GLINE_UPD_DT,
+                       EFF_DT
+                  FROM (SELECT B.EFF_DT,
+                               A.PROP_NO,
+                               A.AMDT_SEQ,
+                               A.SVC_SCP_CD,
+                               A.ADD_CHG_TP_CD,
+                               A.ORG_DEST_TP_CD,
+                               A.ADD_CHG_SEQ,
+#if(${add_on_flag} == 'Y')                   
+                               PRI_ADDON_RATE_CALCULATE_PKG.PRI_getFICArbRateByRoute_FNC(TO_CHAR(B.EFF_DT,'YYYYMMDD'),
+                                                                                         A.SVC_SCP_CD,
+                                                                                         A.ORG_DEST_TP_CD,
+                                                                                         A.ROUT_PNT_LOC_DEF_CD,
+                                                                                         A.BSE_PORT_DEF_CD,
+                                                                                         A.RCV_DE_TERM_CD,
+                                                                                         A.PRC_TRSP_MOD_CD,
+                                                                                         NVL(A.RAT_UT_CD,'D2'),
+                                                                                         NVL(A.PRC_CGO_TP_CD,'RF')) FIC_RT_USE_STS_CD,
+#else
+                               PRI_FIC_RATE_CALCULATE_PKG.PRI_getFICArbRateByRoute_FNC(TO_CHAR(B.EFF_DT,'YYYYMMDD'),
+                                                                                         A.SVC_SCP_CD,
+                                                                                         A.ROUT_PNT_LOC_DEF_CD,
+                                                                                         A.BSE_PORT_DEF_CD,
+                                                                                         A.RCV_DE_TERM_CD,
+                                                                                         A.PRC_TRSP_MOD_CD,
+                                                                                         NVL(A.RAT_UT_CD,'D2'),
+                                                                                         NVL(A.PRC_CGO_TP_CD,'RF')) FIC_RT_USE_STS_CD,
+#end
+                               'A' AS CD
+                          FROM PRI_RP_SCP_TRSP_ADD_CHG A, PRI_RP_MN B
+                         WHERE A.PROP_NO = B.PROP_NO
+                           AND A.AMDT_SEQ = B.AMDT_SEQ
+                           AND A.PROP_NO = @[prop_no]
+                           AND A.AMDT_SEQ = @[amdt_seq]
+                           AND A.SVC_SCP_CD NOT IN (
+                               #foreach( ${v} in ${v_param}) 
+                                     #if($velocityCount != 1) 
+                                     ,
+                                     #end
+                                     '$v'
+                               #end
+                            )
+                        UNION ALL
+                        SELECT SYSDATE,'', 0, '', '', '', 0, '', 'B' FROM DUAL)
+                 WHERE CD = 'A') X
+         WHERE G.PROP_NO = X.PROP_NO
+           AND G.AMDT_SEQ = X.AMDT_SEQ
+           AND G.SVC_SCP_CD = X.SVC_SCP_CD
+           AND G.ADD_CHG_TP_CD = X.ADD_CHG_TP_CD
+           AND G.ORG_DEST_TP_CD = X.ORG_DEST_TP_CD
+           AND G.ADD_CHG_SEQ = X.ADD_CHG_SEQ)
+   SET FIC_GLINE_RT_AMT = (CASE WHEN CURR_CD = 'USD' THEN GLINE_RT_AMT 
+                                WHEN CURR_CD = FIC_LOCL_CURR_CD THEN FIC_GLINE_LOCL_RT_AMT ELSE ''||CUR_RT_AMT END)
+   , FIC_GLINE_UPD_DT = DECODE(NVL(GLINE_RT_AMT, 1), 1, NULL, SYSDATE) 
+   , OPTM_TRSP_MOD_FLG = TRSP_MOD_FLG
+   , FIC_ROUT_CMB_TP_CD = ROUT_CMB_TP_CD
+   , FIC_RT_USE_STS_CD = RT_USE_STS_CD			]]></sql>
+			<params>
+				<param name="prop_no" type="12" value="" out="N"/>
+				<param name="amdt_seq" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

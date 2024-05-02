@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="UnmatchBLDBDAOCheckTaaCommodityDiscrepancyRSQL">
+			<desc><![CDATA[checkTaaCommodityDiscrepancy]]></desc>
+			<sql><![CDATA[
+WITH
+TA AS
+(
+/*******************************************************************************************
+계약 정보 조회
+*******************************************************************************************/
+
+SELECT  TM.TAA_PROP_NO  PROP_NO ,
+        TM.AMDT_SEQ             ,
+        TM.SVC_SCP_CD
+FROM    BKG_BOOKING     BK  ,
+        MDM_LOCATION    L1  ,
+        MDM_LOCATION    L4  ,
+        PRI_TAA_HDR     TH  ,
+        PRI_TAA_MN      TM
+WHERE   L1.LOC_CD       = BK.POR_CD
+AND     L4.LOC_CD       = BK.DEL_CD
+AND     TH.TAA_NO       = BK.TAA_NO
+AND     TM.TAA_PROP_NO  = TH.TAA_PROP_NO
+AND     TM.SVC_SCP_CD   IN (BK.SVC_SCP_CD, DECODE(BK.SVC_SCP_CD, 'ACE','TPE','MXE','TPE'))
+AND     TM.CFM_FLG      = 'Y'       -- CONFIRMED TAA
+AND     ( SELECT BKG_REV_APLY_DT_PKG.BKG_GET_REV_APLY_DT_FNC(@[bkg_no], @[ca_flg]) FROM DUAL )
+        BETWEEN TM.EFF_DT AND TM.EXP_DT
+AND     BK.BKG_NO       = @[bkg_no]
+AND     @[ca_flg]       = 'N'
+
+UNION ALL
+
+SELECT  TM.TAA_PROP_NO  PROP_NO ,
+        TM.AMDT_SEQ             ,
+        TM.SVC_SCP_CD
+FROM    BKG_BKG_HIS     BK  ,
+        MDM_LOCATION    L1  ,
+        MDM_LOCATION    L4  ,
+        PRI_TAA_HDR     TH  ,
+        PRI_TAA_MN      TM
+WHERE   L1.LOC_CD       = BK.POR_CD
+AND     L4.LOC_CD       = BK.DEL_CD
+AND     TH.TAA_NO       = BK.TAA_NO
+AND     TM.TAA_PROP_NO  = TH.TAA_PROP_NO
+AND     TM.SVC_SCP_CD   IN (BK.SVC_SCP_CD, DECODE(BK.SVC_SCP_CD, 'ACE','TPE','MXE','TPE'))
+AND     TM.CFM_FLG      = 'Y'       -- CONFIRMED TAA
+AND     ( SELECT BKG_REV_APLY_DT_PKG.BKG_GET_REV_APLY_DT_FNC(@[bkg_no], @[ca_flg]) FROM DUAL )
+        BETWEEN TM.EFF_DT AND TM.EXP_DT
+AND     BK.BKG_NO       = @[bkg_no]
+AND     BK.CORR_NO      = 'TMP0000001'  -- CORRECTION 중인 DATA 를 나타내는 고정된 상수값
+AND     @[ca_flg]       = 'Y'
+) ,
+C1 AS
+(
+/*******************************************************************************************
+COMMODITY DATA 비교
+*******************************************************************************************/
+
+SELECT  'X'
+FROM    (
+        /* BKG COMMODITY */
+        SELECT  CMDT_CD
+        FROM    BKG_BOOKING BK
+        WHERE   BK.BKG_NO   = @[bkg_no]
+        AND     @[ca_flg]   = 'N'
+
+        UNION ALL
+
+        SELECT  CMDT_CD
+        FROM    BKG_BKG_HIS BK
+        WHERE   BK.BKG_NO   = @[bkg_no]
+        AND     BK.CORR_NO  = 'TMP0000001'  -- CORRECTION 중인 DATA 를 나타내는 고정된 상수값
+        AND     @[ca_flg]   = 'Y'
+        ) BC  ,
+        (
+        SELECT  TM.CMDT_CD
+        FROM    TA  ,
+                PRI_TAA_TRI_LIST  TL  ,
+                PRI_TRI_MN        TM
+        WHERE   TL.TAA_PROP_NO    = TA.PROP_NO
+        AND     TL.AMDT_SEQ       = TA.AMDT_SEQ
+        AND     TM.TRI_PROP_NO    = TL.TRI_PROP_NO
+        ) RC
+WHERE   (
+            BC.CMDT_CD  = RC.CMDT_CD
+        OR  ( SELECT A.REP_CMDT_CD FROM MDM_COMMODITY A WHERE A.CMDT_CD = RC.CMDT_CD ) = '0000' -- FAK
+        OR  ( SELECT A.REP_CMDT_CD FROM MDM_COMMODITY A WHERE A.CMDT_CD = RC.CMDT_CD ) = '9901' -- GDSM
+        )
+AND     ROWNUM  = 1
+)
+SELECT  'C'   UMCH_TP_CD      ,
+        '[Commodity]['
+          ||  DECODE(@[ca_flg],
+                'N', ( SELECT CMDT_CD FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no] ),
+                'Y', ( SELECT CMDT_CD FROM BKG_BKG_HIS WHERE BKG_NO = @[bkg_no] AND CORR_NO = 'TMP0000001' )
+                )
+          ||  ']' BKG_ITM_LOG ,
+        (
+        SELECT  '[Commodity]'
+        FROM    DUAL
+        WHERE   EXISTS  (
+                        SELECT  'X'
+                        FROM    PRI_TAA_TRI_LIST  TL  ,
+                                PRI_TRI_MN        TM
+                        WHERE   ( TL.TAA_PROP_NO, TL.AMDT_SEQ ) = ( SELECT PROP_NO, AMDT_SEQ FROM TA )
+                        AND     TM.TRI_PROP_NO    = TL.TRI_PROP_NO
+                        )
+        )
+        ||
+        (
+        SELECT  REPLACE(RTRIM(REPLACE(LTRIM(SYS_CONNECT_BY_PATH(CMDT_CD || DECODE(MOD(ROW_NUMBER, 5), 0, '/'), ';'), ';'), '/;', CHR(10)) ,'/'), ';', '')
+        FROM    (
+                SELECT  '[' || TM.CMDT_CD || ']' CMDT_CD  ,
+                        ROW_NUMBER() OVER ( ORDER BY TM.TRI_PROP_NO ) ROW_NUMBER  ,
+                        COUNT(1) OVER () CNT
+                FROM    PRI_TAA_TRI_LIST  TL  ,
+                        PRI_TRI_MN        TM
+                WHERE   ( TL.TAA_PROP_NO, TL.AMDT_SEQ ) = ( SELECT PROP_NO, AMDT_SEQ FROM TA )
+                AND     TM.TRI_PROP_NO    = TL.TRI_PROP_NO
+                )
+        WHERE   LEVEL   = LEAST(CNT, 20)
+        START WITH ROW_NUMBER = 1
+        CONNECT BY
+                ROW_NUMBER        = PRIOR ROW_NUMBER + 1
+        )   CTRT_ITM_LOG    ,
+        'U'   MTCH_UMCH_TP_CD ,
+        ( SELECT UMCH_TP_DESC FROM BKG_REV_UMCH_TP WHERE UMCH_TP_CD = 'C' ) UMCH_TP_DESC  ,
+        ( SELECT INTG_CD_VAL_DP_DESC FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD02456' AND INTG_CD_VAL_CTNT = 'U' ) MTCH_UMCH_TP_DESC
+FROM    DUAL
+WHERE   NOT EXISTS ( SELECT 'X' FROM C1 )
+
+/*******************************************************************************************
+CO-BIZ은 대상에서 제외한다.
+*******************************************************************************************/
+AND     (
+        SELECT  NVL(RT_BL_TP_CD, 'N')
+        FROM    BKG_RATE
+        WHERE   BKG_NO        = @[bkg_no]
+        AND     @[ca_flg]     = 'N'
+        UNION ALL
+        SELECT  NVL(RT_BL_TP_CD, 'N')
+        FROM    BKG_RT_HIS
+        WHERE   BKG_NO        = @[bkg_no]
+        AND     CORR_NO       = 'TMP0000001'  -- CORRECTION 중인 DATA 를 나타내는 고정된 상수값
+        AND     @[ca_flg]     = 'Y'
+        )
+        NOT IN ( 'B' )			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="ca_flg" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

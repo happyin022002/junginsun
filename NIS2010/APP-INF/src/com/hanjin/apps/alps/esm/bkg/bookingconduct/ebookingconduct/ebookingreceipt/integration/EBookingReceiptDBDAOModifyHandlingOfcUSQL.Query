@@ -1,0 +1,551 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="EBookingReceiptDBDAOModifyHandlingOfcUSQL">
+			<desc><![CDATA[1. S/I일 떄 기존 bkg이 있으면 해당 bkg의 bkg_ofc_cd 
+2.. cust_cnt_cd, cust_seq가 mdm_customer에 mdm_customer에서 담당 office, 
+3. porCd가 mdm_location에 있으면 location의 sales office, 
+4. polCd가 mdm_location에 있으면 location의 sales office를 찾아서 기준 정보 table에서 mapping된 ofc_cd가 있으면 조회된 Office
+5. Doc Type이 'B'인경우와 'S'인 경우에 컬럼을 나누어 저장함.
+* 2011.05.23 김진승 [CHM-201110982-01] e-Booking Receipt시 현재 BKG의 CNTR Qty와 접수된 Request상의 CNTR Qty를 업데이트
+ - ORG_BKG_QTY , ORG_BKG_CNTR_QTY 칼럼 업데이트 추가 
+  => 커밋/태깅 9300에서 테스트 예정 (김진주)
+6.SPLIT_STS_CD : 접수된 Container 가 0개인 경우 Split 대상 아님
+                        BKG 의 Container Volume이 접수된 Container수보다 큰 경우 Split 대상
+*2013.07.10 최문환 [CHM-201325586] E-BKG & E-SI request Date 기준 조정 요청
+ => POR, POL이 없는 경우의 request Date를 Handling Office를 기준으로 계산하도록 변경]]></desc>
+			<sql><![CDATA[
+UPDATE BKG_XTER_RQST_MST M 
+   SET HNDL_OFC_CD =(SELECT OFC
+                       FROM 
+                        (SELECT RANK, CASE WHEN RANK = 1 THEN OFC.OFC
+                                          WHEN RANK <> 1 THEN NVL(CTRL.HNDL_OFC_CD, OFC.OFC) END OFC
+                          FROM
+                            (
+							SELECT 0.9 RANK, BHC.ATTR_CTNT2 OFC
+                              FROM BKG_XTER_RQST_MST MST,
+                                   BKG_HRD_CDG_CTNT  BHC
+                             WHERE MST.XTER_SNDR_ID = @[sender_id]
+				               AND MST.XTER_RQST_NO = @[rqst_no]
+           					   AND MST.XTER_RQST_SEQ= @[rqst_seq]	
+                               AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC_LOC'
+                               AND BHC.ATTR_CTNT1 = MST.POR_CD
+                               AND BHC.ATTR_CTNT1 = MST.POL_CD
+                               AND BHC.ATTR_CTNT3 ='Location'
+							UNION
+							SELECT 1 RANK, BK.BKG_OFC_CD OFC
+                              FROM BKG_BOOKING BK, BKG_XTER_RQST_MST MST
+                             WHERE MST.BKG_NO       = BK.BKG_NO
+           					   AND MST.XTER_SNDR_ID = @[sender_id]
+				               AND MST.XTER_RQST_NO = @[rqst_no]
+           					   AND MST.XTER_RQST_SEQ= @[rqst_seq]	
+                            UNION							
+                            SELECT 1.4 RANK, DECODE(MST.POL_CD, 'CNXMN', 'XMNSC', 'CNFOC', 'XMNSC', 'HKGSC') OFC
+                                                  FROM BKG_XTER_RQST_MST MST,
+                                                       BKG_XTER_CUST MXC,
+                                                       BKG_HRD_CDG_CTNT BHC,
+                                                       MDM_LOCATION POL
+                                                 WHERE MST.XTER_SNDR_ID = @[sender_id]
+                                                   AND MST.XTER_RQST_NO = @[rqst_no]
+                                                   AND MST.XTER_RQST_SEQ = @[rqst_seq]	
+                                                   AND MST.XTER_SNDR_ID = MXC.XTER_SNDR_ID
+                                                   AND MST.XTER_RQST_NO = MXC.XTER_RQST_NO
+                                                   AND MST.XTER_RQST_SEQ = MXC.XTER_RQST_SEQ
+                                                   AND MXC.XTER_CUST_TP_CD in ( 'E' , 'S' )
+                                                   AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC'
+                                                   AND MXC.CNT_CD = BHC.ATTR_CTNT1
+                                                   AND MXC.CUST_SEQ = BHC.ATTR_CTNT2
+                                                   AND BHC.ATTR_CTNT3 is null
+                                                   AND BHC.ATTR_CTNT4 is null
+                                                   AND MST.XTER_RQST_VIA_CD = BHC.ATTR_CTNT6
+                                                   AND MST.POL_CD = POL.LOC_CD(+)
+                                                   and rgn_cd in ('CNS', 'HKG')
+                                                   and rownum = 1
+	                        UNION 
+                            SELECT 1.5 RANK, BHC.ATTR_CTNT5 OFC       
+                            FROM BKG_XTER_RQST_MST MST,            
+                                 BKG_XTER_CUST     MXE,            
+                                 BKG_XTER_CUST     MXS,            
+                                 BKG_HRD_CDG_CTNT  BHC      
+                           WHERE MST.XTER_SNDR_ID = @[sender_id]        
+                             AND MST.XTER_RQST_NO = @[rqst_no]        
+                             AND MST.XTER_RQST_SEQ = @[rqst_seq]        
+                             AND MST.XTER_SNDR_ID = MXE.XTER_SNDR_ID        
+                             AND MST.XTER_RQST_NO = MXE.XTER_RQST_NO        
+                             AND MST.XTER_RQST_SEQ = MXE.XTER_RQST_SEQ        
+                             AND MXE.XTER_CUST_TP_CD = 'E'        
+                             AND MST.XTER_SNDR_ID = MXS.XTER_SNDR_ID        
+                             AND MST.XTER_RQST_NO = MXS.XTER_RQST_NO        
+                             AND MST.XTER_RQST_SEQ = MXS.XTER_RQST_SEQ        
+                             AND MXS.XTER_CUST_TP_CD = 'S'              
+                             AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC'        
+                             AND MXE.CNT_CD = BHC.ATTR_CTNT1        
+                             AND MXE.CUST_SEQ = BHC.ATTR_CTNT2        
+                             AND MST.POR_CD = BHC.ATTR_CTNT3        
+                             AND MXS.CUST_NM LIKE BHC.ATTR_CTNT4||'%'    
+                             AND MST.XTER_RQST_VIA_CD = BHC.ATTR_CTNT6
+                            UNION
+					      SELECT 1.55 RANK,  BHC.ATTR_CTNT5 OFC          
+                            FROM BKG_XTER_RQST_MST MST,            
+                                 BKG_XTER_CUST     MXS,            
+                                 BKG_HRD_CDG_CTNT  BHC      
+                           WHERE MST.XTER_SNDR_ID = @[sender_id]        
+                             AND MST.XTER_RQST_NO = @[rqst_no]        
+                             AND MST.XTER_RQST_SEQ = @[rqst_seq]    
+                             AND MST.XTER_SNDR_ID = MXS.XTER_SNDR_ID        
+                             AND MST.XTER_RQST_NO = MXS.XTER_RQST_NO        
+                             AND MST.XTER_RQST_SEQ = MXS.XTER_RQST_SEQ        
+                             AND MXS.XTER_CUST_TP_CD = 'S'              
+                             AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC'      
+                             and BHC.ATTR_CTNT4 is not null
+							 and BHC.ATTR_CTNT1 is null
+							 and BHC.ATTR_CTNT2 is null
+							 and BHC.ATTR_CTNT3 is null
+                             and BHC.ATTR_CTNT6 is null
+                             AND upper(MXS.CUST_NM) LIKE upper(BHC.ATTR_CTNT4||'%')
+						   UNION
+                            SELECT 1.6 RANK
+                                   ,NVL(NVL(BHC.ATTR_CTNT3,POR.SLS_OFC_CD), POL.SLS_OFC_CD) OFC
+                            FROM BKG_XTER_RQST_MST MST,
+                                 BKG_XTER_CUST     MXC,
+                                 BKG_HRD_CDG_CTNT  BHC,
+                                 MDM_LOCATION      POR,
+                                 MDM_LOCATION      POL
+                           WHERE MST.XTER_SNDR_ID = @[sender_id]
+                             AND MST.XTER_RQST_NO = @[rqst_no]
+                             AND MST.XTER_RQST_SEQ = @[rqst_seq]
+                             AND MST.XTER_SNDR_ID = MXC.XTER_SNDR_ID
+                             AND MST.XTER_RQST_NO = MXC.XTER_RQST_NO
+                             AND MST.XTER_RQST_SEQ = MXC.XTER_RQST_SEQ
+                             AND MXC.XTER_CUST_TP_CD = 'S'
+                             AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC_S'
+                             AND MXC.CNT_CD = BHC.ATTR_CTNT1
+                             AND MXC.CUST_SEQ = BHC.ATTR_CTNT2
+                             AND MST.POR_CD = POR.LOC_CD(+)
+                             AND MST.POL_CD = POL.LOC_CD(+)
+                            UNION
+							SELECT 1.7 RANK
+                                   ,NVL(POR.SLS_OFC_CD, POL.SLS_OFC_CD) OFC
+                            FROM BKG_XTER_RQST_MST MST,
+                                 BKG_HRD_CDG_CTNT  BHC,
+                                 MDM_LOCATION      POR,
+                                 MDM_LOCATION      POL
+                           WHERE MST.XTER_SNDR_ID = @[sender_id]
+                             AND MST.XTER_RQST_NO = @[rqst_no]
+                             AND MST.XTER_RQST_SEQ = @[rqst_seq]
+                             AND MST.POR_CD = POR.LOC_CD(+)
+                             AND MST.POL_CD = POL.LOC_CD(+)
+                             AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC_PHILIPS'
+                             and ctrt_no in BHC.ATTR_CTNT1   
+							UNION
+                            SELECT 1.8 RANK
+                                   ,NVL(POR.SLS_OFC_CD, POL.SLS_OFC_CD) OFC
+                            FROM BKG_XTER_RQST_MST MST,
+                                 BKG_XTER_CUST     MXC,
+                                 BKG_HRD_CDG_CTNT  BHC,
+                                 MDM_LOCATION      POR,
+                                 MDM_LOCATION      POL
+                           WHERE MST.XTER_SNDR_ID = @[sender_id]
+                             AND MST.XTER_RQST_NO = @[rqst_no]
+                             AND MST.XTER_RQST_SEQ = @[rqst_seq]
+                             AND MST.XTER_SNDR_ID = MXC.XTER_SNDR_ID
+                             AND MST.XTER_RQST_NO = MXC.XTER_RQST_NO
+                             AND MST.XTER_RQST_SEQ = MXC.XTER_RQST_SEQ
+                             AND MXC.XTER_CUST_TP_CD = 'E'
+                             AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC'
+                             AND MXC.CNT_CD = BHC.ATTR_CTNT1
+                             AND MXC.CUST_SEQ = BHC.ATTR_CTNT2
+                             AND BHC.ATTR_CTNT4 IS NULL
+                             AND BHC.ATTR_CTNT1 = 'NL'
+                             AND MST.POR_CD = POR.LOC_CD(+)
+                             AND MST.POL_CD = POL.LOC_CD(+)
+UNION
+SELECT 1.91 RANK 
+       ,HOS.HNDL_OFC_CD OFC
+FROM BKG_XTER_RQST_MST MST
+     ,BKG_HNDL_OFC_STUP HOS
+WHERE MST.XTER_SNDR_ID = @[sender_id]
+AND MST.XTER_RQST_NO = @[rqst_no]
+AND MST.XTER_RQST_SEQ = @[rqst_seq]     
+AND upper(MST.CMDT_DESC) LIKE '%'||HOS.CMDT_NM||'%'
+AND HOS.CMDT_NM IS NOT NULL
+AND MST.POL_CD LIKE 'US%'
+UNION
+SELECT 1.92 RANK 
+       ,CASE 
+             WHEN FF.CNT_CD = 'US' THEN HOS.HNDL_OFC_CD             
+             WHEN SH.CNT_CD = 'US' THEN HOS.HNDL_OFC_CD
+             ELSE HOS.HNDL_OFC_CD
+             END OFC
+FROM BKG_XTER_RQST_MST MST
+     ,BKG_XTER_CUST FF
+     ,BKG_XTER_CUST SH
+     ,BKG_HNDL_OFC_STUP HOS
+WHERE MST.XTER_SNDR_ID = @[sender_id]
+AND MST.XTER_RQST_NO = @[rqst_no]
+AND MST.XTER_RQST_SEQ = @[rqst_seq]
+AND MST.POL_CD = HOS.POL_CD
+AND MST.XTER_SNDR_ID = FF.XTER_SNDR_ID(+)
+AND MST.XTER_RQST_NO = FF.XTER_RQST_NO(+)
+AND MST.XTER_RQST_SEQ = FF.XTER_RQST_SEQ(+)
+AND FF.XTER_CUST_TP_CD(+) = 'F'
+AND MST.XTER_SNDR_ID = SH.XTER_SNDR_ID(+)
+AND MST.XTER_RQST_NO = SH.XTER_RQST_NO(+)
+AND MST.XTER_RQST_SEQ = SH.XTER_RQST_SEQ(+)
+AND SH.XTER_CUST_TP_CD(+) = 'S'
+
+
+   							UNION
+                            SELECT 2 RANK, MDM_CUST.OFC_CD OFC
+                              FROM BKG_XTER_CUST CUST, MDM_CUSTOMER MDM_CUST
+           					 WHERE CUST.XTER_SNDR_ID = @[sender_id]
+				               AND CUST.XTER_RQST_NO = @[rqst_no]
+           					   AND CUST.XTER_RQST_SEQ= @[rqst_seq]
+                               AND CUST.XTER_CUST_TP_CD = 'S'
+                               AND CUST.CNT_CD      = MDM_CUST.CUST_CNT_CD
+                               AND CUST.CUST_SEQ    = MDM_CUST.CUST_SEQ 
+                            UNION
+                            SELECT 3 RANK, MDM_CUST.OFC_CD OFC
+                              FROM BKG_XTER_CUST CUST, MDM_CUSTOMER MDM_CUST
+           					 WHERE CUST.XTER_SNDR_ID = @[sender_id]
+				               AND CUST.XTER_RQST_NO = @[rqst_no]
+           					   AND CUST.XTER_RQST_SEQ= @[rqst_seq]
+                               AND CUST.XTER_CUST_TP_CD = 'F'
+                               AND CUST.CNT_CD      = MDM_CUST.CUST_CNT_CD
+                               AND CUST.CUST_SEQ    = MDM_CUST.CUST_SEQ 							
+                            UNION
+							SELECT 3.5 RANK, BHC.ATTR_CTNT2 OFC
+							  FROM BKG_XTER_RQST_MST MST,
+							       BKG_HRD_CDG_CTNT  BHC
+                             WHERE MST.XTER_SNDR_ID = @[sender_id]
+                               AND MST.XTER_RQST_NO = @[rqst_no]
+                               AND MST.XTER_RQST_SEQ = @[rqst_seq]
+							   AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC_LOC'
+							   AND BHC.ATTR_CTNT1 = MST.POR_CD 
+                            UNION
+                            SELECT 4 RANK, NVL(POR.SLS_OFC_CD, POL.SLS_OFC_CD) OFC
+                              FROM BKG_XTER_RQST_MST MST, MDM_LOCATION POR, MDM_LOCATION POL
+           					 WHERE MST.XTER_SNDR_ID = @[sender_id]
+				               AND MST.XTER_RQST_NO = @[rqst_no]
+           					   AND MST.XTER_RQST_SEQ= @[rqst_seq]
+                               AND MST.POR_CD       = POR.LOC_CD(+)
+                               AND MST.POL_CD       = POL.LOC_CD(+)
+                            UNION
+                            SELECT 5 RANK, MST.BKG_OFC_CD OFC
+                              FROM BKG_XTER_RQST_MST MST
+           					 WHERE MST.XTER_SNDR_ID = @[sender_id]
+				               AND MST.XTER_RQST_NO = @[rqst_no]
+           					   AND MST.XTER_RQST_SEQ= @[rqst_seq]
+                               AND MST.XTER_RQST_VIA_CD = 'SIM'
+                               AND MST.DOC_TP_CD = 'B'
+                            ) OFC, BKG_ESVC_CTRL_OFC CTRL
+                         WHERE OFC.OFC = CTRL.CTRL_OFC_CD(+)
+                        ORDER BY RANK
+                        )
+                     WHERE ROWNUM = 1
+                       AND OFC IS NOT NULL) 
+	 , BKG_UPLD_STS_CD = 'N'
+	 , RQST_DT = NVL((SELECT GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL',SYSDATE,NVL(POR_CD, POL_CD))
+					    FROM BKG_XTER_RQST_MST
+					   WHERE XTER_SNDR_ID = @[sender_id]
+					     AND XTER_RQST_NO = @[rqst_no]
+					     AND XTER_RQST_SEQ= @[rqst_seq])
+				, NVL (GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL'
+                                                   , SYSDATE
+                                                   , (SELECT LOC_CD
+                                                        FROM MDM_ORGANIZATION 
+                                                       WHERE OFC_CD = (SELECT OFC
+                                                                       FROM 
+                                                                        (SELECT RANK, CASE WHEN RANK = 1 THEN OFC.OFC
+                                                                                          WHEN RANK <> 1 THEN NVL(CTRL.HNDL_OFC_CD, OFC.OFC) END OFC
+                                                                          FROM
+                                                                            (
+                                                							SELECT 1 RANK, BK.BKG_OFC_CD OFC
+                                                                              FROM BKG_BOOKING BK, BKG_XTER_RQST_MST MST
+                                                                             WHERE MST.BKG_NO       = BK.BKG_NO
+                                                           					   AND MST.XTER_SNDR_ID = @[sender_id]
+                                                				               AND MST.XTER_RQST_NO = @[rqst_no]
+                                                           					   AND MST.XTER_RQST_SEQ= @[rqst_seq]	
+                                                                            UNION
+                            					SELECT 1.4 RANK, DECODE(MST.POL_CD, 'CNXMN', 'XMNSC', 'CNFOC', 'XMNSC', 'HKGSC') OFC
+                                                  FROM BKG_XTER_RQST_MST MST,
+                                                       BKG_XTER_CUST MXC,
+                                                       BKG_HRD_CDG_CTNT BHC,
+                                                       MDM_LOCATION POL
+                                                 WHERE MST.XTER_SNDR_ID = @[sender_id]
+                                                   AND MST.XTER_RQST_NO = @[rqst_no]
+                                                   AND MST.XTER_RQST_SEQ = @[rqst_seq]	
+                                                   AND MST.XTER_SNDR_ID = MXC.XTER_SNDR_ID
+                                                   AND MST.XTER_RQST_NO = MXC.XTER_RQST_NO
+                                                   AND MST.XTER_RQST_SEQ = MXC.XTER_RQST_SEQ
+                                                   AND MXC.XTER_CUST_TP_CD in ( 'E' , 'S' )
+                                                   AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC'
+                                                   AND MXC.CNT_CD = BHC.ATTR_CTNT1
+                                                   AND MXC.CUST_SEQ = BHC.ATTR_CTNT2
+                                                   AND BHC.ATTR_CTNT3 is null
+                                                   AND BHC.ATTR_CTNT4 is null
+                                                   AND MST.XTER_RQST_VIA_CD = BHC.ATTR_CTNT6
+                                                   AND MST.POL_CD = POL.LOC_CD(+)
+                                                   and rgn_cd in ('CNS', 'HKG')
+                                                   and rownum = 1
+                                                	                        UNION 
+                                                                            SELECT 1.5 RANK, BHC.ATTR_CTNT5 OFC       
+                                                                            FROM BKG_XTER_RQST_MST MST,            
+                                                                                 BKG_XTER_CUST     MXE,            
+                                                                                 BKG_XTER_CUST     MXS,            
+                                                                                 BKG_HRD_CDG_CTNT  BHC      
+                                                                           WHERE MST.XTER_SNDR_ID = @[sender_id]        
+                                                                             AND MST.XTER_RQST_NO = @[rqst_no]        
+                                                                             AND MST.XTER_RQST_SEQ = @[rqst_seq]        
+                                                                             AND MST.XTER_SNDR_ID = MXE.XTER_SNDR_ID        
+                                                                             AND MST.XTER_RQST_NO = MXE.XTER_RQST_NO        
+                                                                             AND MST.XTER_RQST_SEQ = MXE.XTER_RQST_SEQ        
+                                                                             AND MXE.XTER_CUST_TP_CD = 'E'        
+                                                                             AND MST.XTER_SNDR_ID = MXS.XTER_SNDR_ID        
+                                                                             AND MST.XTER_RQST_NO = MXS.XTER_RQST_NO        
+                                                                             AND MST.XTER_RQST_SEQ = MXS.XTER_RQST_SEQ        
+                                                                             AND MXS.XTER_CUST_TP_CD = 'S'              
+                                                                             AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC'        
+                                                                             AND MXE.CNT_CD = BHC.ATTR_CTNT1        
+                                                                             AND MXE.CUST_SEQ = BHC.ATTR_CTNT2        
+                                                                             AND MST.POR_CD = BHC.ATTR_CTNT3        
+                                                                             AND MXS.CUST_NM LIKE BHC.ATTR_CTNT4||'%'    
+                                                                             AND MST.XTER_RQST_VIA_CD = BHC.ATTR_CTNT6
+									       UNION
+                                          SELECT 1.55 RANK,  BHC.ATTR_CTNT5 OFC          
+                                            FROM BKG_XTER_RQST_MST MST,            
+                                                 BKG_XTER_CUST     MXS,            
+                                                 BKG_HRD_CDG_CTNT  BHC      
+                                           WHERE MST.XTER_SNDR_ID = @[sender_id]
+                                             AND MST.XTER_RQST_NO = @[rqst_no]        
+                                             AND MST.XTER_RQST_SEQ = @[rqst_seq]    
+                                             AND MST.XTER_SNDR_ID = MXS.XTER_SNDR_ID        
+                                             AND MST.XTER_RQST_NO = MXS.XTER_RQST_NO        
+                                             AND MST.XTER_RQST_SEQ = MXS.XTER_RQST_SEQ        
+                                             AND MXS.XTER_CUST_TP_CD = 'S'              
+                                             AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC'      
+                                             and BHC.ATTR_CTNT4 is not null
+                                             and BHC.ATTR_CTNT1 is null
+                                             and BHC.ATTR_CTNT2 is null
+                                             and BHC.ATTR_CTNT3 is null
+                                             and BHC.ATTR_CTNT6 is null
+                                             AND upper(MXS.CUST_NM) LIKE upper(BHC.ATTR_CTNT4||'%')
+                                                                            UNION
+                                                                          SELECT 1.6 RANK
+                                                                                 ,NVL(NVL(BHC.ATTR_CTNT3,POR.SLS_OFC_CD), POL.SLS_OFC_CD) OFC
+                                                                            FROM BKG_XTER_RQST_MST MST,
+																				 BKG_XTER_CUST     MXC,
+																				 BKG_HRD_CDG_CTNT  BHC,
+																				 MDM_LOCATION      POR,
+																				 MDM_LOCATION      POL
+																			WHERE MST.XTER_SNDR_ID = @[sender_id]
+																			AND MST.XTER_RQST_NO = @[rqst_no]
+																			AND MST.XTER_RQST_SEQ = @[rqst_seq]
+																			AND MST.XTER_SNDR_ID = MXC.XTER_SNDR_ID
+																			AND MST.XTER_RQST_NO = MXC.XTER_RQST_NO
+																			AND MST.XTER_RQST_SEQ = MXC.XTER_RQST_SEQ
+																			AND MXC.XTER_CUST_TP_CD = 'S'
+																			AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC_S'
+																			AND MXC.CNT_CD = BHC.ATTR_CTNT1
+																			AND MXC.CUST_SEQ = BHC.ATTR_CTNT2
+																			AND MST.POR_CD = POR.LOC_CD(+)
+																			AND MST.POL_CD = POL.LOC_CD(+)
+                                                                    UNION
+																	SELECT 1.7 RANK
+                                                                           ,NVL(POR.SLS_OFC_CD, POL.SLS_OFC_CD) OFC
+                                                                    FROM BKG_XTER_RQST_MST MST,
+                                                                         BKG_HRD_CDG_CTNT  BHC,
+                                                                         MDM_LOCATION      POR,
+                                                                         MDM_LOCATION      POL
+                                                                   WHERE MST.XTER_SNDR_ID = @[sender_id]
+                                                                     AND MST.XTER_RQST_NO = @[rqst_no]
+                                                                     AND MST.XTER_RQST_SEQ = @[rqst_seq]
+                                                                     AND MST.POR_CD = POR.LOC_CD(+)
+                                                                     AND MST.POL_CD = POL.LOC_CD(+)
+                                                                     AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC_PHILIPS'
+                                                                     and ctrt_no in BHC.ATTR_CTNT1  
+																	UNION                           
+                                                                          SELECT 1.8 RANK
+                                                                                 ,NVL(POR.SLS_OFC_CD, POL.SLS_OFC_CD) OFC
+																			FROM BKG_XTER_RQST_MST MST,
+																				 BKG_XTER_CUST     MXC,
+																				 BKG_HRD_CDG_CTNT  BHC,
+																				 MDM_LOCATION      POR,
+																				 MDM_LOCATION      POL
+																			WHERE MST.XTER_SNDR_ID = @[sender_id]
+																			AND MST.XTER_RQST_NO = @[rqst_no]
+																			AND MST.XTER_RQST_SEQ = @[rqst_seq]
+																			AND MST.XTER_SNDR_ID = MXC.XTER_SNDR_ID
+																			AND MST.XTER_RQST_NO = MXC.XTER_RQST_NO
+																			AND MST.XTER_RQST_SEQ = MXC.XTER_RQST_SEQ
+																			AND MXC.XTER_CUST_TP_CD = 'E'
+																			AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC'
+																			AND MXC.CNT_CD = BHC.ATTR_CTNT1
+																			AND MXC.CUST_SEQ = BHC.ATTR_CTNT2
+																			AND BHC.ATTR_CTNT4 IS NULL
+																			AND BHC.ATTR_CTNT1 = 'NL'
+																			AND MST.POR_CD = POR.LOC_CD(+)
+																			AND MST.POL_CD = POL.LOC_CD(+)
+UNION
+SELECT 1.91 RANK 
+       ,HOS.HNDL_OFC_CD OFC
+FROM BKG_XTER_RQST_MST MST
+     ,BKG_HNDL_OFC_STUP HOS
+WHERE MST.XTER_SNDR_ID = @[sender_id]
+AND MST.XTER_RQST_NO = @[rqst_no]
+AND MST.XTER_RQST_SEQ = @[rqst_seq]     
+AND upper(MST.CMDT_DESC) LIKE '%'||HOS.CMDT_NM||'%'
+AND HOS.CMDT_NM IS NOT NULL
+AND MST.POL_CD LIKE 'US%' 
+UNION
+SELECT 1.92 RANK 
+,CASE 
+             WHEN FF.CNT_CD = 'US' THEN HOS.HNDL_OFC_CD             
+             WHEN SH.CNT_CD = 'US' THEN HOS.HNDL_OFC_CD
+             ELSE HOS.HNDL_OFC_CD
+             END OFC
+FROM BKG_XTER_RQST_MST MST
+     ,BKG_XTER_CUST FF
+     ,BKG_XTER_CUST SH
+     ,BKG_HNDL_OFC_STUP HOS
+WHERE MST.XTER_SNDR_ID = @[sender_id]
+AND MST.XTER_RQST_NO = @[rqst_no]
+AND MST.XTER_RQST_SEQ = @[rqst_seq]
+AND MST.POL_CD = HOS.POL_CD
+AND MST.XTER_SNDR_ID = FF.XTER_SNDR_ID(+)
+AND MST.XTER_RQST_NO = FF.XTER_RQST_NO(+)
+AND MST.XTER_RQST_SEQ = FF.XTER_RQST_SEQ(+)
+AND FF.XTER_CUST_TP_CD(+) = 'F'
+AND MST.XTER_SNDR_ID = SH.XTER_SNDR_ID(+)
+AND MST.XTER_RQST_NO = SH.XTER_RQST_NO(+)
+AND MST.XTER_RQST_SEQ = SH.XTER_RQST_SEQ(+)
+AND SH.XTER_CUST_TP_CD(+) = 'S'
+                                                   							UNION
+                                                                            SELECT 2 RANK, MDM_CUST.OFC_CD OFC
+                                                                              FROM BKG_XTER_CUST CUST, MDM_CUSTOMER MDM_CUST
+                                                           					 WHERE CUST.XTER_SNDR_ID = @[sender_id]
+                                                				               AND CUST.XTER_RQST_NO = @[rqst_no]
+                                                           					   AND CUST.XTER_RQST_SEQ= @[rqst_seq]
+                                                                               AND CUST.XTER_CUST_TP_CD = 'S'
+                                                                               AND CUST.CNT_CD      = MDM_CUST.CUST_CNT_CD
+                                                                               AND CUST.CUST_SEQ    = MDM_CUST.CUST_SEQ 
+                                                                            UNION
+                                                                            SELECT 3 RANK, MDM_CUST.OFC_CD OFC
+                                                                              FROM BKG_XTER_CUST CUST, MDM_CUSTOMER MDM_CUST
+                                                           					 WHERE CUST.XTER_SNDR_ID = @[sender_id]
+                                                				               AND CUST.XTER_RQST_NO = @[rqst_no]
+                                                           					   AND CUST.XTER_RQST_SEQ= @[rqst_seq]
+                                                                               AND CUST.XTER_CUST_TP_CD = 'F'
+                                                                               AND CUST.CNT_CD      = MDM_CUST.CUST_CNT_CD
+                                                                               AND CUST.CUST_SEQ    = MDM_CUST.CUST_SEQ 							
+                                                                            UNION
+                                                							SELECT 3.5 RANK, BHC.ATTR_CTNT2 OFC
+                                                							  FROM BKG_XTER_RQST_MST MST,
+                                                							       BKG_HRD_CDG_CTNT  BHC
+                                                                             WHERE MST.XTER_SNDR_ID = @[sender_id]
+                                                                               AND MST.XTER_RQST_NO = @[rqst_no]
+                                                                               AND MST.XTER_RQST_SEQ = @[rqst_seq]
+                                                							   AND BHC.HRD_CDG_ID = 'EBKG_HND_OFC_LOC'
+                                                							   AND BHC.ATTR_CTNT1 = MST.POR_CD 
+                                                                            UNION
+                                                                            SELECT 4 RANK, NVL(POR.SLS_OFC_CD, POL.SLS_OFC_CD) OFC
+                                                                              FROM BKG_XTER_RQST_MST MST, MDM_LOCATION POR, MDM_LOCATION POL
+                                                           					 WHERE MST.XTER_SNDR_ID = @[sender_id]
+                                                				               AND MST.XTER_RQST_NO = @[rqst_no]
+                                                           					   AND MST.XTER_RQST_SEQ= @[rqst_seq]
+                                                                               AND MST.POR_CD       = POR.LOC_CD(+)
+                                                                               AND MST.POL_CD       = POL.LOC_CD(+)
+                                                                            UNION
+                                                                            SELECT 5 RANK, MST.BKG_OFC_CD OFC
+                                                                              FROM BKG_XTER_RQST_MST MST
+                                                           					 WHERE MST.XTER_SNDR_ID = @[sender_id]
+                                                				               AND MST.XTER_RQST_NO = @[rqst_no]
+                                                           					   AND MST.XTER_RQST_SEQ= @[rqst_seq]
+                                                                               AND MST.XTER_RQST_VIA_CD = 'SIM'
+                                                                               AND MST.DOC_TP_CD = 'B'
+                                                                            ) OFC, BKG_ESVC_CTRL_OFC CTRL
+                                                                         WHERE OFC.OFC = CTRL.CTRL_OFC_CD(+)
+                                                                        ORDER BY RANK
+                                                                        )
+                                                                     WHERE ROWNUM = 1
+                                                                       AND OFC IS NOT NULL)))
+                                                   , SYSDATE))
+	, GDS_DESC  = @[gds_desc]
+	, MK_DESC   = @[mk_desc]
+	, ESTM_WGT_UT_CD = DECODE( ESTM_WGT_UT_CD, NULL, 'KGS','K','KGS','L','LBS',ESTM_WGT_UT_CD)
+	, MEAS_UT_CD     = DECODE( MEAS_UT_CD,     NULL, 'CBM','X','CBM','E','CBF',MEAS_UT_CD)
+	, SI_CNTC_NM          = DECODE( DOC_TP_CD, 'S', CNTC_NM         , SI_CNTC_NM         )
+	, SI_CNTC_PHN_INTL_NO = DECODE( DOC_TP_CD, 'S', CNTC_PHN_INTL_NO, SI_CNTC_PHN_INTL_NO)
+	, SI_CNTC_PHN_AREA_NO = DECODE( DOC_TP_CD, 'S', CNTC_PHN_AREA_NO, SI_CNTC_PHN_AREA_NO)
+	, SI_CNTC_PHN_NO      = DECODE( DOC_TP_CD, 'S', CNTC_PHN_NO     , SI_CNTC_PHN_NO     )
+	, SI_CNTC_XTN_PHN_NO  = DECODE( DOC_TP_CD, 'S', CNTC_XTN_PHN_NO , SI_CNTC_XTN_PHN_NO )
+	, SI_CNTC_FAX_INTL_NO = DECODE( DOC_TP_CD, 'S', CNTC_FAX_INTL_NO, SI_CNTC_FAX_INTL_NO)
+	, SI_CNTC_FAX_AREA_NO = DECODE( DOC_TP_CD, 'S', CNTC_FAX_AREA_NO, SI_CNTC_FAX_AREA_NO)
+	, SI_CNTC_FAX_NO      = DECODE( DOC_TP_CD, 'S', CNTC_FAX_NO     , SI_CNTC_FAX_NO     )
+	, SI_CNTC_EML         = DECODE( DOC_TP_CD, 'S', CNTC_EML        , SI_CNTC_EML        )
+	, SI_CNTC_MPHN_NO     = DECODE( DOC_TP_CD, 'S', CNTC_MPHN_NO    , SI_CNTC_MPHN_NO    )
+	, CNTC_NM             = DECODE( DOC_TP_CD, 'S', ''              , CNTC_NM            )
+	, CNTC_PHN_INTL_NO    = DECODE( DOC_TP_CD, 'S', ''              , CNTC_PHN_INTL_NO   )
+	, CNTC_PHN_AREA_NO    = DECODE( DOC_TP_CD, 'S', ''              , CNTC_PHN_AREA_NO   )
+	, CNTC_PHN_NO         = DECODE( DOC_TP_CD, 'S', ''              , CNTC_PHN_NO        )
+	, CNTC_XTN_PHN_NO     = DECODE( DOC_TP_CD, 'S', ''              , CNTC_XTN_PHN_NO    )
+	, CNTC_FAX_INTL_NO    = DECODE( DOC_TP_CD, 'S', ''              , CNTC_FAX_INTL_NO   )
+	, CNTC_FAX_AREA_NO    = DECODE( DOC_TP_CD, 'S', ''              , CNTC_FAX_AREA_NO   )
+	, CNTC_FAX_NO         = DECODE( DOC_TP_CD, 'S', ''              , CNTC_FAX_NO        )
+	, CNTC_EML            = DECODE( DOC_TP_CD, 'S', ''              , CNTC_EML           )
+	, CNTC_MPHN_NO        = DECODE( DOC_TP_CD, 'S', ''              , CNTC_MPHN_NO       )	
+    , ORG_BKG_QTY         = (CASE WHEN (SELECT COUNT(CNTR_NO) 
+                                        FROM BKG_XTER_CNTR C 
+                                        WHERE C.XTER_SNDR_ID = M.XTER_SNDR_ID 
+                                        AND C.XTER_RQST_NO = M.XTER_RQST_NO 
+                                        AND C.XTER_RQST_SEQ = M.XTER_RQST_SEQ) = 0 THEN NULL
+                                  ELSE (SELECT SUM(OP_CNTR_QTY) 
+                                        FROM BKG_QUANTITY C 
+                                        WHERE C.BKG_NO = M.BKG_NO 
+                                        AND CNTR_TPSZ_CD NOT LIKE 'Q%')
+                             END ) 
+    , ORG_BKG_CNTR_QTY    = (CASE WHEN (SELECT COUNT(CNTR_NO) 
+                                        FROM BKG_XTER_CNTR C 
+                                        WHERE C.XTER_SNDR_ID = M.XTER_SNDR_ID 
+                                        AND C.XTER_RQST_NO = M.XTER_RQST_NO 
+                                        AND C.XTER_RQST_SEQ = M.XTER_RQST_SEQ) = 0 THEN NULL
+                                  ELSE (SELECT SUM(CNTR_VOL_QTY) 
+                                        FROM BKG_CONTAINER C 
+                                        WHERE C.BKG_NO = M.BKG_NO )
+                             END ) 
+    , SPLIT_STS_CD        = (CASE WHEN XTER_SNDR_ID = 'EML' THEN SPLIT_STS_CD
+                                  WHEN (SELECT COUNT(CNTR_NO) 
+                                        FROM BKG_XTER_CNTR C 
+                                        WHERE C.XTER_SNDR_ID = M.XTER_SNDR_ID 
+                                        AND C.XTER_RQST_NO = M.XTER_RQST_NO 
+                                        AND C.XTER_RQST_SEQ = M.XTER_RQST_SEQ) = 0 THEN NULL
+                                  WHEN (SELECT SUM(OP_CNTR_QTY) 
+                                        FROM BKG_QUANTITY C 
+                                        WHERE C.BKG_NO = M.BKG_NO 
+                                        AND CNTR_TPSZ_CD NOT LIKE 'Q%')
+                                        >
+                                       (SELECT COUNT(CNTR_NO) FROM BKG_XTER_CNTR C 
+                                        WHERE C.XTER_SNDR_ID = M.XTER_SNDR_ID 
+                                        AND C.XTER_RQST_NO = M.XTER_RQST_NO 
+                                        AND C.XTER_RQST_SEQ = M.XTER_RQST_SEQ) THEN 'S'
+                                  ELSE NULL
+                             END )
+--add 2011/11/24 
+, INCL_RT_BL_KNT = DECODE(XTER_SNDR_ID,'EXCEL', DECODE(XTER_BL_TP_CD,'S','','W','',INCL_RT_BL_KNT),INCL_RT_BL_KNT)
+, XCLD_RT_BL_KNT = DECODE(XTER_SNDR_ID,'EXCEL', DECODE(XTER_BL_TP_CD,'S','','W','',XCLD_RT_BL_KNT),XCLD_RT_BL_KNT)
+, NON_NEGO_RT_INCL_KNT = DECODE(XTER_SNDR_ID,'EXCEL', DECODE(XTER_BL_TP_CD,'W',INCL_RT_BL_KNT,NON_NEGO_RT_INCL_KNT),NON_NEGO_RT_INCL_KNT)
+, NON_NEGO_RT_XCLD_KNT = DECODE(XTER_SNDR_ID,'EXCEL', DECODE(XTER_BL_TP_CD,'W',XCLD_RT_BL_KNT,NON_NEGO_RT_XCLD_KNT),NON_NEGO_RT_XCLD_KNT)
+, USA_CSTMS_FILE_NO = DECODE(XTER_BL_TP_CD,'H',BL_NO_CTNT,USA_CSTMS_FILE_NO)
+ WHERE XTER_SNDR_ID = @[sender_id]
+   AND XTER_RQST_NO = @[rqst_no]
+   AND XTER_RQST_SEQ= @[rqst_seq]			]]></sql>
+			<params>
+				<param name="sender_id" type="12" value="INTTRANG2" out="N"/>
+				<param name="rqst_no" type="12" value="14327033" out="N"/>
+				<param name="rqst_seq" type="12" value="1" out="N"/>
+				<param name="gds_desc" type="12" value="aaa" out="N"/>
+				<param name="mk_desc" type="12" value="bbb" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

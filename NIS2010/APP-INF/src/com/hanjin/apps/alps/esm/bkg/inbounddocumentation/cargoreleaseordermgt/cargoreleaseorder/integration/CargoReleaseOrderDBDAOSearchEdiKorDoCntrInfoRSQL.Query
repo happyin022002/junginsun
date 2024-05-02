@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CargoReleaseOrderDBDAOSearchEdiKorDoCntrInfoRSQL">
+			<desc><![CDATA[Booking Container 정보를 조회한다.]]></desc>
+			<sql><![CDATA[
+SELECT   '{CNTR_INFO'   || CHR(10)
+      || 'CNTR_NO:'     || CNTR_NO || CHR(10)
+      || 'SIZE_TYPE:'   || SIZE_TYPE || CHR(10)
+      /* 2014.08.05 DMT 모듈에서 나가는 것도 ETA 추가함 */
+      || 'DMIF_END_DT:' || NVL(DMIF_END_DT,NVL(VPS_ETA_DT,' ')) || CHR(10)
+      || 'DTIC_END_DT:' || NVL(DTIC_END_DT,' ')  || CHR(10)
+      || 'DT_FT_DAYS:'  || DECODE(DT_FT_DAYS, '0',' ', DT_FT_DAYS) || CHR(10)
+      || '}CNTR_INFO'   || CHR(10)
+  FROM 
+  ( 
+        SELECT   BCNTR.CNTR_NO                                          AS CNTR_NO
+                ,BCNTR.CNTR_TPSZ_CD                                     AS SIZE_TYPE
+                ,MAX(DMT_CALC.DMIF_END_DT)                                   AS DMIF_END_DT
+                ,MAX(DMT_CALC.DTIC_END_DT)                                   AS DTIC_END_DT
+                ,MAX(DMT_CALC.OVER_DAY)                                      AS DT_FT_DAYS
+                /* ReeFeR는 + 5일, 기타 +8일로  */
+                ,TO_CHAR(MAX(VSKD.VPS_ETA_DT) + DECODE(SUBSTR(CNTR_TPSZ_CD,1,1),'R',5,8) , 'YYYYMMDD') AS VPS_ETA_DT
+        FROM    BKG_CONTAINER    BCNTR,
+                BKG_VVD          VVD,
+                VSK_VSL_PORT_SKD VSKD,
+                ( 
+                SELECT   C.CNTR_NO
+                        ,C.CNTR_CYC_NO
+                        ,C.DMDT_TRF_CD
+                        ,MAX(DECODE(NVL(INVM1.DMDT_AR_IF_CD, 'N'),'Y', TO_CHAR(TO_MVMT_DT, 'YYYYMMDD'),
+                                                                  'N', TO_CHAR(FT_END_DT,  'YYYYMMDD')))   AS DMIF_END_DT
+                        ,''             DTIC_END_DT
+                        ,''             OVER_DAY
+                FROM    DMT_CHG_CALC    C,
+                        DMT_INV_MN  INVM1
+                WHERE   (SYS_AREA_GRP_ID,CNTR_NO,CNTR_CYC_NO) IN
+                        ( SELECT SYS_AREA_GRP_ID,CNTR_NO,CNTR_CYC_NO FROM DMT_CHG_BKG_CNTR WHERE BKG_NO = @[bkg_no])
+                AND     C.DMDT_INV_NO        = INVM1.DMDT_INV_NO(+)
+                AND     C.SYS_AREA_GRP_ID = 'KOR'
+
+                AND C.DMDT_CHG_STS_CD IN ('F', 'C', 'I', 'L', 'N', 'U')  
+                AND (   ( C.DMDT_TRF_CD = 'DMIF'  AND C.DMDT_CHG_LOC_DIV_CD = 'POD')
+                     OR ( C.DMDT_TRF_CD = 'CTIC'  AND C.DMDT_CHG_LOC_DIV_CD = 'DEL')
+                     )
+           
+                AND NOT (C.DUL_TP_EXPT_FLG  = 'Y' AND SUBSTR(C.DMDT_TRF_CD, 1, 1) = 'D')
+                AND C.DMDT_CHG_LOC_DIV_CD	<> 'SZP'  
+
+                GROUP BY C.CNTR_NO, C.CNTR_CYC_NO, C.DMDT_TRF_CD
+              
+                UNION
+                SELECT   C.CNTR_NO
+                        ,C.CNTR_CYC_NO
+                        ,C.DMDT_TRF_CD
+                        ,''             DMIF_END_DT
+                        ,MAX(DECODE( NVL(INVM1.DMDT_AR_IF_CD, 'N'), 'Y', DECODE(NVL(INVM1.DMDT_INV_STS_CD, 'I'), 'X', TO_CHAR(FT_END_DT,  'YYYYMMDD'), TO_CHAR(TO_MVMT_DT, 'YYYYMMDD') ),
+                                                                     'N', TO_CHAR(FT_END_DT,  'YYYYMMDD') ) )  AS DMIF_END_DT
+                        ,TO_CHAR(MIN(DTIC_OVER.OVER_DAY))
+                FROM    DMT_CHG_CALC    C,
+                        (
+                            SELECT   C.CNTR_NO
+                                    ,C.CNTR_CYC_NO
+                                    ,C.DMDT_TRF_CD
+                                    ,C.SYS_AREA_GRP_ID
+                                    ,TO_CHAR(NVL(SUM(FX_FT_OVR_DYS), 0))    OVER_DAY
+                            FROM    DMT_CHG_CALC    C,
+                                    DMT_INV_MN  INVM1
+                            WHERE   (SYS_AREA_GRP_ID,CNTR_NO,CNTR_CYC_NO) IN
+                                    ( SELECT SYS_AREA_GRP_ID,CNTR_NO,CNTR_CYC_NO FROM DMT_CHG_BKG_CNTR WHERE BKG_NO = @[bkg_no])
+                            AND     C.DMDT_INV_NO        = INVM1.DMDT_INV_NO(+)
+                            AND     C.DMDT_TRF_CD        = 'DTIC'
+                            AND     DUL_TP_EXPT_FLG      = 'N'
+                            AND     NVL(INVM1.DMDT_AR_IF_CD, 'N') <> 'Y'
+                            GROUP BY C.CNTR_NO, C.CNTR_CYC_NO, C.DMDT_TRF_CD,C.SYS_AREA_GRP_ID
+                        )   DTIC_OVER,
+                        DMT_INV_MN  INVM1
+                WHERE   (C.SYS_AREA_GRP_ID,C.CNTR_NO,C.CNTR_CYC_NO) IN
+                        ( SELECT SYS_AREA_GRP_ID,CNTR_NO,CNTR_CYC_NO FROM DMT_CHG_BKG_CNTR WHERE BKG_NO = @[bkg_no])
+                AND     C.DMDT_INV_NO        = INVM1.DMDT_INV_NO(+)
+                AND     C.DMDT_TRF_CD        = 'DTIC'
+                AND     C.DUL_TP_EXPT_FLG      = 'N'
+                AND     C.SYS_AREA_GRP_ID = 'KOR'
+                AND     C.SYS_AREA_GRP_ID    = DTIC_OVER.SYS_AREA_GRP_ID(+)
+                AND     C.CNTR_NO    = DTIC_OVER.CNTR_NO(+)
+                AND     C.CNTR_CYC_NO    = DTIC_OVER.CNTR_CYC_NO(+)
+                AND     C.DMDT_TRF_CD   = DTIC_OVER.DMDT_TRF_CD(+)
+ 
+               /* 2015.06.12 이정은 차장
+                1,2,3 중 AR I/F 
+                               다 안됐면 1번
+                                하나라도 됐으면 마지막 SEQ
+                */
+                AND     C.CHG_SEQ = (SELECT NVL(MAX(CHG_SEQ),1)
+                                       FROM DMT_CHG_CALC CC
+                                      WHERE CC.SYS_AREA_GRP_ID     = C.SYS_AREA_GRP_ID
+                                        AND CC.CNTR_NO             = C.CNTR_NO
+                                        AND CC.CNTR_CYC_NO         = C.CNTR_CYC_NO
+                                        AND CC.DMDT_TRF_CD         = C.DMDT_TRF_CD
+                                        AND CC.DMDT_CHG_LOC_DIV_CD = C.DMDT_CHG_LOC_DIV_CD
+                                        AND EXISTS ( SELECT 'Y' FROM DMT_INV_MN WHERE DMDT_INV_NO = CC.DMDT_INV_NO AND DMDT_AR_IF_CD = 'Y' )
+                                    )  
+
+                GROUP BY C.CNTR_NO, C.CNTR_CYC_NO, C.DMDT_TRF_CD, C.SYS_AREA_GRP_ID
+                
+                UNION
+                SELECT   C.CNTR_NO
+                        ,C.CNTR_CYC_NO
+                        ,C.DMDT_TRF_CD
+                        ,''             DMIF_END_DT
+                        /* 2015.02.23 수정 김기범 부장 CTIC는 정산완료한 날짜가 소위 무조건 반납때 까지의 기한이 됨(물론, 반출되었던 관계없이)  */
+                        ,MAX(DECODE( NVL(INVM1.DMDT_AR_IF_CD, 'N'), 'Y', DECODE(NVL(INVM1.DMDT_INV_STS_CD, 'I'), 'X', TO_CHAR(FT_END_DT,  'YYYYMMDD'), TO_CHAR(TO_MVMT_DT, 'YYYYMMDD') ),
+                                                                    'N', TO_CHAR(FT_END_DT,  'YYYYMMDD') ) )  AS DMIF_END_DT
+                        ,TO_CHAR(NVL(SUM(FX_FT_OVR_DYS), 0))
+                FROM    DMT_CHG_CALC    C,
+                        DMT_INV_MN  INVM1
+                WHERE   (SYS_AREA_GRP_ID,CNTR_NO,CNTR_CYC_NO) IN
+                        ( SELECT SYS_AREA_GRP_ID,CNTR_NO,CNTR_CYC_NO FROM DMT_CHG_BKG_CNTR WHERE BKG_NO = @[bkg_no])
+                AND     C.DMDT_INV_NO        = INVM1.DMDT_INV_NO(+)
+                AND     C.DMDT_TRF_CD          = 'CTIC'
+                AND     C.DUL_TP_EXPT_FLG = 'Y'
+                AND     C.SYS_AREA_GRP_ID = 'KOR' 
+                GROUP BY C.CNTR_NO, C.CNTR_CYC_NO, C.DMDT_TRF_CD
+                )   DMT_CALC
+        WHERE   BCNTR.BKG_NO          = @[bkg_no]
+        AND     BCNTR.CNTR_NO         = DMT_CALC.CNTR_NO(+)
+        AND     BCNTR.CNMV_CYC_NO     = DMT_CALC.CNTR_CYC_NO(+)
+        AND     VVD.BKG_NO               = BCNTR.BKG_NO
+        AND     VVD.VSL_PRE_PST_CD       IN ('T','U')
+        AND     VVD.VSL_CD               = VSKD.VSL_CD
+        AND     VVD.SKD_VOY_NO           = VSKD.SKD_VOY_NO
+        AND     VVD.SKD_DIR_CD           = VSKD.SKD_DIR_CD
+        AND     VVD.POD_CD               = VSKD.VPS_PORT_CD
+        AND     VVD.POD_CLPT_IND_SEQ     = VSKD.CLPT_IND_SEQ
+        GROUP BY  BCNTR.CNTR_NO, BCNTR.CNTR_TPSZ_CD
+)			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

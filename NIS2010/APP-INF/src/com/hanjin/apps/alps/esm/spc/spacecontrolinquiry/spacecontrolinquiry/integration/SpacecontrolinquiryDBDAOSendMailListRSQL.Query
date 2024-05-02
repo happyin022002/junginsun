@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SpacecontrolinquiryDBDAOSendMailListRSQL">
+			<desc><![CDATA[2011.06.15 김종준 [CHM-201110708-01]  F"cast 입력 요청 메세지 송부 기능
+2011.08.02 이행지 [CHM-201112670-01] F''cast Auto Message 대상 선정 로직 보완 - sls_ofc_cd NVL처리되어있던것 outer join으로 수정, having절 수정
+2011.11.16 김종준 [CHM-201114558-01] F'cast Auto Message  SQL 튜닝
+2014.03.25 김시몬 [선처리] SQM 분기구하는 로직 관련 보완
+2015.03.03 CHM-201534458 SQM QTA주가 변경 관련 적용 요청]]></desc>
+			<sql><![CDATA[
+WITH CW AS
+(
+      SELECT /*+ INDEX(P XPKMAS_WK_PRD) */
+             P.COST_YR ,
+             P.COST_WK ,
+             ROWNUM AS NUM
+        FROM MAS_WK_PRD P
+       WHERE P.COST_YR||P.COST_WK >= @[year]||@[week]
+         AND ROWNUM               <= @[duration]
+)
+,CW2 AS
+(
+      SELECT /*+ INDEX_DESC(P XPKMAS_WK_PRD) */
+             P.COST_YR ,
+             P.COST_WK ,
+             ROWNUM AS NUM
+        FROM MAS_WK_PRD P
+       WHERE P.COST_YR||P.COST_WK < @[year]||@[week]
+         AND ROWNUM               <= 6
+) 
+SELECT SLS_OFC_CD, TRD_CD, SUB_TRD_CD, RLANE_CD, VSL_CD, SKD_VOY_NO, DIR_CD, SLS_YRMON, COST_WK,BSE_QTR_CD, BSE_YR
+FROM (
+    SELECT T.TRD_CD, T.SUB_TRD_CD, T.RLANE_CD, T.VSL_CD, T.SKD_VOY_NO, T.DIR_CD, T.SLS_YRMON, T.COST_WK, T.SLS_OFC_CD,T.BSE_QTR_CD,T.BSE_YR
+      FROM SPC_DLY_FCAST_CUST C,
+        (
+        SELECT /*+ ORDERED USE_NL(CW V M) */ 
+               V.TRD_CD, V.SUB_TRD_CD,  V.RLANE_CD, V.IOC_CD, V.VSL_CD, V.SKD_VOY_NO, V.DIR_CD, V.SLS_YRMON, V.COST_WK, M.SLS_OFC_CD, M.POL_CD
+               , CASE WHEN V.COST_YRMON >= '201501' 
+                      THEN CEIL(TO_NUMBER(SUBSTR(V.COST_YRMON, -2))/3)||'Q' 
+                      ELSE CEIL(TO_NUMBER(DECODE(V.COST_WK,'00','01','53','52',V.COST_WK))/13)||'Q'
+                 END BSE_QTR_CD --2015.03.04 CHM-201534435 SQM QTA주가 변경 관련 적용 요청
+              , SUBSTR(V.COST_YRMON, 1,4) AS BSE_YR
+          FROM CW, 
+			   MAS_MON_VVD V,
+               SPC_FCAST_OFC_POL_MAPG M             
+         WHERE M.REP_TRD_CD         = SPC_GET_REP_TRD_FNC(V.RLANE_CD)
+           AND M.REP_SUB_TRD_CD     = SPC_GET_REP_SUB_TRD_FNC(V.RLANE_CD)
+           AND M.RLANE_CD           = V.RLANE_CD
+           AND M.DIR_CD             = V.DIR_CD
+           AND M.IOC_TS_CD          = V.IOC_CD
+           AND M.TRD_CD             = V.TRD_CD
+           AND M.SUB_TRD_CD         = V.SUB_TRD_CD
+           AND NVL(V.DELT_FLG, 'N') = 'N'
+           AND SUBSTR(V.SLS_YRMON, 1, 4)||V.COST_WK = CW.COST_YR||CW.COST_WK
+           AND EXISTS   ( SELECT /*+ INDEX_DESC(MI XPKSPC_FCAST_OFC_POL_MAPG) */
+                                 'X'
+                            FROM SPC_FCAST_OFC_POL_MAPG MI
+                           WHERE MI.REP_TRD_CD     = M.REP_TRD_CD
+                             AND MI.REP_SUB_TRD_CD = M.REP_SUB_TRD_CD
+                             AND MI.RLANE_CD       = M.RLANE_CD
+                             AND MI.DIR_CD         = M.DIR_CD
+                             AND MI.IOC_TS_CD      = M.IOC_TS_CD
+                             AND MI.SLS_OFC_CD     = M.SLS_OFC_CD
+                             AND MI.BSE_YRWK       = M.BSE_YRWK
+                             AND MI.BSE_YRWK      <= SUBSTR(V.SLS_YRMON, 1, 4)||V.COST_WK
+                         )
+           AND M.SLS_OFC_CD IN (SELECT OFC_CD
+                                 FROM SPC_OFC_LVL O
+                                WHERE N2ND_PRNT_OFC_CD IN (
+                                                            #foreach ($key in ${ilist})
+                                                                #if($velocityCount < $ilist.size())
+                                                                    '$key',
+                                                                #else
+                                                                    '$key'
+                                                                #end
+                                                            #end)
+                                  AND SUBSTR(V.SLS_YRMON, 1, 4)||V.COST_WK BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK)
+           AND V.TRD_CD IN (
+							#foreach ($key in ${trdCdlist})
+                 			  	#if($velocityCount < $trdCdlist.size())
+                  				  '$key',
+                  				  	#else
+                  				  '$key'
+                    			#end
+							#end)
+           #if($subTrdCdlist.size() > 0)
+           AND V.SUB_TRD_CD IN (
+								#foreach ($key in ${subTrdCdlist})
+                 			  		#if($velocityCount < $subTrdCdlist.size())
+                  				  		'$key',
+                  				  	#else
+                  				  		'$key'
+                    				#end
+								#end)
+			#end
+			#if($boundList.size() > 0)
+       	    AND V.DIR_CD IN (
+							#foreach ($key in ${boundList})
+                 			  	#if($velocityCount < $boundList.size())
+                  				  '$key',
+                  				  	#else
+                  				  '$key'
+                    			#end
+							#end)
+			#end
+			#if($rlaneList.size() > 0)
+            AND V.RLANE_CD IN (
+								#foreach ($key in ${rlaneList})
+                 			  		#if($velocityCount < $rlaneList.size())
+                  				  		'$key',
+                  				  	#else
+                  				  		'$key'
+                    				#end
+								#end)
+			#end
+        UNION ALL
+        SELECT /*+ ORDERED USE_NL(CW M O) INDEX(V XFN1MAS_MON_VVD) */ 
+				V.TRD_CD, V.SUB_TRD_CD, V.RLANE_CD, V.IOC_CD, V.VSL_CD, V.SKD_VOY_NO, V.DIR_CD, V.SLS_YRMON, V.COST_WK , M.SLS_OFC_CD, M.POL_CD
+               , CASE WHEN V.COST_YRMON >= '201501' 
+                      THEN CEIL(TO_NUMBER(SUBSTR(V.COST_YRMON, -2))/3)||'Q' 
+                      ELSE CEIL(TO_NUMBER(DECODE(V.COST_WK,'00','01','53','52',V.COST_WK))/13)||'Q'
+                 END BSE_QTR_CD --2015.03.04 CHM-201534435 SQM QTA주가 변경 관련 적용 요청
+              , SUBSTR(V.COST_YRMON, 1,4) AS BSE_YR
+          FROM  CW,
+           		MAS_MON_VVD V,
+           		SPC_IRR_FCAST_OFC_POL_MAPG M,
+           		SPC_OFC_LVL O
+         WHERE M.REP_TRD_CD         = SPC_GET_REP_TRD_FNC(V.RLANE_CD)
+           AND M.REP_SUB_TRD_CD     = SPC_GET_REP_SUB_TRD_FNC(V.RLANE_CD)
+           AND M.TRD_CD             = V.TRD_CD
+           AND M.SUB_TRD_CD         = V.SUB_TRD_CD
+           AND M.RLANE_CD           = V.RLANE_CD
+           AND M.DIR_CD             = V.DIR_CD
+           AND M.IOC_TS_CD          = V.IOC_CD
+           AND M.VSL_CD             = V.VSL_CD
+           AND M.SKD_VOY_NO         = V.SKD_VOY_NO
+           AND M.SKD_DIR_CD         = V.DIR_CD
+           AND SUBSTR(V.SLS_YRMON, 1, 4)||V.COST_WK = CW.COST_YR||CW.COST_WK
+           AND NVL(V.DELT_FLG, 'N') = 'N'
+           AND M.SLS_OFC_CD         = O.OFC_CD
+           AND SUBSTR(V.SLS_YRMON, 1, 4)||V.COST_WK BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK
+           AND N2ND_PRNT_OFC_CD IN (
+									#foreach ($key in ${ilist})
+                 					  	#if($velocityCount < $ilist.size())
+                  						  '$key',
+                  					  	#else
+                  						  '$key'
+                    					#end
+									#end)
+           AND V.TRD_CD IN (
+							#foreach ($key in ${trdCdlist})
+                 			  	#if($velocityCount < $trdCdlist.size())
+                  				  '$key',
+                  				  	#else
+                  				  '$key'
+                    			#end
+							#end)
+           #if($subTrdCdlist.size() > 0)
+           AND V.SUB_TRD_CD IN (
+								#foreach ($key in ${subTrdCdlist})
+                 			  		#if($velocityCount < $subTrdCdlist.size())
+                  				  		'$key',
+                  				  	#else
+                  				 		'$key'
+                    				#end
+								#end)
+           #end
+           #if($boundList.size() > 0)
+       	   AND V.DIR_CD IN (
+							#foreach ($key in ${boundList})
+                 			  	#if($velocityCount < $boundList.size())
+                  				  '$key',
+                  				  	#else
+                  				  '$key'
+                    			#end
+							#end)
+           #end
+           #if($rlaneList.size() > 0)
+           AND V.RLANE_CD IN (
+								#foreach ($key in ${rlaneList})
+                 			  		#if($velocityCount < $rlaneList.size())
+                  				  		'$key',
+                  				  	#else
+                  				  		'$key'
+                    				#end
+								#end)
+           #end
+
+
+    ) T
+    WHERE T.TRD_CD   = C.TRD_CD(+)
+    AND T.RLANE_CD   = C.RLANE_CD(+)
+    AND T.VSL_CD     = C.VSL_CD(+)
+    AND T.SKD_VOY_NO = C.SKD_VOY_NO(+)
+    AND T.DIR_CD     = C.SKD_DIR_CD(+)
+    AND T.SLS_OFC_CD = C.SLS_RGN_OFC_CD(+)
+    AND T.POL_CD     = NVL(SUBSTR(C.POL_YD_CD, 1, 5), T.POL_CD)
+   -- 실제 SKED에 해당 PORT 들이 있는지 확인.
+    AND EXISTS (SELECT 'A' 
+                  FROM VSK_VSL_PORT_SKD S
+                 WHERE S.VSL_CD      = T.VSL_CD
+                   AND S.SKD_VOY_NO  = T.SKD_VOY_NO
+                   AND S.SKD_DIR_CD  = T.DIR_CD
+                   AND NVL(S.SKD_CNG_STS_CD, 'X') <> 'S'
+                   AND S.VPS_PORT_CD = T.POL_CD)
+    
+    GROUP BY T.TRD_CD, T.SUB_TRD_CD, T.RLANE_CD, T.VSL_CD, T.SKD_VOY_NO, T.DIR_CD, T.SLS_YRMON, T.COST_WK, T.SLS_OFC_CD, T.BSE_QTR_CD,T.BSE_YR
+    HAVING SUM(NVL(C.CFM_TTL_QTY, 0) + NVL(C.CFM_40FT_HC_QTY, 0) + NVL(C.CFM_45FT_HC_QTY, 0) + NVL(C.CFM_53FT_QTY, 0)) = 0
+) T
+WHERE EXISTS (
+            -- QTA 존재
+            SELECT  'A'
+              FROM SQM_CFM_QTA      MQ ,
+                   SQM_QTA_RLSE_VER MQR
+             WHERE MQR.BSE_YR          = T.BSE_YR
+               --AND MQR.BSE_QTR_CD      = CEIL(TO_NUMBER(DECODE(T.COST_WK,'00','01','53','52',T.COST_WK))/13)||'Q' --CEIL(TO_NUMBER( SUBSTR(T.SLS_YRMON, 5, 2))/3)||'Q'
+			   -- CHM-201534458 SQM QTA주가 변경 관련 적용 요청
+			   AND MQR.BSE_QTR_CD      = T.BSE_QTR_CD
+               AND MQR.SQM_VER_STS_CD  = 'R' -- 컬럼 변경
+               AND MQR.BSE_TP_CD       = 'Q' -- 분기 20131205추가
+               AND MQ.QTA_RLSE_VER_NO  = MQR.QTA_RLSE_VER_NO
+               AND MQ.BSE_TP_CD        = MQR.BSE_TP_CD -- 분기 20131205추가  
+               AND MQ.BSE_YR           = MQR.BSE_YR
+               AND MQ.BSE_QTR_CD       = MQR.BSE_QTR_CD
+               AND MQ.QTA_TGT_CD       = 'D'
+               AND MQ.OFC_VW_CD        = 'L'  -- 20131205추가
+               AND MQ.VSL_CD 		   = T.VSL_CD
+               AND MQ.SKD_VOY_NO       = T.SKD_VOY_NO
+               AND MQ.DIR_CD           = T.DIR_CD
+               AND MQ.SKD_DIR_CD       = T.DIR_CD
+               AND MQ.TRD_CD           = T.TRD_CD
+               AND MQ.RLANE_CD         = T.RLANE_CD
+               AND T.SLS_OFC_CD        = (SELECT NVL(MAX(ROC.CONV_RGN_OFC_CD), MQ.RGN_OFC_CD)
+                                            FROM SPC_RGN_OFC_CONV ROC
+                                           WHERE ROC.SLS_RGN_OFC_CD = MQ.RGN_OFC_CD)
+               AND MQ.LOD_QTY          > 0
+
+             -- 1-6주차, 동일 Lane, Bound에 QTA 존재
+             UNION ALL
+             SELECT /*+ ORDERED USE_NL(CW V MQ MQR) INDEX(V XFN1MAS_MON_VVD) */ 
+				    'A'
+               FROM CW2, 
+                    MAS_MON_VVD V,
+                    SQM_CFM_QTA      MQ ,
+                    SQM_QTA_RLSE_VER MQR
+                    
+              WHERE MQR.BSE_YR          = SUBSTR(V.COST_YRMON, 1, 4)
+                --AND MQR.BSE_QTR_CD      = CEIL(TO_NUMBER(DECODE(V.COST_WK,'00','01','53','52',V.COST_WK))/13)||'Q' --CEIL(TO_NUMBER( SUBSTR(V.SLS_YRMON, 5, 2))/3)||'Q'
+				-- CHM-201534458 SQM QTA주가 변경 관련 적용 요청
+				AND MQR.BSE_QTR_CD      = T.BSE_QTR_CD
+                AND MQR.SQM_VER_STS_CD  = 'R' -- 컬럼 변경
+                AND MQR.BSE_TP_CD       = 'Q' -- 분기 20131205추가
+                AND MQ.QTA_RLSE_VER_NO  = MQR.QTA_RLSE_VER_NO
+                AND MQ.BSE_TP_CD        = MQR.BSE_TP_CD -- 분기 20131205추가       
+                AND MQ.BSE_YR           = MQR.BSE_YR
+                AND MQ.BSE_QTR_CD       = MQR.BSE_QTR_CD
+                AND MQ.QTA_TGT_CD       = 'D'
+                AND MQ.OFC_VW_CD        = 'L'  -- 20131205추가
+                AND V.TRD_CD            = T.TRD_CD
+                AND V.RLANE_CD          = T.RLANE_CD
+                AND V.DIR_CD            = T.DIR_CD
+                AND SUBSTR(V.SLS_YRMON, 1, 4)||V.COST_WK = CW2.COST_YR||CW2.COST_WK
+                AND NVL(V.DELT_FLG, 'N') = 'N'
+                AND MQ.VSL_CD           = V.VSL_CD
+                AND MQ.SKD_VOY_NO       = V.SKD_VOY_NO
+                AND MQ.DIR_CD           = V.DIR_CD
+                AND MQ.SKD_DIR_CD       = V.DIR_CD
+                AND MQ.TRD_CD           = V.TRD_CD
+                AND MQ.RLANE_CD         = V.RLANE_CD
+                AND T.SLS_OFC_CD        = (SELECT NVL(MAX(ROC.CONV_RGN_OFC_CD), MQ.RGN_OFC_CD)
+                                             FROM SPC_RGN_OFC_CONV ROC
+                                            WHERE ROC.SLS_RGN_OFC_CD = MQ.RGN_OFC_CD)
+                AND MQ.LOD_QTY          > 0
+
+             -- 1-6주차, 동일 Lane, Bound에 fcast 존재
+             UNION ALL
+             SELECT /*+ ORDERED USE_NL(CW2 V C)  INDEX(V XFN1MAS_MON_VVD) */ 
+                    'A'
+               FROM CW2, 
+                    MAS_MON_VVD V,
+                    SPC_DLY_FCAST_CUST C                    
+              WHERE V.TRD_CD             = T.TRD_CD
+                AND V.RLANE_CD           = T.RLANE_CD
+                AND V.DIR_CD             = T.DIR_CD
+                AND SUBSTR(V.SLS_YRMON, 1, 4)||V.COST_WK = CW2.COST_YR||CW2.COST_WK
+                AND NVL(V.DELT_FLG, 'N') = 'N'
+                AND C.VSL_CD             = V.VSL_CD
+                AND C.SKD_VOY_NO         = V.SKD_VOY_NO
+                AND C.DIR_CD             = V.DIR_CD
+                AND C.SKD_DIR_CD         = V.DIR_CD
+                AND C.TRD_CD             = V.TRD_CD
+                AND C.RLANE_CD           = V.RLANE_CD
+                AND C.REP_TRD_CD         = SPC_GET_REP_TRD_FNC(V.RLANE_CD)
+                AND C.REP_SUB_TRD_CD     = SPC_GET_REP_SUB_TRD_FNC(V.RLANE_CD)
+                AND T.SLS_OFC_CD         = C.SLS_RGN_OFC_CD
+              GROUP BY C.TRD_CD, C.RLANE_CD, C.VSL_CD, C.SKD_VOY_NO, C.DIR_CD, V.SLS_YRMON, V.COST_WK, C.SLS_OFC_CD
+             HAVING SUM(NVL(C.CFM_TTL_QTY, 0)) > 0
+
+             )
+ORDER BY SLS_OFC_CD, TRD_CD, RLANE_CD, SLS_YRMON, COST_WK			]]></sql>
+			<params>
+				<param name="year" type="12" value="" out="N"/>
+				<param name="week" type="12" value="" out="N"/>
+				<param name="duration" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

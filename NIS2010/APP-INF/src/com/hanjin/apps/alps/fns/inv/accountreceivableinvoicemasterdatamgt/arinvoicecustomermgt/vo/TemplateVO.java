@@ -1,0 +1,502 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : TemplateVO.java
+*@FileTitle : TemplateVO
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.10.01
+*@LastModifier : 한동훈
+*@LastVersion : 1.0
+* 2009.10.01 한동훈 
+* 1.0 Creation
+=========================================================*/
+
+package com.hanjin.apps.alps.fns.inv.accountreceivableinvoicemasterdatamgt.arinvoicecustomermgt.vo;
+
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+
+import javax.servlet.http.HttpServletRequest;
+
+import com.hanjin.apps.alps.fns.inv.accountreceivableinvoicemgt.invoiceissue.vo.CPRTInvoiceVO;
+import com.hanjin.framework.component.common.AbstractValueObject;
+import com.hanjin.framework.component.util.JSPUtil;
+import com.hanjin.syscommon.common.table.InvCprtTmpltChgVO;
+
+/**
+ * Table Value Ojbect<br>
+ * 관련 Event 에서 생성, 서버실행요청시 Data 전달역할을 수행하는 Value Object
+ *
+ * @author 한동훈
+ * @since J2EE 1.6
+ * @see AbstractValueObject
+ */
+
+public class TemplateVO extends AbstractValueObject {
+
+	private static final long serialVersionUID = 1L;
+	
+	private Collection<TemplateVO> models = new ArrayList<TemplateVO>();
+	
+	private List<TemplateItemVO> listTemplateItemVO = null;
+	private List<InvCprtTmpltChgVO> listInvCprtTmpltChgVO = null;
+	
+	/* Column Info */
+	private String updDt = null;
+	/* Column Info */
+	private String creUsrId = null;
+	/* VO Data Value( C:Creation, U:Update, D:Delete ) */
+	private String ibflag = null;
+	/* Column Info */
+	private String itmSeq = null;
+	/* Column Info */
+	private String usrDefNm = null;
+	/* Column Info */
+	private String creDt = null;
+	/* Column Info */
+	private String rptTmpltNm = null;
+	/* Column Info */
+	private String rptItmId = null;
+	/* Column Info */
+	private String rptAuthId = null;
+	/* Column Info */
+	private String updUsrId = null;
+	/* Column Info */
+	private String arOfcCd = null;
+	/* Page Number */
+	private String pagerows = null;
+
+	/*	테이블 컬럼의 값을 저장하는 Hashtable */
+	private HashMap<String, String> hashColumns = new HashMap<String, String>();
+
+	/*	테이블 컬럼에 대응되는 멤버변수를 저장하는 Hashtable */
+	private HashMap<String, String> hashFields = new HashMap<String, String>();
+	
+	
+	public List<InvCprtTmpltChgVO> getListInvCprtTmpltChgVO() {
+		return listInvCprtTmpltChgVO;
+	}
+	public void setListInvCprtTmpltChgVO(List<InvCprtTmpltChgVO> listInvCprtTmpltChgVO) {
+		this.listInvCprtTmpltChgVO = listInvCprtTmpltChgVO;
+	}
+	
+	public List<TemplateItemVO> getListTemplateItemVO() {
+		return listTemplateItemVO;
+	}
+	public void setListTemplateItemVO(List<TemplateItemVO> listTemplateItemVO) {
+		this.listTemplateItemVO = listTemplateItemVO;
+	}	
+	
+	public TemplateVO() {}
+
+	public TemplateVO(String ibflag, String pagerows, String rptTmpltNm, String rptItmId, String itmSeq, String usrDefNm, String rptAuthId, String arOfcCd, String creUsrId, String creDt, String updUsrId, String updDt) {
+		this.updDt = updDt;
+		this.creUsrId = creUsrId;
+		this.ibflag = ibflag;
+		this.itmSeq = itmSeq;
+		this.usrDefNm = usrDefNm;
+		this.creDt = creDt;
+		this.rptTmpltNm = rptTmpltNm;
+		this.rptItmId = rptItmId;
+		this.rptAuthId = rptAuthId;
+		this.updUsrId = updUsrId;
+		this.arOfcCd = arOfcCd;
+		this.pagerows = pagerows;
+	}
+	
+	/**
+	 * 테이블 컬럼에 저장할 값을 Hashtable<"column_name", "value"> 로 반환
+	 * @return HashMap
+	 */
+	public HashMap<String, String> getColumnValues(){
+		this.hashColumns.put("upd_dt", getUpdDt());
+		this.hashColumns.put("cre_usr_id", getCreUsrId());
+		this.hashColumns.put("ibflag", getIbflag());
+		this.hashColumns.put("itm_seq", getItmSeq());
+		this.hashColumns.put("usr_def_nm", getUsrDefNm());
+		this.hashColumns.put("cre_dt", getCreDt());
+		this.hashColumns.put("rpt_tmplt_nm", getRptTmpltNm());
+		this.hashColumns.put("rpt_itm_id", getRptItmId());
+		this.hashColumns.put("rpt_auth_id", getRptAuthId());
+		this.hashColumns.put("upd_usr_id", getUpdUsrId());
+		this.hashColumns.put("ar_ofc_cd", getArOfcCd());
+		this.hashColumns.put("pagerows", getPagerows());
+		return this.hashColumns;
+	}
+	
+	/**
+	 * 컬럼명에 대응되는 멤버변수명을 저장하여 Hashtable<"column_name", "variable"> 로 반환   
+	 * @return
+	 */
+	public HashMap<String, String> getFieldNames(){
+		this.hashFields.put("upd_dt", "updDt");
+		this.hashFields.put("cre_usr_id", "creUsrId");
+		this.hashFields.put("ibflag", "ibflag");
+		this.hashFields.put("itm_seq", "itmSeq");
+		this.hashFields.put("usr_def_nm", "usrDefNm");
+		this.hashFields.put("cre_dt", "creDt");
+		this.hashFields.put("rpt_tmplt_nm", "rptTmpltNm");
+		this.hashFields.put("rpt_itm_id", "rptItmId");
+		this.hashFields.put("rpt_auth_id", "rptAuthId");
+		this.hashFields.put("upd_usr_id", "updUsrId");
+		this.hashFields.put("ar_ofc_cd", "arOfcCd");
+		this.hashFields.put("pagerows", "pagerows");
+		return this.hashFields;
+	}
+	
+	/**
+	 * Column Info
+	 * @return updDt
+	 */
+	public String getUpdDt() {
+		return this.updDt;
+	}
+	
+	/**
+	 * Column Info
+	 * @return creUsrId
+	 */
+	public String getCreUsrId() {
+		return this.creUsrId;
+	}
+	
+	/**
+	 * VO Data Value( C:Creation, U:Update, D:Delete )
+	 * @return ibflag
+	 */
+	public String getIbflag() {
+		return this.ibflag;
+	}
+	
+	/**
+	 * Column Info
+	 * @return itmSeq
+	 */
+	public String getItmSeq() {
+		return this.itmSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @return usrDefNm
+	 */
+	public String getUsrDefNm() {
+		return this.usrDefNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @return creDt
+	 */
+	public String getCreDt() {
+		return this.creDt;
+	}
+	
+	/**
+	 * Column Info
+	 * @return rptTmpltNm
+	 */
+	public String getRptTmpltNm() {
+		return this.rptTmpltNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @return rptItmId
+	 */
+	public String getRptItmId() {
+		return this.rptItmId;
+	}
+	
+	/**
+	 * Column Info
+	 * @return rptAuthId
+	 */
+	public String getRptAuthId() {
+		return this.rptAuthId;
+	}
+	
+	/**
+	 * Column Info
+	 * @return updUsrId
+	 */
+	public String getUpdUsrId() {
+		return this.updUsrId;
+	}
+	
+	/**
+	 * Column Info
+	 * @return arOfcCd
+	 */
+	public String getArOfcCd() {
+		return this.arOfcCd;
+	}
+	
+	/**
+	 * Page Number
+	 * @return pagerows
+	 */
+	public String getPagerows() {
+		return this.pagerows;
+	}
+	
+
+	/**
+	 * Column Info
+	 * @param updDt
+	 */
+	public void setUpdDt(String updDt) {
+		this.updDt = updDt;
+	}
+	
+	/**
+	 * Column Info
+	 * @param creUsrId
+	 */
+	public void setCreUsrId(String creUsrId) {
+		this.creUsrId = creUsrId;
+	}
+	
+	/**
+	 * VO Data Value( C:Creation, U:Update, D:Delete )
+	 * @param ibflag
+	 */
+	public void setIbflag(String ibflag) {
+		this.ibflag = ibflag;
+	}
+	
+	/**
+	 * Column Info
+	 * @param itmSeq
+	 */
+	public void setItmSeq(String itmSeq) {
+		this.itmSeq = itmSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @param usrDefNm
+	 */
+	public void setUsrDefNm(String usrDefNm) {
+		this.usrDefNm = usrDefNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @param creDt
+	 */
+	public void setCreDt(String creDt) {
+		this.creDt = creDt;
+	}
+	
+	/**
+	 * Column Info
+	 * @param rptTmpltNm
+	 */
+	public void setRptTmpltNm(String rptTmpltNm) {
+		this.rptTmpltNm = rptTmpltNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @param rptItmId
+	 */
+	public void setRptItmId(String rptItmId) {
+		this.rptItmId = rptItmId;
+	}
+	
+	/**
+	 * Column Info
+	 * @param rptAuthId
+	 */
+	public void setRptAuthId(String rptAuthId) {
+		this.rptAuthId = rptAuthId;
+	}
+	
+	/**
+	 * Column Info
+	 * @param updUsrId
+	 */
+	public void setUpdUsrId(String updUsrId) {
+		this.updUsrId = updUsrId;
+	}
+	
+	/**
+	 * Column Info
+	 * @param arOfcCd
+	 */
+	public void setArOfcCd(String arOfcCd) {
+		this.arOfcCd = arOfcCd;
+	}
+	
+	/**
+	 * Page Number
+	 * @param pagerows
+	 */
+	public void setPagerows(String pagerows) {
+		this.pagerows = pagerows;
+	}
+	
+	/**
+	 * Request 의 데이터를 추출하여 VO 의 멤버변수에 설정.
+	 * @param request
+	 */
+	public void fromRequest(HttpServletRequest request) {
+		setUpdDt(JSPUtil.getParameter(request, "upd_dt", ""));
+		setCreUsrId(JSPUtil.getParameter(request, "cre_usr_id", ""));
+		setIbflag(JSPUtil.getParameter(request, "ibflag", ""));
+		setItmSeq(JSPUtil.getParameter(request, "itm_seq", ""));
+		setUsrDefNm(JSPUtil.getParameter(request, "usr_def_nm", ""));
+		setCreDt(JSPUtil.getParameter(request, "cre_dt", ""));
+		setRptTmpltNm(JSPUtil.getParameter(request, "rpt_tmplt_nm", ""));
+		setRptItmId(JSPUtil.getParameter(request, "rpt_itm_id", ""));
+		setRptAuthId(JSPUtil.getParameter(request, "rpt_auth_id", ""));
+		setUpdUsrId(JSPUtil.getParameter(request, "upd_usr_id", ""));
+		setArOfcCd(JSPUtil.getParameter(request, "ar_ofc_cd", ""));
+		setPagerows(JSPUtil.getParameter(request, "pagerows", ""));
+	}
+
+	/**
+	 * Request 의 데이터를 VO 배열로 변환하여 반환.
+	 * @param request
+	 * @return TemplateVO[]
+	 */
+	public TemplateVO[] fromRequestGrid(HttpServletRequest request) {
+		return fromRequestGrid(request, "");
+	}
+
+	/**
+	 * Request 넘어온 여러 건 DATA를 VO Class 에 담는다. 
+	 * @param request
+	 * @param prefix
+	 * @return TemplateVO[]
+	 */
+	public TemplateVO[] fromRequestGrid(HttpServletRequest request, String prefix) {
+		TemplateVO model = null;
+		
+		String[] tmp = request.getParameterValues(prefix + "ibflag");
+  		if(tmp == null)
+   			return null;
+
+  		int length = request.getParameterValues(prefix + "ibflag").length;
+  
+		try {
+			String[] updDt = (JSPUtil.getParameter(request, prefix	+ "upd_dt", length));
+			String[] creUsrId = (JSPUtil.getParameter(request, prefix	+ "cre_usr_id", length));
+			String[] ibflag = (JSPUtil.getParameter(request, prefix	+ "ibflag", length));
+			String[] itmSeq = (JSPUtil.getParameter(request, prefix	+ "itm_seq", length));
+			String[] usrDefNm = (JSPUtil.getParameter(request, prefix	+ "usr_def_nm", length));
+			String[] creDt = (JSPUtil.getParameter(request, prefix	+ "cre_dt", length));
+			String[] rptTmpltNm = (JSPUtil.getParameter(request, prefix	+ "rpt_tmplt_nm", length));
+			String[] rptItmId = (JSPUtil.getParameter(request, prefix	+ "rpt_itm_id", length));
+			String[] rptAuthId = (JSPUtil.getParameter(request, prefix	+ "rpt_auth_id", length));
+			String[] updUsrId = (JSPUtil.getParameter(request, prefix	+ "upd_usr_id", length));
+			String[] arOfcCd = (JSPUtil.getParameter(request, prefix	+ "ar_ofc_cd", length));
+			String[] pagerows = (JSPUtil.getParameter(request, prefix	+ "pagerows", length));
+			
+			for (int i = 0; i < length; i++) {
+				model = new TemplateVO();
+				if (updDt[i] != null)
+					model.setUpdDt(updDt[i]);
+				if (creUsrId[i] != null)
+					model.setCreUsrId(creUsrId[i]);
+				if (ibflag[i] != null)
+					model.setIbflag(ibflag[i]);
+				if (itmSeq[i] != null)
+					model.setItmSeq(itmSeq[i]);
+				if (usrDefNm[i] != null)
+					model.setUsrDefNm(usrDefNm[i]);
+				if (creDt[i] != null)
+					model.setCreDt(creDt[i]);
+				if (rptTmpltNm[i] != null)
+					model.setRptTmpltNm(rptTmpltNm[i]);
+				if (rptItmId[i] != null)
+					model.setRptItmId(rptItmId[i]);
+				if (rptAuthId[i] != null)
+					model.setRptAuthId(rptAuthId[i]);
+				if (updUsrId[i] != null)
+					model.setUpdUsrId(updUsrId[i]);
+				if (arOfcCd[i] != null)
+					model.setArOfcCd(arOfcCd[i]);
+				if (pagerows[i] != null)
+					model.setPagerows(pagerows[i]);
+				models.add(model);
+			}
+
+		} catch (Exception e) {
+			return null;
+		}
+		return getTemplateVOs();
+	}
+
+	/**
+	 * VO 배열을 반환
+	 * @return TemplateVO[]
+	 */
+	public TemplateVO[] getTemplateVOs(){
+		TemplateVO[] vos = (TemplateVO[])models.toArray(new TemplateVO[models.size()]);
+		return vos;
+	}
+	
+	/**
+	 * VO Class의 내용을 String으로 변환
+	 */
+	public String toString() {
+		StringBuffer ret = new StringBuffer();
+		Field[] field = this.getClass().getDeclaredFields();
+		String space = "";
+		try{
+			for(int i = 0; i < field.length; i++){
+				String[] arr = null;
+				arr = getField(field, i);
+				if(arr != null){
+					for(int j = 0; j < arr.length; j++) {
+						ret.append(field[i].getName().concat(space).substring(0, 30).concat("= ") + arr[j] + "\n");
+					}
+				} else {
+					ret.append(field[i].getName() + " =  null \n");
+				}
+			}
+		} catch (Exception ex) {
+			return null;
+		}
+		return ret.toString();
+	}
+	
+	/**
+	 * 필드에 있는 값을 스트링 배열로 반환.
+	 * @param field
+	 * @param i
+	 * @return String[]
+	 */
+	private String[] getField(Field[] field, int i) {
+		String[] arr = null;
+		try{
+			arr = (String[]) field[i].get(this);
+		}catch(Exception ex){
+			arr = null;
+		}
+		return arr;
+	}
+
+	/**
+	* 포맷팅된 문자열에서 특수문자 제거("-","/",",",":")
+	*/
+	public void unDataFormat(){
+		this.updDt = this.updDt .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.creUsrId = this.creUsrId .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.ibflag = this.ibflag .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.itmSeq = this.itmSeq .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.usrDefNm = this.usrDefNm .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.creDt = this.creDt .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.rptTmpltNm = this.rptTmpltNm .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.rptItmId = this.rptItmId .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.rptAuthId = this.rptAuthId .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.updUsrId = this.updUsrId .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.arOfcCd = this.arOfcCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.pagerows = this.pagerows .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+	}
+}

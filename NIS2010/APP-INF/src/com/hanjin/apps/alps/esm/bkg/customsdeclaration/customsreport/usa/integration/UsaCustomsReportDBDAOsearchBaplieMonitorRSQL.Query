@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="UsaCustomsReportDBDAOsearchBaplieMonitorRSQL">
+			<desc><![CDATA[US AMS Baplie Monitoring Report 조회]]></desc>
+			<sql><![CDATA[
+WITH VSL_PORT_SKD AS (
+SELECT V1.*
+FROM VSK_VSL_PORT_SKD V1
+WHERE 1=1
+#if (${vvd} != '')
+      AND V1.VSL_CD = SUBSTR(@[vvd], 1, 4)
+      AND V1.SKD_VOY_NO = SUBSTR(@[vvd], 5, 4)
+      AND V1.SKD_DIR_CD = SUBSTR(@[vvd], 9, 1) 
+#end 
+#if (${lane} != '')
+      AND V1.SLAN_CD = @[lane] 
+#end 
+#if (${due_from_dt} != '' && ${due_to_dt} != '') 
+  #if (${srch_dt} == 'atd')
+      AND V1.VPS_ETD_DT BETWEEN TO_DATE(REPLACE(REPLACE(@[due_from_dt], '-', ''), '/', '') ||' '|| REPLACE(REPLACE(@[due_from_tm], ':', ''), '-', ''), 'YYYYMMDD HH24MI') AND TO_DATE(REPLACE(REPLACE(@[due_to_dt], '-', ''), '/', '') ||' '|| REPLACE(REPLACE(@[due_to_tm], ':', ''), '-', ''), 'YYYYMMDD HH24MI') 
+  #end 
+  #if (${srch_dt} == 'due')
+      AND V1.VPS_ETD_DT+2 BETWEEN TO_DATE(REPLACE(REPLACE(@[due_from_dt], '-', ''), '/', '') ||' '|| REPLACE(REPLACE(@[due_from_tm], ':', ''), '-', ''), 'YYYYMMDD HH24MI') AND TO_DATE(REPLACE(REPLACE(@[due_to_dt], '-', ''), '/', '') ||' '|| REPLACE(REPLACE(@[due_to_tm], ':', ''), '-', ''), 'YYYYMMDD HH24MI') 
+  #end 
+#end
+
+#if (${l_pol} != '')
+      AND V1.VPS_PORT_CD = @[l_pol]
+      /* 입력한 L POL 기준으로 조회한다. 2018.04.11 */ 
+      AND V1.CLPT_SEQ = (SELECT MAX(CLPT_SEQ)
+                         FROM VSK_VSL_PORT_SKD SV2
+                        WHERE V1.VSL_CD      = SV2.VSL_CD
+                          AND V1.SKD_VOY_NO  = SV2.SKD_VOY_NO  
+                          AND V1.SKD_DIR_CD  = SV2.SKD_DIR_CD
+                          AND V1.VPS_PORT_CD = SV2.VPS_PORT_CD
+                          AND NVL(SV2.SKD_CNG_STS_CD, 'X') != 'S'  
+                        ) 
+#else 
+      AND V1.CLPT_SEQ = (
+        SELECT --B.VSL_CD, B.SKD_VOY_NO, B.SKD_DIR_CD, 
+          MAX(SV2.CLPT_SEQ)
+        FROM (
+            SELECT VSL_CD,
+              SKD_VOY_NO ,
+              SKD_DIR_CD,
+              MIN(CLPT_SEQ) CLPT_SEQ
+            FROM VSK_VSL_PORT_SKD K
+            WHERE 1=1
+              AND VPS_PORT_CD LIKE 'US%'
+              AND NVL(SKD_CNG_STS_CD, 'X') != 'S'
+            GROUP BY VSL_CD, SKD_VOY_NO , SKD_DIR_CD ) SV1,
+          VSK_VSL_PORT_sKD SV2
+        WHERE sV1.VSl_CD = SV2.VSL_CD
+          AND SV1.SKD_VOY_NO = SV2.SKD_VOY_NO
+          AND sV1.SKD_dIR_CD = SV2.SKD_dIR_CD
+          AND NVL(SV2.SKD_CNG_STS_CD, 'X') != 'S'
+          AND sV2.CLPT_SEQ < SV1.CLPT_SEQ
+          AND SV2.VSl_CD = V1.VSL_CD
+          AND SV2.SKD_VOY_NO = V1.SKD_VOY_NO
+          AND SV2.SKD_dIR_CD = V1.SKD_dIR_CD
+-- exception for canal type port
+          AND SV2.VPS_PORT_CD NOT IN (
+            SELECT ATTR_CTNT1
+            FROM BKG_CSTMS_CD_CONV_CTNT
+            WHERE CNT_CD = 'US'
+              AND CSTMS_DIV_ID='CANAL_LOC_CD' )
+        GROUP BY SV2.VSL_CD, SV2.SKD_VOY_NO, SV2.SKD_DIR_CD 
+      )
+#end
+
+
+)
+SELECT LANE,VVD,
+  RHQ,
+  L_POL,
+  CNTR_CNT,
+  'ACK :'||ACK_KNT||' / REJ :'||REJ_KNT CSTMS_RSLT,
+  SND_STS,
+  SND_DT,
+  ATD,
+  DUE,
+  RCV_DT,
+      NVL( (
+        SELECT 'YES'
+        FROM BKG_CSTMS_ADV_SND_LOG A ,
+             BKG_CSTMS_ADV_RCV_lOG B
+        WHERE 1=1
+          AND A.CNT_CD = 'US'
+          AND A.IO_BND_CD= 'I'
+          AND A.TRSM_MSG_TP_ID='MI'
+		  AND A.CNT_CD = B.CNT_CD
+          AND A.IO_BND_CD= B.IO_BND_CD
+          AND A.CRR_bAT_NO = B.CRR_BAT_NO
+        AND SUBSTR(CI.VVD, 1, 4) = A.VSL_CD
+        AND SUBSTR(CI.VVD, 5, 4) = A.SKD_VOY_NO
+        AND SUBSTR(CI.VVD, 9, 1) = A.SKD_DIR_CD
+        AND ROWNUM=1
+       ), 'No' ) MI_STS
+FROM (
+    SELECT VC.CRR_CD,
+      MAX(V1.SLAN_CD) LANE,
+	  V1.VSL_CD||V1.SKD_VOY_NO||V1.SKD_DIR_CD VVD,
+      MAX(OLA.REGION) RHQ,
+      V1.VPS_PORT_CD L_POL,
+      MAX((
+            SELECT VPS_PORT_CD
+            FROM VSK_VSL_PORT_SKD
+            WHERE 1=1
+              AND VSL_CD = V1.VSL_CD
+              AND SKD_VOY_NO = V1.SKD_VOY_NO
+              AND SKD_DIR_CD = V1.SKD_DIR_CD
+              AND NVL(SKD_CNG_STS_CD, 'X') != 'S'
+              AND CLPT_SEQ > (
+                SELECT MAX(CLPT_SEQ)
+                FROM VSK_VSL_PORT_SKD
+                WHERE 1=1
+                  AND VSL_CD = V1.VSL_CD
+                  AND SKD_VOY_NO = V1.SKD_VOY_NO
+                  AND SKD_DIR_CD = V1.SKD_DIR_CD
+                  AND VPS_PORT_CD = V1.VPS_PORT_CD
+                  AND NVL(SKD_CNG_STS_CD, 'X') != 'S' )
+              AND CLPT_IND_SEQ > 0
+              AND VPS_PORT_CD LIKE 'US%'
+              AND ROWNUM = 1 )) CSTMS_PORT_CD,
+      COUNT(A.ID) TOT_CNTR_KNT,
+ -- BAY_PLAN 생성 CNTR 수
+      DECODE( COUNT(L.CNTR_NO), 0, COUNT(A.ID), COUNT(L.CNTR_NO) ) CNTR_CNT,
+      COUNT(L.CNTR_NO) SND_KNT,
+ -- 전송 CNTR 수
+      SUM( DECODE( ACK_RCV_STS_CD, 'A' , 1, 0 ) ) ACK_KNT,
+      SUM( DECODE( ACK_RCV_STS_CD, 'R' , 1, 0 ) ) REJ_KNT,
+      DECODE(COUNT(L.CNTR_NO), 0, 'No', 'Yes' ) SND_STS,
+      TO_CHAR(MAX(L.SND_dT), 'YYYY-MM-DD HH24:MI') SND_DT,
+      TO_CHAR(MAX(V1.VPS_eTD_DT), 'YYYY-MM-DD HH24:MI') ATD,
+      TO_CHAR(MAX(V1.VPS_eTD_DT)+2, 'YYYY-MM-DD HH24:MI') DUE,
+      TO_CHAR(MAX( L.RCV_dT), 'YYYY-MM-DD HH24:MI') RCV_DT
+    FROM VSL_PORT_SKD V1,
+      MDM_VSL_CNTR VC,
+      (
+       SELECT BAY.*
+        FROM (
+        SELECT RANK() OVER(PARTITION BY SKD.VSL_CD, SKD.SKD_VOY_NO, SKD.SKD_DIR_CD, SKD.VPS_PORT_CD
+            ORDER BY SKD.ETD_DT DESC) AS RNK,
+          SKD.VSL_CD,
+          SKD.SKD_VOY_NO,
+          SKD.SKD_DIR_CD,
+          SKD.VPS_PORT_CD,
+          SKD.CLPT_IND_SEQ,
+          DECODE(CHK_MTY_PLN_FLG, 'Y', 'E', 'F') AS PLAN_TYPE
+        FROM STO_PLN_VSL_PORT_SKD SKD, VSL_PORT_SKD V1
+        WHERE (CHK_FNL_PLN_FLG='Y' OR CHK_MTY_PLN_FLG='Y')
+            AND SKD.VSL_CD(+) = V1.VSL_CD
+           AND SKD.SKD_VOY_NO(+) = V1.SKD_VOY_NO
+           AND SKD.SKD_DIR_CD(+)= V1.SKD_DIR_CD
+           AND SKD.VPS_PORT_CD(+)= V1.VPS_PORT_CD
+      ) SKD, BAY_PLAN BAY
+      WHERE SKD.RNK = 1
+           AND SKD.VSL_CD = BAY.VSL_CD
+           AND SKD.SKD_VOY_NO = BAY.VOY_NO
+           AND SKD.SKD_DIR_CD = BAY.DIR_CD
+           AND SKD.VPS_PORT_CD = BAY.PORT_CD
+           AND SKD.CLPT_IND_SEQ = BAY.CALL_IND
+           AND SKD.PLAN_TYPE = BAY.PLAN_TYPE
+      ) A,
+      BKG_CSTMS_ADV_STWG_CNTR L,
+      MDM_LOCATION ML,
+      (
+        SELECT OFC_N3RD_LVL_CD REGION ,
+          OFC_N8TH_LVL_CD OFC_CD
+        FROM (
+            SELECT OFC_KIND OFC_KND_CD ,
+              A.DEL ,
+              A.OFC_CD OFC_N8TH_LVL_CD ,
+              L1 OFC_LVL ,
+              DECODE(A.L1, 1, A.OFC_CD, 2, A.OFC_CD, 3, A.OFC_CD, 4, A.OFC_CD, 5, A.OFC_CD, 6, A.OFC_CD, 7, A.OFC_CD, 8, B.OFC_CD) OFC_N7TH_LVL_CD ,
+              DECODE(A.L1, 1, A.OFC_CD, 2, A.OFC_CD, 3, A.OFC_CD, 4, A.OFC_CD, 5, A.OFC_CD, 6, A.OFC_CD, 7, B.OFC_CD, 8, C.OFC_CD) OFC_N6TH_LVL_CD ,
+              DECODE(A.L1, 1, A.OFC_CD, 2, A.OFC_CD, 3, A.OFC_CD, 4, A.OFC_CD, 5, A.OFC_CD, 6, B.OFC_CD, 7, C.OFC_CD, 8, D.OFC_CD) OFC_N5TH_LVL_CD ,
+              DECODE(A.L1, 1, A.OFC_CD, 2, A.OFC_CD, 3, A.OFC_CD, 4, A.OFC_CD, 5, B.OFC_CD, 6, C.OFC_CD, 7, D.OFC_CD, 8, E.OFC_CD) OFC_N4TH_LVL_CD ,
+              DECODE(A.L1, 1, A.OFC_CD, 2, A.OFC_CD, 3, A.OFC_CD, 4, B.OFC_CD, 5, C.OFC_CD, 6, D.OFC_CD, 7, E.OFC_CD, 8, F.OFC_CD) OFC_N3RD_LVL_CD ,
+              DECODE(A.L1, 1, A.OFC_CD, 2, A.OFC_CD, 3, B.OFC_CD, 4, C.OFC_CD, 5, D.OFC_CD, 6, E.OFC_CD, 7, F.OFC_CD, 8, G.OFC_CD) OFC_N2ND_LVL_CD ,
+              DECODE(A.L1, 1, A.OFC_CD, 2, B.OFC_CD, 3, C.OFC_CD, 4, D.OFC_CD, 5, E.OFC_CD, 6, F.OFC_CD, 7, G.OFC_CD, 8, H.OFC_CD) OFC_N1ST_LVL_CD
+            FROM (
+                SELECT OFC_CD ,
+                  LOC_CD ,
+                  PRNT_OFC_CD ,
+                  DELT_FLG DEL ,
+                  A.OFC_KND_CD OFC_KIND ,
+                  LEVEL L1
+                FROM MDM_ORGANIZATION A START WITH A.OFC_CD = 'SELHO' CONNECT BY PRIOR A.OFC_CD = A.PRNT_OFC_CD ) A ,
+              MDM_ORGANIZATION B ,
+              MDM_ORGANIZATION C ,
+              MDM_ORGANIZATION D ,
+              MDM_ORGANIZATION E ,
+              MDM_ORGANIZATION F ,
+              MDM_ORGANIZATION G ,
+              MDM_ORGANIZATION H
+            WHERE A.PRNT_OFC_CD = B.OFC_CD(+)
+              AND B.PRNT_OFC_CD = C.OFC_CD(+)
+              AND C.PRNT_OFC_CD = D.OFC_CD(+)
+              AND D.PRNT_OFC_CD = E.OFC_CD(+)
+              AND E.PRNT_OFC_CD = F.OFC_CD(+)
+              AND F.PRNT_OFC_CD = G.OFC_CD(+)
+              AND G.PRNT_OFC_CD = H.OFC_CD(+) )
+        WHERE 1=1
+--  AND NVL(DEL, 'N') = 'N'
+          AND OFC_N3RD_LVL_CD IS NOT NULL
+          AND OFC_N3RD_LVL_CD IN (
+            SELECT OFC_CD
+            FROM (
+                SELECT OFC_CD ,
+                  LOC_CD ,
+                  PRNT_OFC_CD ,
+                  DELT_FLG DEL ,
+                  A.OFC_KND_CD OFC_KIND ,
+                  LEVEL L1
+                FROM MDM_ORGANIZATION A START WITH A.OFC_CD = 'SELHO' CONNECT BY PRIOR A.OFC_CD = A.PRNT_OFC_CD )
+            WHERE L1 =3
+              AND OFC_KIND = '2' )
+          AND OFC_N6TH_LVL_CD IS NOT NULL ) OLA
+    WHERE 1=1 
+-- V1 : L.Foreign Port 에 대한 체크 (US 바로전 PORT인지)
+      AND V1.VSL_CD = A.VSL_CD(+)
+      AND V1.SKD_VOY_NO = A.VOY_NO(+)
+      AND V1.SKD_DIR_CD = A.DIR_CD(+)
+      AND V1.VPS_PORT_CD = A.PORT_CD(+)
+      AND A.VSL_CD = L.VSL_CD(+)
+      AND A.VOY_NO = L.SKD_VOY_NO(+)
+      AND A.DIR_CD = L.SKD_DIR_CD(+)
+      AND A.ID = L.CNTR_NO(+)
+      AND A.PORT_CD = L.LODG_PORT_CD(+)
+
+     /*AND NVL(A.PLAN_TYPE, 'XX')=  
+     NVL((
+           SELECT DECODE(CHK_MTY_PLN_FLG, 'Y', 'E', 'F') AS PLAN_TYPE
+           FROM STO_PLN_VSL_PORT_SKD BB
+           WHERE BB.VSL_CD = A.VSL_CD
+            AND BB.SKD_VOY_NO= A.VOY_NO
+            AND BB.SKD_DIR_CD= A.DIR_CD
+            AND BB.VPS_PORT_CD= A.PORT_CD
+            AND CLPT_IND_SEQ='1'
+       ),'XX')*/
+
+      AND V1.VSL_CD = VC.VSL_CD
+      AND VC.CRR_CD = 'SML'
+      AND ML.LOC_CD = V1.VPS_PORT_CD
+      AND OLA.OFC_CD = ML.EQ_CTRL_OFC_CD
+
+      AND NOT EXISTS (
+                    SELECT 'X'
+                    FROM BKG_CSTMS_CD_CONV_CTNT
+                    WHERE CNT_CD = 'US'
+                    AND CSTMS_DIV_ID= 'BAPLIE_XCLD_CNTR_CD'
+                    AND ATTR_CTNT1 = A.ID
+                )   
+   
+    GROUP BY VC.CRR_CD, V1.VSL_CD, V1.SKD_VOY_NO,V1.SKD_DIR_CD , V1.VPS_PORT_CD ) CI
+ 
+
+#if (${snd_sts} != '') 
+#if (${snd_sts} == 'N')
+  AND CI.SND_KNT = 0 
+#elseif (${snd_sts} == 'Y')
+  AND CI.SND_KNT > 0 
+#end 
+#end 
+#if (${customs} != '')
+  AND CI.CSTMS_PORT_CD = @[customs] 
+#end			]]></sql>
+			<params>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="lane" type="12" value="" out="N"/>
+				<param name="due_from_dt" type="12" value="" out="N"/>
+				<param name="due_from_tm" type="12" value="" out="N"/>
+				<param name="due_to_dt" type="12" value="" out="N"/>
+				<param name="due_to_tm" type="12" value="" out="N"/>
+				<param name="l_pol" type="12" value="" out="N"/>
+				<param name="customs" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

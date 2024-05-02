@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AudPerfDAOSearchPerfOfcListRSQL">
+			<desc><![CDATA[AudPerfDAOSearchPerfOfcListRSQL DESC ]]></desc>
+			<sql><![CDATA[
+-- MON1, MON2, MON3는 없어도 조회결과에는 영향이 없으나 조회속도 향상을 위하여 추가
+WITH MON1 AS (
+#if (${s_compare_mon} == '1' || ${s_compare_mon} == '3')
+SELECT A.ROWID
+      ,SUBSTR(A.GL_DT, 1, 6) AS GL_YM
+      ,A.*
+  FROM AP_INV_HDR  A
+      ,MDM_ORGANIZATION O
+ WHERE 1=1
+   AND O.OFC_CD = A.TJ_OFC_CD
+   AND A.IF_FLG IS NOT NULL
+   AND (A.PAY_DT IS NOT NULL OR (O.SO_IF_CD = 'O' AND A.ATTR_CTNT2 IS NOT NULL ) )
+   AND A.GL_DT BETWEEN @[s_fm_ym]||'01' AND (SELECT TO_CHAR(LAST_DAY(TO_DATE(@[s_to_ym]||'01', 'YYYYMMDD')), 'YYYYMMDD') FROM DUAL)
+   AND A.SRC_CTNT IN ('SO_TRANS', 'SO_TERMINAL', 'SO_PORT', 'SO_M&R')
+)
+#end
+#if (${s_compare_mon} == '3')
+,MON2 AS (
+SELECT A.ROWID -- 전월
+      ,SUBSTR(A.GL_DT, 1, 6) AS GL_YM
+      ,A.*
+  FROM AP_INV_HDR  A
+      ,MDM_ORGANIZATION O
+ WHERE 1=1
+   AND O.OFC_CD = A.TJ_OFC_CD
+   AND A.IF_FLG IS NOT NULL
+   AND (A.PAY_DT IS NOT NULL OR (O.SO_IF_CD = 'O' AND A.ATTR_CTNT2 IS NOT NULL ) )
+   AND A.GL_DT BETWEEN (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(@[s_fm_ym]||'01', 'YYYYMMDD'), -1), 'YYYYMMDD') FROM DUAL)
+                   AND (SELECT TO_CHAR(LAST_DAY(ADD_MONTHS(TO_DATE(@[s_to_ym]||'01', 'YYYYMMDD'), -1)), 'YYYYMMDD') FROM DUAL)
+   AND A.SRC_CTNT IN ('SO_TRANS', 'SO_TERMINAL', 'SO_PORT', 'SO_M&R')
+)
+,MON3 AS (
+SELECT A.ROWID -- 전년 동기
+      ,SUBSTR(A.GL_DT, 1, 6) AS GL_YM   
+      ,A.*      
+  FROM AP_INV_HDR  A
+      ,MDM_ORGANIZATION O
+ WHERE 1=1
+   AND O.OFC_CD = A.TJ_OFC_CD
+   AND A.IF_FLG IS NOT NULL
+   AND (A.PAY_DT IS NOT NULL OR (O.SO_IF_CD = 'O' AND A.ATTR_CTNT2 IS NOT NULL ) )
+   AND A.GL_DT BETWEEN (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(@[s_fm_ym]||'01', 'YYYYMMDD'), -12), 'YYYYMMDD') FROM DUAL)
+                   AND (SELECT TO_CHAR(LAST_DAY(ADD_MONTHS(TO_DATE(@[s_to_ym]||'01', 'YYYYMMDD'), -12)), 'YYYYMMDD') FROM DUAL)
+   AND A.SRC_CTNT IN ('SO_TRANS', 'SO_TERMINAL', 'SO_PORT', 'SO_M&R')
+)
+#end
+
+,M1 AS (
+    SELECT RHQ_CD
+          ,OFC_CD
+          ,(SELECT TO_CHAR(ADD_MONTHS(TO_DATE(GL_YM||'01', 'YYYYMMDD'), STND_CAL_MON), 'YYYYMM') FROM DUAL) STND_YM
+          ,GL_YM
+          ,YM_TP_CD
+          ,SUM(INV_TES_QTY) INV_TES_QTY
+          ,ROUND(SUM(INV_TES_AMT),2) INV_TES_AMT
+          ,SUM(INV_TRS_QTY) INV_TRS_QTY
+          ,ROUND(SUM(INV_TRS_AMT),2) INV_TRS_AMT
+          ,SUM(INV_MNR_QTY) INV_MNR_QTY
+          ,ROUND(SUM(INV_MNR_AMT),2) INV_MNR_AMT
+          ,SUM(INV_PSO_QTY) INV_PSO_QTY
+          ,ROUND(SUM(INV_PSO_AMT),2) INV_PSO_AMT
+      FROM (
+            -- 1. 조회 년월로 조회
+		#if (${s_compare_mon} == '1' || ${s_compare_mon} == '3')
+            SELECT (SELECT TRS_COMMON_PKG.TRS_GET_RHQ_OFC_CD(OFC_CD) FROM DUAL) AS RHQ_CD
+                  ,DECODE(@[s_rhq_yn], 'Y', (SELECT TRS_COMMON_PKG.TRS_GET_RHQ_OFC_CD(OFC_CD) FROM DUAL), OFC_CD) OFC_CD
+                  ,GL_YM
+                  ,0 STND_CAL_MON
+                  ,YM_TP_CD
+                  ,CASE WHEN MDL_CD = 'SO_TERMINAL' THEN INV_CNT END INV_TES_QTY
+                  ,CASE WHEN MDL_CD = 'SO_TERMINAL' THEN USD_AMT END INV_TES_AMT
+                  ,CASE WHEN MDL_CD = 'SO_TRANS' THEN INV_CNT END INV_TRS_QTY
+                  ,CASE WHEN MDL_CD = 'SO_TRANS' THEN USD_AMT END INV_TRS_AMT
+                  ,CASE WHEN MDL_CD = 'SO_M&R' THEN INV_CNT END INV_MNR_QTY
+                  ,CASE WHEN MDL_CD = 'SO_M&R' THEN USD_AMT END INV_MNR_AMT
+                  ,CASE WHEN MDL_CD = 'SO_PORT' THEN INV_CNT END INV_PSO_QTY
+                  ,CASE WHEN MDL_CD = 'SO_PORT' THEN USD_AMT END INV_PSO_AMT
+              FROM (
+                    SELECT A.TJ_OFC_CD AS OFC_CD
+                          ,A.GL_YM
+                          ,SRC_CTNT AS MDL_CD
+                          ,COUNT(DISTINCT A.VNDR_NO||B.ATTR_CTNT1) INV_CNT
+                          ,SUM((SELECT ROUND((B.INV_AMT / X.USD_LOCL_XCH_RT), 2)
+                                  FROM GL_MON_XCH_RT X
+                                 WHERE X.CURR_CD = A.CSR_CURR_CD
+                                   AND X.ACCT_XCH_RT_LVL = '1'
+                                   AND X.ACCT_XCH_RT_YRMON = SUBSTR(A.GL_DT, 1, 6)))  AS USD_AMT
+                          ,'1' YM_TP_CD -- 당월자료
+                      FROM MON1 A
+                          ,AP_INV_DTRB B
+                     WHERE A.CSR_NO = B.CSR_NO
+                       AND B.FTU_USE_CTNT1 IS NOT NULL
+					#if ( ${s_rhq_ofc_cd} != '' )
+                       AND A.TJ_OFC_CD IN (SELECT OFC_CD
+                                             FROM MDM_ORGANIZATION
+                                            WHERE DELT_FLG = 'N'
+                                          CONNECT BY NOCYCLE PRIOR OFC_CD = PRNT_OFC_CD
+                                            START WITH OFC_CD = @[s_rhq_ofc_cd]
+                                         )
+					#end
+					#if ( ${s_ofc_cd} != '' )
+                       AND A.TJ_OFC_CD = @[s_ofc_cd]
+					#end
+					#if ( ${s_mdl_cd} != '' )
+                       AND A.SRC_CTNT  = @[s_mdl_cd]
+					#end
+					#if ( ${s_lgs_cost_cd} != '' )
+                       AND B.FTU_USE_CTNT1 = @[s_lgs_cost_cd]
+					#end
+					#if ( ${s_cgo_tp_cd} != '' )
+                       AND B.FTU_USE_CTNT1 IN (SELECT X.LGS_COST_CD
+                                                 FROM TABLE(EAS_EXPN_AUD_PKG.GET_LGS_COST_DIV_FNC()) X
+                                                WHERE X.CGO_TP_CD = @[s_cgo_tp_cd]
+                                              ) -- Cargo Type 으로 조회
+					#end
+                    GROUP BY A.TJ_OFC_CD, SRC_CTNT, SUBSTR(A.GL_DT, 1, 6)
+            )
+            --------------------------------  UNION ALL 아래는 s_compare_mon이 3일 경우만 실행되도록 한다.
+		#end
+		#if (${s_compare_mon} == '3')
+            UNION ALL
+            -- 2. 조회 전월로 조회
+            SELECT (SELECT TRS_COMMON_PKG.TRS_GET_RHQ_OFC_CD(OFC_CD) FROM DUAL) AS RHQ_CD
+                  ,DECODE(@[s_rhq_yn], 'Y', (SELECT TRS_COMMON_PKG.TRS_GET_RHQ_OFC_CD(OFC_CD) FROM DUAL), OFC_CD) OFC_CD
+                  ,GL_YM
+                  ,1 STND_CAL_MON
+                  ,YM_TP_CD
+                  ,CASE WHEN MDL_CD = 'SO_TERMINAL' THEN INV_CNT END INV_TES_QTY
+                  ,CASE WHEN MDL_CD = 'SO_TERMINAL' THEN USD_AMT END INV_TES_AMT
+                  ,CASE WHEN MDL_CD = 'SO_TRANS' THEN INV_CNT END INV_TRS_QTY
+                  ,CASE WHEN MDL_CD = 'SO_TRANS' THEN USD_AMT END INV_TRS_AMT
+                  ,CASE WHEN MDL_CD = 'SO_M&R' THEN INV_CNT END INV_MNR_QTY
+                  ,CASE WHEN MDL_CD = 'SO_M&R' THEN USD_AMT END INV_MNR_AMT
+                  ,CASE WHEN MDL_CD = 'SO_PORT' THEN INV_CNT END INV_PSO_QTY
+                  ,CASE WHEN MDL_CD = 'SO_PORT' THEN USD_AMT END INV_PSO_AMT
+              FROM (
+                    SELECT A.TJ_OFC_CD AS OFC_CD
+                          ,A.GL_YM
+                          ,SRC_CTNT AS MDL_CD
+                          ,COUNT(DISTINCT A.VNDR_NO||B.ATTR_CTNT1) INV_CNT
+                          ,SUM((SELECT ROUND((B.INV_AMT / X.USD_LOCL_XCH_RT), 2)
+                                  FROM GL_MON_XCH_RT X
+                                 WHERE X.CURR_CD = A.CSR_CURR_CD
+                                   AND X.ACCT_XCH_RT_LVL = '1'
+                                   AND X.ACCT_XCH_RT_YRMON = SUBSTR(A.GL_DT, 1, 6)))  AS USD_AMT
+                          ,'2' YM_TP_CD -- 전월자료
+                      FROM MON2 A
+                          ,AP_INV_DTRB B
+                     WHERE A.CSR_NO = B.CSR_NO
+                       AND B.FTU_USE_CTNT1 IS NOT NULL
+					#if ( ${s_rhq_ofc_cd} != '' )
+                       AND A.TJ_OFC_CD IN (SELECT OFC_CD
+                                             FROM MDM_ORGANIZATION
+                                            WHERE DELT_FLG = 'N'
+                                          CONNECT BY NOCYCLE PRIOR OFC_CD = PRNT_OFC_CD
+                                            START WITH OFC_CD = @[s_rhq_ofc_cd]
+                                          )
+					#end
+					#if ( ${s_ofc_cd} != '' )
+                       AND A.TJ_OFC_CD = @[s_ofc_cd]
+					#end
+					#if ( ${s_mdl_cd} != '' )
+                       AND A.SRC_CTNT  = @[s_mdl_cd]
+					#end
+					#if ( ${s_lgs_cost_cd} != '' )
+                       AND B.FTU_USE_CTNT1 = @[s_lgs_cost_cd]
+					#end
+					#if ( ${s_cgo_tp_cd} != '' )
+                       AND B.FTU_USE_CTNT1 IN (SELECT X.LGS_COST_CD
+                                                 FROM TABLE(EAS_EXPN_AUD_PKG.GET_LGS_COST_DIV_FNC()) X
+                                                WHERE X.CGO_TP_CD = @[s_cgo_tp_cd]
+                                              ) -- Cargo Type 으로 조회
+					#end
+                    GROUP BY A.TJ_OFC_CD, SRC_CTNT, SUBSTR(A.GL_DT, 1, 6)
+            )
+            UNION ALL
+            -- 3. 전년동기로 조회
+            SELECT (SELECT TRS_COMMON_PKG.TRS_GET_RHQ_OFC_CD(OFC_CD) FROM DUAL) AS RHQ_CD
+                  ,DECODE(@[s_rhq_yn], 'Y', (SELECT TRS_COMMON_PKG.TRS_GET_RHQ_OFC_CD(OFC_CD) FROM DUAL), OFC_CD) OFC_CD
+                  ,GL_YM
+                  ,12 STND_CAL_MON
+                  ,YM_TP_CD
+                  ,CASE WHEN MDL_CD = 'SO_TERMINAL' THEN INV_CNT END INV_TES_QTY
+                  ,CASE WHEN MDL_CD = 'SO_TERMINAL' THEN USD_AMT END INV_TES_AMT
+                  ,CASE WHEN MDL_CD = 'SO_TRANS' THEN INV_CNT END INV_TRS_QTY
+                  ,CASE WHEN MDL_CD = 'SO_TRANS' THEN USD_AMT END INV_TRS_AMT
+                  ,CASE WHEN MDL_CD = 'SO_M&R' THEN INV_CNT END INV_MNR_QTY
+                  ,CASE WHEN MDL_CD = 'SO_M&R' THEN USD_AMT END INV_MNR_AMT
+                  ,CASE WHEN MDL_CD = 'SO_PORT' THEN INV_CNT END INV_PSO_QTY
+                  ,CASE WHEN MDL_CD = 'SO_PORT' THEN USD_AMT END INV_PSO_AMT
+              FROM (
+                    SELECT A.TJ_OFC_CD AS OFC_CD
+                          ,A.GL_YM
+                          ,SRC_CTNT AS MDL_CD
+                          ,COUNT(DISTINCT A.VNDR_NO||B.ATTR_CTNT1) INV_CNT
+                          ,SUM((SELECT ROUND((B.INV_AMT / X.USD_LOCL_XCH_RT), 2)
+                                  FROM GL_MON_XCH_RT X
+                                 WHERE X.CURR_CD = A.CSR_CURR_CD
+                                   AND X.ACCT_XCH_RT_LVL = '1'
+                                   AND X.ACCT_XCH_RT_YRMON = SUBSTR(A.GL_DT, 1, 6)))  AS USD_AMT
+                          ,'3' YM_TP_CD -- 전년동기 자료
+                      FROM MON3 A
+                          ,AP_INV_DTRB B
+                     WHERE A.CSR_NO = B.CSR_NO
+                       AND B.FTU_USE_CTNT1 IS NOT NULL
+					#if ( ${s_rhq_ofc_cd} != '' )
+                       AND A.TJ_OFC_CD IN (SELECT OFC_CD
+                                             FROM MDM_ORGANIZATION
+                                            WHERE DELT_FLG = 'N'
+                                          CONNECT BY NOCYCLE PRIOR OFC_CD = PRNT_OFC_CD
+                                            START WITH OFC_CD = @[s_rhq_ofc_cd]
+                                          )
+					#end
+					#if ( ${s_ofc_cd} != '' )
+                       AND A.TJ_OFC_CD = @[s_ofc_cd]
+					#end
+					#if ( ${s_mdl_cd} != '' )
+                       AND A.SRC_CTNT  = @[s_mdl_cd]
+					#end
+					#if ( ${s_lgs_cost_cd} != '' )
+                       AND B.FTU_USE_CTNT1 = @[s_lgs_cost_cd]
+					#end
+					#if ( ${s_cgo_tp_cd} != '' )
+                       AND B.FTU_USE_CTNT1 IN (SELECT X.LGS_COST_CD
+                                                 FROM TABLE(EAS_EXPN_AUD_PKG.GET_LGS_COST_DIV_FNC()) X
+                                                WHERE X.CGO_TP_CD = @[s_cgo_tp_cd]
+                                              ) -- Cargo Type 으로 조회
+					#end
+                    GROUP BY A.TJ_OFC_CD, SRC_CTNT, SUBSTR(A.GL_DT, 1, 6)
+            )
+		#end
+    )
+    WHERE RHQ_CD IS NOT NULL
+    GROUP BY RHQ_CD, OFC_CD, STND_CAL_MON, GL_YM, YM_TP_CD
+)
+
+SELECT MM.RHQ_CD
+      ,MM.OFC_CD
+      ,MM.STND_YM
+      ,CASE WHEN MM.YM_TP_CD = '1' THEN MM.STND_YM
+            WHEN MM.YM_TP_CD = '2' THEN (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(MM.STND_YM||'01', 'YYYYMMDD'), -1), 'YYYYMM') FROM DUAL)
+            WHEN MM.YM_TP_CD = '3' THEN (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(MM.STND_YM||'01', 'YYYYMMDD'), -12), 'YYYYMM') FROM DUAL)
+       END AS GL_MON
+      ,MM.YM_TP_CD
+      ,M1.INV_TES_QTY
+      ,M1.INV_TES_AMT
+      ,M1.INV_TRS_QTY
+      ,M1.INV_TRS_AMT
+      ,M1.INV_MNR_QTY
+      ,M1.INV_MNR_AMT
+      ,M1.INV_PSO_QTY
+      ,M1.INV_PSO_AMT
+		, '' as S_RHQ_YN
+		, '' as S_FM_YM
+		, '' as S_TO_YM
+		, '' as S_RHQ_OFC_CD
+		, '' as S_COMPARE_MON
+		, '' as S_OFC_CD
+		, '' as S_MDL_CD
+		, '' as S_LGS_COST_CD
+		, '' as S_CGO_TP_CD
+  FROM (
+        SELECT M.RHQ_CD, M.OFC_CD, M.STND_YM, N.YM_TP_CD
+          FROM (
+                SELECT RHQ_CD, OFC_CD, STND_YM
+                  FROM M1
+                 GROUP BY RHQ_CD, OFC_CD, STND_YM
+               ) M
+              ,(SELECT ROWNUM AS YM_TP_CD
+                  FROM DUAL
+               CONNECT BY LEVEL <= @[s_compare_mon]
+               ) N
+       ) MM
+      ,M1
+ WHERE MM.RHQ_CD  = M1.RHQ_CD(+)
+   AND MM.OFC_CD  = M1.OFC_CD(+)
+   AND MM.STND_YM = M1.STND_YM(+)
+   AND MM.YM_TP_CD = M1.YM_TP_CD(+)
+ORDER BY MM.RHQ_CD, MM.OFC_CD, MM.STND_YM, MM.YM_TP_CD			]]></sql>
+			<params>
+				<param name="s_fm_ym" type="12" value="201405" out="N"/>
+				<param name="s_to_ym" type="12" value="201405" out="N"/>
+				<param name="s_rhq_yn" type="12" value="N" out="N"/>
+				<param name="s_rhq_ofc_cd" type="12" value="NYCNA" out="N"/>
+				<param name="s_ofc_cd" type="12" value="" out="N"/>
+				<param name="s_mdl_cd" type="12" value="" out="N"/>
+				<param name="s_lgs_cost_cd" type="12" value="" out="N"/>
+				<param name="s_cgo_tp_cd" type="12" value="" out="N"/>
+				<param name="s_compare_mon" type="12" value="3" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

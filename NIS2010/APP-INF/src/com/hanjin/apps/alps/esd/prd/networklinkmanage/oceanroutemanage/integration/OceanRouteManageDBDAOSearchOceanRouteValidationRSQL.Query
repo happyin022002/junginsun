@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="OceanRouteManageDBDAOSearchOceanRouteValidationRSQL">
+			<desc><![CDATA[2012.10.22 정선용 [] - Ocean Route Total Transit Time 변경 (45일->50일)
+2011.12.08 변종건 [CHM-201114917-01] Ocean Route Upload Excel 신규 기능 추가건]]></desc>
+			<sql><![CDATA[
+SELECT MIN(ERR_TP) S_ERR_TP
+   FROM (
+       SELECT SUBQ.LINK_POS, SUBQ.POL_CD, SUBQ.SLAN_CD, SUBQ.POD_CD, DECODE(SLAN_CD, 'FDR',PFDR.SKD_DIR_CD, PFTZ.SKD_DIR_CD) SKD_DIR_CD
+            , CASE WHEN TRIM(@[s_pol]) IS NULL OR LENGTH(TRIM(@[s_pol])) <> 5
+                        OR TRIM(@[s_ts1_lane]) IS NULL OR LENGTH(TRIM(@[s_ts1_lane])) <> 3
+                        OR TRIM(@[s_pod]) IS NULL OR LENGTH(TRIM(@[s_pod])) <> 5
+                        OR ((TRIM(@[s_ts1_port]) IS NOT NULL OR TRIM(@[s_ts2_lane]) IS NOT NULL) AND (LENGTH(TRIM(@[s_ts1_port] || @[s_ts2_lane])) <> 8))
+                        OR ((TRIM(@[s_ts2_port]) IS NOT NULL OR TRIM(@[s_ts3_lane]) IS NOT NULL) AND (LENGTH(TRIM(@[s_ts2_port] || @[s_ts3_lane])) <> 8))
+                        OR ((TRIM(@[s_ts3_port]) IS NOT NULL OR TRIM(@[s_ts4_lane]) IS NOT NULL) AND (LENGTH(TRIM(@[s_ts3_port] || @[s_ts4_lane])) <> 8))
+                        OR ((COUNT(1) OVER () - 1) <> LINK_COUNT) THEN 'E14'
+                   WHEN MPOL.LOC_CD IS NULL OR (LINK_POS <> 5 AND MPOD.LOC_CD IS NULL) THEN 'E01'
+                   WHEN SUBQ.SLAN_CD IS NOT NULL AND MLAN.VSL_SLAN_CD IS NULL THEN 'E02'
+                   --WHEN SUBQ.SLAN_CD IS NOT NULL AND (SELECT 1 FROM PRD_PF_TZ_TM WHERE VSL_SLAN_CD = SUBQ.SLAN_CD AND NVL(DELT_FLG,'N') = 'N' AND ROWNUM = 1) IS NULL THEN 'E03'
+                   WHEN SUBQ.SLAN_CD IS NOT NULL THEN (CASE WHEN SUBQ.SLAN_CD <> 'FDR' AND (SELECT 1 FROM PRD_PF_TZ_TM WHERE VSL_SLAN_CD = SUBQ.SLAN_CD AND NVL(DELT_FLG,'N') = 'N' AND ROWNUM = 1) IS NULL THEN 'E03' END)
+                   WHEN SUBQ.SLAN_CD IS NOT NULL AND ((SUBQ.SLAN_CD <> 'FDR' AND PFTZ.VSL_SLAN_CD IS NULL) OR (SUBQ.SLAN_CD = 'FDR' AND PFDR.VSL_SLAN_CD IS NULL)) THEN 'E04'
+                   WHEN DECODE(LINK_POS, 1, 'X', 5, 'X', POL_CD) = MAX(DECODE(LINK_POS, 5, POL_CD)) OVER () THEN 'E05'
+                   WHEN POL_CD IN ('EGSUZ', 'PAPAC') OR POD_CD IN ('EGSUZ', 'PAPAC') THEN 'E06'
+                   WHEN T_LANE_SEQ < LINK_POS AND SLAN_CD = 'FDR' AND MAX(DECODE(T_LANE_SEQ, LINK_POS, SUBSTR(POL_CD,1,2))) OVER () = SUBSTR(POD_CD,1,2) THEN 'E07'
+                   WHEN T_LANE_SEQ > LINK_POS AND SLAN_CD = 'FDR' AND MAX(DECODE(T_LANE_SEQ, LINK_POS, SUBSTR(POD_CD,1,2))) OVER () = SUBSTR(POL_CD,1,2) THEN 'E08'
+                   WHEN POL_CD = POD_CD AND SUBSTR(POL_CD,1,2) NOT IN ('CN','AE') THEN 'E09'
+                   WHEN MAX(DECODE(LINK_POS, 1, POL_CD)) OVER() = MAX(DECODE(LINK_POS, 5, POL_CD)) OVER() THEN 'E10'
+                   WHEN TRIM(@[s_route_flg]) IS NULL OR TRIM(@[s_route_flg]) NOT IN ('S','T','A') THEN 'E12'
+                   WHEN DECODE(TRIM(@[s_route_flg]), 'T', 'Y', 'N') <>
+                          DECODE(TRIM(@[s_route_rmk]), NULL, 'N', 'Space Shortage', 'Y','Customer Request', 'Y','Port Skip', 'Y','VSL Phase Out', 'Y','Add Call', 'Y'
+                                             ,'Customs Problem', 'Y','Clerical Error', 'Y','The Others', DECODE(TRIM(@[s_route_note]), NULL, 'N', 'Y'), 'N')
+                        THEN 'E11'
+                   WHEN SUM(DECODE(SLAN_CD, 'FDR',PFDR.TZTM_HRS, PFTZ.TZTM_HRS)) OVER () > (50 * 24)  THEN 'E13'
+                   END AS ERR_TP
+            , T_LANE_SEQ
+       FROM(
+             SELECT LINK_POS, POL_CD, SLAN_CD
+                   , DECODE(LINK_POS, MAX(DECODE(LINK_POS, 5, 0, LINK_POS)) OVER (), TRIM(@[s_pod]), POD_CD) POD_CD
+                   , MAX(DECODE(LINK_POS, 5, 0, LINK_POS)) OVER () LINK_COUNT
+              FROM (
+                  SELECT CPY_NO LINK_POS
+                       , DECODE(CPY_NO, 1, TRIM(@[s_pol]), 2, TRIM(@[s_ts1_port]), 3, TRIM(@[s_ts2_port]), 4, TRIM(@[s_ts3_port]), 5, TRIM(@[s_pod]) ) POL_CD
+                       , DECODE(CPY_NO, 1, TRIM(@[s_ts1_lane]), 2, TRIM(@[s_ts2_lane]), 3, TRIM(@[s_ts3_lane]), 4, TRIM(@[s_ts4_lane]) ) SLAN_CD
+                       , DECODE(CPY_NO, 1, TRIM(@[s_ts1_port]), 2, TRIM(@[s_ts2_port]), 3, TRIM(@[s_ts3_port]) ) POD_CD
+                  FROM COM_CPY_NO
+                  WHERE CPY_NO BETWEEN 1 AND 5
+                   )
+              WHERE POL_CD IS NOT NULL OR SLAN_CD IS NOT NULL
+             ) SUBQ
+       LEFT OUTER JOIN MDM_LOCATION MPOL
+       ON ( SUBQ.POL_CD = MPOL.LOC_CD
+           AND NVL(MPOL.DELT_FLG, 'N') = 'N')
+       LEFT OUTER JOIN MDM_LOCATION MPOD
+       ON ( SUBQ.POD_CD = MPOD.LOC_CD
+           AND NVL(MPOD.DELT_FLG, 'N') = 'N')
+       LEFT OUTER JOIN MDM_VSL_SVC_LANE MLAN
+       ON ( SUBQ.SLAN_CD = MLAN.VSL_SLAN_CD
+           AND NVL(MLAN.DELT_FLG, 'N') = 'N')
+       LEFT OUTER JOIN PRD_PF_TZ_TM PFTZ
+       ON ( SUBQ.SLAN_CD = PFTZ.VSL_SLAN_CD
+           AND SUBQ.POL_CD = PFTZ.FM_PORT_CD
+           AND SUBQ.POD_CD = PFTZ.TO_PORT_CD
+           AND NVL(PFTZ.DELT_FLG, 'N') = 'N')
+       LEFT OUTER JOIN PRD_FDR_LNK PFDR
+       ON ( SUBQ.SLAN_CD = PFDR.VSL_SLAN_CD
+           AND SUBQ.POL_CD = PFDR.LNK_ORG_LOC_CD
+           AND SUBQ.POD_CD = PFDR.LNK_DEST_LOC_CD
+           AND NVL(PFDR.DELT_FLG, 'N') = 'N')
+       JOIN (SELECT PRD_GET_OCN_ROUT_TLANE_FNC(TRIM(@[s_pol]),TRIM(@[s_ts1_port]), TRIM(@[s_ts2_port]), TRIM(@[s_ts3_port]), TRIM(@[s_pod])
+                                              , TRIM(@[s_ts1_lane]), TRIM(@[s_ts2_lane]), TRIM(@[s_ts3_lane]), TRIM(@[s_ts4_lane])) T_LANE_SEQ
+             FROM DUAL) X
+       ON (1=1)
+       )
+    WHERE LINK_POS <> 5			]]></sql>
+			<params>
+				<param name="s_pol" type="12" value="" out="N"/>
+				<param name="s_ts1_lane" type="12" value="" out="N"/>
+				<param name="s_pod" type="12" value="" out="N"/>
+				<param name="s_ts1_port" type="12" value="" out="N"/>
+				<param name="s_ts2_lane" type="12" value="" out="N"/>
+				<param name="s_ts2_port" type="12" value="" out="N"/>
+				<param name="s_ts3_lane" type="12" value="" out="N"/>
+				<param name="s_ts3_port" type="12" value="" out="N"/>
+				<param name="s_ts4_lane" type="12" value="" out="N"/>
+				<param name="s_route_flg" type="12" value="" out="N"/>
+				<param name="s_route_rmk" type="12" value="" out="N"/>
+				<param name="s_route_note" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

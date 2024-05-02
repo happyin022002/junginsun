@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LaneSimulationDBDAOCreateSimSummaryReportInsQCSQL">
+			<desc><![CDATA[레포트 Summary 입력]]></desc>
+			<sql><![CDATA[
+INSERT INTO COA_SIM_SMRY_RPT
+		    SELECT   A.SIM_DT
+		            ,A.SIM_NO
+		            ,A.SECT_NO
+            #if(${default_rpt_no} != '')
+		            ,'${default_rpt_no}' SIM_RPT_NO --처음인 경우 AA001을 사용
+		    #end
+		            ,NVL(B.SGRP_COST_CD, A.SGRP_COST_CD) SGRP_COST_CD
+		            ,A.VSL_CD
+		            ,NVL(B.AMT, 0) SIM_PERF_AMT
+		            ,@[cre_usr_id] CRE_USR_ID
+		            ,SYSDATE CRE_DT
+					,@[upd_usr_id] UPD_USR_ID
+                    ,SYSDATE UPD_DT
+		        FROM (SELECT A.SGRP_COST_CD
+		                    ,A.DP_SEQ_NO
+		                    ,A.KR_DP_DESC
+		                    ,B.SIM_DT
+		                    ,B.SIM_NO
+		                    ,B.SECT_NO
+		                    ,B.VSL_CD
+		                FROM COA_SIM_RPT_INFO A, COA_SIM_VSL_SET_INFO B
+		               WHERE SIM_DIV_CD = '3'
+		                 AND B.SIM_DT = @[f_sim_dt] --
+		                 AND B.SIM_NO = @[f_sim_no] ) A
+		            ,(
+		              -- 영업외비용
+		              SELECT A.SIM_DT
+		                    ,A.SIM_NO
+		                    ,A.SECT_NO
+		                    ,A.VSL_CD
+		                    ,'NOPE' SGRP_COST_CD
+		                    ,B.UC_AMT*C.TOT_AMT AMT
+		               FROM COA_SIM_VSL_SET_INFO A,COA_SIM_NON_OP_EXPN B,
+		                (SELECT  
+                            SECT_NO
+                            ,SUM(TTL_TZ_DYS) TOT_AMT
+                            FROM COA_SIM_TML_OP_DYS
+                            WHERE SIM_DT=@[f_sim_dt] AND SIM_NO=@[f_sim_no]
+                            GROUP BY SECT_NO) C
+		               WHERE A.VSL_CD=B.VSL_CD
+		                 AND A.SECT_NO = C.SECT_NO
+		                 AND A.SIM_DT = @[f_sim_dt]
+		                 AND A.SIM_NO = @[f_sim_no]
+		                 AND A.SIM_DIV_CD = '3'
+		                 AND SUBSTR(A.SIM_DT,0,6)=B.COST_YRMON
+		              UNION ALL
+		              -- 기타 계정항목
+		              SELECT A.SIM_DT
+		                    ,A.SIM_NO
+		                    ,A.SECT_NO
+		                    ,A.VSL_CD
+		                    ,DECODE(B.RNUM, 1, 'TBSA', 2, 'LOAD', 3, 'LDFR', 4, 'FRRE', 5, 'GRPB', 6, 'OTCH', 7, 'OTTT', 8, 'OFSC', 9, 'TVVD', 10, 'TTSA') SGRP_COST_CD
+		                    ,DECODE(B.RNUM, 1, TBSA, 2, LOAD, 3, LDFR, 4, FRRE, 5, GRPB, 6, OTCH, 7, OTCH, 8, OFSC, 9, '1', 10, OTCH + FRRE) AMT
+		                FROM (SELECT A.SIM_DT
+		                            ,A.SIM_NO
+		                            ,A.SECT_NO
+		                            ,B.VSL_CD
+		                            ,B.FNL_HJS_BSA_CAPA TBSA
+		                            , B.FNL_HJS_BSA_CAPA * B.LDF_RTO LOAD
+		                            ,DECODE(NVL(B.FNL_HJS_BSA_CAPA, 0), 0, 0,(B.FNL_HJS_BSA_CAPA * B.LDF_RTO) / B.FNL_HJS_BSA_CAPA) LDFR
+		                            , A.GRS_RPB_REV *(B.FNL_HJS_BSA_CAPA * B.LDF_RTO) FRRE
+		                            ,A.GRS_RPB_REV GRPB
+		                            , B.OTR_CRR_BSA_CAPA1 + B.OTR_CRR_BSA_CAPA2 + B.OTR_CRR_BSA_CAPA3 + B.OTR_CRR_BSA_CAPA4 + B.OTR_CRR_BSA_CAPA5 + B.SUB_LSE_CAPA1 + B.SUB_LSE_CAPA2
+		                            + B.SUB_LSE_CAPA3 + B.SUB_LSE_CAPA4 + B.SUB_LSE_CAPA5 OTCH
+		                            , B.HJS_BFR_BSA_CAPA + B.SUB_CHTR_CAPA1 + B.SUB_CHTR_CAPA2 + B.SUB_CHTR_CAPA3 + B.SUB_CHTR_CAPA4 + B.SUB_CHTR_CAPA5 OFSC
+		                        FROM COA_SIM_SVC_LANE A, COA_SIM_VSL_SET_INFO B
+		                       WHERE A.SIM_DT = B.SIM_DT
+		                         AND A.SIM_NO = B.SIM_NO
+		                         AND A.SECT_NO = B.SECT_NO
+		                         AND A.SIM_DT = @[f_sim_dt] --
+		                         AND A.SIM_NO = @[f_sim_no] --
+		                         AND B.SIM_DIV_CD = '3') A
+		                    ,(SELECT ROWNUM RNUM
+		                        FROM COM_CPY_NO
+		                       WHERE ROWNUM <= 10) B
+		              UNION ALL
+		              -- CARGO RELATED VARIABLE COST(화물변동비)/EQ HOLDING COST(장비비)
+		              SELECT SIM_DT
+		                    ,SIM_NO
+		                    ,SECT_NO
+		                    ,VSL_CD
+		                    ,SGRP_COST_CD
+		                    ,AMT
+		                FROM (SELECT   A.SIM_DT
+		                              ,A.SIM_NO
+		                              ,A.SECT_NO
+		                              ,A.VSL_CD
+		                              ,   --C.MGRP_COST_CD,
+		                               DECODE(GROUPING_ID(C.MGRP_COST_CD, B.SGRP_COST_CD)
+		                                     ,3, 'XXXX'
+		                                     ,1, DECODE(C.MGRP_COST_CD, 'EQ', 'EQTT', 'CV', 'CVTT', 'FR', 'XXXX','BU', 'XXXX')
+		                                     ,0, B.SGRP_COST_CD
+		                                     ) SGRP_COST_CD
+		                              ,SUM(B.CGO_VAR_AMT) AMT1
+		                              ,A.RTO
+		                              , SUM(B.CGO_VAR_AMT) * A.RTO AMT
+		                          FROM (SELECT A.SIM_DT
+		                                      ,A.SIM_NO
+		                                      ,A.SECT_NO
+		                                      ,A.VSL_CD
+		                                      ,RATIO_TO_REPORT(A.LDF_RTO * A.FNL_HJS_BSA_CAPA) OVER(PARTITION BY A.SECT_NO) RTO
+		                                  FROM COA_SIM_VSL_SET_INFO A
+		                                 WHERE A.SIM_DT = @[f_sim_dt] --
+		                                   AND A.SIM_NO = @[f_sim_no] --
+		                                   AND A.SIM_DIV_CD = '1') A
+		                              ,COA_SIM_CTRB_MGN_COST B
+		                              ,(SELECT MGRP_COST_CD
+		                                      ,SGRP_COST_CD
+		                                      ,SGRP_COST_CD_DESC
+		                                  FROM COA_SUB_GRP_COST
+		                                 WHERE MGRP_COST_CD IN('CV', 'BU', 'EQ' ) 
+		                                 UNION ALL
+		                                SELECT 'FR' 
+		                                      ,'DEMT' 
+		                                      ,'CNTR DEM/DET' 
+		                                  FROM DUAL ) C
+		                         WHERE A.SIM_DT = B.SIM_DT
+		                           AND A.SIM_NO = B.SIM_NO
+		                           AND A.SECT_NO = B.SECT_NO
+		                           AND C.SGRP_COST_CD = B.SGRP_COST_CD
+		                      GROUP BY A.SIM_DT, A.SIM_NO, A.SECT_NO, A.VSL_CD, A.RTO, ROLLUP(C.MGRP_COST_CD, B.SGRP_COST_CD))
+		               WHERE SGRP_COST_CD != 'XXXX'
+		              UNION ALL
+		              -- VOYAGE COST(운항변동비)/VESSEL FIXED COST(운항고정비[SPACE CHARTERAGE(OFSC) : 선복임차료는 제외])
+		              SELECT   A.SIM_DT
+		                      ,A.SIM_NO
+		                      ,A.SECT_NO
+		                      ,A.VSL_CD
+		                      ,DECODE(GROUPING_ID(A.SGRP_COST_CD), 1, DECODE(B.MGRP_COST_CD, 'OF', 'VFTT', 'OV', 'VVTT'), 0, A.SGRP_COST_CD) SGRP_COST_CD
+		                      ,SUM(A.AFT_OCN_TRNS_COST_AMT) AMT --NTWK_COST_AMT  AFT_OCN_TRNS_COST_AMT
+		                  FROM COA_SIM_NTWK_COST A
+		                      ,(SELECT MGRP_COST_CD
+		                              ,SGRP_COST_CD
+		                              ,SGRP_COST_CD_DESC
+		                          FROM COA_SUB_GRP_COST
+		                         WHERE MGRP_COST_CD IN('OF', 'OV')) B
+		                 WHERE A.SGRP_COST_CD = B.SGRP_COST_CD
+		                   AND A.SIM_DT = @[f_sim_dt] --
+		                   AND A.SIM_NO = @[f_sim_no] --
+		                   AND A.SGRP_COST_CD != 'OFSC'
+		              GROUP BY A.SIM_DT, A.SIM_NO, A.SECT_NO, A.VSL_CD, B.MGRP_COST_CD, ROLLUP(A.SGRP_COST_CD)) B
+		       WHERE A.SIM_DT = B.SIM_DT(+)
+		         AND A.SIM_NO = B.SIM_NO(+)
+		         AND A.SECT_NO = B.SECT_NO(+)
+		         AND A.VSL_CD = B.VSL_CD(+)
+		         AND A.SGRP_COST_CD = B.SGRP_COST_CD(+)
+		    ORDER BY A.VSL_CD, TO_NUMBER(A.DP_SEQ_NO)			]]></sql>
+			<params>
+				<param name="cre_usr_id" type="12" value="" out="N"/>
+				<param name="upd_usr_id" type="12" value="" out="N"/>
+				<param name="f_sim_dt" type="12" value="" out="N"/>
+				<param name="f_sim_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

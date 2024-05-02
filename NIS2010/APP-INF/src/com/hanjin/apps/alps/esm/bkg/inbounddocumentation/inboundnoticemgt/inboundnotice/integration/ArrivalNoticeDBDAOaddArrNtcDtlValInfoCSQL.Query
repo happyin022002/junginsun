@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ArrivalNoticeDBDAOaddArrNtcDtlValInfoCSQL">
+			<desc><![CDATA[code validation에 의해 Arrival Notice Detail이 자동으로 등록되도록 처리]]></desc>
+			<sql><![CDATA[
+INSERT INTO BKG_ARR_NTC_DTL
+       (BKG_NO
+      , BKG_CUST_TP_CD
+      , CUST_CNTC_TP_CD
+      , FAX_NO
+      , FAX_TP_CD  -- 5
+      , FAX_SND_FLG
+      , NTC_EML
+      , EML_TP_CD
+      , EML_SND_FLG
+      , CRE_USR_ID
+      , CRE_DT  
+      , UPD_USR_ID 
+      , UPD_DT    -- 15
+      )
+SELECT SUBQ.BKG_NO
+     , SUBQ.BKG_CUST_TP_CD
+     , CNTC.CUST_CNTC_TP_CD
+     , CNTC.FAX_NO
+        , 'A' -- by codevalidation auto code  -- 5
+     , DECODE(SUBQ.AN_SND_FLG, 'Y', CNTC.FAX_SND_FLG, SUBQ.AN_SND_FLG) AS FAX_SND_FLG
+     , CNTC.CNTC_EML 
+        , 'A' -- by codevalidation auto code
+     , DECODE(SUBQ.AN_SND_FLG, 'Y', CNTC.EML_SND_FLG, SUBQ.AN_SND_FLG) AS EML_SND_FLG 
+        , @[usr_id]
+        , SYSDATE
+        , @[usr_id]
+        , SYSDATE   -- 15
+  FROM 
+      (
+       SELECT BKGM.BKG_NO
+            , BKGM.SAM_CNEE_NTFY_FLG
+            , BKGM.CUST_TO_ORD_FLG
+            , BKGM.POD_CD
+            , BKGM.DEL_CD
+            , BCST.VAL_NM
+            , BCST.CUST_CNT_CD
+            , BCST.CUST_SEQ
+            , BCST.BKG_CUST_TP_CD   
+            , BCST.CUST_FAX_NO
+            , BCST.CUST_EML
+            , BCST.AN_SND_FLG
+
+
+			/* 2015.08.03 한진그룹 코드 표준화 */
+          , CASE WHEN SUBSTR(BKGM.DEL_CD,1,2) ='US' AND SUBSTR(BKGM.POD_CD,1,2) ='CA' THEN 'TORSC'
+                 WHEN SUBSTR(BKGM.DEL_CD,1,2) ='US' THEN 'PHXSA'
+                 WHEN SUBSTR(BKGM.DEL_CD,1,2) ='CA'
+               THEN DECODE( ( SELECT COUNT(1)
+	                           FROM BKG_IB_CUST_CNTC CNTC
+	                          WHERE CNTC.OFC_CD = MLOC.EQ_CTRL_OFC_CD
+	                            AND CNTC.CUST_CNT_CD = BCST.CUST_CNT_CD
+	                            AND CNTC.CUST_SEQ = BCST.CUST_SEQ 
+	                            AND ROWNUM = 1
+	                        )
+	                       , 1, MLOC.EQ_CTRL_OFC_CD
+	                       , @[val_ofc_cd]
+	                     ) 
+	           ELSE 
+	               DECODE( ( SELECT COUNT(1)
+	                           FROM BKG_IB_CUST_CNTC CNTC
+	                          WHERE CNTC.OFC_CD = @[ofc_cd] 
+	                            AND CNTC.CUST_CNT_CD = BCST.CUST_CNT_CD
+	                            AND CNTC.CUST_SEQ = BCST.CUST_SEQ 
+	                            AND ROWNUM = 1
+	                        )
+	                       , 1, @[ofc_cd]
+	                       , MLOC.EQ_CTRL_OFC_CD
+	                     ) 
+	          END AS OFC_CD     
+
+
+
+--            , SUBSTR((SELECT MAX(DECODE(CNTC.OFC_CD, MLOC.EQ_CTRL_OFC_CD, '3' || MLOC.EQ_CTRL_OFC_CD, STUP.HNDL_OFC_CD, '2' || STUP.HNDL_OFC_CD,  val_ofc_cd, 1 || val_ofc_cd, NULL))
+--                        FROM BKG_AN_DEST_OFC_STUP STUP
+--                           , BKG_IB_CUST_CNTC CNTC
+--                        WHERE STUP.EQ_CTRL_OFC_CD = MLOC.EQ_CTRL_OFC_CD
+--                          AND STUP.DEST_OFC_CNTC_CD = 'I'
+--                          AND CNTC.OFC_CD IN (MLOC.EQ_CTRL_OFC_CD, STUP.HNDL_OFC_CD, val_ofc_cd)
+--                          AND CNTC.CUST_CNT_CD = BCST.CUST_CNT_CD
+--                          AND CNTC.CUST_SEQ = BCST.CUST_SEQ )
+--                      , 2, 10) AS OFC_CD -- 다중일 경우 eq, handling, login user office 순으로 결정
+        FROM BKG_CUSTOMER BCST
+            JOIN BKG_BOOKING BKGM ON
+               ( BKGM.BKG_NO =BCST.BKG_NO ) 
+            JOIN MDM_LOCATION MLOC
+              ON (MLOC.LOC_CD = BKGM.DEL_CD) 
+       WHERE BCST.BKG_NO = @[bkg_no]
+         AND BCST.BKG_CUST_TP_CD = @[bkg_cust_tp_cd]
+         AND BCST.AN_SND_FLG = 'Y'
+         AND BCST.VAL_CD IN ('M', 'W', 'O')  -- Validation이 Not Exists로 구하지 못했을 경우 Arrival Notice를 자동 생성하지 않는다.
+         AND BKGM.BKG_STS_CD NOT IN ('X', 'S') -- 무효한 bkg제거 -- AS IS와 동일하게 하기위해 추가 20091124
+         AND BKGM.BKG_CGO_TP_CD IN ('F', 'R') -- full, revenue empty container
+      ) SUBQ
+    JOIN BKG_IB_CUST_CNTC CNTC ON
+         (CNTC.OFC_CD = SUBQ.OFC_CD
+          AND CNTC.CUST_CNT_CD = SUBQ.CUST_CNT_CD
+          AND CNTC.CUST_SEQ = SUBQ.CUST_SEQ 
+         )
+ WHERE NOT EXISTS ( SELECT 1
+                      FROM BKG_ARR_NTC_DTL ADTL
+                     WHERE ADTL.BKG_NO = SUBQ.BKG_NO
+                       AND ADTL.BKG_CUST_TP_CD = SUBQ.BKG_CUST_TP_CD
+                       AND ADTL.CUST_CNTC_TP_CD = CNTC.CUST_CNTC_TP_CD
+                  )			]]></sql>
+			<params>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="val_ofc_cd" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="bkg_cust_tp_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

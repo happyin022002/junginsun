@@ -1,0 +1,704 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PsoAdvanceAuditDBDAOSearchPreAuditListRSQL">
+			<desc><![CDATA[2016.06.07 CHM-201641967 PSO Auto Audit 결과 수정 요청 
+2016.07.12 CHM-201642602 manual audit 조회시 all 조회시 금액 오류
+]]></desc>
+			<sql><![CDATA[
+WITH TB_SRC AS (
+SELECT  AA.*
+       #if (${chargeType} == '00' || ${chargeType} == '01' || ${chargeType} == '02')
+       , (
+          SELECT ROUND ( (X.VPS_ETD_DT - X.VPS_ETB_DT) * 24, 2)
+            FROM VSK_VSL_PORT_SKD X
+           WHERE X.VSL_CD      = AA.VSL_CD
+             AND X.SKD_VOY_NO  = AA.SKD_VOY_NO
+             AND X.SKD_DIR_CD  = AA.SKD_DIR_CD
+             AND X.YD_CD       = AA.YD_CD
+             AND X.CALL_YD_IND_SEQ = 1
+          ) AS BERTHING_HOUR
+       , (
+          SELECT NVL(SUBSTR(MIN(TO_CHAR(B.VPS_ETD_DT,'YYYYMMDDHH24MI')||B.yd_cd ),-7,2), '')
+            FROM VSK_VSL_PORT_SKD A
+               , VSK_VSL_PORT_SKD B
+           WHERE A.VSL_CD        = B.VSL_CD
+             AND A.VSL_CD        = AA.VSL_CD
+             AND A.SKD_VOY_NO    = AA.SKD_VOY_NO
+             AND A.SKD_DIR_CD    = AA.SKD_DIR_CD
+             AND A.YD_CD         = AA.YD_CD
+             AND A.VPS_ETD_DT    < B.VPS_ETD_DT
+          ) AS COUNTRY_OF_NP
+       , (
+          SELECT X.NET_RGST_TONG_WGT 
+            FROM MDM_VSL_CNTR X
+           WHERE X.VSL_CD =  AA.VSL_CD
+          ) AS NRT
+       , (
+          SELECT S1.ARR_TUG_BOT_KNT ||','||S1.DEP_TUG_BOT_KNT
+            FROM VSK_ACT_PORT_SKD S1
+               , VSK_VSL_PORT_SKD S2
+           WHERE 1 = 1
+             AND S1.VSL_CD          = S2.VSL_CD
+             AND S1.SKD_VOY_NO      = S2.SKD_VOY_NO
+             AND S1.SKD_DIR_CD      = S2.SKD_DIR_CD
+             AND S1.VPS_PORT_CD     = S2.VPS_PORT_CD
+             AND S1.CLPT_IND_SEQ    = S2.CLPT_IND_SEQ
+             AND (S1.VSL_CD, S1.SKD_VOY_NO, S1.SKD_DIR_CD, S1.VPS_PORT_CD, S1.CLPT_IND_SEQ) IN
+                          ( SELECT VSL_CD 
+                                 , DECODE(TURN_PORT_IND_CD, 'Y', SKD_VOY_NO, 'N', SKD_VOY_NO, TURN_SKD_VOY_NO) SKD_VOY_NO
+                                 , DECODE(TURN_PORT_IND_CD, 'Y', SKD_DIR_CD, 'N', SKD_DIR_CD, TURN_SKD_DIR_CD) SKD_DIR_CD
+                                 , VPS_PORT_CD
+                                 , DECODE(TURN_PORT_IND_CD, 'Y', CLPT_IND_SEQ, 'N', CLPT_IND_SEQ, TURN_CLPT_IND_SEQ) CLPT_IND_SEQ
+                              FROM VSK_VSL_PORT_SKD
+                             WHERE VSL_CD      = AA.VSL_CD
+                               AND SKD_VOY_NO  = AA.SKD_VOY_NO
+                               AND SKD_DIR_CD  = AA.SKD_DIR_CD
+                               AND VPS_PORT_CD = SUBSTR(AA.YD_CD, 1, 5)
+                          )
+             AND S2.VSL_CD       = AA.VSL_CD
+             AND S2.VPS_PORT_CD  = SUBSTR(AA.YD_CD, 1, 5)
+             AND S2.YD_CD        = AA.YD_CD
+             AND ROWNUM          = 1 -- Vsk Vessel Schedule과 Pso Charge 생성 단위가 다름. Second Calling 발생하던라도 하나의 yard로 Charge Data를 발생
+          ) AS ARR_DEP_TUG_KNT
+       #end
+
+       #if (${chargeType} == '00' || ${chargeType} == '01' || ${chargeType} == '02' || ${chargeType} == '03')
+       , (
+          SELECT X.GRS_RGST_TONG_WGT 
+            FROM MDM_VSL_CNTR X
+           WHERE X.VSL_CD  = AA.VSL_CD
+         ) AS GRT
+       , (
+          SELECT NVL(SUBSTR(MAX(TO_CHAR(B.VPS_ETD_DT,'YYYYMMDDHH24MI')||B.VPS_PORT_CD ),-5), '')
+            FROM VSK_VSL_PORT_SKD A
+               , VSK_VSL_PORT_SKD B
+           WHERE 1=1
+             AND A.VSL_CD            = AA.VSL_CD
+             AND A.SKD_VOY_NO        = AA.SKD_VOY_NO
+             AND A.SKD_DIR_CD        = AA.SKD_DIR_CD
+             AND A.YD_CD             = AA.YD_CD
+             AND A.CALL_YD_IND_SEQ   = 1
+             AND A.TURN_PORT_IND_CD IN ('Y','N')
+             AND B.VSL_CD            = A.VSL_CD
+             AND B.VPS_ETD_DT        < A.VPS_ETD_DT
+             AND NVL(B.SKD_CNG_STS_CD,' ') <> 'S'
+             AND B.TURN_PORT_IND_CD IN ('Y','N')       
+          ) LAST_PORT
+       #end
+
+       #if (${chargeType} == '00' || ${chargeType} == '03')
+       , (
+          SELECT NVL(S.SUZ_GT_WGT, 0)||','||NVL(S.MADN_VOY_SUZ_NET_TONG_WGT, 0)
+            FROM MDM_VSL_CNTR S
+           WHERE S.VSL_CD = AA.VSL_CD
+          ) AS VSL_CNTR_INFO
+        , (
+          SELECT -- 잘못된 큰수가 입력된 경우가 있으므로 일의자리 이하 숫자만 선택한다.
+                 CASE WHEN INSTR(NVL(SUBSTR(MAX(TO_CHAR(S.CRE_DT,'YYYYMMDDHH24MI')||S.LOCL_XCH_RT),13),1), '.') > 0 THEN 
+                        SUBSTR(NVL(SUBSTR(MAX(TO_CHAR(S.CRE_DT,'YYYYMMDDHH24MI')||S.LOCL_XCH_RT),13),1), INSTR(NVL(SUBSTR(MAX(TO_CHAR(S.CRE_DT,'YYYYMMDDHH24MI')||S.LOCL_XCH_RT),13),1), '.') - 1)
+                      ELSE SUBSTR(NVL(SUBSTR(MAX(TO_CHAR(S.CRE_DT,'YYYYMMDDHH24MI')||S.LOCL_XCH_RT),13),1), -1, 1)
+                 END
+            FROM PSO_CNL_TZ_FEE S
+           WHERE 1=1
+             AND S.ISS_CTY_CD     = AA.ISS_CTY_CD
+             AND S.SO_SEQ         = AA.SO_SEQ
+             AND S.PSO_BZTP_CD    = '5'
+             AND S.CNL_TZ_BZTP_CD = 'I'
+             AND S.YD_CD LIKE 'EGSUZ' || '%'
+             AND S.LOCL_XCH_RT IS NOT NULL
+          ) AS SDR_RT           -- SRD
+       #end
+FROM    (
+         SELECT ISS_CTY_CD
+              , SO_SEQ
+              , VVD
+              , LGS_COST_CD
+              , MAX(SO_DTL_SEQ) AS SO_DTL_SEQ
+              , MAX(PAY_TERM_DYS) AS PAY_TERM_DYS 
+              , MAX(INV_OFC_CD) AS INV_OFC_CD
+              , MAX(PSO_CHG_STS_CD) AS PSO_CHG_STS_CD
+              , MAX(VSL_CD) AS VSL_CD
+              , MAX(SKD_VOY_NO) AS SKD_VOY_NO
+              , MAX(SKD_DIR_CD) AS SKD_DIR_CD
+              , MAX(LGS_COST_CD) AS COST_CD
+              , MAX(ACCT_CD) AS ACCT_CD
+              , MAX(IO) AS IO    
+              , MAX(LGS_COST_FULL_NM) AS COST_NM
+              , SUM(TARIFF_COST) AS TARIFF_COST
+              , SUM(ADJCOST) AS ADJCOST
+              , SUM(AMOUNT) AS AMOUNT
+              , MAX(FOML1) AS FOML1
+              , MAX(FOML2) AS FOML2
+              , MAX(COND1) AS COND1
+              , MAX(RMK) AS RMK
+              , MAX(VNDR_SEQ) AS VNDR_SEQ
+              , MAX(YD_CD) AS YD_CD
+              , MAX(YD_CHG_NO) AS YD_CHG_NO
+              , MAX(YD_CHG_VER_SEQ) AS YD_CHG_VER_SEQ
+              , MAX(BKG_GET_TOKEN_FNC(ATB_ATD,1)) ATB
+              , MAX(BKG_GET_TOKEN_FNC(ATB_ATD,2)) ATD
+              , MAX(TTL_LOCL_AMT) AS TTL_LOCL_AMT
+              , MAX(INV_LOCL_AMT) AS INV_LOCL_AMT
+              , MAX(LOCL_TAX_AMT) AS LOCL_TAX_AMT
+              , MAX(LOCL_WHLD_TAX_AMT) AS LOCL_WHLD_TAX_AMT
+              , MAX(CURR_CD)           AS CURR_CD
+              , MAX(EFF_DT)            AS EFF_DT
+              , MAX(PSO_TRNS_SLP_CTNT) AS PSO_TRNS_SLP_CTNT
+              , MAX(ISS_DT)            AS ISS_DT
+              , MAX(ACPT_DT)           AS ACPT_DT
+              , MAX(N3PTY_BIL_IF_FLG)  AS N3PTY_BIL_IF_FLG
+              , MAX(N3PTY_BIL_TP_CD)   AS N3PTY_BIL_TP_CD
+              , MAX(IF_RMK)            AS IF_RMK
+              , MAX(N3PTY_VNDR_SEQ)    AS N3PTY_VNDR_SEQ
+              , MAX(MNL_INP_XCH_RT)    AS MNL_INP_XCH_RT
+              , MAX(INV_NO)            AS INV_NO
+              , MAX(CRE_USR_ID)       AS CRE_USR_ID 
+              , MAX(INV_RGST_NO)       AS INV_RGST_NO
+              , MAX(PAY_DUE_DT)        AS PAY_DUE_DT
+              , MAX(EXPN_MAX_PRMT_RTO) AS EXPN_MAX_PRMT_RTO
+              , MAX(RHQ_OFC_CD)        AS RHQ_OFC_CD
+              , MAX(CSR_STS_CD)        AS CSR_STS_CD
+              , MAX(CSR_NO)            AS CSR_NO
+              , MAX(AP_PAY_DT)         AS AP_PAY_DT
+              , MAX(DIS_INV_OFC_CD)    AS DIS_INV_OFC_CD
+              , MAX(ACCT_ENG_NM)       AS ACCT_NM
+              , MAX(UPD_DT)            AS UPD_DT
+           FROM (
+                SELECT T2.ISS_CTY_CD
+                     , T2.SO_SEQ
+                     , T2.ORG_SO_DTL_SEQ AS SO_DTL_SEQ
+                     , T2.VVD
+                     , SUBSTR(T2.VVD, 1, 4) AS VSL_CD
+                     , SUBSTR(T2.VVD, 5, 4) AS SKD_VOY_NO
+                     , SUBSTR(T2.VVD, 9) AS SKD_DIR_CD
+                     , T1.PAY_TERM_DYS
+                     , DECODE(T1.INV_OFC_CD, 'PUSMOV', 'SELIB', T1.INV_OFC_CD) AS INV_OFC_CD
+                     , T1.INV_OFC_CD AS DIS_INV_OFC_CD
+                     , T1.PSO_CHG_STS_CD
+                     , T2.LGS_COST_CD
+                     , DECODE(T2.DP_IO_BND_CD, 'I', 'IN', 'O', 'OUT', 'IN/OUT') AS IO
+                     , C.ACCT_CD
+                     , C.LGS_COST_FULL_NM
+                     , T2.CALC_AMT AS TARIFF_COST
+                     , DECODE(T2.CALC_AMT, NULL, DECODE(T2.ADJ_AMT, NULL, T2.LOCL_AMT, T2.ADJ_AMT), T2.ADJ_AMT) AS ADJCOST
+                     , T2.LOCL_AMT  AS AMOUNT
+                     , T2.FOML_DESC AS FOML1
+                     , T2.XPR_DESC  AS FOML2
+                     , T2.XPR_DESC  AS COND1
+                     , T2.FOML_DESC AS COND2
+                     , T2.DIFF_RMK  AS RMK
+                     , T1.VNDR_SEQ  AS VNDR_SEQ
+                     , T1.YD_CD     AS YD_CD
+                     , T2.YD_CHG_NO AS YD_CHG_NO
+                     , T2.YD_CHG_VER_SEQ  AS YD_CHG_VER_SEQ
+                     , T1.TTL_LOCL_AMT    AS TTL_LOCL_AMT
+                     , T1.INV_LOCL_AMT    AS INV_LOCL_AMT  --Invoice Local Amount
+                     , T1.LOCL_TAX_AMT    AS LOCL_TAX_AMT
+                     , T1.LOCL_WHLD_TAX_AMT    AS LOCL_WHLD_TAX_AMT
+                     , T1.CURR_CD              AS CURR_CD
+                     , TO_CHAR(T1.EFF_DT, 'YYYY-MM-DD')    AS EFF_DT
+                     , T1.PSO_TRNS_SLP_CTNT                AS PSO_TRNS_SLP_CTNT
+                     , TO_CHAR(T1.ISS_DT, 'YYYY-MM-DD')    AS ISS_DT
+                     , TO_CHAR(T1.ACPT_DT, 'YYYY-MM-DD')   AS ACPT_DT
+                     , T3.N3PTY_BIL_IF_FLG
+                     , T3.N3PTY_BIL_TP_CD
+                     , T3.IF_RMK 
+                     , T3.N3PTY_VNDR_SEQ
+                     , T2.MNL_INP_XCH_RT    AS MNL_INP_XCH_RT
+                     , T1.INV_NO            AS INV_NO
+                     , T1.CRE_USR_ID 
+                     , T1.INV_RGST_NO       AS INV_RGST_NO
+                     , (SELECT MIN(TO_CHAR(X.VPS_ETB_DT, 'YYYY-MM-DD HH24:MI'))||','||MIN(TO_CHAR(X.VPS_ETD_DT, 'YYYY-MM-DD HH24:MI'))
+                          FROM VSK_VSL_PORT_SKD  X
+                         WHERE X.VSL_CD      = T2.VSL_CD
+                           AND X.SKD_VOY_NO  = T2.SKD_VOY_NO
+                           AND X.SKD_DIR_CD  = T2.SKD_DIR_CD
+                           AND X.YD_CD       = T1.YD_CD
+                       ) ATB_ATD
+                     , (SELECT EAS_EXPN_AUD_PKG.GET_RHQ_OFC_CD (DECODE(T1.INV_OFC_CD, 'PUSMOV', 'SELIB', T1.INV_OFC_CD)) FROM DUAL) RHQ_OFC_CD
+                     , TO_CHAR(T1.ISS_DT + NVL(T1.PAY_TERM_DYS, 0), 'YYYY-MM-DD')  AS PAY_DUE_DT
+                     , (SELECT X.EXPN_MAX_PRMT_RTO
+                          FROM EAS_PORT_SO_CHG_ACCT X
+                         WHERE X.AUD_OFC_CD  = (SELECT EAS_EXPN_AUD_PKG.GET_RHQ_OFC_CD (T1.INV_OFC_CD) FROM DUAL)  
+                           AND X.LGS_COST_CD = T2.LGS_COST_CD
+                       ) EXPN_MAX_PRMT_RTO
+                     , (CASE WHEN AI.INV_STS_CD = 'D' THEN 'D' -- Paid
+                             WHEN AH.IF_FLG = 'Y' AND AH.RCV_ERR_FLG IS NULL THEN 'P' -- I/F Success
+                             WHEN AH.RCV_ERR_FLG = 'E' THEN 'J' -- A/P Rejected
+                             WHEN AH.IF_FLG = 'E' THEN 'E' -- I/F Error
+                             WHEN AH.IF_FLG IS NULL AND AH.APRO_FLG = 'Y' AND AH.IF_ERR_RSN = 'Sending...' THEN 'S' -- Sending
+                             WHEN AI.INV_STS_CD = 'R' OR AI.INV_STS_CD = 'B' OR AH.CSR_RJCT_DT IS NOT NULL THEN 'R' -- Disapproved
+                             WHEN AH.IF_FLG IS NULL AND NVL(AH.RQST_APRO_STEP_FLG,'N') = 'N' THEN 'A' -- Approval Requested
+                             WHEN AH.IF_FLG IS NULL AND NVL(AH.RQST_APRO_STEP_FLG,'N') = 'Y' THEN 'L' -- Requesting Approval
+                             WHEN T1.PSO_CHG_STS_CD = 'A' THEN 'C'
+                        END) CSR_STS_CD
+                      , AH.CSR_NO 
+                      , TO_CHAR(AI.AP_PAY_DT, 'YYYY-MM-DD') AS AP_PAY_DT
+                      , MA.ACCT_ENG_NM
+                      , T1.UPD_DT -- confirm date
+                  FROM PSO_CHARGE   T1
+                     , (SELECT X.*
+                             , CASE WHEN X.SO_DTL_SEQ = X.ORG_SO_DTL_SEQ THEN X.VSL_CD||X.SKD_VOY_NO||X.SKD_DIR_CD
+                                    ELSE (SELECT Y.VSL_CD||Y.SKD_VOY_NO||Y.SKD_DIR_CD
+                                            FROM PSO_CHG_DTL Y
+                                           WHERE Y.ISS_CTY_CD = X.ISS_CTY_CD
+                                             AND Y.SO_SEQ     = X.SO_SEQ
+                                             AND Y.SO_DTL_SEQ = X.ORG_SO_DTL_SEQ
+                                         )
+                               END VVD
+                          FROM PSO_CHG_DTL X
+                       ) T2
+                     , TES_LGS_COST C
+                     , MDM_ACCOUNT  MA
+                     , (SELECT X.ISS_CTY_CD
+                             , X.SO_SEQ
+                             , X.SO_DTL_SEQ
+                             , MAX(DECODE(X.ISS_CTY_CD, 'N', 'N', NULL, 'N', 'Y')) AS N3PTY_BIL_IF_FLG
+                             , MAX(X.N3PTY_BIL_TP_CD) AS N3PTY_BIL_TP_CD
+                             , MAX(X.IF_RMK)    AS IF_RMK
+                             , MAX(X.VNDR_SEQ)  AS N3PTY_VNDR_SEQ
+                          FROM PSO_N3RD_PTY_IF X
+                         GROUP BY X.ISS_CTY_CD
+                             , X.SO_SEQ
+                             , X.SO_DTL_SEQ
+                       ) T3
+                      , AP_PAY_INV AI
+                      , AP_INV_HDR AH
+                 WHERE 1=1               
+                   AND T1.ISS_CTY_CD  = T2.ISS_CTY_CD
+                   AND T1.SO_SEQ      = T2.SO_SEQ
+                   AND T2.LGS_COST_CD = C.LGS_COST_CD
+                   AND C.ACCT_CD      = MA.ACCT_CD
+                   AND T2.ISS_CTY_CD  = T3.ISS_CTY_CD (+)
+                   AND T2.SO_SEQ      = T3.SO_SEQ     (+)
+                   AND T2.ORG_SO_DTL_SEQ  = T3.SO_DTL_SEQ (+)
+                   AND T1.INV_RGST_NO  = AI.INV_RGST_NO(+)
+                   AND AI.CSR_NO       = AH.CSR_NO(+)
+                   AND C.ACCT_CD <> '999999' 
+                   AND EXISTS ( SELECT '*' FROM  EAS_PORT_SO_CHG_ACCT  WHERE 1=1
+				                                                         #if ( ${rhq} !='' )
+                                                                         AND AUD_OFC_CD = @[rhq]
+                                                                         #end
+																		 #if ( ${rhq} =='' )
+                                                                         AND AUD_OFC_CD = EAS_EXPN_AUD_PKG.GET_RHQ_OFC_CD (DECODE(T1.INV_OFC_CD, 'PUSMOV', 'SELIB', T1.INV_OFC_CD))
+                                                                         #end
+                                                                         AND LGS_COST_CD = C.LGS_COST_CD
+                                                                         AND LGS_COST_AUD_FLG = DECODE(@[divChargeType],'1','Y','2','N') 
+                                                                        )  
+                   #if ( ${csr_no} !='' )
+		           AND AH.CSR_NO IN (
+		             #foreach( ${key} IN ${csrNos}) 
+		               #if($velocityCount < $csrNos.size()) 
+		                 '${key}',
+		               #else 
+		                 '${key}'
+		               #end 
+		             #end
+		             )
+                   #end
+
+		           #if (${inv_no} != '')
+		             AND T1.INV_NO IN (
+		             #foreach( ${key} IN ${invNos}) 
+		               #if($velocityCount < $invNos.size()) 
+		                 '${key}',
+		               #else 
+		                 '${key}'
+		               #end 
+		             #end
+		             )
+		           #end
+                   #if ( ${auditStatus} !='ALL' && ${diffNum} !='')
+                   AND EXISTS  (
+                       SELECT 'Y'
+                         FROM EAS_PORT_SO_CHG_ACCT S
+                        WHERE S.LGS_COST_CD = T2.LGS_COST_CD
+                          AND S.LGS_COST_AUD_FLG      = 'Y'
+                          AND CASE WHEN NVL(T2.CALC_AMT, 0) = 0 THEN 0
+                                   ELSE S.EXPN_MAX_PRMT_RTO
+                              END
+                              <=
+                              CASE WHEN NVL(T2.CALC_AMT, 0) = 0 THEN 0
+                                   ELSE ROUND((LOCL_AMT - T2.CALC_AMT) / T2.CALC_AMT * 100, 3)
+                              END
+                          AND ROWNUM = 1
+                        )
+                   #end
+
+                   #if ( ${office} !='ALL' && ${office} !='') 
+                   --OFFICE
+                   AND T1.COST_OFC_CD = @[office]
+                   #end
+                   #if ( ${period1} !='' && ${period2} !='' ) 
+                   --PERIOD
+                   AND T1.UPD_DT BETWEEN TO_DATE(@[period1],'YYYY-MM-DD') AND TO_DATE(@[period2],'YYYY-MM-DD') + 0.99999
+                   #end
+
+                   AND LENGTH(T2.LGS_COST_CD) = 6
+
+                   --CHARGE TYPE : PORT CHARGE, PORT SERVICE CHARGE
+                   #if (${chargeType} == '01' )
+                     --PORT CHARGE 선택시
+                       AND C.ACCT_CD NOT IN ('999999', '511795')
+                       AND C.ACCT_CD LIKE '5117%'
+                       AND MA.ACCT_ENG_NM NOT LIKE 'OTHER PORT%'
+                   #end
+                   #if (${chargeType} == '02' ) 
+                     --PORT SERVICE CHARGE 선택시
+                       AND C.ACCT_CD LIKE '5118%'
+                       AND MA.ACCT_ENG_NM NOT LIKE 'OTHER PORT%'
+                   #end
+                   #if (${chargeType} == '03' ) 
+                   --Canal Transit Fee 선택시
+                       AND C.ACCT_CD LIKE '5119%'
+                       AND MA.ACCT_ENG_NM NOT LIKE 'OTHER PORT%'
+                   #end
+                   #if ((${chargeType} != '' && ${chargeType} == '04') ) 
+                   --Other 선택시
+                       AND C.ACCT_CD <> '999999' 
+                       AND (C.ACCT_CD IN ('564611', '511795') OR MA.ACCT_ENG_NM LIKE 'OTHER PORT%')
+                   #end
+                   #if (${chargeType} == '00')
+					  AND C.ACCT_CD NOT IN ('999999', '511795')
+                      #if (${portlChargeType} == '' && ${serviceChargeType} == '' && ${canalChargeType} == '' && ${otherChargeType} == '')
+                                AND ((SUBSTR(C.ACCT_CD,0,4) IN ('5117', '5118', '5119') ) OR (C.ACCT_CD IN ('564611', '511795') OR MA.ACCT_ENG_NM LIKE 'OTHER PORT%'))
+                        #else
+                          #if (${divChargeType} == '1')
+                                #if (${otherChargeType} != '564611')
+                                    AND ((SUBSTR(C.ACCT_CD,0,4) IN (@[portlChargeType], @[serviceChargeType], @[canalChargeType]) ))
+                                #else
+                                    AND ((SUBSTR(C.ACCT_CD,0,4) IN (@[portlChargeType], @[serviceChargeType], @[canalChargeType]) ) OR (C.ACCT_CD IN ('564611', '511795') OR MA.ACCT_ENG_NM LIKE 'OTHER PORT%'))
+                                #end
+                            #else
+                                #if (${otherChargeType} == '564611')
+                                    AND ((SUBSTR(C.ACCT_CD,0,4) IN (DECODE(@[portlChargeType],'5117','null','5117'), DECODE(@[serviceChargeType],'5118','null','5118'), DECODE(@[canalChargeType],'5119','null','5119')) ))
+                                #else
+                                    AND ((SUBSTR(C.ACCT_CD,0,4) IN (DECODE(@[portlChargeType],'5117','null','5117'), DECODE(@[serviceChargeType],'5118','null','5118'), DECODE(@[canalChargeType],'5119','null','5119')) ) OR (C.ACCT_CD IN ('564611', '511795') OR MA.ACCT_ENG_NM LIKE 'OTHER PORT%'))
+                                #end
+                            #end
+                        #end
+                   #end
+                   #if ( ${accountCode} !='' ) 
+                   --ACCOUNT CODE
+                   AND C.ACCT_CD = @[accountCode]
+                   #end
+                   #if ( ${costCode} !='' )
+                   --COST CODE
+                   AND T2.LGS_COST_CD = @[costCode]
+                   #end
+                   --3번째 줄 조회조건
+                   #if ( ${portCode} !='' ) 
+                   --PORT CODE
+                   AND T1.YD_CD LIKE @[portCode]||@[yardCd]||'%'
+                   #end
+                   #if ( ${spNo} !='' ) 
+                   --SP NO
+                   AND T1.VNDR_SEQ = @[spNo]
+                   #end
+           
+                   --4번째 줄 조회조건
+                   #if ( ${contractType} !='' && ${contractType} !='ALL' && ${period1} !='' && ${period2} !='') 
+                   --Contract type 
+                   AND T2.VSL_CD IN (
+                       SELECT VSL_CD
+                         FROM MDM_VSL_CNTR
+                        WHERE 1=1
+                          AND VSL_CD IN (SELECT VSL_CD FROM FMS_CONTRACT WHERE FLET_CTRT_TP_CD IN (@[contractType]))
+                       )
+                   #end
+                   #if ( ${vesselClass} !='' && ${vesselClass} !='ALL' ) 
+                   --Vessel Class
+                   AND T2.VSL_CD IN (SELECT VSL_CD
+                                       FROM MDM_VSL_CNTR AA
+                                          , (SELECT MAX(FM_CD_CAL) AS FM_CD_CAL
+                                                  , MAX(TO_CD_CAL) AS TO_CD_CAL
+                                               FROM (SELECT CASE WHEN A.INTG_CD_VAL_DP_SEQ =B.CD_SEQ-1 THEN INTG_CD_VAL_CTNT ELSE '0' END FM_CD_CAL
+                                                          , CASE WHEN A.INTG_CD_VAL_DP_SEQ =B.CD_SEQ THEN INTG_CD_VAL_CTNT ELSE '0' END TO_CD_CAL
+                                                       FROM COM_INTG_CD_DTL A
+                                                          , (SELECT INTG_CD_ID,INTG_CD_VAL_DP_SEQ AS CD_SEQ
+                                                               FROM COM_INTG_CD_DTL
+                                                              WHERE 1=1 
+                                                                AND INTG_CD_ID ='CD03434'
+                                                                AND INTG_CD_VAL_CTNT =  @[vesselClass]
+                                                            ) B
+                                                      WHERE A.INTG_CD_ID = B.INTG_CD_ID
+                                                        AND A.INTG_CD_VAL_DP_SEQ BETWEEN B.CD_SEQ-1 AND B.CD_SEQ
+                                                    )      
+                                            )BB
+                                      WHERE 1=1
+                                        AND CNTR_VSL_CLSS_CAPA  BETWEEN BB.FM_CD_CAL AND BB.TO_CD_CAL  
+                                    )
+                   #end
+
+                   #if ( ${vessel} !='' ) 
+                   --Vessel
+                   AND T2.VSL_CD = @[vessel]
+                   #end
+                   #if ( ${remark} !='' ) 
+                   --Diff
+                   AND UPPER(T2.DIFF_RMK) LIKE '%'||UPPER(@[remark])||'%'
+                   #end
+              )
+        GROUP BY ISS_CTY_CD
+               , SO_SEQ
+               , VVD
+               , LGS_COST_CD
+        ) AA
+WHERE   1=1
+#if ( ${rhq} !='' )
+AND     RHQ_OFC_CD      = @[rhq]
+#end
+)
+#if (${chargeType} == '00' || ${chargeType} == '03')
+, TB_VVD_TIER AS
+(
+SELECT DISTINCT VSL_CD, VOY_NO, DIR_CD, 'EGSUZ' AS PORT_CD,
+       CASE WHEN RNK='Y' THEN
+            TIER_1ST
+       ELSE
+            TIER_2ND
+       END SCG_CAR_TIER
+FROM	(
+		SELECT	ROW_NUMBER () OVER (PARTITION BY VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND ORDER BY TIER_NO DESC) AS SEQ
+				, VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND, YD_CD
+				, DECODE(SIGN(TEU - 11), -1, 'N', 'Y') AS RNK
+				, TIER_NO AS TIER_1ST				
+				, LEAD (TIER_NO) OVER (PARTITION BY VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND ORDER BY TIER_NO DESC) AS TIER_2ND
+				, TEU AS TEU_1ST
+				, LEAD (TEU) OVER (PARTITION BY VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND ORDER BY TIER_NO DESC) AS TEU_2ND				
+		FROM	(
+				SELECT	VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND, YD_CD
+						, TIER_NO AS TIER_NO
+						, MAX(MAX_TIER_BY_BAY) AS TIER_ORG
+						, SUM(CASE WHEN (TIER = MAX_TIER_BY_BAY) THEN TEU ELSE 0 END) AS TEU
+				FROM	(	
+							SELECT	T1.VSL_CD
+									, T1.VOY_NO
+									, T1.DIR_CD
+									, T1.PORT_CD
+									, T1.CALL_IND
+									, T1.PLAN_TYPE
+									, T1.BAY
+									, T1.TIER
+									, T2.YD_CD					
+									, MAX(T1.TIER) OVER (PARTITION BY T1.VSL_CD, T1.VOY_NO, T1.DIR_CD, T1.PORT_CD, T1.CALL_IND, T1.BAY ) AS MAX_TIER_BY_BAY
+									, COUNT (DISTINCT T1.TIER) OVER (PARTITION BY T1.VSL_CD, T1.VOY_NO, T1.DIR_CD, T1.PORT_CD, T1.CALL_IND, T1.BAY ) AS TIER_NO							
+									, SUM( CASE WHEN T1.SZTP LIKE 'D2%' THEN 1 ELSE 2 END ) AS TEU
+									, ROW_NUMBER () OVER (PARTITION BY T1.VSL_CD, T1.VOY_NO, T1.DIR_CD, T1.PORT_CD, T1.CALL_IND, T1.BAY, T1.TIER ORDER BY T1.TIER DESC, T1.PLAN_TYPE DESC) AS PLAN_TYPE_SEQ 						
+							FROM	BAY_PLAN T1,
+							        (
+							        SELECT /*+ INDEX_DESC(T2 XAK12VSK_VSL_PORT_SKD) */
+							                  T2.VSL_CD, T2.SKD_VOY_NO, T2.SKD_DIR_CD, T2.VPS_PORT_CD, T2.CLPT_IND_SEQ, T2.YD_CD
+							           FROM   VSK_VSL_PORT_SKD T1, VSK_VSL_PORT_SKD T2,
+							                  (
+							                  SELECT DISTINCT VVD, YD_CD
+							                  FROM   TB_SRC
+							                  )  T3
+							           WHERE  1=1
+							           AND    T1.VSL_CD       = SUBSTR(T3.VVD, 1, 4)
+							           AND    T1.SKD_VOY_NO   = SUBSTR(T3.VVD, 5, 4)
+							           AND    T1.SKD_DIR_CD   = SUBSTR(T3.VVD, 9)
+							           AND    T1.VPS_PORT_CD  = SUBSTR(T3.YD_CD, 1, 5)
+							           AND    T1.VSL_CD       = T2.VSL_CD
+							           AND    T1.SKD_VOY_NO   = T2.SKD_VOY_NO
+							           AND    T1.SKD_DIR_CD   = T2.SKD_DIR_CD
+							           AND    T1.CLPT_SEQ     > T2.CLPT_SEQ
+							           AND    NVL(T2.SKD_CNG_STS_CD, 'X') <> 'S'
+									   AND    ROWNUM = 1
+							        ) T2
+							WHERE	1 = 1				
+							AND		T1.VSL_CD       = T2.VSL_CD
+							AND     T1.VOY_NO       = T2.SKD_VOY_NO
+							AND     T1.DIR_CD       = T2.SKD_DIR_CD
+							AND     T1.PORT_CD      = T2.VPS_PORT_CD
+							AND     T1.CALL_IND     = T2.CLPT_IND_SEQ
+							AND		T1.TIER		>= '50'
+							GROUP BY T1.VSL_CD, T1.VOY_NO, T1.DIR_CD, T1.PORT_CD, T1.CALL_IND, T1.PLAN_TYPE, T1.BAY, T1.TIER, YD_CD
+						)
+				WHERE	PLAN_TYPE_SEQ	= 1		
+				GROUP BY VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND, TIER_NO, YD_CD
+				)
+		) T1, VSK_PORT_CNL_TR_SCG T2
+WHERE	T2.LOC_CD		= 'EGSUZ'
+AND		T2.TR_SEQ		= DECODE(RNK, 'Y', TIER_1ST, TIER_2ND) 
+AND		T1.SEQ			= 1
+)
+#else
+-- Canal이 아닌 경우 의미가 없는 dual 사용.
+, TB_VVD_TIER AS
+(
+SELECT '' AS VSL_CD, '' AS VOY_NO, '' AS DIR_CD, '' AS PORT_CD, '' AS CALL_IND, '' AS YD_CD, '' AS SCG_CAR_TIER
+FROM   DUAL
+)
+#end
+
+SELECT *
+  FROM (
+		SELECT   '' SEL
+		        ,'' IBFLAG
+		        ,'' SELECT_FLG
+		        , T1.ISS_CTY_CD, T1.SO_SEQ, T1.SO_DTL_SEQ
+				, T3.EAC_NO
+		        , T1.VSL_CD
+		        , (SELECT CNTR_VSL_CLSS_CAPA FROM MDM_VSL_CNTR WHERE VSL_CD = T1.VSL_CD) AS CNTR_VSL_CLSS_CAPA
+		        , T3.PORT_CHG_AUD_CHK_CD                    AS SELECT_FLG_TEMP
+		        --,(CASE WHEN TARIFF_COST = 0 OR TARIFF_COST IS NULL THEN 'C'
+		        ,(CASE WHEN (TARIFF_COST = 0 OR TARIFF_COST IS NULL) THEN CASE WHEN (T1.ADJCOST <0) THEN 'F' 
+																				ELSE 'C' END
+		        --: PSO Auto Audit/Manual Audit에서 Tariff가 없는 것은 Candidate EAC로 분류-->PSO Auto Audit / Manual Audit에서 Tariff가 없고 Adjust Cost가 마이너스 금액인 경우는 Discrepancy로 분류
+		               WHEN ABS(ROUND( (AMOUNT - TARIFF_COST) / DECODE(TARIFF_COST,0,1,TARIFF_COST) * 100 , 1 )) <= 1 THEN 'S'
+		               WHEN T1.EXPN_MAX_PRMT_RTO >= (ROUND( (AMOUNT - TARIFF_COST) / DECODE(TARIFF_COST,0,1,TARIFF_COST) * 100 , 1 )) THEN CASE WHEN NVL(TARIFF_COST,0) = NVL(AMOUNT,0) THEN 'S'
+		                                                                                                                                        ELSE 'F'
+		                                                                                                                                   END
+		               WHEN T1.EXPN_MAX_PRMT_RTO <  (ROUND( (AMOUNT - TARIFF_COST) / DECODE(TARIFF_COST,0,1,TARIFF_COST) * 100 , 1 )) THEN 'C'
+		               --ELSE 'O' -- Ratio가 등록되지 않아 비교값이 없는 경우
+                       ELSE (CASE WHEN T3.PORT_CHG_AUD_CHK_CD IS NULL THEN 'F'
+                                  WHEN T3.PORT_CHG_AUD_CHK_CD = 'E' THEN 'C'
+                             END
+                            )
+		          END) AUTO_AUDIT_FLG
+		        , RHQ_OFC_CD                                AS RHQ
+		        , T1.INV_OFC_CD                             AS OFFICE
+		        , SUBSTR(T1.YD_CD,1,5)                      AS PORT
+		        , T1.YD_CD                                  AS YARD
+		        , T1.VSL_CD||T1.SKD_VOY_NO||T1.SKD_DIR_CD VVD
+		        , T1.IO                                     AS BOUND
+		        , T1.ATB                                    AS VPS_ATB_DT
+		        , T1.ACCT_CD
+		        , T1.ACCT_NM
+		        , T1.COST_CD
+		        , T1.COST_NM
+		        , T1.VNDR_SEQ                               AS SP_NO
+		        , T1.INV_NO
+		        , (SELECT X.USR_NM FROM COM_USER X WHERE X.USR_ID = T1.CRE_USR_ID) AS CRE_USR_ID
+		        , T1.ISS_DT
+		        , T1.CURR_CD
+		        , DECODE(T1.TARIFF_COST, 0, NULL, T1.TARIFF_COST) TARIFF_COST
+		        , T1.ADJCOST
+		        , T1.AMOUNT
+		        , CASE
+		           WHEN NVL(TARIFF_COST,0) = 0 THEN
+		                NULL
+		           ELSE
+		                ROUND( (AMOUNT - TARIFF_COST) / TARIFF_COST * 100 , 2 )
+		           END  AS DIFF -->>01 DIFF 보정함
+		        , T1.FOML1
+		        , T1.FOML2
+		        , T1.RMK
+		#if (${chargeType} == '00' || ${chargeType} == '01' || ${chargeType} == '02')
+		        , T1.BERTHING_HOUR
+		        , T1.COUNTRY_OF_NP
+		        , T1.NRT
+		        , BKG_GET_TOKEN_FNC(T1.ARR_DEP_TUG_KNT, 1) ARR_TUG_BOT_KNT
+		        , BKG_GET_TOKEN_FNC(T1.ARR_DEP_TUG_KNT, 2) DEP_TUG_BOT_KNT
+		#end
+		#if (${chargeType} == '00' || ${chargeType} == '01' || ${chargeType} == '02' || ${chargeType} == '03')
+		        , T1.GRT
+		        , T1.LAST_PORT
+		#end
+		#if (${chargeType} == '00' || ${chargeType} == '03')
+		        , BKG_GET_TOKEN_FNC(T1.VSL_CNTR_INFO, 1) SUZ_GT_WGT
+		        , BKG_GET_TOKEN_FNC(T1.VSL_CNTR_INFO, 2) MADN_VOY_SUZ_NET_TONG_WGT
+		        , '' AS NIGHT_FLG
+		        , T1.SDR_RT
+		        , T4.SCG_CAR_TIER
+		#end
+		        , DECODE(T3.PORT_CHG_AUD_CHK_CD,'','',(SELECT X.USR_NM FROM COM_USER X WHERE X.USR_ID = T3.UPD_USR_ID)) AS UPD_USR_ID
+		        , DECODE(T3.PORT_CHG_AUD_CHK_CD,'','',(SELECT X.USR_NM FROM COM_USER X WHERE X.USR_ID = T3.UPD_USR_ID)) AS AUDIT_USR_ID
+				, DECODE(T3.PORT_CHG_AUD_CHK_CD,'','',TO_CHAR(T3.UPD_DT, 'YYYY-MM-DD')) AUDIT_DT
+				, T3.PORT_CHG_AUD_RSLT_RMK
+				, T3.PORT_CHG_AUD_RSLT_USR_ID
+				, (SELECT X.USR_NM FROM COM_USER X WHERE X.USR_ID = T3.PORT_CHG_AUD_RSLT_USR_ID) AS PORT_CHG_AUD_RSLT_USR_NM
+		        , T1.PAY_TERM_DYS
+		        , T1.CSR_NO
+		        , T1.PAY_DUE_DT
+		        , T1.AP_PAY_DT
+		        , T1.DIS_INV_OFC_CD
+                , TO_CHAR(T1.UPD_DT,'YYYY-MM-DD') UPD_DT
+                , T3.ATCH_FILE_LNK_ID
+                , T3.EXPN_AUD_RSLT_CD
+				, '' bat_prog_sts_cd -----추가
+				, '' bat_prog_sts_nm -----추가
+
+		FROM    TB_SRC              T1,
+		        EAS_PORT_SO_CFM_INV T3,
+		        TB_VVD_TIER         T4
+		WHERE   T1.ISS_CTY_CD       = T3.ISS_CTY_CD     (+)
+		AND     T1.SO_SEQ           = T3.SO_SEQ         (+)
+		AND     T1.SO_DTL_SEQ       = T3.SO_DTL_SEQ     (+)
+		AND     T1.VSL_CD           = T4.VSL_CD         (+) 
+		AND     T1.SKD_VOY_NO       = T4.VOY_NO         (+)
+		AND     T1.SKD_DIR_CD       = T4.DIR_CD         (+)
+		AND     SUBSTR(T1.YD_CD,1,5)= T4.PORT_CD        (+)
+
+  	    -- Audit Status로 조회시	
+	    #if(${expn_aud_sts_cd} == 'N')	
+	        AND T3.PORT_CHG_AUD_CHK_CD IS NULL	
+	    #elseif(${expn_aud_sts_cd} == 'D') 	
+	        AND T3.PORT_CHG_AUD_CHK_CD IS NOT NULL	
+	    #elseif(${expn_aud_sts_cd} == 'P' || ${expn_aud_sts_cd} == 'E' || ${expn_aud_sts_cd} == 'A')	
+	        AND T3.PORT_CHG_AUD_CHK_CD = @[expn_aud_sts_cd]
+	    #elseif(${expn_aud_sts_cd} == 'I')	
+	        AND T3.EAC_NO IS NOT NULL
+	    #end
+
+		#if ((${diff} =='01' || ${diff} =='02' || ${diff} =='03') && (${diffNum} !=''))
+		     AND (CASE WHEN NVL(TARIFF_COST,0) = 0 THEN 100
+		               ELSE ROUND( (AMOUNT - TARIFF_COST) / TARIFF_COST * 100 , 2 )
+		          END)
+		          #if ( ${diff} =='01') 
+			        <= TO_NUMBER(@[diffNum])
+		          #elseif ( ${diff} =='02') 
+			        = TO_NUMBER(@[diffNum])
+		          #elseif ( ${diff} =='03') 
+			        >= TO_NUMBER(@[diffNum])
+		          #end
+		         )
+		#end
+
+		#if (${if_status} != '')
+		AND     T1.CSR_STS_CD  = @[if_status]
+		#end
+)
+WHERE 1=1 
+-- Auto Audit Status로 조회시  
+#if (${auditStatus}!= '')
+    AND AUTO_AUDIT_FLG = @[auditStatus]
+#end
+#if (${sExpnAudStsCd}!= '')
+	#if (${sExpnAudStsCd} == 'N')
+    	AND SELECT_FLG_TEMP IS NULL
+	#elseif (${sExpnAudStsCd} == 'D')
+		AND SELECT_FLG_TEMP IS NOT NULL
+	#elseif (${sExpnAudStsCd} != 'N' && ${sExpnAudStsCd} != 'D')
+		AND SELECT_FLG_TEMP = @[sExpnAudStsCd]
+	#end
+#end			]]></sql>
+			<params>
+				<param name="rhq" type="12" value="" out="N"/>
+				<param name="divChargeType" type="12" value="" out="N"/>
+				<param name="office" type="12" value="" out="N"/>
+				<param name="period1" type="12" value="" out="N"/>
+				<param name="period2" type="12" value="" out="N"/>
+				<param name="portlChargeType" type="12" value="" out="N"/>
+				<param name="serviceChargeType" type="12" value="" out="N"/>
+				<param name="canalChargeType" type="12" value="" out="N"/>
+				<param name="accountCode" type="12" value="" out="N"/>
+				<param name="costCode" type="12" value="" out="N"/>
+				<param name="portCode" type="12" value="" out="N"/>
+				<param name="yardCd" type="12" value="" out="N"/>
+				<param name="spNo" type="12" value="" out="N"/>
+				<param name="contractType" type="12" value="" out="N"/>
+				<param name="vesselClass" type="12" value="" out="N"/>
+				<param name="vessel" type="12" value="" out="N"/>
+				<param name="remark" type="12" value="" out="N"/>
+				<param name="expn_aud_sts_cd" type="12" value="" out="N"/>
+				<param name="diffNum" type="12" value="" out="N"/>
+				<param name="if_status" type="12" value="" out="N"/>
+				<param name="auditStatus" type="12" value="" out="N"/>
+				<param name="sExpnAudStsCd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

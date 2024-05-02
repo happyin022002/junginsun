@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PerformanceReportDBDAOSearchBlTurnTimeReportRSQL">
+			<desc><![CDATA[PerformanceReportDBDAOSearchBlTurnTimeReportRSQL]]></desc>
+			<sql><![CDATA[
+SELECT
+   TO_CHAR(FLOOR(GRP_TOTAL_ELAPSED_TIME/GRP_QUE_CNT/3600),'00')                AS AVG_ELAPSED_TIME_HH
+ , TO_CHAR(FLOOR(MOD(GRP_TOTAL_ELAPSED_TIME/GRP_QUE_CNT,3600)/60),'00')        AS AVG_ELAPSED_TIME_MI
+ , TO_CHAR(FLOOR(MOD(MOD(GRP_TOTAL_ELAPSED_TIME/GRP_QUE_CNT, 3600),60)),'00')  AS AVG_ELAPSED_TIME_SS
+ , Y.*
+FROM ( SELECT
+					   TO_CHAR(FLOOR(ELAPSED_TIME/3600),'00')         AS ELAPSED_TIME_HH
+					 , TO_CHAR(FLOOR(MOD(ELAPSED_TIME,3600)/60),'00') AS ELAPSED_TIME_MI
+					 , TO_CHAR(MOD(MOD(ELAPSED_TIME, 3600),60),'00')  AS ELAPSED_TIME_SS
+					 , (SELECT  INTG_CD_VAL_DP_DESC 
+							 FROM COM_INTG_CD_DTL 
+							WHERE INTG_CD_ID = 'CD02100' AND INTG_CD_VAL_CTNT = X.DPCS_WRK_GRP_CD)  AS QUEUE
+					 , (SELECT  INTG_CD_VAL_DP_DESC 
+							 FROM COM_INTG_CD_DTL 
+							WHERE INTG_CD_ID = 'CD01577' AND INTG_CD_VAL_CTNT = X.SR_AMD_TP_CD)  AS SR_KIND    
+	  			     , COUNT(DPCS_WRK_GRP_CD) OVER( PARTITION BY DPCS_WRK_GRP_CD,PIC) GRP_QUE_CNT
+                     , SUM(ELAPSED_TIME) OVER     ( PARTITION BY DPCS_WRK_GRP_CD,PIC) GRP_TOTAL_ELAPSED_TIME
+                     , DENSE_RANK() OVER( ORDER BY  DPCS_WRK_GRP_CD,PIC) AS SEQ_NO
+					 , X.*
+					FROM (
+					SELECT /*+ ORDERED *//*+ USE_NL(BKG_SR_CRNT_RQST) */
+							DISTINCT G.DPCS_WRK_GRP_CD AS DPCS_WRK_GRP_CD,
+							H.ATND_USR_ID              AS PIC,
+							SR.SR_AMD_TP_CD            AS SR_AMD_TP_CD,
+							H.BKG_NO,
+							B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD AS VVD_CD,
+							B.POL_CD,
+							B.POD_cD,
+							H.SR_NO SR_NO,
+
+							#if(${pfm_by_queue_cd} == '%')
+								DECODE(G.DPCS_WRK_GRP_CD,'I',SR.INP_WRK_CTNT,'0') 
+							+ DECODE(G.DPCS_WRK_GRP_CD,'R',SR.RT_WRK_CTNT,'0') 
+							+ DECODE(G.DPCS_WRK_GRP_CD,'A',SR.AUD_WRK_CTNT,'0') AS ELAPSED_TIME
+							#else    
+							 TO_NUMBER(DECODE(@[pfm_by_queue_cd],'S', NVL((SELECT WRK_TM_NO FROM BKG_SR_FAX WHERE SR_NO = H.SR_NO AND SR_KND_CD = H.SR_KND_CD),'0'),
+																 'I',SR.INP_WRK_CTNT,
+																 'R',SR.RT_WRK_CTNT,
+																 'A',SR.AUD_WRK_CTNT,'0'))  AS ELAPSED_TIME
+							#end   
+
+							#if(${doc_part} !='Y')
+								,NVL((SELECT 'Y' FROM
+									  BKG_SR_FAX
+									  WHERE SR_NO = SR.SR_NO
+									  AND SR_KND_CD = SR.SR_KND_CD
+									  AND RCV_OFC_CD IN (
+							#if(${doc_part_eu} =='Y')
+							'ANRSO','BRESO','DUSSO','FRASO','FXTBO','HAMSC','LONBB','MANBS','MUCSO','RTMSC','FXTSC','HAMRUG',
+							#end
+							#if(${doc_part_jp} =='Y')
+							'KIJBA','OSASO','TYOSC',
+							#end
+							#if(${doc_part_sw} =='Y')
+							'PENSO','PGUSO','PKGSC','SINSC',
+							#end
+							'$$')),'N') DOC_PART
+							#end
+							#if(${doc_part} =='Y')
+								,'Y' DOC_PART 
+							#end
+							
+					 
+					FROM BKG_SR_HIS H, BKG_SR_CRNT_RQST SR, BKG_BOOKING B, BKG_DPCS_USR_GRP G
+					WHERE 1=1
+						AND SR.BKG_NO = B.BKG_NO
+						AND SR.SR_KND_CD = H.SR_KND_CD
+						AND SR.SR_NO = H.SR_NO
+						AND SR.BKG_NO = H.BKG_NO
+						AND H.ATND_USR_ID = G.USR_ID
+
+						/* PERIOD */
+						AND H.ST_DT >= TO_DATE(@[period_from_dt],'YYYY-MM-DD')
+						AND H.ST_DT <= TO_DATE(@[period_to_dt],'YYYY-MM-DD') +0.999999
+						AND G.DPCS_WRK_GRP_CD IN ('I','R','A')
+						/* VVD */
+						#if(${vvd_cd} != '')
+						AND B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD LIKE '%'||@[vvd_cd]||'%'
+						#end
+						/* BKG NO */
+						#if(${bkg_no} != '')
+						AND B.BKG_NO = @[bkg_no]
+						#end
+
+						/* POL */
+						#if(${pol_cd} != '')
+						AND B.POL_CD = @[pol_cd]
+						#end
+
+						/* POD */
+						#if(${pod_cd} != '')
+						AND B.POD_CD = @[pod_cd]
+						#end
+
+						/* PERFORMANCE_BY_PIC */
+						#if(${pfm_by_pic} != '')
+						AND  H.ATND_USR_ID = @[pfm_by_pic]
+						#end
+						/* BKG OFC */
+						#if(${bkg_ofc_cd} != '')
+						AND B.BKG_OFC_CD = @[bkg_ofc_cd]
+						#end
+
+						/* S/R KIND */
+						#if(${sr_knd_cd} != '' &&  ${sr_knd_cd} != 'L')
+						AND SR.SR_AMD_TP_CD = @[sr_knd_cd]
+						#end
+						
+						/* Performance by Queue */
+						#if(${pfm_by_queue_cd} == '%')
+						    /* D/C ALL*/
+							AND H.SR_STS_CD  IN ('ID', 'RD', 'AD')
+							AND G.DPCS_WRK_GRP_CD IN ('I','R','A')
+						#elseif(${pfm_by_queue_cd} == 'S')
+							/* FONT OFC */
+							AND H.SR_STS_CD = 'ST'
+							AND G.DPCS_WRK_GRP_CD = @[pfm_by_queue_cd]
+						/* 나머지 */
+						#else
+							AND H.SR_STS_CD IN('ID','RD','AD')
+							AND G.DPCS_WRK_GRP_CD = @[pfm_by_queue_cd]
+						#end
+
+					) X
+					WHERE 1=1
+					
+						AND X.DOC_PART ='Y'
+
+					ORDER BY DPCS_WRK_GRP_CD, PIC, BKG_NO, SR_AMD_TP_CD
+       ) Y			]]></sql>
+			<params>
+				<param name="pfm_by_queue_cd" type="12" value="" out="N"/>
+				<param name="period_from_dt" type="12" value="" out="N"/>
+				<param name="period_to_dt" type="12" value="" out="N"/>
+				<param name="vvd_cd" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="pfm_by_pic" type="12" value="" out="N"/>
+				<param name="bkg_ofc_cd" type="12" value="" out="N"/>
+				<param name="sr_knd_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

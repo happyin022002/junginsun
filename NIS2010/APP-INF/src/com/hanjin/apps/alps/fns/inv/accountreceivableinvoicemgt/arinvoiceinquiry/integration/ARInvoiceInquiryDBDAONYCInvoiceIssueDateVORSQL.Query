@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ARInvoiceInquiryDBDAONYCInvoiceIssueDateVORSQL">
+			<desc><![CDATA[   ]]></desc>
+			<sql><![CDATA[
+SELECT CASE WHEN INV_ISS_SND_TP_CD = 'E' THEN (SELECT GLOBALDATE_PKG.TIME_CONV_OFC_FNC('SELHO', EML_DT, A.AR_OFC_CD) FROM DUAL)
+           WHEN INV_ISS_SND_TP_CD = 'F' THEN (SELECT GLOBALDATE_PKG.TIME_CONV_OFC_FNC('SELHO', FAX_DT, A.AR_OFC_CD) FROM DUAL)
+           WHEN INV_ISS_SND_TP_CD = 'P' THEN (SELECT GLOBALDATE_PKG.TIME_CONV_OFC_FNC('SELHO', A.CRE_DT, A.AR_OFC_CD) FROM DUAL)
+        END                                                    AS TIME_SENT
+       , CASE WHEN INV_ISS_SND_TP_CD = 'E' THEN 'e-mail'
+            WHEN INV_ISS_SND_TP_CD = 'F' THEN 'FAX'
+            WHEN INV_ISS_SND_TP_CD = 'P' THEN 'Paper'
+			ELSE 'Unperformed'
+       END AS SENT_BY
+       ,CASE WHEN INV_ISS_SND_TP_CD = 'E' THEN
+             DECODE(NVL(B.EML_PROC_STS_CD, 'N'), '1', 'SENDING', '3', 'SUCCESS',                 'FAIL')
+            WHEN INV_ISS_SND_TP_CD = 'F' THEN DECODE(NVL(C.FAX_PROC_STS_CD, 'N'), '1', 'SENDING', '3', 'SENDING', '5', 'SUCCESS', 'FAIL')
+            WHEN INV_ISS_SND_TP_CD = 'P' THEN 'SUCCESS'
+        END AS SENT_RESULT     
+       ,INV_SND_CUST_NO RECEIVED_NO
+       ,INV_SND_DT TIME_REQUESTED
+       ,D.AR_OFC_CD
+       ,D.IO_BND_CD
+       ,D.REV_TP_CD||D.REV_SRC_CD REV_TYPE
+       ,D.BL_SRC_NO
+       ,D.ACT_CUST_CNT_CD||'-'||LPAD(D.ACT_CUST_SEQ,6,0) CUST_CODE
+       ,D.VSL_CD||D.SKD_VOY_NO||D.SKD_DIR_CD AS VVD
+       ,D.SAIL_ARR_DT
+       ,D.POL_CD
+       ,D.POD_CD
+       ,(SELECT TO_CHAR(ROUND(SUM(CHG_AMT*INV_XCH_RT), 2),'FM999,999,990.00') FROM INV_AR_MN M, INV_AR_CHG CH
+        WHERE M.AR_IF_NO = CH.AR_IF_NO AND M.BL_SRC_NO = A.BL_SRC_NO AND M.AR_OFC_CD = A.AR_OFC_CD
+         AND NVL(M.INV_DELT_DIV_CD, 'N') <> 'Y') TTL_AMT
+        ,A.CRE_USR_ID
+		,TO_CHAR(INV_SND_DT,'YYYYMMDD') AS INV_SND_DT
+		,A.SND_SEQ
+  FROM INV_AR_USA_ISS_SND A
+       ,COM_EML_SND_INFO B
+       ,COM_FAX_SND_INFO C
+       ,INV_AR_MN D
+ WHERE A.INV_SND_NO = B.EML_SND_NO(+)
+   AND A.INV_SND_NO = C.FAX_SND_NO(+)
+   AND A.AR_OFC_CD = D.AR_OFC_CD
+   AND A.BL_SRC_NO = D.BL_SRC_NO
+   AND D.AR_IF_NO = (SELECT SUBSTR(MAX(DECODE(REV_TP_CD,'M','A','B')||AR_IF_NO),2,11) AR_IF_NO 
+                       FROM INV_AR_MN 
+                      WHERE AR_OFC_CD = A.AR_OFC_CD
+                        AND BL_SRC_NO = A.BL_SRC_NO
+                        AND NVL(INV_DELT_DIV_CD, 'N') <> 'Y'
+                        AND BL_INV_CFM_DT IS NOT NULL)
+   --AND A.SND_SEQ = 1
+#if (${bl_src_no} != '')
+		   AND D.BL_SRC_NO = @[bl_src_no]
+#end
+#if ((${iss_fm_dt} != '') && (${iss_to_dt} != ''))
+		   AND TO_CHAR(A.INV_SND_DT,'YYYYMMDD') BETWEEN REPLACE(@[iss_fm_dt],'-','') AND REPLACE(@[iss_to_dt],'-','')
+#end
+#if (${office} != '')
+		   AND D.AR_OFC_CD = @[office] -- OFFICE
+#else 
+		   AND D.AR_OFC_CD IN ( SELECT OFC_CD -- OFC ALL 선택시 적용..  
+		                          FROM MDM_ORGANIZATION
+		                         WHERE AR_HD_QTR_OFC_CD = ( SELECT AR_HD_QTR_OFC_CD
+		                                                      FROM MDM_ORGANIZATION
+		                                                     WHERE OFC_CD = ( SELECT AR_OFC_CD
+		                                                                        FROM MDM_ORGANIZATION
+		                                                                       WHERE OFC_CD = @[user_ofc_cd]))
+		                           AND OFC_CD = AR_OFC_CD )
+#end
+		   AND NVL(D.INV_DELT_DIV_CD, 'N') <> 'Y'
+#if (${cust_cnt_cd} != '')
+		   AND D.ACT_CUST_CNT_CD = @[cust_cnt_cd]
+#end
+#if (${cust_seq} != '')
+		   AND D.ACT_CUST_SEQ = @[cust_seq]
+#end
+#if (${rev_type} != 'A')
+		   AND D.REV_TP_CD = @[rev_type]
+#end
+#if (${vsl_cd} != '')
+		   AND D.VSL_CD = @[vsl_cd]
+#end
+#if (${skd_voy_no} != '')
+		   AND D.SKD_VOY_NO = @[skd_voy_no]
+#end
+#if (${skd_dir_cd} != '')
+		   AND D.SKD_DIR_CD = @[skd_dir_cd]
+#end
+#if (${scope} != '')
+		   AND D.SVC_SCP_CD = @[scope]
+#end
+#if (${bound} != 'A')
+		   AND D.IO_BND_CD = @[bound]
+#if ((${bound} == 'I') && (${port} != ''))
+		   AND D.POD_CD = @[port]
+#elseif ((${bound} == 'O') && (${port} != ''))
+		   AND D.POL_CD = @[port]
+#end
+#else
+#if (${port} != '')
+		   AND ((D.IO_BND_CD = 'I' AND D.POD_CD = @[port]) OR (D.IO_BND_CD = 'O' AND D.POL_CD = @[port]))
+#end
+#end
+#if (${usr_id} != '')
+		   AND A.CRE_USR_ID = @[usr_id]
+#end
+ORDER BY D.AR_OFC_CD, D.BL_SRC_NO, A.SND_SEQ DESC			]]></sql>
+			<params>
+				<param name="bl_src_no" type="12" value="" out="N"/>
+				<param name="iss_fm_dt" type="12" value="" out="N"/>
+				<param name="iss_to_dt" type="12" value="" out="N"/>
+				<param name="office" type="12" value="" out="N"/>
+				<param name="user_ofc_cd" type="12" value="" out="N"/>
+				<param name="cust_cnt_cd" type="12" value="" out="N"/>
+				<param name="cust_seq" type="12" value="" out="N"/>
+				<param name="rev_type" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="scope" type="12" value="" out="N"/>
+				<param name="bound" type="12" value="" out="N"/>
+				<param name="port" type="12" value="" out="N"/>
+				<param name="usr_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

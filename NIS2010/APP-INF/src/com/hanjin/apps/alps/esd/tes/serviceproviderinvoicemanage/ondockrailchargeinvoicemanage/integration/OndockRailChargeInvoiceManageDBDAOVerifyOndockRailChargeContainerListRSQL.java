@@ -1,0 +1,556 @@
+/*=========================================================
+*Copyright(c) 2018 CyberLogitec
+*@FileName : OndockRailChargeInvoiceManageDBDAOVerifyOndockRailChargeContainerListRSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2018.03.07
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2018.03.07 
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esd.tes.serviceproviderinvoicemanage.ondockrailchargeinvoicemanage.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class OndockRailChargeInvoiceManageDBDAOVerifyOndockRailChargeContainerListRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * VerifyOndockRailChargeContainerList
+	  * </pre>
+	  */
+	public OndockRailChargeInvoiceManageDBDAOVerifyOndockRailChargeContainerListRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("tml_so_seq",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("tml_so_ofc_cty_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.esd.tes.serviceproviderinvoicemanage.ondockrailchargeinvoicemanage.integration").append("\n"); 
+		query.append("FileName : OndockRailChargeInvoiceManageDBDAOVerifyOndockRailChargeContainerListRSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT DECODE(A.CNTR_NO,NULL,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.EQ_NO,'CA',B.EQ_NO,C.EQ_NO),A.CNTR_NO) CNTR_NO" ).append("\n"); 
+		query.append("	  ,A.CNTR_TPSZ_CD" ).append("\n"); 
+		query.append("	  ,DECODE(A.CNTR_STY_CD,NULL,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.MT,'CA',B.MT,C.MT),A.CNTR_STY_CD) CNTR_STY_CD " ).append("\n"); 
+		query.append("	  ,TO_CHAR(TO_DATE(DECODE(A.CNTR_NO,NULL,'',A.WRK_DT),'YYYY-MM-DD'),'YYYY-MM-DD') WRK_DT" ).append("\n"); 
+		query.append("	  ,A.VNDR_SEQ" ).append("\n"); 
+		query.append("	  ,A.YD_CD" ).append("\n"); 
+		query.append("	  ,A.RCV_DT" ).append("\n"); 
+		query.append("	  ,A.CNTR_RMK" ).append("\n"); 
+		query.append("--	  ,DECODE(A.DSCR_IND_CD,NULL,'HO',A.DSCR_IND_CD)      DSCR_IND_CD" ).append("\n"); 
+		query.append("--	  ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.VSL_CD,'CA',B.VSL_CD,C.VSL_CD) VSL_CD" ).append("\n"); 
+		query.append("--	  ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.SKD_VOY_NO,'CA',B.SKD_VOY_NO,C.SKD_VOY_NO) SKD_VOY_NO" ).append("\n"); 
+		query.append("--	  ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.SKD_DIR_CD,'CA',B.SKD_DIR_CD,C.SKD_DIR_CD) SKD_DIR_CD" ).append("\n"); 
+		query.append("--	  ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD,'CA',B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD,C.VSL_CD||C.SKD_VOY_NO||C.SKD_DIR_CD) VVD_NO" ).append("\n"); 
+		query.append("--	  ,MAX(B.BKG_NO_SPLIT) BKG_NO_SPLIT" ).append("\n"); 
+		query.append("--	  ,MAX(B.BL_NO_CHK) BL_NO_CHK" ).append("\n"); 
+		query.append("--	  ,MAX(B.BL_NO_TP) BL_NO_TP" ).append("\n"); 
+		query.append("--	  ,DECODE(SUBSTR(A.YD_CD,1,2),'US',MAX(B.BKG_NO),'CA',MAX(B.BKG_NO),MAX(C.BKG_NO)) BKG_NO" ).append("\n"); 
+		query.append("--	  ,DECODE(SUBSTR(A.YD_CD,1,2),'US',MAX(B.BL_NO),'CA',MAX(B.BL_NO),MAX(C.BL_NO)) BL_NO" ).append("\n"); 
+		query.append("--	  ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.RC_FLG,'CA',B.RC_FLG,C.RC_FLG) RC_FLG" ).append("\n"); 
+		query.append("--	  ,DECODE(B.DCGO_CLSS_CD,NULL,'N',DECODE(SUBSTR(A.YD_CD,1,2),'US',B.DCGO_CLSS_CD,'CA',B.DCGO_CLSS_CD,C.DCGO_CLSS_CD)) ASDCGO_CLSS_CD" ).append("\n"); 
+		query.append("--	  ,DECODE(SUBSTR(A.YD_CD,1,2),'US',MAX(TO_CHAR(B.CLM_DT,'YYYY-MM-DD')),'CA',MAX(TO_CHAR(B.CLM_DT,'YYYY-MM-DD')),MAX(TO_CHAR(C.CLM_DT,'YYYY-MM-DD'))) CLM_DT" ).append("\n"); 
+		query.append("--	  ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.RAIL_BIL_DT,'CA',B.RAIL_BIL_DT,C.RAIL_BIL_DT) RAIL_BIL_DT" ).append("\n"); 
+		query.append("--	  ,CASE WHEN SUBSTR(A.DSCR_IND_CD,0,2) IN  ('DD','DP','HO','PD','NH','DB','DF') THEN 'DC' ELSE 'CO' END VRFY_RSLT_IND_CD" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, NULL, 'HO', 'NH', DECODE(D.BKG_NO, NULL, 'NH', 'CO'), A.DSCR_IND_CD) AS DSCR_IND_CD" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.VSL_CD, 'CA', B.VSL_CD, C.VSL_CD), D.VSL_CD), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.VSL_CD, 'CA', B.VSL_CD,C.VSL_CD)) AS VSL_CD" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.SKD_VOY_NO, 'CA', B.SKD_VOY_NO, C.SKD_VOY_NO), D.SKD_VOY_NO), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.SKD_VOY_NO, 'CA', B.SKD_VOY_NO, C.SKD_VOY_NO)) AS SKD_VOY_NO" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.SKD_DIR_CD, 'CA', B.SKD_DIR_CD, C.SKD_DIR_CD), D.SKD_DIR_CD), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.SKD_DIR_CD, 'CA', B.SKD_DIR_CD, C.SKD_DIR_CD)) AS SKD_DIR_CD" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD, 'CA', B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD, C.VSL_CD||C.SKD_VOY_NO||C.SKD_DIR_CD), D.VSL_CD||D.SKD_VOY_NO||D.SKD_DIR_CD), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD, 'CA', B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD, C.VSL_CD||C.SKD_VOY_NO||C.SKD_DIR_CD)) AS VVD_NO" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', MAX(B.BKG_NO), 'CA', MAX(B.BKG_NO), MAX(C.BKG_NO)), MAX(D.BKG_NO)), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', MAX(B.BKG_NO), 'CA', MAX(B.BKG_NO), MAX(C.BKG_NO))) AS BKG_NO" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', MAX(B.BL_NO), 'CA', MAX(B.BL_NO), MAX(C.BL_NO)), MAX(D.BL_NO)), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', MAX(B.BL_NO), 'CA', MAX(B.BL_NO), MAX(C.BL_NO))) AS BL_NO" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.FM_NOD_CD, 'CA', B.FM_NOD_CD, C.FM_NOD_CD), D.POL_NOD_CD) ) AS FM_NOD_CD" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.TO_NOD_CD, 'CA', B.TO_NOD_CD, C.TO_NOD_CD), D.POD_NOD_CD) ) AS TO_NOD_CD" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.RC_FLG, 'CA', B.RC_FLG, C.RC_FLG), D.RC_FLG), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.RC_FLG, 'CA', B.RC_FLG, C.RC_FLG)) AS RC_FLG" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(B.DCGO_CLSS_CD, NULL, 'N', DECODE(SUBSTR(A.YD_CD,1,2), 'US', B.DCGO_CLSS_CD, 'CA', B.DCGO_CLSS_CD, C.DCGO_CLSS_CD)), D.DCGO_CLSS_CD), DECODE(B.DCGO_CLSS_CD, NULL, 'N', DECODE(SUBSTR(A.YD_CD,1,2), 'US', B.DCGO_CLSS_CD, 'CA', B.DCGO_CLSS_CD, C.DCGO_CLSS_CD))) AS DCGO_CLSS_CD" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', MAX(TO_CHAR(B.CLM_DT, 'YYYY-MM-DD')), 'CA', MAX(TO_CHAR(B.CLM_DT, 'YYYY-MM-DD')), MAX(TO_CHAR(C.CLM_DT, 'YYYY-MM-DD'))), MAX(D.CLM_DT)), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', MAX(TO_CHAR(B.CLM_DT, 'YYYY-MM-DD')), 'CA', MAX(TO_CHAR(B.CLM_DT, 'YYYY-MM-DD')), MAX(TO_CHAR(C.CLM_DT, 'YYYY-MM-DD')))) AS CLM_DT" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.RAIL_BIL_DT, 'CA', B.RAIL_BIL_DT, C.RAIL_BIL_DT), D.RAIL_BIL_DT), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.RAIL_BIL_DT, 'CA', B.RAIL_BIL_DT, C.RAIL_BIL_DT)) AS RAIL_BIL_DT" ).append("\n"); 
+		query.append("		, CASE  WHEN SUBSTR(A.DSCR_IND_CD, 0, 2) = 'NH' AND D.BKG_NO IS NULL THEN 'DC'" ).append("\n"); 
+		query.append("				WHEN SUBSTR(A.DSCR_IND_CD, 0, 2) IN ('DD','DP','HO','PD', 'DB','DF') THEN 'DC' ELSE 'CO' END VRFY_RSLT_IND_CD" ).append("\n"); 
+		query.append("		, A.IO_BND_CD" ).append("\n"); 
+		query.append("FROM   ( SELECT P.CNTR_NO        CNTR_NO" ).append("\n"); 
+		query.append("    ,C.CNTR_TPSZ_CD  CNTR_TPSZ_CD" ).append("\n"); 
+		query.append("    ,DB.CNTR_RMK" ).append("\n"); 
+		query.append("    ,P.CNTR_STY_CD   CNTR_STY_CD" ).append("\n"); 
+		query.append("    ,P.VNDR_SEQ      VNDR_SEQ" ).append("\n"); 
+		query.append("    ,P.YD_CD         YD_CD" ).append("\n"); 
+		query.append("    ,P.RCV_DT        RCV_DT" ).append("\n"); 
+		query.append("    ,P.WRK_DT        WRK_DT" ).append("\n"); 
+		query.append("    ,P.TML_SO_TMP_SEQ TML_SO_TMP_SEQ" ).append("\n"); 
+		query.append("	,P.IO_BND_CD" ).append("\n"); 
+		query.append("    ,CASE WHEN LENGTH(DB.CNTR_RMK) > 1 THEN 'DB' -- 'Double Bill' Check" ).append("\n"); 
+		query.append("--                  ,CASE WHEN (( SELECT COUNT(*) -- 'Double Bill' Check" ).append("\n"); 
+		query.append("--                                  FROM    TES_TML_SO_HDR A," ).append("\n"); 
+		query.append("--                                          TES_TML_SO_CNTR_LIST B" ).append("\n"); 
+		query.append("--                                  WHERE  A.TML_SO_OFC_CTY_CD  = B.TML_SO_OFC_CTY_CD" ).append("\n"); 
+		query.append("--                                  AND    A.TML_SO_SEQ         = B.TML_SO_SEQ" ).append("\n"); 
+		query.append("--                                  AND    A.VNDR_SEQ           = P.VNDR_SEQ" ).append("\n"); 
+		query.append("--                                  AND    A.YD_CD              = P.YD_CD" ).append("\n"); 
+		query.append("--                                  AND    A.TML_INV_TP_CD      = 'ON'" ).append("\n"); 
+		query.append("--                                  AND    NVL(A.DELT_FLG,'N')  <> 'Y'" ).append("\n"); 
+		query.append("--                                  AND    B.CNTR_NO            = P.CNTR_NO" ).append("\n"); 
+		query.append("--                                  AND    B.CNTR_STY_CD        = P.CNTR_STY_CD" ).append("\n"); 
+		query.append("--  -- 김기영 부장님 요청으로 double billing checking period를 현재 3개월에서 (+/-)7일로 수정 - 2007.07.16" ).append("\n"); 
+		query.append("--                                  AND    ABS(MONTHS_BETWEEN(P.RCV_DT,A.RCV_DT )) <= 0.25) > 0 ) THEN 'DB'" ).append("\n"); 
+		query.append(" WHEN SUBSTR(P.YD_CD ,1,2) IN ('US','CA') THEN --미주지역의 경우" ).append("\n"); 
+		query.append("     CASE WHEN ( SELECT COUNT(*) -- 'Not in SML Souce' Check" ).append("\n"); 
+		query.append("        FROM   TRS_TRSP_RAIL_BIL_ORD O, BKG_BOOKING B, BKG_DG_CGO D" ).append("\n"); 
+		query.append("               , SCE_COP_HDR H, SCE_COP_DTL D, MDM_ACTIVITY M" ).append("\n"); 
+		query.append("        WHERE  ( O.FM_NOD_CD = P.YD_CD  OR  O.TO_NOD_CD = P.YD_CD )" ).append("\n"); 
+		query.append("                                AND    NVL(D.ACT_DT,D.ESTM_DT) >= ( SELECT TO_DATE(MIN(WRK_DT),'YYYYMMDD') - 7" ).append("\n"); 
+		query.append("                                      FROM   TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("                                      WHERE  TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("                                      AND    TML_SO_SEQ        = @[tml_so_seq] )   -- FILE IMPORT한 WORKING DATE의 MIN 값" ).append("\n"); 
+		query.append("                                AND    NVL(D.ACT_DT,D.ESTM_DT) <= ( SELECT TO_DATE(MAX(WRK_DT),'YYYYMMDD') + 7" ).append("\n"); 
+		query.append("                                      FROM   TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("                                      WHERE  TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("                                      AND    TML_SO_SEQ = @[tml_so_seq] )   -- FILE IMPORT한 WORKING DATE의 MAX 값" ).append("\n"); 
+		query.append("        AND    NVL(O.DELT_FLG,'N') <> 'Y'" ).append("\n"); 
+		query.append("        AND    O.EQ_NO             = P.CNTR_NO" ).append("\n"); 
+		query.append("        AND    O.BKG_NO            = B.BKG_NO(+)" ).append("\n"); 
+		query.append("        --AND    O.BKG_NO_SPLIT      = B.BKG_NO_SPLIT(+)" ).append("\n"); 
+		query.append("        AND    B.BKG_STS_CD IN ('F','W')" ).append("\n"); 
+		query.append("        AND    O.BKG_NO            = D.BKG_NO(+)" ).append("\n"); 
+		query.append("        --AND    O.BKG_NO_SPLIT      = D.BKG_NO_SPLIT(+) " ).append("\n"); 
+		query.append("                                AND    O.COP_NO = H.COP_NO" ).append("\n"); 
+		query.append("                                AND    H.COP_NO = D.COP_NO" ).append("\n"); 
+		query.append("                                AND    D.NOD_CD = P.YD_CD" ).append("\n"); 
+		query.append("                                AND    D.ACT_CD = M.ACT_CD" ).append("\n"); 
+		query.append("                                AND    M.NOD_TP_CD = 'R' --// RAIL RAMP" ).append("\n"); 
+		query.append("                                AND    M.BND_VSKD_SEQ_CD = P.IO_BND_CD --// I/O BND를 받으면 사용가능하다" ).append("\n"); 
+		query.append("                                AND    M.ACT_OP_TP_CD IN ('L','U') --// 미주지역인 경우에는 RAIL RAMP ACT중 LOAD/UNLOAD를 사용하고, 미주지역이 아닌 경우에는 Arrival/Departure를 사용한다." ).append("\n"); 
+		query.append("								AND    P.CNTR_STY_CD = O.CGO_TP_CD" ).append("\n"); 
+		query.append("        ) = 0 THEN 'NH'" ).append("\n"); 
+		query.append("        ELSE" ).append("\n"); 
+		query.append("       (SELECT DECODE(CGO_TP_CD,'F','CO','DDF')" ).append("\n"); 
+		query.append("          FROM(" ).append("\n"); 
+		query.append("         SELECT MAX(O.BKG_NO), --MAX(O.BKG_NO_SPLIT), " ).append("\n"); 
+		query.append("           P.CNTR_NO, O.CGO_TP_CD -- 'Discrepancy by Detail Data' Check" ).append("\n"); 
+		query.append("         FROM   TRS_TRSP_RAIL_BIL_ORD O, BKG_BOOKING B, BKG_DG_CGO D, TES_FILE_IMP_TMP P" ).append("\n"); 
+		query.append("                , SCE_COP_HDR H, SCE_COP_DTL D, MDM_ACTIVITY M" ).append("\n"); 
+		query.append("         WHERE  ( O.FM_NOD_CD = P.YD_CD   OR   O.TO_NOD_CD = P.YD_CD )" ).append("\n"); 
+		query.append("                                    AND    NVL(D.ACT_DT,D.ESTM_DT) >= ( SELECT TO_DATE(MIN(WRK_DT),'YYYYMMDD') - 7" ).append("\n"); 
+		query.append("                                          FROM   TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("                                          WHERE  TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("                                          AND    TML_SO_SEQ        = @[tml_so_seq] )   -- FILE IMPORT한 WORKING DATE의 MIN 값" ).append("\n"); 
+		query.append("                                    AND    NVL(D.ACT_DT,D.ESTM_DT) <= ( SELECT TO_DATE(MAX(WRK_DT),'YYYYMMDD') + 7" ).append("\n"); 
+		query.append("                                          FROM   TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("                                          WHERE  TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("                                          AND    TML_SO_SEQ = @[tml_so_seq] )   -- FILE IMPORT한 WORKING DATE의 MAX 값" ).append("\n"); 
+		query.append("         AND    NVL(O.DELT_FLG,'N') <> 'Y'" ).append("\n"); 
+		query.append("         AND    O.EQ_NO             = P.CNTR_NO" ).append("\n"); 
+		query.append("         AND    O.BKG_NO            = B.BKG_NO(+)" ).append("\n"); 
+		query.append("         --AND    O.BKG_NO_SPLIT      = B.BKG_NO_SPLIT(+)" ).append("\n"); 
+		query.append("         AND    B.BKG_STS_CD IN ('F','W')" ).append("\n"); 
+		query.append("         AND    O.BKG_NO            = D.BKG_NO(+)" ).append("\n"); 
+		query.append("         --AND    O.BKG_NO_SPLIT      = D.BKG_NO_SPLIT(+)" ).append("\n"); 
+		query.append("         AND    P.TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("         AND    P.TML_SO_SEQ = @[tml_so_seq]" ).append("\n"); 
+		query.append("                                    AND    O.COP_NO = H.COP_NO" ).append("\n"); 
+		query.append("                                    AND    H.COP_NO = D.COP_NO" ).append("\n"); 
+		query.append("                                    AND    D.NOD_CD = P.YD_CD" ).append("\n"); 
+		query.append("                                    AND    D.ACT_CD = M.ACT_CD" ).append("\n"); 
+		query.append("                                    AND    M.NOD_TP_CD = 'R' --// RAIL RAMP" ).append("\n"); 
+		query.append("                                    AND    M.BND_VSKD_SEQ_CD = P.IO_BND_CD --// I/O BND를 받으면 사용가능하다" ).append("\n"); 
+		query.append("                                    AND    M.ACT_OP_TP_CD IN ('L','U') --// 미주지역인 경우에는 RAIL RAMP ACT중 LOAD/UNLOAD를 사용하고, 미주지역이 아닌 경우에는 Arrival/Departure를 사용한다." ).append("\n"); 
+		query.append("									AND    P.CNTR_STY_CD = O.CGO_TP_CD" ).append("\n"); 
+		query.append("         GROUP BY P.CNTR_NO, O.CGO_TP_CD )" ).append("\n"); 
+		query.append("        WHERE P.CNTR_NO = CNTR_NO" ).append("\n"); 
+		query.append("        )" ).append("\n"); 
+		query.append("        END" ).append("\n"); 
+		query.append(" WHEN SUBSTR(P.YD_CD ,1,2) NOT IN ('US','CA') THEN --미주지역 외의 경우" ).append("\n"); 
+		query.append("	CASE WHEN ( SELECT COUNT(*) -- 'Not in SML Souce' Check    " ).append("\n"); 
+		query.append("        FROM   TRS_TRSP_SVC_ORD O, BKG_BOOKING B, BKG_DG_CGO D" ).append("\n"); 
+		query.append("               , SCE_COP_HDR H, SCE_COP_DTL D, MDM_ACTIVITY M, TRS_TRSP_WRK_ORD WO" ).append("\n"); 
+		query.append("        WHERE  ( O.FM_NOD_CD = P.YD_CD  OR  O.TO_NOD_CD = P.YD_CD )" ).append("\n"); 
+		query.append("                                AND    NVL(D.ACT_DT,D.ESTM_DT) >= ( SELECT TO_DATE(MIN(WRK_DT),'YYYYMMDD') - 7" ).append("\n"); 
+		query.append("                                      FROM   TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("                                      WHERE  TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("                                      AND    TML_SO_SEQ        = @[tml_so_seq] )   -- FILE IMPORT한 WORKING DATE의 MIN 값" ).append("\n"); 
+		query.append("                                AND    NVL(D.ACT_DT,D.ESTM_DT) <= ( SELECT TO_DATE(MAX(WRK_DT),'YYYYMMDD') + 7" ).append("\n"); 
+		query.append("                                      FROM   TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("                                      WHERE  TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("                                      AND    TML_SO_SEQ = @[tml_so_seq] )   -- FILE IMPORT한 WORKING DATE의 MAX 값" ).append("\n"); 
+		query.append("        AND    NVL(O.DELT_FLG,'N') <> 'Y'" ).append("\n"); 
+		query.append("        AND    O.TRSP_SO_TP_CD      = 'Y'" ).append("\n"); 
+		query.append("        AND    O.TRSP_CRR_MOD_CD    IN ('RD','TR','RT')" ).append("\n"); 
+		query.append("        AND    O.TRSP_COST_DTL_MOD_CD IN ('CY','DR')" ).append("\n"); 
+		query.append("        AND    O.EQ_NO             = P.CNTR_NO" ).append("\n"); 
+		query.append("        AND    O.BKG_NO            = B.BKG_NO(+)" ).append("\n"); 
+		query.append("        --AND    O.BKG_NO_SPLIT      = B.BKG_NO_SPLIT(+)" ).append("\n"); 
+		query.append("        AND    B.BKG_STS_CD IN ('F','W')" ).append("\n"); 
+		query.append("        AND    O.BKG_NO            = D.BKG_NO(+)" ).append("\n"); 
+		query.append("        --AND    O.BKG_NO_SPLIT      = D.BKG_NO_SPLIT(+) " ).append("\n"); 
+		query.append("                                AND    O.COP_NO = H.COP_NO" ).append("\n"); 
+		query.append("                                AND    H.COP_NO = D.COP_NO" ).append("\n"); 
+		query.append("                                AND    D.NOD_CD = P.YD_CD" ).append("\n"); 
+		query.append("                                AND    D.ACT_CD = M.ACT_CD" ).append("\n"); 
+		query.append("								AND    WO.TRSP_WO_OFC_CTY_CD = O.TRSP_WO_OFC_CTY_CD(+)" ).append("\n"); 
+		query.append("								AND    WO.TRSP_WO_SEQ = O.TRSP_WO_SEQ(+)" ).append("\n"); 
+		query.append("                                AND    M.NOD_TP_CD = 'R' --// RAIL RAMP" ).append("\n"); 
+		query.append("                                AND    M.BND_VSKD_SEQ_CD = P.IO_BND_CD --// I/O BND를 받으면 사용가능하다" ).append("\n"); 
+		query.append("                                AND    M.ACT_OP_TP_CD IN ('A','D') --// 미주지역인 경우에는 RAIL RAMP ACT중 LOAD/UNLOAD를 사용하고, 미주지역이 아닌 경우에는 Arrival/Departure를 사용한다." ).append("\n"); 
+		query.append("                                AND    P.CNTR_STY_CD = O.CGO_TP_CD" ).append("\n"); 
+		query.append("        ) = 0 THEN 'NH' " ).append("\n"); 
+		query.append("        else (SELECT DECODE(CGO_TP_CD,'F','CO','DDF')" ).append("\n"); 
+		query.append("          FROM(" ).append("\n"); 
+		query.append("         SELECT MAX(O.BKG_NO), --MAX(O.BKG_NO_SPLIT), " ).append("\n"); 
+		query.append("           P.CNTR_NO, O.CGO_TP_CD -- 'Discrepancy by Detail Data' Check" ).append("\n"); 
+		query.append("         FROM   TRS_TRSP_SVC_ORD O, BKG_BOOKING B, BKG_DG_CGO D, TES_FILE_IMP_TMP P" ).append("\n"); 
+		query.append("                , SCE_COP_HDR H, SCE_COP_DTL D, MDM_ACTIVITY M, TRS_TRSP_WRK_ORD WO" ).append("\n"); 
+		query.append("         WHERE  ( O.FM_NOD_CD = P.YD_CD   OR   O.TO_NOD_CD = P.YD_CD )" ).append("\n"); 
+		query.append("                                    AND    NVL(D.ACT_DT,D.ESTM_DT) >= ( SELECT TO_DATE(MIN(WRK_DT),'YYYYMMDD') - 7" ).append("\n"); 
+		query.append("                                          FROM   TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("                                          WHERE  TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("                                          AND    TML_SO_SEQ        = @[tml_so_seq] )   -- FILE IMPORT한 WORKING DATE의 MIN 값" ).append("\n"); 
+		query.append("                                    AND    NVL(D.ACT_DT,D.ESTM_DT) <= ( SELECT TO_DATE(MAX(WRK_DT),'YYYYMMDD') + 7" ).append("\n"); 
+		query.append("                                          FROM   TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("                                          WHERE  TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("                                          AND    TML_SO_SEQ = @[tml_so_seq] )   -- FILE IMPORT한 WORKING DATE의 MAX 값" ).append("\n"); 
+		query.append("         AND    NVL(O.DELT_FLG,'N') <> 'Y'" ).append("\n"); 
+		query.append("         AND    O.TRSP_SO_TP_CD      = 'Y'" ).append("\n"); 
+		query.append("         AND    O.TRSP_CRR_MOD_CD    IN ('RD','TR','RT')" ).append("\n"); 
+		query.append("         AND    O.TRSP_COST_DTL_MOD_CD IN ('CY','DR')" ).append("\n"); 
+		query.append("         AND    O.EQ_NO             = P.CNTR_NO" ).append("\n"); 
+		query.append("         AND    O.BKG_NO            = B.BKG_NO(+)" ).append("\n"); 
+		query.append("         --AND    O.BKG_NO_SPLIT      = B.BKG_NO_SPLIT(+)" ).append("\n"); 
+		query.append("         AND    B.BKG_STS_CD IN ('F','W')" ).append("\n"); 
+		query.append("         AND    O.BKG_NO            = D.BKG_NO(+)" ).append("\n"); 
+		query.append("         --AND    O.BKG_NO_SPLIT      = D.BKG_NO_SPLIT(+)" ).append("\n"); 
+		query.append("         AND    P.TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("         AND    P.TML_SO_SEQ = @[tml_so_seq]" ).append("\n"); 
+		query.append("                                    AND    O.COP_NO = H.COP_NO" ).append("\n"); 
+		query.append("                                    AND    H.COP_NO = D.COP_NO" ).append("\n"); 
+		query.append("                                    AND    D.NOD_CD = P.YD_CD" ).append("\n"); 
+		query.append("                                    AND    D.ACT_CD = M.ACT_CD" ).append("\n"); 
+		query.append("									AND    WO.TRSP_WO_OFC_CTY_CD = O.TRSP_WO_OFC_CTY_CD(+)" ).append("\n"); 
+		query.append("									AND    WO.TRSP_WO_SEQ = O.TRSP_WO_SEQ(+)" ).append("\n"); 
+		query.append("                                    AND    M.NOD_TP_CD = 'R' --// RAIL RAMP" ).append("\n"); 
+		query.append("                                    AND    M.BND_VSKD_SEQ_CD = P.IO_BND_CD --// I/O BND를 받으면 사용가능하다" ).append("\n"); 
+		query.append("                                    AND    M.ACT_OP_TP_CD IN ('A','D') --// 미주지역인 경우에는 RAIL RAMP ACT중 LOAD/UNLOAD를 사용하고, 미주지역이 아닌 경우에는 Arrival/Departure를 사용한다." ).append("\n"); 
+		query.append("									AND    P.CNTR_STY_CD = O.CGO_TP_CD" ).append("\n"); 
+		query.append("         GROUP BY P.CNTR_NO, O.CGO_TP_CD )" ).append("\n"); 
+		query.append("        WHERE P.CNTR_NO = CNTR_NO" ).append("\n"); 
+		query.append("        )" ).append("\n"); 
+		query.append("        END" ).append("\n"); 
+		query.append("     END  DSCR_IND_CD" ).append("\n"); 
+		query.append("   FROM  TES_FILE_IMP_TMP P, MST_CONTAINER C," ).append("\n"); 
+		query.append("      (SELECT /*+ USE_HASH(A) */ B.CNTR_NO, B.CNTR_STY_CD,'Double billing Inv : '|| MAX(A.INV_NO) CNTR_RMK" ).append("\n"); 
+		query.append("    FROM    TES_FILE_IMP_TMP P, " ).append("\n"); 
+		query.append("      ( SELECT * " ).append("\n"); 
+		query.append("       FROM TES_TML_SO_HDR" ).append("\n"); 
+		query.append("       WHERE UPD_DT>=(SELECT MIN(TO_DATE(WRK_DT,'YYYYMMDD')) FROM TES_FILE_IMP_TMP " ).append("\n"); 
+		query.append("           WHERE TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd] AND TML_SO_SEQ = @[tml_so_seq])" ).append("\n"); 
+		query.append("      ) A, " ).append("\n"); 
+		query.append("      TES_TML_SO_CNTR_LIST B" ).append("\n"); 
+		query.append("    WHERE  P.TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("    AND    P.TML_SO_SEQ = @[tml_so_seq]" ).append("\n"); 
+		query.append("    AND    P.VNDR_SEQ           = A.VNDR_SEQ" ).append("\n"); 
+		query.append("    AND    P.YD_CD              = A.YD_CD" ).append("\n"); 
+		query.append("    AND    A.TML_INV_TP_CD      = 'ON'" ).append("\n"); 
+		query.append("    AND    NVL(A.DELT_FLG,'N')  <> 'Y'" ).append("\n"); 
+		query.append("    AND    A.TML_SO_OFC_CTY_CD  = B.TML_SO_OFC_CTY_CD" ).append("\n"); 
+		query.append("    AND    A.TML_SO_SEQ         = B.TML_SO_SEQ" ).append("\n"); 
+		query.append("    AND    P.CNTR_NO            = B.CNTR_NO" ).append("\n"); 
+		query.append("    AND    P.CNTR_STY_CD        = B.CNTR_STY_CD" ).append("\n"); 
+		query.append("    AND    ABS(MONTHS_BETWEEN(TO_DATE(P.WRK_DT,'YYYYMMDD'),B.RAIL_BIL_DT )) <= 0.25" ).append("\n"); 
+		query.append("    GROUP BY B.CNTR_NO, B.CNTR_STY_CD" ).append("\n"); 
+		query.append("    ) DB" ).append("\n"); 
+		query.append("   WHERE P.TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("   AND   P.TML_SO_SEQ        = @[tml_so_seq]" ).append("\n"); 
+		query.append("   AND   P.CNTR_NO = DB.CNTR_NO(+)" ).append("\n"); 
+		query.append("   AND   P.CNTR_STY_CD = DB.CNTR_STY_CD(+)" ).append("\n"); 
+		query.append("   AND   P.CNTR_NO           = C.CNTR_NO(+) ) A," ).append("\n"); 
+		query.append("    ( SELECT  B.VSL_CD," ).append("\n"); 
+		query.append("     B.SKD_VOY_NO," ).append("\n"); 
+		query.append("     B.SKD_DIR_CD," ).append("\n"); 
+		query.append("     O.BKG_NO," ).append("\n"); 
+		query.append("     --O.BKG_NO_SPLIT," ).append("\n"); 
+		query.append("     B.BL_NO," ).append("\n"); 
+		query.append("     --B.BL_NO_CHK," ).append("\n"); 
+		query.append("     --B.BL_NO_TP," ).append("\n"); 
+		query.append("     O.EQ_NO," ).append("\n"); 
+		query.append("     O.EQ_TPSZ_CD," ).append("\n"); 
+		query.append("     O.CGO_TP_CD MT," ).append("\n"); 
+		query.append("     O.FM_NOD_CD," ).append("\n"); 
+		query.append("     O.TO_NOD_CD," ).append("\n"); 
+		query.append("     P.TML_SO_TMP_SEQ," ).append("\n"); 
+		query.append("     MIN(NVL(SUBSTR(D.IMDG_CLSS_CD,1,1),'N')) DCGO_CLSS_CD," ).append("\n"); 
+		query.append("     NVL(B.RC_FLG,'N') RC_FLG," ).append("\n"); 
+		query.append("     TO_CHAR(TO_DATE(P.WRK_DT,'YYYYMMDD'),'YYYY-MM-DD') WK_DT," ).append("\n"); 
+		query.append("     DECODE(DECODE(SUBSTR(P.YD_CD,1,5),B.POL_CD,'O','I'),'O',MIN(U.ARR_DT),MAX(V.ARR_DT)) CLM_DT," ).append("\n"); 
+		query.append("     TO_CHAR(O.CRE_DT,'YYYY-MM-DD') RAIL_BIL_DT," ).append("\n"); 
+		query.append("     DECODE(TO_CHAR(TO_DATE(P.WRK_DT,'YYYYMMDD'),'DY'),'SAT','SA','SUN','SU','WD') DY," ).append("\n"); 
+		query.append("    ( SELECT COUNT(*)" ).append("\n"); 
+		query.append("      FROM   DMT_HOLIDAY" ).append("\n"); 
+		query.append("      WHERE  TO_CHAR(HOL_DT,'YYYYMMDD') = TO_CHAR(P.WRK_DT,'YYYYMMDD')" ).append("\n"); 
+		query.append("      AND    CNT_CD = P.YD_CD" ).append("\n"); 
+		query.append("       ) HO" ).append("\n"); 
+		query.append("   FROM   TRS_TRSP_RAIL_BIL_ORD O, BKG_BOOKING B, BKG_DG_CGO D, SCE_CLM U, SCE_CLM V, TES_FILE_IMP_TMP P" ).append("\n"); 
+		query.append("                 , SCE_COP_HDR H, SCE_COP_DTL D, MDM_ACTIVITY M" ).append("\n"); 
+		query.append("   WHERE  P.TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("   AND    P.TML_SO_SEQ        = @[tml_so_seq]" ).append("\n"); 
+		query.append("   AND    ( O.FM_NOD_CD = P.YD_CD  OR O.TO_NOD_CD = P.YD_CD )" ).append("\n"); 
+		query.append("   AND    NVL(D.ACT_DT,D.ESTM_DT) >= ( SELECT TO_DATE(MIN(WRK_DT),'YYYYMMDD') - 7" ).append("\n"); 
+		query.append("         FROM   TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("         WHERE  TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("         AND    TML_SO_SEQ        = @[tml_so_seq] )   -- FILE IMPORT한 WORKING DATE의 MIN 값" ).append("\n"); 
+		query.append("   AND    NVL(D.ACT_DT,D.ESTM_DT) <= ( SELECT TO_DATE(MAX(WRK_DT),'YYYYMMDD') + 7" ).append("\n"); 
+		query.append("         FROM   TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("         WHERE  TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("         AND    TML_SO_SEQ = @[tml_so_seq] )   -- FILE IMPORT한 WORKING DATE의 MAX 값" ).append("\n"); 
+		query.append("   AND    NVL(O.DELT_FLG,'N')  <> 'Y'" ).append("\n"); 
+		query.append("   AND    O.EQ_NO              = P.CNTR_NO" ).append("\n"); 
+		query.append("   AND    O.BKG_NO             = B.BKG_NO(+)" ).append("\n"); 
+		query.append("   --AND    O.BKG_NO_SPLIT       = B.BKG_NO_SPLIT(+)" ).append("\n"); 
+		query.append("   AND    B.BKG_STS_CD IN ('F','W')" ).append("\n"); 
+		query.append("   AND    O.BKG_NO             = D.BKG_NO(+)" ).append("\n"); 
+		query.append("   --AND    O.BKG_NO_SPLIT       = D.BKG_NO_SPLIT(+)" ).append("\n"); 
+		query.append("   AND    O.TRSP_SO_OFC_CTY_CD = U.TRSP_SO_OFC_CTY_CD(+)" ).append("\n"); 
+		query.append("   AND    O.TRSP_SO_SEQ        = U.TRSP_SO_SEQ(+)" ).append("\n"); 
+		query.append("   AND    O.EQ_NO              = U.CNTR_NO(+)" ).append("\n"); 
+		query.append("   AND    U.CLM_SGHT_CD(+)     = 'U'" ).append("\n"); 
+		query.append("   AND    O.TRSP_SO_OFC_CTY_CD = V.TRSP_SO_OFC_CTY_CD(+)" ).append("\n"); 
+		query.append("   AND    O.TRSP_SO_SEQ        = V.TRSP_SO_SEQ(+)" ).append("\n"); 
+		query.append("   AND    O.EQ_NO              = V.CNTR_NO(+)" ).append("\n"); 
+		query.append("   AND    V.CLM_SGHT_CD(+)     = 'V'" ).append("\n"); 
+		query.append("   AND    O.COP_NO = H.COP_NO" ).append("\n"); 
+		query.append("   AND    H.COP_NO = D.COP_NO" ).append("\n"); 
+		query.append("   AND    D.NOD_CD = P.YD_CD" ).append("\n"); 
+		query.append("         AND    D.ACT_CD = M.ACT_CD" ).append("\n"); 
+		query.append("         AND    M.NOD_TP_CD = 'R' --// RAIL RAMP" ).append("\n"); 
+		query.append("         AND    M.BND_VSKD_SEQ_CD = P.IO_BND_CD --// I/O BND를 받으면 사용가능하다" ).append("\n"); 
+		query.append("		 --// 미주지역인 경우에는 RAIL RAMP ACT중 LOAD/UNLOAD를 사용하고, 미주지역이 아닌 경우에는 Arrival/Departure를 사용한다." ).append("\n"); 
+		query.append("         AND    (M.ACT_OP_TP_CD = DECODE(SUBSTR(P.YD_CD, 1, 2),'US','L','CA','L','A') OR M.ACT_OP_TP_CD = DECODE(SUBSTR(P.YD_CD, 1, 2),'US','U','CA','U','D'))" ).append("\n"); 
+		query.append("		 AND    P.CNTR_STY_CD = O.CGO_TP_CD" ).append("\n"); 
+		query.append("   GROUP BY B.VSL_CD, B.SKD_VOY_NO, B.SKD_DIR_CD, O.BKG_NO, --O.BKG_NO_SPLIT, " ).append("\n"); 
+		query.append("    B.BL_NO, --B.BL_NO_CHK, B.BL_NO_TP," ).append("\n"); 
+		query.append("      O.EQ_NO, O.EQ_TPSZ_CD, O.CGO_TP_CD, O.FM_NOD_CD, O.TO_NOD_CD, P.TML_SO_TMP_SEQ, P.WRK_DT, P.YD_CD, P.IO_BND_CD," ).append("\n"); 
+		query.append("      B.POL_CD, O.CRE_DT, B.RC_FLG ) B," ).append("\n"); 
+		query.append("(SELECT  B.VSL_CD," ).append("\n"); 
+		query.append("     B.SKD_VOY_NO," ).append("\n"); 
+		query.append("     B.SKD_DIR_CD," ).append("\n"); 
+		query.append("     O.BKG_NO," ).append("\n"); 
+		query.append("     B.BL_NO," ).append("\n"); 
+		query.append("     O.EQ_NO," ).append("\n"); 
+		query.append("     O.EQ_TPSZ_CD," ).append("\n"); 
+		query.append("     O.CGO_TP_CD MT," ).append("\n"); 
+		query.append("     O.FM_NOD_CD," ).append("\n"); 
+		query.append("     O.TO_NOD_CD," ).append("\n"); 
+		query.append("     P.TML_SO_TMP_SEQ," ).append("\n"); 
+		query.append("     MIN(NVL(SUBSTR(D.IMDG_CLSS_CD,1,1),'N')) DCGO_CLSS_CD," ).append("\n"); 
+		query.append("     NVL(B.RC_FLG,'N') RC_FLG," ).append("\n"); 
+		query.append("     TO_CHAR(TO_DATE(P.WRK_DT,'YYYYMMDD'),'YYYY-MM-DD') WK_DT," ).append("\n"); 
+		query.append("     DECODE(DECODE(SUBSTR(P.YD_CD,1,5),B.POL_CD,'O','I'),'O',MIN(U.ARR_DT),MAX(V.ARR_DT)) CLM_DT," ).append("\n"); 
+		query.append("     TO_CHAR(WO.LOCL_CRE_DT,'YYYY-MM-DD') RAIL_BIL_DT," ).append("\n"); 
+		query.append("     DECODE(TO_CHAR(TO_DATE(P.WRK_DT,'YYYYMMDD'),'DY'),'SAT','SA','SUN','SU','WD') DY," ).append("\n"); 
+		query.append("    ( SELECT COUNT(*)" ).append("\n"); 
+		query.append("      FROM   DMT_HOLIDAY" ).append("\n"); 
+		query.append("      WHERE  TO_CHAR(HOL_DT,'YYYYMMDD') = TO_CHAR(P.WRK_DT,'YYYYMMDD')" ).append("\n"); 
+		query.append("      AND    CNT_CD = P.YD_CD" ).append("\n"); 
+		query.append("       ) HO" ).append("\n"); 
+		query.append("   FROM   TRS_TRSP_SVC_ORD O, BKG_BOOKING B, BKG_DG_CGO D, SCE_CLM U, SCE_CLM V, TES_FILE_IMP_TMP P" ).append("\n"); 
+		query.append("                 , SCE_COP_HDR H, SCE_COP_DTL D, MDM_ACTIVITY M, TRS_TRSP_WRK_ORD WO" ).append("\n"); 
+		query.append("   WHERE  P.TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("   AND    P.TML_SO_SEQ        = @[tml_so_seq]" ).append("\n"); 
+		query.append("   AND    ( O.FM_NOD_CD = P.YD_CD  OR O.TO_NOD_CD = P.YD_CD )" ).append("\n"); 
+		query.append("   AND    NVL(D.ACT_DT,D.ESTM_DT) >= ( SELECT TO_DATE(MIN(WRK_DT),'YYYYMMDD') - 7" ).append("\n"); 
+		query.append("         FROM   TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("         WHERE  TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("         AND    TML_SO_SEQ        = @[tml_so_seq] )   -- FILE IMPORT한 WORKING DATE의 MIN 값" ).append("\n"); 
+		query.append("   AND    NVL(D.ACT_DT,D.ESTM_DT) <= ( SELECT TO_DATE(MAX(WRK_DT),'YYYYMMDD') + 7" ).append("\n"); 
+		query.append("         FROM   TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("         WHERE  TML_SO_OFC_CTY_CD = @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("         AND    TML_SO_SEQ = @[tml_so_seq] )   -- FILE IMPORT한 WORKING DATE의 MAX 값" ).append("\n"); 
+		query.append("   AND    NVL(O.DELT_FLG,'N')  <> 'Y'" ).append("\n"); 
+		query.append("   AND    O.EQ_NO              = P.CNTR_NO" ).append("\n"); 
+		query.append("   AND    O.BKG_NO             = B.BKG_NO(+)" ).append("\n"); 
+		query.append("   AND    B.BKG_STS_CD IN ('F','W')" ).append("\n"); 
+		query.append("   AND    O.BKG_NO             = D.BKG_NO(+)" ).append("\n"); 
+		query.append("   AND    O.TRSP_SO_OFC_CTY_CD = U.TRSP_SO_OFC_CTY_CD(+)" ).append("\n"); 
+		query.append("   AND    O.TRSP_SO_SEQ        = U.TRSP_SO_SEQ(+)" ).append("\n"); 
+		query.append("   AND    O.EQ_NO              = U.CNTR_NO(+)" ).append("\n"); 
+		query.append("   AND    U.CLM_SGHT_CD(+)     = 'U'" ).append("\n"); 
+		query.append("   AND    O.TRSP_SO_TP_CD      = 'Y'" ).append("\n"); 
+		query.append("   AND    O.TRSP_CRR_MOD_CD    IN ('RD','TR','RT')" ).append("\n"); 
+		query.append("   AND    O.TRSP_COST_DTL_MOD_CD IN ('CY','DR')" ).append("\n"); 
+		query.append("   AND    O.TRSP_SO_OFC_CTY_CD = V.TRSP_SO_OFC_CTY_CD(+)" ).append("\n"); 
+		query.append("   AND    O.TRSP_SO_SEQ        = V.TRSP_SO_SEQ(+)" ).append("\n"); 
+		query.append("   AND    O.EQ_NO              = V.CNTR_NO(+)" ).append("\n"); 
+		query.append("   AND    V.CLM_SGHT_CD(+)     = 'V'" ).append("\n"); 
+		query.append("   AND    O.COP_NO = H.COP_NO" ).append("\n"); 
+		query.append("   AND    H.COP_NO = D.COP_NO" ).append("\n"); 
+		query.append("   AND    D.NOD_CD = P.YD_CD" ).append("\n"); 
+		query.append("         AND    D.ACT_CD = M.ACT_CD" ).append("\n"); 
+		query.append("		 AND    WO.TRSP_WO_OFC_CTY_CD = O.TRSP_WO_OFC_CTY_CD(+)" ).append("\n"); 
+		query.append("		 AND    WO.TRSP_WO_SEQ = O.TRSP_WO_SEQ(+)" ).append("\n"); 
+		query.append("         AND    M.NOD_TP_CD = 'R' --// RAIL RAMP" ).append("\n"); 
+		query.append("         AND    M.BND_VSKD_SEQ_CD = P.IO_BND_CD --// I/O BND를 받으면 사용가능하다" ).append("\n"); 
+		query.append("         --// 미주지역인 경우에는 RAIL RAMP ACT중 LOAD/UNLOAD를 사용하고, 미주지역이 아닌 경우에는 Arrival/Departure를 사용한다." ).append("\n"); 
+		query.append("         AND    (M.ACT_OP_TP_CD = DECODE(SUBSTR(P.YD_CD, 1, 2),'US','L','CA','L','A') OR M.ACT_OP_TP_CD = DECODE(SUBSTR(P.YD_CD, 1, 2),'US','U','CA','U','D'))" ).append("\n"); 
+		query.append("		 AND    P.CNTR_STY_CD = O.CGO_TP_CD" ).append("\n"); 
+		query.append("   GROUP BY B.VSL_CD, B.SKD_VOY_NO, B.SKD_DIR_CD, O.BKG_NO, B.BL_NO, " ).append("\n"); 
+		query.append("      O.EQ_NO, O.EQ_TPSZ_CD, O.CGO_TP_CD, O.FM_NOD_CD, O.TO_NOD_CD, P.TML_SO_TMP_SEQ, P.WRK_DT, P.YD_CD, P.IO_BND_CD," ).append("\n"); 
+		query.append("      B.POL_CD, WO.LOCL_CRE_DT, B.RC_FLG ) C" ).append("\n"); 
+		query.append("		, (" ).append("\n"); 
+		query.append("		-- 1) CNTR verify 결과가NH" ).append("\n"); 
+		query.append("		-- 2) F/M가Full" ).append("\n"); 
+		query.append("		-- 3) Outbound" ).append("\n"); 
+		query.append("		-- 4) US, CA, MX의 Yard" ).append("\n"); 
+		query.append("		SELECT	H.CNTR_NO" ).append("\n"); 
+		query.append("				, H.BKG_NO" ).append("\n"); 
+		query.append("				, B.BL_NO" ).append("\n"); 
+		query.append("				, B.VSL_CD" ).append("\n"); 
+		query.append("				, B.SKD_VOY_NO" ).append("\n"); 
+		query.append("				, B.SKD_DIR_CD" ).append("\n"); 
+		query.append("				, H.CNTR_TPSZ_CD" ).append("\n"); 
+		query.append("				, B.BKG_CGO_TP_CD AS MT" ).append("\n"); 
+		query.append("				, H.POL_NOD_CD" ).append("\n"); 
+		query.append("				, H.POD_NOD_CD" ).append("\n"); 
+		query.append("				, P.TML_SO_OFC_CTY_CD" ).append("\n"); 
+		query.append("				, P.TML_SO_SEQ" ).append("\n"); 
+		query.append("				, P.TML_SO_TMP_SEQ" ).append("\n"); 
+		query.append("				, MIN(NVL(SUBSTR(DC.IMDG_CLSS_CD, 1, 1), 'N')) AS DCGO_CLSS_CD" ).append("\n"); 
+		query.append("				, NVL(B.RC_FLG, 'N') AS RC_FLG" ).append("\n"); 
+		query.append("				, TO_CHAR(TO_DATE(P.WRK_DT, 'YYYYMMDD'), 'YYYY-MM-DD') AS WK_DT" ).append("\n"); 
+		query.append("				, TO_CHAR(NVL(D.ACT_DT, D.PLN_DT), 'YYYY-MM-DD') AS CLM_DT" ).append("\n"); 
+		query.append("				, TO_CHAR(NVL(D.ACT_DT, D.PLN_DT), 'YYYY-MM-DD') AS RAIL_BIL_DT" ).append("\n"); 
+		query.append("				, DECODE(TO_CHAR(TO_DATE(P.WRK_DT,'YYYYMMDD'),'DY'),'SAT','SA','SUN','SU','WD') DY" ).append("\n"); 
+		query.append("		FROM	SCE_COP_HDR H" ).append("\n"); 
+		query.append("				, SCE_COP_DTL D" ).append("\n"); 
+		query.append("				, BKG_BOOKING B" ).append("\n"); 
+		query.append("				, BKG_DG_CGO DC" ).append("\n"); 
+		query.append("				, TES_FILE_IMP_TMP P" ).append("\n"); 
+		query.append("		WHERE	1	= 1" ).append("\n"); 
+		query.append("		AND		H.COP_NO	= D.COP_NO" ).append("\n"); 
+		query.append("		AND		H.BKG_NO	= DC.BKG_NO(+)" ).append("\n"); 
+		query.append("		AND		H.BKG_NO	= B.BKG_NO" ).append("\n"); 
+		query.append("		AND		H.CNTR_NO	= P.CNTR_NO	" ).append("\n"); 
+		query.append("		AND		TML_SO_OFC_CTY_CD	= @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("		AND		TML_SO_SEQ			= @[tml_so_seq]" ).append("\n"); 
+		query.append("		AND		NVL(D.ACT_DT, D.ESTM_DT)  >= (" ).append("\n"); 
+		query.append("											SELECT	TO_DATE(MIN(WRK_DT), 'YYYYMMDD') - 7" ).append("\n"); 
+		query.append("											FROM	TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("											WHERE	TML_SO_OFC_CTY_CD	= @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("											AND		TML_SO_SEQ			= @[tml_so_seq]" ).append("\n"); 
+		query.append("											)" ).append("\n"); 
+		query.append("		AND		NVL(D.ACT_DT, D.ESTM_DT)  <= (" ).append("\n"); 
+		query.append("											SELECT	TO_DATE(MAX(WRK_DT), 'YYYYMMDD') + 7" ).append("\n"); 
+		query.append("											FROM	TES_FILE_IMP_TMP" ).append("\n"); 
+		query.append("											WHERE	TML_SO_OFC_CTY_CD	= @[tml_so_ofc_cty_cd]" ).append("\n"); 
+		query.append("											AND		TML_SO_SEQ			= @[tml_so_seq]" ).append("\n"); 
+		query.append("											)" ).append("\n"); 
+		query.append("		AND		D.ACT_STS_MAPG_CD		= 'OC'" ).append("\n"); 
+		query.append("--		AND		SUBSTR(H.COP_RAIL_CHK_CD, 0, 1) = 'O' -- RAIL O/B" ).append("\n"); 
+		query.append("--		AND		B.BKG_CGO_TP_CD			= 'F'" ).append("\n"); 
+		query.append("        AND     B.BKG_STS_CD IN ('F','W')" ).append("\n"); 
+		query.append("		AND		SUBSTR(P.YD_CD, 0, 5)	= SUBSTR(D.NOD_CD, 0, 5)" ).append("\n"); 
+		query.append("		AND		SUBSTR(P.YD_CD, 1, 2)	IN ('US', 'CA', 'MX')" ).append("\n"); 
+		query.append("		GROUP BY H.CNTR_NO" ).append("\n"); 
+		query.append("				, H.BKG_NO" ).append("\n"); 
+		query.append("				, B.BL_NO" ).append("\n"); 
+		query.append("				, B.VSL_CD" ).append("\n"); 
+		query.append("				, B.SKD_VOY_NO" ).append("\n"); 
+		query.append("				, B.SKD_DIR_CD" ).append("\n"); 
+		query.append("				, H.CNTR_TPSZ_CD" ).append("\n"); 
+		query.append("				, B.BKG_CGO_TP_CD" ).append("\n"); 
+		query.append("				, H.POL_NOD_CD" ).append("\n"); 
+		query.append("				, H.POD_NOD_CD" ).append("\n"); 
+		query.append("				, P.TML_SO_OFC_CTY_CD" ).append("\n"); 
+		query.append("				, P.TML_SO_SEQ" ).append("\n"); 
+		query.append("				, P.TML_SO_TMP_SEQ" ).append("\n"); 
+		query.append("				, NVL(B.RC_FLG, 'N')" ).append("\n"); 
+		query.append("				, TO_CHAR(TO_DATE(P.WRK_DT,'YYYYMMDD'),'YYYY-MM-DD')" ).append("\n"); 
+		query.append("				, NVL(D.ACT_DT, D.PLN_DT)" ).append("\n"); 
+		query.append("				, DECODE(TO_CHAR(TO_DATE(P.WRK_DT, 'YYYYMMDD'), 'DY'),'SAT','SA','SUN','SU','WD')" ).append("\n"); 
+		query.append("		) D" ).append("\n"); 
+		query.append("WHERE A.CNTR_NO        = B.EQ_NO(+)" ).append("\n"); 
+		query.append("AND   A.TML_SO_TMP_SEQ = B.TML_SO_TMP_SEQ(+)" ).append("\n"); 
+		query.append("AND   A.CNTR_NO        = C.EQ_NO(+)" ).append("\n"); 
+		query.append("AND   A.TML_SO_TMP_SEQ = C.TML_SO_TMP_SEQ(+)" ).append("\n"); 
+		query.append("AND   A.CNTR_NO        = D.CNTR_NO(+)" ).append("\n"); 
+		query.append("AND   A.TML_SO_TMP_SEQ = D.TML_SO_TMP_SEQ(+)" ).append("\n"); 
+		query.append("GROUP BY DECODE(A.CNTR_NO,NULL, DECODE(SUBSTR(A.YD_CD,1,2),'US',B.EQ_NO,'CA',B.EQ_NO,C.EQ_NO),A.CNTR_NO)" ).append("\n"); 
+		query.append("--         ,A.CNTR_TPSZ_CD" ).append("\n"); 
+		query.append("--         ,DECODE(A.CNTR_STY_CD,NULL,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.MT,'CA',B.MT,C.MT),A.CNTR_STY_CD)" ).append("\n"); 
+		query.append("--         ,TO_CHAR(TO_DATE(DECODE(A.CNTR_NO,NULL,'',A.WRK_DT),'YYYY-MM-DD'),'YYYY-MM-DD')" ).append("\n"); 
+		query.append("--         ,A.VNDR_SEQ" ).append("\n"); 
+		query.append("--         ,A.YD_CD" ).append("\n"); 
+		query.append("--         ,A.RCV_DT" ).append("\n"); 
+		query.append("--         ,DECODE(A.DSCR_IND_CD,NULL,'HO',A.DSCR_IND_CD)" ).append("\n"); 
+		query.append("--         ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.VSL_CD,    'CA',B.VSL_CD,C.VSL_CD)" ).append("\n"); 
+		query.append("--         ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.SKD_VOY_NO,'CA',B.SKD_VOY_NO,C.SKD_VOY_NO)" ).append("\n"); 
+		query.append("--         ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.SKD_DIR_CD,'CA',B.SKD_DIR_CD,C.SKD_DIR_CD)" ).append("\n"); 
+		query.append("--         ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD,'CA',B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD,C.VSL_CD||C.SKD_VOY_NO||C.SKD_DIR_CD)" ).append("\n"); 
+		query.append("--         ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.FM_NOD_CD,'CA',B.FM_NOD_CD,C.FM_NOD_CD)   " ).append("\n"); 
+		query.append("--         ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.TO_NOD_CD,'CA',B.TO_NOD_CD,C.TO_NOD_CD)    " ).append("\n"); 
+		query.append("--         ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.RC_FLG,   'CA',B.RC_FLG,C.RC_FLG)" ).append("\n"); 
+		query.append("--         ,DECODE(B.DCGO_CLSS_CD,NULL,'N',B.DCGO_CLSS_CD)" ).append("\n"); 
+		query.append("--         ,DECODE(B.DCGO_CLSS_CD,NULL,'N',DECODE(SUBSTR(A.YD_CD,1,2),'US',B.DCGO_CLSS_CD,'CA',B.DCGO_CLSS_CD,C.DCGO_CLSS_CD))" ).append("\n"); 
+		query.append("--         ,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.RAIL_BIL_DT,'CA',B.RAIL_BIL_DT,C.RAIL_BIL_DT)    " ).append("\n"); 
+		query.append("--         ,A.DSCR_IND_CD, A.CNTR_RMK, A.IO_BND_CD" ).append("\n"); 
+		query.append("		, A.CNTR_TPSZ_CD" ).append("\n"); 
+		query.append("		, DECODE(A.CNTR_STY_CD,NULL,DECODE(SUBSTR(A.YD_CD,1,2),'US',B.MT,'CA',B.MT,C.MT),A.CNTR_STY_CD)" ).append("\n"); 
+		query.append("		, TO_CHAR(TO_DATE(DECODE(A.CNTR_NO,NULL,'',A.WRK_DT),'YYYY-MM-DD'),'YYYY-MM-DD')" ).append("\n"); 
+		query.append("		, A.VNDR_SEQ" ).append("\n"); 
+		query.append("		, A.YD_CD" ).append("\n"); 
+		query.append("		, A.RCV_DT" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, NULL, 'HO', 'NH', DECODE(D.BKG_NO, NULL, 'NH', 'CO'), A.DSCR_IND_CD)" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.VSL_CD, 'CA', B.VSL_CD, C.VSL_CD), D.VSL_CD), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.VSL_CD, 'CA', B.VSL_CD,C.VSL_CD))" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.SKD_VOY_NO, 'CA', B.SKD_VOY_NO, C.SKD_VOY_NO), D.SKD_VOY_NO), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.SKD_VOY_NO, 'CA', B.SKD_VOY_NO, C.SKD_VOY_NO))" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.SKD_DIR_CD, 'CA', B.SKD_DIR_CD, C.SKD_DIR_CD), D.SKD_DIR_CD), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.SKD_DIR_CD, 'CA', B.SKD_DIR_CD, C.SKD_DIR_CD))" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD, 'CA', B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD, C.VSL_CD||C.SKD_VOY_NO||C.SKD_DIR_CD), D.VSL_CD||D.SKD_VOY_NO||D.SKD_DIR_CD), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD, 'CA', B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD, C.VSL_CD||C.SKD_VOY_NO||C.SKD_DIR_CD))" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.FM_NOD_CD, 'CA', B.FM_NOD_CD, C.FM_NOD_CD), D.POL_NOD_CD) )" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.TO_NOD_CD, 'CA', B.TO_NOD_CD, C.TO_NOD_CD), D.POD_NOD_CD) )" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.RC_FLG, 'CA', B.RC_FLG, C.RC_FLG), D.RC_FLG), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.RC_FLG, 'CA', B.RC_FLG, C.RC_FLG))" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(B.DCGO_CLSS_CD, NULL, 'N', DECODE(SUBSTR(A.YD_CD,1,2), 'US', B.DCGO_CLSS_CD, 'CA', B.DCGO_CLSS_CD, C.DCGO_CLSS_CD)), D.DCGO_CLSS_CD), DECODE(B.DCGO_CLSS_CD, NULL, 'N', DECODE(SUBSTR(A.YD_CD,1,2), 'US', B.DCGO_CLSS_CD, 'CA', B.DCGO_CLSS_CD, C.DCGO_CLSS_CD)))" ).append("\n"); 
+		query.append("		, DECODE(A.DSCR_IND_CD, 'NH', DECODE(D.BKG_NO, NULL, DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.RAIL_BIL_DT, 'CA', B.RAIL_BIL_DT, C.RAIL_BIL_DT), D.RAIL_BIL_DT), DECODE(SUBSTR(A.YD_CD, 1, 2), 'US', B.RAIL_BIL_DT, 'CA', B.RAIL_BIL_DT, C.RAIL_BIL_DT))" ).append("\n"); 
+		query.append("		, A.DSCR_IND_CD, A.CNTR_RMK, A.IO_BND_CD, D.BKG_NO" ).append("\n"); 
+
+	}
+}

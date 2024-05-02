@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="RFAReportDBDAORsltSearchRFAListVORSQL">
+			<desc><![CDATA[2011.12.05 이석준 [CHM-201114806-01] Login Office가 XXXBA일경우 RFA No or Proposal No가 해당 BA것 일경우만 S/C Viewing이 가능하거나
+조회 가능토록 수정
+2011.12.26 이석준 [CHM-201115205] RFA or Proposal 조회시 HAMRU 산하의 BA만
+                                                                    자신의 office만 조회 가능할 수 있도록 validation및 logic 수정
+2012.02.08 이석준[CHM-201216074] RFA 조회시 HAMRU 산하의 BA OFFICE들이 상대방 BA RFA 조회 못하게 했던 부분을 다시 원래대로 조회 할 수 있도록 수정
+2015.07.14 전지예 [CHM-201536783] RFA 조회 시 Scope의 Sales Rep이 조회되는걸 대표 Sales Rep이 조회되도록 수정
+2016.05.03 RFA 효율화를 위한 요청 (1차) (CHM-201640671)]]></desc>
+			<sql><![CDATA[
+WITH
+RA  AS
+(SELECT SUB.SVC_SCP_CD
+      , SUB.RFA_NO
+      , SUB.AMDT_SEQ
+      , SUB.PRC_CTRT_CUST_TP_CD
+      , SUB.CTRT_CUST_CNT_CD
+      , SUB.CTRT_CUST_SEQ
+      , SUB.CUST_NM
+      , SUB.PROP_SCP_OFC_CD
+      ---------------------------------------------------------      	  
+      , SUB.SVC_TGT_QTY     -- ADD
+      , SUB.MN_TGT_QTY      -- ADD
+      , SUB.DMDT_FT_TP_NM   -- ADD
+      , SUB.PROP_SREP_NM    -- ADD
+	  ---------------------------------------------------------
+      , SUB.PROP_SREP_CD -- PROP_SREP_CD로 수정
+      , SUB.CTRT_EFF_DT
+      , SUB.CTRT_EXP_DT
+      , SUB.RFA_CTRT_TP_CD
+      , SUB.ACT_CUST_NM
+#if (${act_cust_nm} != '')      
+      , SUB.ACT_CUST_IND  -- actual customer 
+#end
+#if (${cust_nm} != '')      
+      , SUB.CUST_IND      -- customer name 
+#end      
+      , ROW_NUMBER() OVER ( PARTITION BY SVC_SCP_CD, RFA_NO  ORDER BY AMDT_SEQ DESC 
+                            #if (${cust_nm} != '') , CUST_IND DESC #end
+                            #if (${act_cust_nm} != '') , ACT_CUST_IND DESC #end
+                          ) ROW_NUMBER
+  FROM (
+            SELECT  RS.SVC_SCP_CD           ,
+                    RH.RFA_NO               ,
+                    RM.AMDT_SEQ             ,
+                    RM.PRC_CTRT_CUST_TP_CD  , 
+                    RM.CTRT_CUST_CNT_CD     ,
+                    RM.CTRT_CUST_SEQ        ,
+                    ( SELECT A.CUST_LGL_ENG_NM FROM MDM_CUSTOMER A WHERE A.CUST_CNT_CD = RM.CTRT_CUST_CNT_CD AND A.CUST_SEQ = RM.CTRT_CUST_SEQ ) CUST_NM ,
+                    RS.PROP_SCP_OFC_CD      ,
+					----------------------------------------------------------------------------
+                    (CASE WHEN RS.CNTR_LOD_UT_CD = 'T' THEN NVL(RS.TGT_MVC_QTY,0) WHEN RS.CNTR_LOD_UT_CD = 'F' THEN NVL(RS.TGT_MVC_QTY,0) * 2 END) AS SVC_TGT_QTY ,  --RFA 가 TEU 값이면 그대로, FEU 값이면 ×2
+                    (CASE WHEN RM.CNTR_LOD_UT_CD = 'T' THEN NVL(RM.TGT_MVC_QTY,0) WHEN RM.CNTR_LOD_UT_CD = 'F' THEN NVL(RM.TGT_MVC_QTY,0) * 2 END) AS MN_TGT_QTY  ,  --RFA 가 TEU 값이면 그대로, FEU 값이면 ×2
+                    ( SELECT CASE WHEN DMDT_FT_TP_CD = 'E' THEN 'Exception'
+                             ELSE 'Tariff' END 
+                        FROM PRI_RP_DMDT 
+                       WHERE PROP_NO  = RM.PROP_NO
+                         AND AMDT_SEQ = RM.AMDT_SEQ
+                    ) AS DMDT_FT_TP_NM              	, --E EXCEPTION / T TARIFF
+					--(SELECT SREP_NM FROM MDM_SLS_REP WHERE SREP_CD = RM.PROP_SREP_CD) AS PROP_SREP_NM ,
+                    (SELECT USR_NM FROM COM_USER WHERE USR_ID = RM.PROP_USR_ID) AS PROP_SREP_NM , -- Requested by Staff
+                    ----------------------------------------------------------------------------
+                    RM.PROP_SREP_CD         , -- PROP_SREP_CD로 수정
+                    RD.CTRT_EFF_DT          ,
+                    RD.CTRT_EXP_DT          ,
+                    (SELECT INTG_CD_VAL_DP_DESC FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD03493' AND INTG_CD_VAL_CTNT = RM.RFA_CTRT_TP_CD) AS RFA_CTRT_TP_CD,
+                    (SELECT A.CUST_LGL_ENG_NM FROM MDM_CUSTOMER A WHERE A.CUST_CNT_CD = RA.CUST_CNT_CD AND A.CUST_SEQ = RA.CUST_SEQ) AS ACT_CUST_NM
+              #if (${act_cust_nm} != '')
+                  , NVL(( SELECT 1 FROM MDM_CUSTOMER MC
+                                  WHERE RA.PROP_NO       = RS.PROP_NO
+                                    AND RA.AMDT_SEQ      = RS.AMDT_SEQ
+                                    AND RA.SVC_SCP_CD    = RS.SVC_SCP_CD
+                                    AND RA.CUST_CNT_CD   = MC.CUST_CNT_CD 
+                                    AND RA.CUST_SEQ      = MC.CUST_SEQ
+                                    AND RA.SRC_INFO_CD   <> 'AD'
+                                    AND MC.CUST_LGL_ENG_NM LIKE '%' || @[act_cust_nm] || '%'
+                                    AND ROWNUM = 1), 0 ) ACT_CUST_IND         
+              #end
+              #if (${cust_nm} != '')
+                  , NVL(( SELECT 1 FROM MDM_CUSTOMER MC
+                                  WHERE 1=1
+                                    AND RM.CTRT_CUST_CNT_CD   = MC.CUST_CNT_CD 
+                                    AND RM.CTRT_CUST_SEQ      = MC.CUST_SEQ
+                                    AND MC.CUST_LGL_ENG_NM LIKE '%' || @[cust_nm] || '%'
+                                    AND ROWNUM = 1), 0 ) CUST_IND         
+              #end              
+                    FROM    PRI_RP_HDR     RH  ,
+                            PRI_RP_MN      RM  ,
+                            PRI_RP_SCP_MN  RS  , 
+                            PRI_RP_SCP_DUR RD  ,
+                            PRI_RP_SCP_RT_ACT_CUST RA
+                    WHERE   RM.PROP_NO       = RH.PROP_NO
+                    AND     RM.PROP_STS_CD   = 'A'
+                    AND     RS.PROP_NO       = RM.PROP_NO
+                    AND     RS.AMDT_SEQ      = RM.AMDT_SEQ
+                    AND     RD.PROP_NO       = RS.PROP_NO
+                    AND     RD.AMDT_SEQ      = RS.AMDT_SEQ
+                    AND     RD.SVC_SCP_CD    = RS.SVC_SCP_CD
+                    AND     RA.PROP_NO(+)    = RS.PROP_NO
+                    AND     RA.AMDT_SEQ(+)   = RS.AMDT_SEQ
+                    AND     RA.SVC_SCP_CD(+) = RS.SVC_SCP_CD
+                    #if (${rfa_no} != '')
+                    AND     RH.RFA_NO             LIKE @[rfa_no] || '%' -- RFA No
+                    #end
+                    #if (${prc_ctrt_cust_tp_cd} != '') 
+                    AND    RM.PRC_CTRT_CUST_TP_CD = @[prc_ctrt_cust_tp_cd] -- Customer Type
+                    #end
+                    #if (${prop_scp_srep_cd} != '') 
+                    AND    RS.PROP_SCP_SREP_CD    = @[prop_scp_srep_cd] -- S.Rep
+                    #end
+                    #if (${prop_scp_ofc_cd} != '') 
+                    AND    RS.PROP_SCP_OFC_CD     = @[prop_scp_ofc_cd] -- Contract Office
+                    #end
+					
+					#if (${prop_scp_ofc_srep_cd} != '') 
+                    AND    RM.PROP_USR_ID    = @[prop_scp_ofc_srep_cd] -- Requested by Staff(Only Master use) [RFA 효율화를 위한 요청 (1차) (CHM-201640671)]
+                    #end
+
+                    #if (${svc_scp_cd} != '') 
+                    AND    RS.SVC_SCP_CD          = @[svc_scp_cd] -- SVC Scope
+                    #end
+                    AND    RS.EFF_DT              <= TO_DATE(@[exp_dt], 'YYYY-MM-DD') -- Effective Date(To) or Access Date
+                    AND    RS.EXP_DT              >= TO_DATE(@[eff_dt], 'YYYY-MM-DD') -- Effective Date(From) or Access Date
+                    #if (${customer_code} == 'C' && ${ctrt_cust_cnt_cd} != '' && ${ctrt_cust_seq} != '') 
+                    AND    RM.CTRT_CUST_CNT_CD = @[ctrt_cust_cnt_cd] -- Customer code
+                    AND    RM.CTRT_CUST_SEQ    = @[ctrt_cust_seq]    -- Customer code
+                    #end
+                    #if (${customer_code} == 'A' && ${ctrt_cust_cnt_cd} != '' && ${ctrt_cust_seq} != '') -- Actual Customer
+                    AND    EXISTS  (
+                                    SELECT  'X'
+                                    FROM    PRI_RP_SCP_RT_ACT_CUST  AC
+                                    WHERE   AC.PROP_NO     = RS.PROP_NO
+                                    AND     AC.AMDT_SEQ    = RS.AMDT_SEQ
+                                    AND     AC.SVC_SCP_CD  = RS.SVC_SCP_CD
+                                    AND     AC.CUST_CNT_CD = @[ctrt_cust_cnt_cd] -- Actual Customer
+                                    AND     AC.CUST_SEQ    = @[ctrt_cust_seq] -- Actual Customer
+                                   )
+                    #end
+                    #if (${customer_code} == 'F' && ${ctrt_cust_cnt_cd} != '' && ${ctrt_cust_seq} != '')  -- Affiliate
+                    AND    EXISTS  (
+                                    SELECT  'X'
+                                    FROM    PRI_RP_AFIL AF
+                                    WHERE   AF.PROP_NO     = RM.PROP_NO
+                                    AND     AF.AMDT_SEQ    = RM.AMDT_SEQ
+                                    AND     AF.CUST_CNT_CD = @[ctrt_cust_cnt_cd] -- Affiliate
+                                    AND     AF.CUST_SEQ    = @[ctrt_cust_seq] -- Affiliate
+                                   )
+                    #end
+                    #if (${rfa_ctrt_tp_cd} != '')
+                    AND    RM.RFA_CTRT_TP_CD = @[rfa_ctrt_tp_cd] -- RFA Type
+                    #end
+        )SUB
+) 
+SELECT  SVC_SCP_CD          ,
+        RFA_NO              ,
+        LPAD(AMDT_SEQ,3,0) AS AMDT_SEQ ,
+        PRC_CTRT_CUST_TP_CD ,
+		(SELECT INTG_CD_VAL_DP_DESC FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00779' AND INTG_CD_VAL_CTNT = A.PRC_CTRT_CUST_TP_CD) AS PRC_CTRT_CUST_TP_NM ,
+        CTRT_CUST_CNT_CD    ,
+        CTRT_CUST_SEQ       ,
+	    CTRT_CUST_CNT_CD || LPAD(CTRT_CUST_SEQ,6,0) AS CODE ,
+        CUST_NM             ,
+        PROP_SCP_OFC_CD     ,
+        ----------------------------------------------------------------------------
+        SVC_TGT_QTY         ,				-- ADD
+        MN_TGT_QTY          ,				-- ADD
+        DMDT_FT_TP_NM       ,				-- ADD      
+        PROP_SREP_NM AS PROP_SCP_SREP_NM , 	--ADD
+        ----------------------------------------------------------------------------
+        PROP_SREP_CD AS PROP_SCP_SREP_CD, -- PROP_SREP_CD로 수정
+        TO_CHAR(CTRT_EFF_DT,'YYYY-MM-DD') AS CTRT_EFF_DT ,
+        TO_CHAR(CTRT_EXP_DT,'YYYY-MM-DD') AS CTRT_EXP_DT ,
+        RFA_CTRT_TP_CD      ,
+        ACT_CUST_NM         ,
+        '' AS EFF_DT        , -- param
+        '' AS EXP_DT        , -- param
+        '' AS CUSTOMER_CODE   -- param
+FROM    RA  A
+WHERE   NOT EXISTS (
+                     SELECT  'X'
+                     FROM   RA B
+                     WHERE  B.RFA_NO     = A.RFA_NO
+                     AND    B.SVC_SCP_CD = A.SVC_SCP_CD
+                     AND    B.AMDT_SEQ   > A.AMDT_SEQ
+                    )
+ AND    A.ROW_NUMBER = 1
+#if (${cust_nm} != '')
+ AND    A.CUST_IND = 1  -- customer name
+#end 
+#if (${act_cust_nm} != '')
+ AND    A.ACT_CUST_IND = 1  -- actual customer
+#end
+ORDER BY SVC_SCP_CD, RFA_NO			]]></sql>
+			<params>
+				<param name="act_cust_nm" type="12" value="" out="N"/>
+				<param name="cust_nm" type="12" value="" out="N"/>
+				<param name="rfa_no" type="12" value="" out="N"/>
+				<param name="prc_ctrt_cust_tp_cd" type="12" value="" out="N"/>
+				<param name="prop_scp_srep_cd" type="12" value="" out="N"/>
+				<param name="prop_scp_ofc_cd" type="12" value="" out="N"/>
+				<param name="prop_scp_ofc_srep_cd" type="12" value="" out="N"/>
+				<param name="svc_scp_cd" type="12" value="" out="N"/>
+				<param name="exp_dt" type="12" value="" out="N"/>
+				<param name="eff_dt" type="12" value="" out="N"/>
+				<param name="ctrt_cust_cnt_cd" type="12" value="" out="N"/>
+				<param name="ctrt_cust_seq" type="12" value="" out="N"/>
+				<param name="rfa_ctrt_tp_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="JointOperationAccrualCreationDBDAOSearchEstmPerformanceChangeStatusIIRSQL">
+			<desc><![CDATA[FNS_JOO_0089 Estimate Performance Change Status Inquiry]]></desc>
+			<sql><![CDATA[
+WITH GLVVD AS
+(
+	SELECT A.EXE_YRMON
+			, A.REV_YRMON
+			, A.VSL_CD
+			, A.SKD_VOY_NO
+			, A.SKD_DIR_CD
+			, A.REV_DIR_CD
+			, A.ESTM_VVD_TP_CD
+			, A.VVD_TP
+			, A.ESTM_VVD_HDR_ID
+			, A.RLANE_CD
+			, A.ESTM_IOC_DIV_CD
+	FROM 
+		( --A
+			SELECT EXE_YRMON
+					, REV_YRMON
+					, VSL_CD
+					, SKD_VOY_NO
+					, SKD_DIR_CD
+					, REV_DIR_CD
+					, ESTM_VVD_TP_CD
+					, VVD_TP
+					, ESTM_VVD_HDR_ID
+					, RLANE_CD
+					, ESTM_IOC_DIV_CD
+					, ROW_NUMBER() OVER (PARTITION BY VSL_CD, SKD_VOY_NO, SKD_DIR_CD, REV_DIR_CD, RLANE_CD ORDER BY VVD_TP) AS VVD_CNT
+			FROM 
+				(
+					SELECT EXE_YRMON
+							, REV_YRMON
+							, VSL_CD
+							, SKD_VOY_NO
+							, SKD_DIR_CD
+							, REV_DIR_CD
+							, ESTM_VVD_TP_CD
+							, ESTM_IOC_DIV_CD
+							, ESTM_VVD_HDR_ID
+							, RLANE_CD
+							, DECODE(ESTM_VVD_TP_CD, 'RV', '1', 'BV', '2', 'PV', '3') AS VVD_TP
+							, ROW_NUMBER() OVER (PARTITION BY EXE_YRMON, REV_YRMON, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, REV_DIR_CD, RLANE_CD ORDER BY ESTM_IOC_DIV_CD DESC) AS IO_CNT
+					FROM GL_ESTM_REV_VVD
+					WHERE EXE_YRMON = REPLACE(@[exe_yrmon],'-','') -- exe_yrmon
+						AND ESTM_BC_DIV_CD = 'C'
+						AND ESTM_IOC_DIV_CD IN ('OO', 'IA', 'IE', 'IM')
+					UNION ALL
+					SELECT REPLACE(@[exe_yrmon],'-','') AS EXE_YRMON -- exe_yrmon
+							, REV_YRMON
+							, VSL_CD
+							, SKD_VOY_NO
+							, SKD_DIR_CD
+							, REV_DIR_CD
+							, ESTM_VVD_TP_CD
+							, ESTM_IOC_DIV_CD
+							, ESTM_VVD_HDR_ID
+							, RLANE_CD
+							, DECODE(ESTM_VVD_TP_CD, 'RV', '1', 'BV', '2', 'PV', '3') AS VVD_TP
+							, ROW_NUMBER() OVER (PARTITION BY EXE_YRMON, REV_YRMON, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, REV_DIR_CD, RLANE_CD ORDER BY ESTM_IOC_DIV_CD DESC) AS IO_CNT
+					FROM GL_ESTM_REV_VVD
+					WHERE EXE_YRMON = DECODE(SUBSTR(REPLACE(@[exe_yrmon], '-', ''), 1, 4), SUBSTR(REPLACE(@[exe_yrmon], '-', ''), 1, 4), '99999', SUBSTR(REPLACE(@[exe_yrmon], '-', ''), 1, 4)||'12')    -- exe_yrmon
+						AND ESTM_BC_DIV_CD = 'C'
+						AND ESTM_IOC_DIV_CD IN ('OO', 'IA', 'IE', 'IM')
+				)
+			WHERE REV_YRMON BETWEEN REPLACE(@[rev_yrmon_fr], '-', '') AND REPLACE(@[rev_yrmon_to], '-', '') -- target to - from
+				AND IO_CNT = 1
+		) A
+		-- Inter/Ocean중 Ocean 값만 취하기 위해 join건다.
+		, AR_ROUT_RNK B
+	WHERE A.VVD_CNT = 1
+		AND A.RLANE_CD = B.RLANE_CD
+		AND A.ESTM_IOC_DIV_CD = SUBSTR(B.ZN_IOC_CD, 1, 2)
+		--IA, IAO, IE, IEO, IM, IMO 가 있음
+		AND B.ZN_IOC_CD NOT IN ('IA', 'IE', 'IM')
+		AND B.DELT_FLG = 'N'
+)
+
+SELECT EXE_YRMON, REV_YRMON, JO_CRR_CD, VVD, RLANE_CD, JO_STL_JB_CD, ACCT_CD, 
+		ESTM1_BSA_QTY, ESTM1_BSA_SLT_PRC, ESTM1_AMT, ESTM2_BSA_QTY, ESTM2_BSA_SLT_PRC, ESTM2_AMT, CAL_AMT, CHANGE_ITEM, 
+		JB_EXE_YRMON
+FROM (
+		SELECT A.EXE_YRMON, A.REV_YRMON, A.JO_CRR_CD, A.VVD, A.RLANE_CD, DECODE(A.JO_STL_JB_CD, '101', 'JOINT OPERATION', '102', 'LEASE', '103', 'ADDITIONAL') JO_STL_JB_CD, A.ACCT_CD,
+			A.BSA_QTY ESTM1_BSA_QTY, A.BSA_SLT_PRC ESTM1_BSA_SLT_PRC, ROUND(A.ESTM_AMT, 2) ESTM1_AMT, B.BSA_QTY ESTM2_BSA_QTY, B.BSA_SLT_PRC ESTM2_BSA_SLT_PRC, ROUND(B.ESTM_AMT, 2) ESTM2_AMT, NVL(ROUND(B.ESTM_AMT, 2), 0) - NVL(ROUND(A.ESTM_AMT, 2), 0)  CAL_AMT,
+			CASE WHEN A.BSA_QTY = B.BSA_QTY AND A.BSA_SLT_PRC <> B.BSA_SLT_PRC THEN 'Price'
+				WHEN A.BSA_QTY <> B.BSA_QTY AND A.BSA_SLT_PRC = B.BSA_SLT_PRC THEN 'BSA'
+				WHEN A.BSA_QTY <> B.BSA_QTY AND A.BSA_SLT_PRC <> B.BSA_SLT_PRC THEN 'BSA, Price'
+				WHEN  NVL(B.BSA_QTY, 0) = 0 THEN 'C, V, BT'
+			END CHANGE_ITEM ,
+			REPLACE(@[exe_yrmon],'-','') JB_EXE_YRMON   -- exe_yrmon
+		FROM
+			( 
+				SELECT T.EXE_YRMON, T.REV_YRMON, T.JO_CRR_CD, T.VSL_CD||T.SKD_VOY_NO||T.SKD_DIR_CD||T.REV_DIR_CD  VVD, T.RLANE_CD,
+						T.ACCT_CD, T.JO_STL_JB_CD, T.BSA_QTY, T.BSA_SLT_PRC, T.ESTM_AMT
+				FROM JOO_ESTM_ACT_RSLT T
+				WHERE 1 = 1
+					AND T.EXE_YRMON	= REPLACE(@[exe_yrmon],'-','')     -- FROM 년월		-- exe_yrmon
+					AND T.REV_YRMON	BETWEEN REPLACE(@[rev_yrmon_fr], '-', '') AND REPLACE(@[rev_yrmon_to], '-', '')     -- From ~ To
+					AND T.ACCT_CD IN ('510921', '411221')	-- Rev/Exp
+			)  A,
+			( 
+				SELECT A.COST_YRMON AS REV_YRMON, A.VSL_CD||A.SKD_VOY_NO||A.DIR_CD||D.REV_DIR_CD VVD,
+					/* ,A.VSL_CD
+						,A.SKD_VOY_NO
+						,A.DIR_CD AS SKD_DIR_CD*/
+					A.RLANE_CD
+					, C.CRR_CD AS JO_CRR_CD
+					, CASE WHEN C.BSA_OP_JB_CD IN ('000','001')
+						THEN '101'
+						WHEN C.BSA_OP_JB_CD IN ('002','003')
+						THEN '102'
+						WHEN C.BSA_OP_JB_CD IN ('004','005')
+						THEN '103'
+					END AS JO_STL_JB_CD
+					, CASE WHEN C.BSA_OP_JB_CD IN ('001','002','004')
+						THEN 'R'
+						WHEN C.BSA_OP_JB_CD IN ('000','003','005')
+						THEN 'E'
+					END AS RE_DIVR_CD
+					,ROUND(C.SLT_PRC_CAPA, 2) AS BSA_SLT_PRC
+					,C.CRR_BSA_CAPA AS BSA_QTY
+					,ROUND(C.CRR_PERF_AMT, 2) AS ESTM_AMT
+				FROM MAS_MON_VVD A
+					,BSA_VVD_MST B
+					,BSA_VVD_CRR_PERF C
+					,GLVVD D
+				WHERE 1= 1 
+					AND A.VSL_CD			= B.VSL_CD
+					AND A.SKD_VOY_NO		= B.SKD_VOY_NO
+					AND A.DIR_CD			= B.SKD_DIR_CD
+					AND A.TRD_CD			= B.TRD_CD
+					AND A.RLANE_CD			= B.RLANE_CD
+					AND A.VSL_CD			= C.VSL_CD
+					AND A.SKD_VOY_NO		= C.SKD_VOY_NO
+					AND A.DIR_CD			= C.SKD_DIR_CD
+					AND A.TRD_CD			= C.TRD_CD
+					AND A.RLANE_CD			= C.RLANE_CD
+					AND C.BSA_OP_JB_CD IN ('000','001','002','003','004','005')
+					AND C.CRR_CD <> 'SML'
+					AND A.DELT_FLG			= 'N'
+					AND NOT(NVL(C.CRR_BSA_CAPA,0) = 0 AND NVL(C.SLT_PRC_CAPA,0) = 0 )
+					AND D.VSL_CD			= B.VSL_CD
+					AND D.SKD_VOY_NO		= B.SKD_VOY_NO
+					AND D.SKD_DIR_CD		= B.SKD_DIR_CD
+					AND D.RLANE_CD			= B.RLANE_CD
+					AND D.EXE_YRMON = REPLACE(@[exe_yrmon],'-','')   -- 추가
+					AND D.REV_YRMON BETWEEN REPLACE(@[rev_yrmon_fr], '-', '') AND REPLACE(@[rev_yrmon_to], '-', '')  -- 추가   FROM ~` tO
+
+
+				)  B, 
+			MDM_REV_LANE M
+		WHERE 1 = 1
+			AND A.REV_YRMON			= B.REV_YRMON (+)
+			#if (${jo_crr_cd} != '')
+			AND A.JO_CRR_CD			=  @[jo_crr_cd]
+			#end
+			AND A.JO_CRR_CD			= B.JO_CRR_CD (+)
+			#if (${vvd} != '')
+			AND A.VVD 				LIKE @[vvd]||'%'
+			#end
+			AND A.VVD				= B.VVD (+)
+			#if (${jo_stl_jb_cd} != '')
+			AND A.JO_STL_JB_CD 		= @[jo_stl_jb_cd]
+			#end
+			AND A.JO_STL_JB_CD		= B.JO_STL_JB_CD (+)
+			#if (${rlane_cd} != '')
+			AND A.RLANE_CD  		= @[rlane_cd]
+			#end
+			AND A.RLANE_CD			= B.RLANE_CD (+)
+			AND M.RLANE_CD			= A.RLANE_CD	-- Lane
+			#if (${trd_cd} != '')
+			AND M.REP_TRD_CD    = @[trd_cd]	-- Trade
+			#end
+			AND DECODE(A.ACCT_CD, '510921', 'E', 'R')  =   B.RE_DIVR_CD  (+)
+
+	UNION ALL
+
+		SELECT A.EXE_YRMON, A.REV_YRMON, A.JO_CRR_CD, A.VVD, A.RLANE_CD, DECODE(A.JO_STL_JB_CD, '101', 'JOINT OPERATION', '102', 'LEASE', '103', 'ADDITIONAL') JO_STL_JB_CD,  DECODE(A.RE_DIVR_CD, 'R', '411221','510921') ACCT_CD,
+				B.BSA_QTY ESTM1_BSA_QTY, B.BSA_SLT_PRC ESTM1_BSA_SLT_PRC, ROUND(B.ESTM_AMT, 2) ESTM1_AMT, A.BSA_QTY ESTM2_BSA_QTY, A.BSA_SLT_PRC ESTM2_BSA_SLT_PRC, ROUND(A.ESTM_AMT, 2) ESTM2_AMT, NVL(ROUND(A.ESTM_AMT, 2), 0) - NVL(ROUND(B.ESTM_AMT, 2), 0)  CAL_AMT,
+			CASE WHEN A.BSA_QTY = B.BSA_QTY AND A.BSA_SLT_PRC <> B.BSA_SLT_PRC THEN 'Price'
+				WHEN A.BSA_QTY <> B.BSA_QTY AND A.BSA_SLT_PRC = B.BSA_SLT_PRC THEN 'BSA'
+				WHEN A.BSA_QTY <> B.BSA_QTY AND A.BSA_SLT_PRC <> B.BSA_SLT_PRC THEN 'BSA, Price'
+				WHEN  NVL(B.BSA_QTY, 0) = 0 THEN 'C, V, BT'
+			END CHANGE_ITEM ,
+			REPLACE(@[exe_yrmon],'-','') JB_EXE_YRMON   -- exe_yrmon
+		FROM
+			( 
+				SELECT A.COST_YRMON AS EXE_YRMON, A.COST_YRMON AS REV_YRMON, A.VSL_CD||A.SKD_VOY_NO||A.DIR_CD||D.REV_DIR_CD VVD,
+					/* ,A.VSL_CD
+					,A.SKD_VOY_NO
+					,A.DIR_CD AS SKD_DIR_CD*/
+					A.RLANE_CD
+					, C.CRR_CD AS JO_CRR_CD
+					, CASE WHEN C.BSA_OP_JB_CD IN ('000','001')
+							THEN '101'
+							WHEN C.BSA_OP_JB_CD IN ('002','003')
+							THEN '102'
+							WHEN C.BSA_OP_JB_CD IN ('004','005')
+							THEN '103'
+					END AS JO_STL_JB_CD
+					, CASE WHEN C.BSA_OP_JB_CD IN ('001','002','004')
+							THEN 'R'
+							WHEN C.BSA_OP_JB_CD IN ('000','003','005')
+							THEN 'E'
+					END AS RE_DIVR_CD
+					, ROUND(C.SLT_PRC_CAPA, 2) AS BSA_SLT_PRC
+					, C.CRR_BSA_CAPA AS BSA_QTY
+					, ROUND(C.CRR_PERF_AMT, 2) AS ESTM_AMT
+				FROM  MAS_MON_VVD A
+					, BSA_VVD_MST B
+					, BSA_VVD_CRR_PERF C
+					, GLVVD D
+				WHERE 1= 1 
+					AND A.VSL_CD			= B.VSL_CD
+		            AND A.SKD_VOY_NO		= B.SKD_VOY_NO
+		            AND A.DIR_CD			= B.SKD_DIR_CD
+		            AND A.TRD_CD			= B.TRD_CD
+		            AND A.RLANE_CD			= B.RLANE_CD
+		            AND A.VSL_CD			= C.VSL_CD
+		            AND A.SKD_VOY_NO		= C.SKD_VOY_NO
+		            AND A.DIR_CD			= C.SKD_DIR_CD
+		            AND A.TRD_CD			= C.TRD_CD
+		            AND A.RLANE_CD			= C.RLANE_CD
+		            AND C.BSA_OP_JB_CD IN ('000','001','002','003','004','005')
+		            AND C.CRR_CD <> 'SML'
+		            AND A.DELT_FLG = 'N'
+		            AND NOT(NVL(C.CRR_BSA_CAPA,0) = 0 AND NVL(C.SLT_PRC_CAPA,0) = 0 )
+		            AND D.VSL_CD			= B.VSL_CD
+		            AND D.SKD_VOY_NO		= B.SKD_VOY_NO
+		            AND D.SKD_DIR_CD		= B.SKD_DIR_CD
+		            AND D.RLANE_CD			= B.RLANE_CD
+					AND D.EXE_YRMON = REPLACE(@[exe_yrmon],'-','')   -- 추가
+					AND D.REV_YRMON BETWEEN REPLACE(@[rev_yrmon_fr], '-', '') AND REPLACE(@[rev_yrmon_to], '-', '')  -- 추가   FROM ~` tO
+
+			) A
+			,(
+				SELECT T.EXE_YRMON, T.REV_YRMON, T.JO_CRR_CD, T.VSL_CD||T.SKD_VOY_NO||T.SKD_DIR_CD||T.REV_DIR_CD VVD, T.RLANE_CD,
+						T.ACCT_CD, T.JO_STL_JB_CD, T.BSA_QTY, T.BSA_SLT_PRC, T.ESTM_AMT
+				FROM JOO_ESTM_ACT_RSLT T
+				WHERE 1 = 1
+					AND T.EXE_YRMON	= REPLACE(@[exe_yrmon],'-','')	-- FROM 년월		  -- exe_yrmon
+			        AND T.REV_YRMON	BETWEEN REPLACE(@[rev_yrmon_fr], '-', '') AND REPLACE(@[rev_yrmon_to], '-', '') -- 추가   FROM ~` tO
+					AND T.ACCT_CD IN ('510921', '411221')	-- Rev/Exp
+			) B
+			, MDM_REV_LANE M
+		WHERE 1 = 1
+			--AND A.REV_YRMON		=  B.REV_YRMON (+)
+			#if (${jo_crr_cd} != '')
+			AND A.JO_CRR_CD			=  @[jo_crr_cd]
+			#end
+			AND A.JO_CRR_CD			= B.JO_CRR_CD (+)
+			#if (${vvd} != '')
+			AND A.VVD 				LIKE @[vvd]||'%'
+			#end
+			AND A.VVD				= B.VVD (+)
+			#if (${jo_stl_jb_cd} != '')
+			AND A.JO_STL_JB_CD 		= @[jo_stl_jb_cd]
+			#end
+			AND A.JO_STL_JB_CD		= B.JO_STL_JB_CD (+)
+			#if (${rlane_cd} != '')
+			AND A.RLANE_CD  		= @[rlane_cd]
+			#end
+			AND A.RLANE_CD			=  B.RLANE_CD (+)
+			AND M.RLANE_CD			=  A.RLANE_CD	-- Lane
+			#if (${trd_cd} != '')
+			AND M.REP_TRD_CD    = @[trd_cd]	-- Trade
+			#end
+			AND NVL(B.BSA_QTY  , 0)	= 0
+			AND DECODE(A.RE_DIVR_CD, 'R', '411221','510921')  =  B.ACCT_CD (+)
+	)
+
+WHERE 1=1
+#if (${re_divr_cd} != 'A')
+AND ACCT_CD = DECODE(@[re_divr_cd],'R','411221','E','510921')	-- Rev/Exp
+#end
+
+#if(${changed_option} == 'Y')
+AND CHANGE_ITEM IS NOT NULL
+#end
+
+
+ORDER BY REV_YRMON ASC, JO_CRR_CD ASC, VVD ASC, RLANE_CD ASC, ACCT_CD ASC			]]></sql>
+			<params>
+				<param name="exe_yrmon" type="12" value="" out="N"/>
+				<param name="rev_yrmon_fr" type="12" value="" out="N"/>
+				<param name="rev_yrmon_to" type="12" value="" out="N"/>
+				<param name="jo_crr_cd" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="jo_stl_jb_cd" type="12" value="" out="N"/>
+				<param name="rlane_cd" type="12" value="" out="N"/>
+				<param name="trd_cd" type="12" value="" out="N"/>
+				<param name="re_divr_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

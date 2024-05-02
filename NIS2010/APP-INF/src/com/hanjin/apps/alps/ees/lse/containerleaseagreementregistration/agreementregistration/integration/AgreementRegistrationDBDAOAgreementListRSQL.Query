@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AgreementRegistrationDBDAOAgreementListRSQL">
+			<desc><![CDATA[Lease Agreement List Search
+2010.12.02 박명신 [CHM-201007443-01] Ref No. 추가
+2010.12.09 남궁진호 [CHM-201007442-01] LT일때 Per-Diem LCC로 변경]]></desc>
+			<sql><![CDATA[
+SELECT DD.LSTM_CD
+     , NVL(SUBSTR(DECODE(VNDR.VNDR_ABBR_NM,'SEACO','SCO','SEACUBE','SCU',VNDR.VNDR_ABBR_NM), 0, 3), 'S.TTL') AS VNDR_ABBR_NM
+     , DD.AGMT_CTY_CD || LPAD(DD.AGMT_SEQ, 6, '0') AS AGMT_NO
+     , AGMT.LSE_CTRT_NO                            AS LSE_CTRT_NO
+     , AGMT.REF_NO                                 AS REF_NO
+     , TO_CHAR(VER.EFF_DT,'YYYYMMDD')              AS EFF_DT
+     , TO_CHAR(AGMT.LST_EXP_DT,'YYYYMMDD')         AS EXP_DT
+     , DECODE(DD.TYPE_CD, 1, 'Contract QTY', 2, 'Lease Out', 3, 'Current QTY', 4, 'Per-Diem') AS TYPE_NM
+     , SUM(DECODE(DD.CNTR_TPSZ_CD, 'S.TTL', DD.VAL, 0)) AS TTL
+#foreach($key IN ${cntr_tpsz_cd_seq})
+#set ($col_name='CNTR'+$velocityCount+'_QTY')
+     , SUM(DECODE(DD.CNTR_TPSZ_CD, '$key', DD.VAL, 0)) AS $col_name
+#end
+FROM   (
+         SELECT CC.LSTM_CD
+              , CC.VNDR_SEQ                   AS VNDR_SEQ
+              , CC.AGMT_CTY_CD                AS AGMT_CTY_CD
+              , CC.AGMT_SEQ                   AS AGMT_SEQ
+              , NVL(CC.CNTR_TPSZ_CD, 'S.TTL') AS CNTR_TPSZ_CD
+              , TP.TYPE_CD
+              , DECODE(TP.TYPE_CD, 1, CC.CTRT_CNT, 2, CC.LSO_CNT, 3, CC.CURR_CNT, DECODE(CC.CURR_CNT, 0, 0, ROUND(CC.SUM_PDM_AMT/CC.CURR_CNT, 2))) AS VAL
+              , DECODE(GRP_ID, 1, 0, 15, 14, GRP_ID) AS GRP_ID
+         FROM   (
+                  SELECT BBB.LSTM_CD
+                       , BBB.VNDR_SEQ
+                       , BBB.AGMT_CTY_CD
+                       , BBB.AGMT_SEQ
+                       , BBB.CNTR_TPSZ_CD
+                       , SUM(BBB.CTRT_CNT) AS CTRT_CNT
+                       , SUM(BBB.LSO_CNT)  AS LSO_CNT
+                       , SUM(BBB.CURR_CNT) AS CURR_CNT
+                       , SUM(BBB.PDM_AMT)  AS SUM_PDM_AMT
+                       , GROUPING_ID ( BBB.LSTM_CD
+                                     , BBB.VNDR_SEQ
+                                     , BBB.AGMT_CTY_CD
+                                     , BBB.AGMT_SEQ
+                                     , BBB.CNTR_TPSZ_CD ) GRP_ID
+                  FROM   (
+                           SELECT BB.LSTM_CD
+                                , BB.VNDR_SEQ
+                                , BB.AGMT_CTY_CD
+                                , BB.AGMT_SEQ
+                                , BB.CNTR_TPSZ_CD
+                                , BB.LSO_CNT
+                                , BB.CURR_CNT
+                                , BB.PDM_AMT
+                                , NVL(GEN.AGMT_CHG_VAL, 0) AS CTRT_CNT
+                           FROM   (
+                                    SELECT AA.LSTM_CD
+                                         , AA.VNDR_SEQ
+                                         , AA.AGMT_CTY_CD
+                                         , AA.AGMT_SEQ
+                                         , AA.CNTR_TPSZ_CD
+                                         , SUM(AA.LSO_CNT)          AS LSO_CNT
+                                         , SUM(AA.CURR_CNT)         AS CURR_CNT
+                                         , SUM(NVL(AA.CURR_CNT*PDM.N1ST_CHG_AMT, 0)) AS PDM_AMT
+                                         , ROW_NUMBER() OVER ( PARTITION BY AA.AGMT_CTY_CD
+                                                                          , AA.AGMT_SEQ
+                                                                          , AA.CNTR_TPSZ_CD
+                                                               ORDER     BY AA.AGMT_CTY_CD
+                                                                          , AA.AGMT_SEQ
+                                                                          , AA.CNTR_TPSZ_CD
+                                                                          , DECODE(AA.LSTM_CD, 'LT', 1, PDM.AGMT_CHG_VAL) DESC ) RNK
+                                    FROM   LSE_AGMT_RT      PDM
+                                         , (
+                                            SELECT DD.LSTM_CD
+                                                 , DD.VNDR_SEQ
+                                                 , DD.AGMT_CTY_CD
+                                                 , DD.AGMT_SEQ
+                                                 , DD.CNTR_TPSZ_CD
+                                                 , DD.LOC_CD
+                                                 , DD.LSI_CNT
+                                                 , DD.LSO_CNT
+                                                 , DD.CURR_CNT
+                                            FROM   (
+                                                     SELECT CC.LSTM_CD
+                                                          , CC.VNDR_SEQ
+                                                          , CC.AGMT_CTY_CD
+                                                          , CC.AGMT_SEQ
+                                                          , CC.CNTR_TPSZ_CD
+                                                          , CC.LOC_CD
+                                                          , CC.LSI_CNT
+                                                          , CC.LSO_CNT
+                                                          , CC.CURR_CNT
+                                                          , SUM(CC.CURR_CNT) OVER ( PARTITION BY CC.LSTM_CD
+                                                                                            , CC.VNDR_SEQ
+                                                                                            , CC.AGMT_CTY_CD
+                                                                                            , CC.AGMT_SEQ ) AS TTL_CURR_CNT
+                                                     FROM   (
+                                                              SELECT /*+ USE_NL(AGMT LSI LSO CNTR YARD LOC) */
+                                                                     AGMT.LSTM_CD
+                                                                   , AGMT.VNDR_SEQ
+                                                                   , AGMT.AGMT_CTY_CD
+                                                                   , AGMT.AGMT_SEQ
+                                                                   , CNTR.CNTR_TPSZ_CD
+                                                                   , COUNT(LSI.CNTR_STS_EVNT_DT) AS LSI_CNT
+                                                                   , COUNT(LSO.CNTR_STS_EVNT_DT) AS LSO_CNT
+                                                                   , COUNT(LSI.CNTR_STS_EVNT_DT) - COUNT(LSO.CNTR_STS_EVNT_DT) AS CURR_CNT
+                                                                   , DECODE(AGMT.LSTM_CD, 'LT', CHT.LCC_CD, 'KRSEL') AS LOC_CD
+                                                              FROM   LSE_AGREEMENT    AGMT
+                                                                   , MST_CNTR_STS_HIS LSI
+                                                                   , MST_CNTR_STS_HIS LSO
+                                                                   , MST_CONTAINER    CNTR
+                                                                   , MDM_YARD         YARD
+                                                                   , MDM_LOCATION     LOC
+                                                                   , MDM_EQ_ORZ_CHT   CHT
+                                                              WHERE  1 = 1
+                                                              AND    LOC.LOC_CD       = YARD.LOC_CD
+                                                              AND    LOC.SCC_CD       = CHT.SCC_CD
+                                                              AND    YARD.YD_CD       = CNTR.ONH_YD_CD
+                                                              AND    LSI.CNTR_STS_CD IN ('LSI','DII','FND')
+                                                              AND    LSI.CNTR_NO      = LSO.CNTR_NO(+)
+                                                              AND    LSI.CNTR_STS_SEQ = LSO.PRNR_STS_SEQ(+)
+                                                              AND    LSI.CNTR_NO      = CNTR.CNTR_NO
+                                                              AND    LSI.AGMT_SEQ     = AGMT.AGMT_SEQ
+                                                              AND    LSI.AGMT_CTY_CD  = AGMT.AGMT_CTY_CD
+                                                              AND    AGMT.LST_EXP_DT BETWEEN TO_DATE(@[exp_from_dt], 'YYYYMMDD') AND TO_DATE(@[exp_to_dt], 'YYYYMMDD')
+#if ( ${ofc_cd} != '' )
+                                                              AND    AGMT.OFC_CD      = @[ofc_cd]
+#end
+
+#if ( ${lstm_cd} != '' )
+#if ( $lstm_cd_seq.size() > 1 )
+                                                              AND    AGMT.LSTM_CD IN (
+#foreach($key IN ${lstm_cd_seq})
+#if($velocityCount < $lstm_cd_seq.size())
+                                                                                      '$key',
+#else
+                                                                                      '$key'
+#end
+#end
+                                                                                     )
+#else
+                                                              AND    AGMT.LSTM_CD = @[lstm_cd]
+#end
+#end
+#if ( ${vndr_seq} != '' )
+                                                              AND    AGMT.VNDR_SEQ = @[vndr_seq]
+#end
+                                                              AND    AGMT.AGMT_SEQ <> 999990
+                                                              AND    AGMT.AGMT_ACT_FLG = 'N'
+                                                              GROUP  BY AGMT.AGMT_CTY_CD
+                                                                      , AGMT.VNDR_SEQ
+                                                                      , AGMT.AGMT_SEQ
+                                                                      , AGMT.LSTM_CD
+                                                                      , CNTR.CNTR_TPSZ_CD
+                                                                      , DECODE(AGMT.LSTM_CD, 'LT', CHT.LCC_CD, 'KRSEL')
+                                                            ) CC
+                                                   ) DD
+                                            WHERE  DD.TTL_CURR_CNT > 0
+                                           ) AA
+                                    WHERE  PDM.CNTR_RNTL_CHG_TP_CD(+) = 'PDGV'
+                                    AND    PDM.AGMT_CHG_VAL(+) <= AA.CURR_CNT
+                                    AND    PDM.LOC_CD(+)       = DECODE(AA.LSTM_CD,'LT',AA.LOC_CD,'KRSEL')
+                                    AND    PDM.CNTR_TPSZ_CD(+) = AA.CNTR_TPSZ_CD
+                                    AND    PDM.AGMT_SEQ(+)     = AA.AGMT_SEQ
+                                    AND    PDM.AGMT_CTY_CD(+)  = AA.AGMT_CTY_CD
+                                    GROUP  BY AA.LSTM_CD
+                                         , AA.VNDR_SEQ
+                                         , AA.AGMT_CTY_CD
+                                         , AA.AGMT_SEQ
+                                         , AA.CNTR_TPSZ_CD
+                                         , DECODE(AA.LSTM_CD, 'LT', 1, PDM.AGMT_CHG_VAL)
+                                  ) BB
+                                , LSE_AGMT_RT      GEN
+                           WHERE  BB.RNK = 1
+                           AND    GEN.CNTR_RNTL_CHG_TP_CD(+) = 'GENV'
+                           AND    GEN.CNTR_TPSZ_CD(+) = BB.CNTR_TPSZ_CD
+                           AND    GEN.AGMT_SEQ(+)     = BB.AGMT_SEQ
+                           AND    GEN.AGMT_CTY_CD(+)  = BB.AGMT_CTY_CD
+                         ) BBB
+                  GROUP  BY CUBE ( BBB.LSTM_CD
+                                 , BBB.VNDR_SEQ
+                                 , BBB.AGMT_CTY_CD
+                                 , BBB.AGMT_SEQ
+                                 , BBB.CNTR_TPSZ_CD )
+                ) CC
+              , ( SELECT LEVEL TYPE_CD FROM DUAL CONNECT BY LEVEL <= 4 ) TP
+         WHERE  ( GRP_ID = 0 OR GRP_ID = 1 OR GRP_ID = 14 OR GRP_ID = 15 )
+       ) DD
+     , LSE_AGREEMENT    AGMT
+     , LSE_AGMT_VER     VER
+     , MDM_VENDOR VNDR
+WHERE  DD.VNDR_SEQ    = VNDR.VNDR_SEQ(+)
+AND    DD.AGMT_CTY_CD = AGMT.AGMT_CTY_CD(+)
+AND    DD.AGMT_SEQ    = AGMT.AGMT_SEQ(+)
+AND    DD.AGMT_CTY_CD = VER.AGMT_CTY_CD(+)
+AND    DD.AGMT_SEQ    = VER.AGMT_SEQ(+)
+AND    VER.AGMT_VER_SEQ(+) = 1
+GROUP  BY DD.LSTM_CD
+        , VNDR.VNDR_ABBR_NM
+        , DD.AGMT_CTY_CD
+        , DD.AGMT_SEQ
+        , AGMT.REF_NO
+        , VER.EFF_DT
+        , AGMT.LST_EXP_DT
+        , DD.TYPE_CD
+        , DD.GRP_ID
+        , AGMT.LSE_CTRT_NO
+ORDER  BY DD.LSTM_CD, DD.GRP_ID, DD.AGMT_SEQ, DD.TYPE_CD			]]></sql>
+			<params>
+				<param name="exp_from_dt" type="12" value="" out="N"/>
+				<param name="exp_to_dt" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="lstm_cd" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="2" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

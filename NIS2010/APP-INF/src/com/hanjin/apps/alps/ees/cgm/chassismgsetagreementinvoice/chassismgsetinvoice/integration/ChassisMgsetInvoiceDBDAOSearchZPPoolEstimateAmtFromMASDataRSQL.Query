@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ChassisMgsetInvoiceDBDAOSearchZPPoolEstimateAmtFromMASDataRSQL">
+			<desc><![CDATA[--Calculation 기능 Batch로 전환 -- 2015.10.30부로 사용치 않음
+[EES_CGM_1225] NP(ZP) Pool Chassis Estimated Expense Input : Calculation
+
+임동빈 부장님과의 협의 내용
+01.
+METP(POOL_CD)의 USNYC(SCC_CD)는 USNYCM3(NODE_CD)를 제외하고
+NRPP(POOL_CD)의 USNYC(SCC_CD)는 USNYCM3(NODE_CD)만 포함한다.
+02.
+HRCP는 HRPC의 모든 SCC를, TPSP는 LABP;LAGP;GACP의 모든 SCC를, TPNP는 PNWP;RPPN의 모든 SCC를, CICP는 BCCP;KACP의 모든 SCC 가지고 있음
+HRPC는 HRCP에, LABP;LAGP;GACP는 TPSP에, RPPN;PNWP는 TPNP에, BCCP;KACP는 CICP에 모든금액 귀속
+따라서 HRPC, LABP, LAGP, GACP, RPPN, BCCP, KACP는 0으로 조회함
+GCCP는 GRPP의 SCC를 뺀 나머지 USLRD, USSAT로만 조회
+MWCP는 MWRP의 SCC를 뺀 나머지 USKCK, USMKC, USSTL로만 조회
+03.
+USMIA - SACP Pool - USSAV 단가로 대체
+USPBF - MWCP Pool - USMEM 단가로 대체
+USLWS - TPNP Pool - USPDX 단가로 대체
+USTUS - TPSP Pool - USPHX 단가로 대체]]></desc>
+			<sql><![CDATA[
+SELECT 'I' AS ibflag ,
+  AA.MONTH AS MONTH ,
+  AA.MONTH_NM AS MONTH_NM ,
+  AA.MONTH AS ESTM_YRMON ,
+  EE.AGMT_OFC_CTY_CD ,
+  EE.AGMT_SEQ ,
+  @[chss_pool_tp_cd] AS CHSS_POOL_TP_CD ,
+  @[chss_pool_cd] AS CHSS_POOL_CD ,
+  'USD' AS CURR_CD ,
+#if(${chss_pool_cd} == 'HRPC' || ${chss_pool_cd} == 'LABP' || ${chss_pool_cd} == 'LAGP' || ${chss_pool_cd} == 'GACP' || ${chss_pool_cd} == 'RPPN' || ${chss_pool_cd} == 'KACP' || ${chss_pool_cd} == 'BCCP' || ${chss_pool_cd} == 'PNWP')
+-- HRCP는 HRPC의 모든 SCC를, TPSP는 LABP;LAGP;GACP의 모든 SCC를, TPNP는 PNWP;RPPN의 모든 SCC를, BCCP는 KACP;CICP의 모든 SCC 가지고 있음
+-- HRPC는 HRCP에, LABP;LAGP;GACP는 TPSP에, RPPN;PNWP는 TPNP에, KACP;CICP는 BCCP에 모든금액 귀속
+-- 따라서 HRPC, LABP, LAGP, GACP, RPPN, KACP, CICP는 0으로 조회함
+  0 AS ESTM_AMT ,
+#else
+  NVL(BB.ESTM_AMT, 0) AS ESTM_AMT ,
+#end
+  NVL(CC.INV_SMRY_AMT, 0) AS INV_SMRY_AMT ,
+  0 AS ESTM_AMT_FX_FLG
+FROM (
+    SELECT @[year] || LPAD(ROWNUM, 2, '0') MONTH ,
+      DECODE (ROWNUM, 1, 'Jan', 2, 'Feb', 3, 'Mar', 4, 'Apr', 5, 'MAY', 6, 'Jun' , 7, 'Jul', 8, 'Aug', 9, 'Sep', 10, 'Oct', 11, 'Nov', 12, 'Dec') MONTH_NM
+    FROM DUAL A CONNECT BY LEVEL<='12') AA ,
+   (
+    SELECT P.ESTM_YRMON
+         , MAX(P.CHSS_POOL_CD)
+         , MAX(P.ESTM_AMT) +
+         #if(${chss_pool_cd} == 'SACP' || ${chss_pool_cd} == 'MWCP' || ${chss_pool_cd} == 'TPNP' || ${chss_pool_cd} == 'TPSP') 
+          (
+            select nvl(sum(DD.COST_TTL_AMT), 0)
+              from MAS_DMDT_COST_RPT_BKG_DTL DD
+                 , MAS_BKG_EXPN_DTL EE
+             where 1=1
+               and DD.BKG_NO = EE.BKG_NO
+            #if(${chss_pool_cd} == 'SACP')
+            -- USMIA - SACP Pool - USSAV 단가로 대체
+               and MAS_LOC_FNC(DD.CNTR_FM_NOD_CD, 'SCC') = 'USMIA'
+            #elseif(${chss_pool_cd} == 'MWCP')
+            -- USPBF - MWCP Pool - USMEM 단가로 대체
+               and MAS_LOC_FNC(DD.CNTR_FM_NOD_CD, 'SCC') = 'USPBF'
+            #elseif(${chss_pool_cd} == 'TPNP')
+            -- USLWS - TPNP Pool - USPDX 단가로 대체
+               and MAS_LOC_FNC(DD.CNTR_FM_NOD_CD, 'SCC') = 'USLWS'
+            #elseif(${chss_pool_cd} == 'TPSP')
+            -- USTUS - TPSP Pool - USPHX 단가로 대체
+               and MAS_LOC_FNC(DD.CNTR_FM_NOD_CD, 'SCC') = 'USTUS'
+            #end
+               and DD.ITM_NM like '%CHSS%'                                                                   -- MAS_DMT_COST_RPT_DTL_PRC의 chassis 비용 산출 기준
+--               and DD.CNTR_FM_NOD_CD like 'US%'
+--               and (MAS_LOC_FNC(DD.POR_CD, 'SCC') like 'US%' or MAS_LOC_FNC(DD.DEL_CD, 'SCC') like 'US%')
+               and EE.COST_YRMON = P.ESTM_YRMON
+           ) 
+         #else 0
+         #end
+           AS ESTM_AMT
+    FROM
+    (
+        SELECT E.COST_YRMON AS ESTM_YRMON
+             , MAX(A.CHSS_POOL_CD) AS CHSS_POOL_CD
+             , SUM(D.COST_TTL_AMT) AS ESTM_AMT
+        FROM CGM_AGREEMENT A
+           , CGM_AGMT_CPS_RT B
+           , MAS_DMDT_COST_RPT_BKG_DTL D
+           , MAS_BKG_EXPN_DTL E
+        WHERE 1=1
+        AND A.AGMT_OFC_CTY_CD = B.AGMT_OFC_CTY_CD
+        AND A.AGMT_SEQ        = B.AGMT_SEQ
+        AND A.AGMT_VER_NO     = B.AGMT_VER_NO
+        AND A.EQ_KND_CD         = 'Z'
+        AND A.AGMT_LSTM_CD      = 'ZP'
+        AND A.LST_VER_FLG       = 'Y'
+        AND A.CHSS_POOL_CD      = @[chss_pool_cd]
+--     METP(POOL_CD)의 USNYC(SCC_CD)는 USNYCM3(NODE_CD)를 제외
+--     NRPP(POOL_CD)의 USNYC(SCC_CD)는 USNYCM3(NODE_CD)만 포함
+--     GCCP는 GRPP의 SCC를 뺀 나머지 USLRD, USSAT로만 조회
+--     MWCP는 MWRP의 SCC를 뺀 나머지 USKCK, USMKC, USSTL로만 조회
+    #if(${chss_pool_cd} == 'METP')
+        AND D.CNTR_FM_NOD_CD <> 'USNYCM3'
+    #elseif(${chss_pool_cd} == 'NRPP')
+        AND D.CNTR_FM_NOD_CD = 'USNYCM3'
+    #elseif(${chss_pool_cd} == 'GCCP')
+        AND MAS_LOC_FNC(D.CNTR_FM_NOD_CD, 'SCC') not in
+        (
+        select B.LOC_CD
+        FROM CGM_AGREEMENT A
+           , CGM_AGMT_CPS_RT B
+        WHERE 1=1
+        AND A.AGMT_OFC_CTY_CD = B.AGMT_OFC_CTY_CD
+        AND A.AGMT_SEQ        = B.AGMT_SEQ
+        AND A.AGMT_VER_NO     = B.AGMT_VER_NO
+        AND A.EQ_KND_CD         = 'Z'
+        AND A.AGMT_LSTM_CD      = 'ZP'
+        AND A.LST_VER_FLG       = 'Y'
+        AND A.CHSS_POOL_CD      = 'GRPP'
+        )
+    #elseif(${chss_pool_cd} == 'MWCP')
+        AND MAS_LOC_FNC(D.CNTR_FM_NOD_CD, 'SCC') not in
+        (
+        select B.LOC_CD
+        FROM CGM_AGREEMENT A
+           , CGM_AGMT_CPS_RT B
+        WHERE 1=1
+        AND A.AGMT_OFC_CTY_CD = B.AGMT_OFC_CTY_CD
+        AND A.AGMT_SEQ        = B.AGMT_SEQ
+        AND A.AGMT_VER_NO     = B.AGMT_VER_NO
+        AND A.EQ_KND_CD         = 'Z'
+        AND A.AGMT_LSTM_CD      = 'ZP'
+        AND A.LST_VER_FLG       = 'Y'
+        AND A.CHSS_POOL_CD      = 'MWRP'
+        )
+    #end
+        AND D.BKG_NO = E.BKG_NO
+        AND MAS_LOC_FNC(D.CNTR_FM_NOD_CD, 'SCC') = B.LOC_CD
+        AND D.ITM_NM LIKE '%CHSS%'                                                                  -- MAS_DMT_COST_RPT_DTL_PRC의 chassis 비용 산출 기준
+--        AND D.CNTR_FM_NOD_CD LIKE 'US%'
+--        AND (MAS_LOC_FNC(D.POR_CD, 'SCC') LIKE 'US%' OR MAS_LOC_FNC(D.DEL_CD, 'SCC') LIKE 'US%')
+        AND E.COST_YRMON LIKE @[year] || '%'
+        GROUP BY E.COST_YRMON
+    ) P
+    GROUP BY P.ESTM_YRMON
+    ) BB,
+    (
+    SELECT A.COST_YRMON, A.AGMT_OFC_CTY_CD, A.AGMT_SEQ, NVL(SUM(B.INV_TTL_AMT), 0) INV_SMRY_AMT 
+    FROM CGM_PAY_INV A, AP_PAY_INV B, AP_INV_HDR C
+    WHERE A.INV_RGST_NO = B.INV_RGST_NO 
+    AND B.CSR_NO = C.CSR_NO
+    AND B.DELT_FLG = 'N'
+    AND A.CHSS_MGST_INV_KND_CD = @[chss_pool_tp_cd]
+    AND A.COST_YRMON LIKE @[year] || '%'
+    AND A.CHSS_POOL_CD = @[chss_pool_cd]
+    AND B.INV_STS_CD IN ('D','P')
+    GROUP BY  A.COST_YRMON,A.AGMT_OFC_CTY_CD, A.AGMT_SEQ 
+    ) CC
+    ,
+    (SELECT AGMT_OFC_CTY_CD, AGMT_SEQ FROM CGM_AGREEMENT
+    WHERE CHSS_POOL_CD = @[chss_pool_cd]
+    AND AGMT_LSTM_CD = @[chss_pool_tp_cd]
+    AND ROWNUM=1
+    ) EE
+WHERE AA.MONTH = BB.ESTM_YRMON (+)
+AND AA.MONTH = CC.COST_YRMON(+)
+ORDER BY AA.MONTH			]]></sql>
+			<params>
+				<param name="chss_pool_tp_cd" type="12" value="" out="N"/>
+				<param name="chss_pool_cd" type="12" value="" out="N"/>
+				<param name="year" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

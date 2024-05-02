@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ProductCatalogCreateDBDAOCreateBkgSplitMapAdjCSQL">
+			<desc><![CDATA[Container번호가 할당되지 않은, 모자라는 물량에 대해, 기존 데이터를 살리거나 신규 COP map정보를 생성한다.
+2011.04.04 mgpark 한 세션중에 bkg_no가 2회 이상 호출되는 경우, 데이터가 다중 생성되는 것을 방지하기 위한 로직 추가]]></desc>
+			<sql><![CDATA[
+MERGE INTO PRD_BKG_COP_MAP A
+USING
+(
+    SELECT distinct DECODE(MAPG.MTCH_FLG, 'Y', CMAP.ROWID, NULL) AS ROW_ID
+         , CASE WHEN MAPG.MTCH_FLG = 'Y' THEN CMAP.PCTL_NO
+                ELSE (SELECT B.PCTL_NO FROM BKG_BOOKING B WHERE B.BKG_NO = @[parent_bkg_no] )-- 신규일 경우 BOOKING의 PC NO를 사용
+           END AS PCTL_NO -- key
+         , @[bkg_no] BKG_NO -- key
+         , CASE WHEN MAPG.MTCH_FLG = 'Y' THEN CMAP.COP_NO
+                ELSE SCE_NEW_COP_NO_FNC (@[bkg_ofc]) 
+           END AS COP_NO -- key
+         , @[mapg_seq] COP_MAPG_SEQ -- key
+         , CMAP.CRNT_FLG
+         , CMAP.CNTR_NO
+         , MAPG.CNTR_TPSZ_CD
+         , CASE WHEN MAPG.MTCH_FLG = 'Y' THEN DECODE(@[bkg_no],@[parent_bkg_no],'N','B')
+                ELSE 'C' END COP_OP_TP_CD
+         , CMAP.BKG_OP_RMK
+         , CMAP.OB_ITCHG_CTNT
+         , CMAP.IB_ITCHG_CTNT
+         , CMAP.OCN_ITCHG_CTNT
+         , CMAP.MTY_PKUP_YD_CD
+         , CMAP.MTY_RTN_YD_CD
+         , CMAP.POR_NOD_CD
+         , CMAP.POL_NOD_CD
+         , CMAP.BKG_RCV_TERM_CD
+         , CMAP.BKG_DE_TERM_CD
+         , DECODE(MAPG.MTCH_FLG, 'Y', CMAP.OB_TRO_FLG, 'N') OB_TRO_FLG -- 신규는 초기화
+         , DECODE(MAPG.MTCH_FLG, 'Y', CMAP.IB_TRO_FLG, 'N') IB_TRO_FLG -- 신규는 초기화
+         , CMAP.COP_PATT_ORD_NO
+         , CASE WHEN MAPG.MTCH_FLG = 'Y' THEN
+                   (SELECT COUNT(*)
+                      FROM TRS_TRSP_SVC_ORD
+                     WHERE COP_NO = MAPG.COP_NO
+                       AND TRSP_SO_TP_CD <> 'S'
+                       AND NVL(DELT_FLG,'N') <> 'Y'
+                       AND NVL(RPLN_UMCH_FLG,'N') <> 'Y' -- 2010.04.09 추가 by j
+                       AND NVL(TRSP_FRST_FLG,'N') <> 'Y' )
+                  +(SELECT COUNT(*)
+                      FROM TRS_TRSP_RAIL_BIL_ORD A
+                     WHERE A.COP_NO = MAPG.COP_NO
+                       AND NVL(A.TRSP_FRST_FLG,'N') <> 'Y'
+                       AND NVL(A.DELT_FLG,'N') <> 'Y')
+                ELSE 0  -- 신규는 초기화 
+           END COP_SO_KNT
+         , CMAP.CRE_USR_ID
+         , CMAP.CRE_DT
+         , CMAP.UPD_USR_ID
+         , CMAP.UPD_DT
+    FROM (
+          SELECT AQTY.TPSZ_CD AS CNTR_TPSZ_CD
+               , DECODE(PQTY.MTCH_CD, NULL, AQTY.PCTL_NO     , PQTY.PCTL_NO     ) PCTL_NO
+               , DECODE(PQTY.MTCH_CD, NULL, AQTY.BKG_NO      , PQTY.BKG_NO      ) BKG_NO
+               , DECODE(PQTY.MTCH_CD, NULL, AQTY.COP_NO      , PQTY.COP_NO      ) COP_NO
+               , DECODE(PQTY.MTCH_CD, NULL, AQTY.COP_MAPG_SEQ, PQTY.COP_MAPG_SEQ) COP_MAPG_SEQ
+               , DECODE(PQTY.MTCH_CD, NULL, 'N', 'Y') MTCH_FLG
+            FROM (--AQTY
+                  SELECT TPSZ_CD
+                       , ROW_NUMBER() OVER (PARTITION BY TPSZ_CD ORDER BY 1) TPSZ_SEQ
+                       , PCTL_NO,BKG_NO, COP_NO, COP_MAPG_SEQ
+                  FROM   ( -- 결과적으로 생성되어야 할 데이터의 양이다.
+                          SELECT TPSZ_CD
+                               , ADJ_CNTR_QTY
+                          FROM  (
+                                 SELECT BKG_GET_TOKEN_FNC(COLUMN_VALUE, 1, '@') TPSZ_CD
+                                      , TO_NUMBER(BKG_GET_TOKEN_FNC(COLUMN_VALUE, 2, '@')) ADJ_CNTR_QTY
+--jsy
+--                                      , NVL((SELECT PROV_CNTR_TPSZ_CD FROM SCE_COP_CNTR_REPO_RULE RPRL WHERE RPRL.CNTR_TPSZ_CD = BKG_GET_TOKEN_FNC(COLUMN_VALUE, 1, '@'))
+--                                            , BKG_GET_TOKEN_FNC(COLUMN_VALUE, 1, '@') )
+--                                        AS PROV_TPSZ_CD
+                                 FROM  (TABLE(SELECT BKG_SPLIT_FNC(@[adj_tpsz_qty], ',') CNTR_TPSZ_QTY_TBL_STR FROM DUAL ))
+                                 WHERE TO_NUMBER(BKG_GET_TOKEN_FNC(COLUMN_VALUE, 2, '@')) > 0
+                                )
+    
+                         ) AQTY
+                       , ( -- 신규로 추가할 데이터가 참조할 정보를 선택한다.
+                          SELECT M.PCTL_NO
+                               , M.BKG_NO
+                               , M.COP_NO
+                               , M.COP_MAPG_SEQ
+                          FROM   PRD_BKG_COP_MAP M
+                          WHERE M.BKG_NO IN 
+                                  ( SELECT COLUMN_VALUE AS BKG_NO 
+                                    FROM TABLE(SELECT BKG_SPLIT_FNC(@[bkg_no_list], ',') BKG_NO_TBL_STR FROM DUAL ))
+                          AND    M.CRNT_FLG = 'Y'
+                          AND  ( M.COP_PATT_ORD_NO = 1
+                                OR  M.COP_PATT_ORD_NO IS NULL )
+                           AND ROWNUM =1
+                         ) PDAT
+                       , COM_CPY_NO CPNO
+                    WHERE CPNO.CPY_NO < AQTY.ADJ_CNTR_QTY
+               ) AQTY
+               ,( -- PC에서 살릴 수 있는 정보를 MAPPING한다. 가급적 요청된 SIZE TYPE을 감안하여 MAPPING 한다. (기존 데이터의 TPSZ가 변경될 수도 있다.)
+                 --JSY, F.H가 아니면 사용안함
+				 SELECT PCTL_NO
+                      , BKG_NO
+                      , COP_NO
+                      , COP_MAPG_SEQ
+                      , MTCH_CD
+                      , ROW_NUMBER() OVER (PARTITION BY MTCH_CD ORDER BY COP_NO ) MTCH_SEQ_old
+					  , ROW_NUMBER() OVER (PARTITION BY MTCH_CD ORDER BY decode( CNTR_TPSZ_CD,MTCH_CD, 1, 2 ) , COP_NO ) MTCH_SEQ --jsy
+                 FROM (
+                     SELECT PCTL_NO
+                          , BKG_NO
+                          , COP_NO
+                          , COP_MAPG_SEQ
+--확인용
+						  , CNTR_TPSZ_CD,TPSZ_CD1,TPSZ_CD2, QTY1,QTY2 --jsy
+--						  , ROW_NUMBER() OVER (PARTITION BY CNTR_TPSZ_CD,TPSZ_CD2 ORDER BY COP_NO) rn, --jsy 
+--                        , ROW_NUMBER() OVER (PARTITION BY CNTR_TPSZ_CD ORDER BY COP_NO) rn2 --jsy
+                          -- 가급적 요청된 SIZE TYPE을 먼저 연결한 후, 호환 가능한 것으로 연결한다.
+--jsy, TPSZ_CD2 추가 , qty가 2개 이상이면 복제된것을 포함해서 같은cop가 2개가 됨 , 다른 cop가 2개가 되야하는데,
+                          , CASE WHEN QTY1 > 0 AND TPSZ_CD1 = CNTR_TPSZ_CD -- 입력된 type 이 PRD_BKG_COP_MAP의 type 과 같으면
+                                     AND ROW_NUMBER() OVER (PARTITION BY CNTR_TPSZ_CD,TPSZ_CD2 ORDER BY COP_NO) <= QTY1 THEN TPSZ_CD1
+                                 WHEN QTY2 > 0 AND TPSZ_CD2 = CNTR_TPSZ_CD  -- 호환 type(없으면 입력된 type) 이 PRD_BKG_COP_MAP의 type 과 같으면
+                                     AND ROW_NUMBER() OVER (PARTITION BY CNTR_TPSZ_CD,TPSZ_CD2 ORDER BY COP_NO) <= QTY2 THEN TPSZ_CD2
+                                 WHEN QTY1 > 0 AND TPSZ_CD2 = CNTR_TPSZ_CD
+                                     AND (ROW_NUMBER() OVER (PARTITION BY CNTR_TPSZ_CD,TPSZ_CD2 ORDER BY COP_NO) - NVL(QTY2,0)) <= QTY1 THEN TPSZ_CD1
+                                 WHEN QTY2 > 0 AND TPSZ_CD1 = CNTR_TPSZ_CD
+                                     AND (ROW_NUMBER() OVER (PARTITION BY CNTR_TPSZ_CD,TPSZ_CD2 ORDER BY COP_NO) - NVL(QTY1,0)) <= QTY2 THEN TPSZ_CD2
+                                 ELSE NULL END MTCH_CD
+						  , row_number() over(partition by COP_NO  order by m2.CNTR_TPSZ_CD,TPSZ_CD2 ) dup_rn --jsy 호환 dup 제거  
+                     FROM PRD_BKG_COP_MAP M2
+                         , ( -- 큰 TYPE으로 GROUP 
+                          SELECT GREATEST(TPSZ_CD, NVL(PROV_TPSZ_CD, ' ')) GRP_TPSZ_CD
+-- 요청된 type 우선으로 cd1 , 호환가능 type로 cd2/ 입력된type 으로 사용할지 ,호환된 type으로 사용할지 
+                               , MIN(DECODE( TPSZ_CD, GREATEST(TPSZ_CD, NVL(PROV_TPSZ_CD, ' ')), PROV_TPSZ_CD, TPSZ_CD)) TPSZ_CD1
+                               , MAX(DECODE( TPSZ_CD, GREATEST(TPSZ_CD, NVL(PROV_TPSZ_CD, ' ')), NULL, ADJ_CNTR_QTY )) QTY1
+                               , MAX(DECODE( TPSZ_CD, GREATEST(TPSZ_CD, NVL(PROV_TPSZ_CD, ' ')), TPSZ_CD, PROV_TPSZ_CD)) TPSZ_CD2
+                               , MAX(DECODE( TPSZ_CD, GREATEST(TPSZ_CD, NVL(PROV_TPSZ_CD, ' ')), ADJ_CNTR_QTY, NULL)) QTY2
+                               , SUM(ADJ_CNTR_QTY) GRP_QTY
+                          FROM 
+-- jsy
+                               ( --JSY 적용
+     
+                                    SELECT  
+                                    TPSZ_CD,ADJ_CNTR_QTY,NVL(PROV_CNTR_TPSZ_CD,TPSZ_CD) PROV_TPSZ_CD
+                                    FROM
+                                    (
+                                        SELECT 
+                                           BKG_GET_TOKEN_FNC(COLUMN_VALUE, 1, '@') TPSZ_CD
+                                           , TO_NUMBER(BKG_GET_TOKEN_FNC(COLUMN_VALUE, 2, '@')) ADJ_CNTR_QTY
+                                           
+                                        FROM TABLE(SELECT BKG_SPLIT_FNC(@[adj_tpsz_qty], ',') CNTR_TPSZ_QTY_TBL_STR FROM DUAL )
+                                        WHERE TO_NUMBER(BKG_GET_TOKEN_FNC(COLUMN_VALUE, 2, '@')) > 0
+                                    )BQTY
+                                    , SCE_COP_CNTR_REPO_RULE RPRL
+                                    WHERE RPRL.CNTR_TPSZ_CD(+) = BQTY.TPSZ_CD
+                                    AND 'Y' = NVL(NVL(@[flex_hgt_flg], (SELECT FLEX_HGT_FLG FROM BKG_BOOKING WHERE BKG_NO = @[parent_bkg_no])), 'N')
+                                                                 
+                               )
+                         GROUP BY GREATEST(TPSZ_CD, NVL(PROV_TPSZ_CD, ' '))
+                            ) AQTY
+                     WHERE BKG_NO IN
+                            ( SELECT COLUMN_VALUE AS BKG_NO 
+                              FROM TABLE(SELECT BKG_SPLIT_FNC(@[bkg_no_list], ',') BKG_NO_TBL_STR FROM DUAL ))
+                     AND M2.CRNT_FLG = 'Y'
+--                     AND M2.CNTR_NO = 'HJCU0000000'
+                     AND M2.COP_OP_TP_CD = 'X'
+                     AND M2.CNTR_TPSZ_CD IN ( AQTY.TPSZ_CD1 , TPSZ_CD2 )
+--                     AND (NVL(OB_TRO_FLG,'N') <> 'Y' or (NVL(OB_TRO_FLG,'N') = 'Y' and CNTR_NO = 'HJCU0000000'))
+--                     AND (NVL(IB_TRO_FLG,'N') <> 'Y' or (NVL(IB_TRO_FLG,'N') = 'Y' and CNTR_NO = 'HJCU0000000'))
+--                     AND POR_NOD_CD IS NULL
+--                     AND POL_NOD_CD IS NULL
+          	         AND ( CNTR_NO IS NULL
+                        OR CNTR_NO = 'SMCU0000000')
+                     AND  ( COP_PATT_ORD_NO = 1
+                        OR  COP_PATT_ORD_NO IS NULL )
+--                     AND NOT EXISTS
+--                     (SELECT 'X' FROM PRD_BKG_COP_MAP M3
+--                     WHERE M2.COP_NO = M3.COP_NO
+--                     AND M3.CRNT_FLG ='Y'
+--                     AND M3.COP_OP_TP_CD <> 'X')
+                     )
+                 WHERE  MTCH_CD IS NOT NULL
+				   AND dup_rn= 1 --jsy
+                ) PQTY
+           WHERE PQTY.MTCH_CD(+) = AQTY.TPSZ_CD
+             AND PQTY.MTCH_SEQ(+) = AQTY.TPSZ_SEQ
+         ) MAPG
+       , PRD_BKG_COP_MAP CMAP
+    WHERE CMAP.PCTL_NO = MAPG.PCTL_NO
+      AND CMAP.BKG_NO = MAPG.BKG_NO
+      AND CMAP.COP_NO = MAPG.COP_NO
+      AND CMAP.COP_MAPG_SEQ = MAPG.COP_MAPG_SEQ
+      AND 0 = (SELECT COUNT(1) -- 2011.04.04 mgpark 한 세션중에 bkg_no가 2회 이상 호출되는 경우, 데이터가 다중 생성되는 것을 방지하기 위한 로직
+                 FROM PRD_BKG_COP_MAP
+                WHERE CRNT_FLG = 'Y'
+                  AND COP_OP_TP_CD in ('N', 'B')
+                  AND BKG_NO = @[bkg_no] 
+                  AND (CNTR_NO IS NULL OR CNTR_NO = 'SMCU0000000')
+                  AND ROWNUM = 1
+              )
+) B
+ON (A.ROWID = B.ROW_ID )
+WHEN MATCHED THEN
+UPDATE SET
+      A.COP_OP_TP_CD = B.COP_OP_TP_CD
+    , A.BKG_NO = B.BKG_NO
+    , A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD
+    , A.COP_SO_KNT = B.COP_SO_KNT
+    , A.COP_MAPG_SEQ = B.COP_MAPG_SEQ
+    , A.UPD_USR_ID = 'SYSTEM2_U'
+    , A.UPD_DT = SYSDATE
+WHEN NOT MATCHED THEN
+INSERT (PCTL_NO, BKG_NO, COP_NO, COP_MAPG_SEQ, CRNT_FLG
+      , CNTR_NO, CNTR_TPSZ_CD, COP_OP_TP_CD, BKG_OP_RMK, OB_ITCHG_CTNT
+      , IB_ITCHG_CTNT, OCN_ITCHG_CTNT, MTY_PKUP_YD_CD, MTY_RTN_YD_CD, POR_NOD_CD
+      , POL_NOD_CD, BKG_RCV_TERM_CD, BKG_DE_TERM_CD, OB_TRO_FLG, IB_TRO_FLG
+      , COP_PATT_ORD_NO, COP_SO_KNT, CRE_USR_ID, CRE_DT, UPD_USR_ID
+      , UPD_DT
+ )
+VALUES (B.PCTL_NO, B.BKG_NO, B.COP_NO, B.COP_MAPG_SEQ, B.CRNT_FLG
+      , 'SMCU0000000', B.CNTR_TPSZ_CD, B.COP_OP_TP_CD, B.BKG_OP_RMK, B.OB_ITCHG_CTNT
+      , B.IB_ITCHG_CTNT, B.OCN_ITCHG_CTNT, B.MTY_PKUP_YD_CD, B.MTY_RTN_YD_CD, B.POR_NOD_CD
+      , B.POL_NOD_CD, B.BKG_RCV_TERM_CD, B.BKG_DE_TERM_CD, B.OB_TRO_FLG, B.IB_TRO_FLG
+      , B.COP_PATT_ORD_NO, B.COP_SO_KNT, B.CRE_USR_ID, B.CRE_DT, 'SYSTEM2_C'
+      , SYSDATE
+)			]]></sql>
+			<params>
+				<param name="parent_bkg_no" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="bkg_ofc" type="12" value="" out="N"/>
+				<param name="mapg_seq" type="12" value="" out="N"/>
+				<param name="adj_tpsz_qty" type="12" value="" out="N"/>
+				<param name="bkg_no_list" type="12" value="" out="N"/>
+				<param name="flex_hgt_flg" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

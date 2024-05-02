@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ReceivableRentalCostDBDAOReceivableRentalChargeDetailListRSQL">
+			<desc><![CDATA[계약번호별 Receivable Rental Charge Detail Creation 작업 대상목록을 조회한다.]]></desc>
+			<sql><![CDATA[
+WITH PARAM AS (   
+    SELECT  @[agmt_cty_cd]      AS AGMT_CTY_CD,
+            @[agmt_seq]         AS AGMT_SEQ,
+            @[qty_yrmon]        AS QTY_YRMON,                                
+            @[cost_yrmon]       AS COST_YRMON,
+            @[rcv_rntl_seq]     AS RCV_RNTL_SEQ,
+            @[lstm_cd]          AS LSTM_CD           
+    FROM    DUAL     
+), TEMP_DROP02 AS (
+    SELECT  A.CNTR_TPSZ_CD, COUNT(A.CNTR_NO) AS CNTR_CNT
+    FROM    MST_CONTAINER A,
+            MST_CNTR_STS_HIS B,
+           (SELECT  /*+ INDEX(A XAK4MST_CNTR_STS_HIS) */
+					A.CNTR_NO, A.CNTR_STS_SEQ, A.CNTR_STS_CD,
+					RANK() OVER(PARTITION BY A.CNTR_NO ORDER BY A.CNTR_STS_EVNT_DT DESC, A.CNTR_STS_SEQ DESC) AS RANK_NO
+            FROM    PARAM P,
+                    MST_CNTR_STS_HIS A
+            WHERE   A.AGMT_CTY_CD = P.AGMT_CTY_CD
+            AND     A.AGMT_SEQ = P.AGMT_SEQ
+			AND    (A.CNTR_STS_CD IN ('MUO','SBO') 
+            AND     A.CNTR_STS_EVNT_DT <= LAST_DAY(TO_DATE(P.QTY_YRMON,'YYYYMM')) + 0.99999
+            OR      A.CNTR_STS_CD IN ('MUI','SBI') 
+            AND     A.CNTR_STS_EVNT_DT < TO_DATE(P.QTY_YRMON,'YYYYMM'))
+            ) C
+    WHERE   A.CNTR_NO = B.CNTR_NO
+    AND     B.CNTR_NO = C.CNTR_NO
+    AND     B.CNTR_STS_SEQ = C.CNTR_STS_SEQ           
+	AND     C.RANK_NO = 1
+	AND     C.CNTR_STS_CD IN('MUO','SBO')
+    GROUP BY A.CNTR_TPSZ_CD            
+), TEMP_DROP01 AS (
+    SELECT  A.AGMT_CTY_CD, A.AGMT_SEQ, A.QTY_YRMON, 
+            A.COST_YRMON, A.RCV_RNTL_SEQ, A.LSTM_CD,  
+            A.CNTR_TPSZ_CD, A.LSE_RCV_CHG_TP_CD, 
+            A.CHG_RT_AMT, A.CL_DPP_FRDAY, A.AGMT_CHG_VAL, A.CNTR_CNT 
+    FROM   (SELECT  P.AGMT_CTY_CD, P.AGMT_SEQ, P.QTY_YRMON, 
+                    P.COST_YRMON, P.RCV_RNTL_SEQ, P.LSTM_CD, 
+                    Z.CNTR_TPSZ_CD, Z.LSE_RCV_CHG_TP_CD, 
+                    Z.CHG_RT_AMT, Z.CL_DPP_FRDAY, Z.AGMT_CHG_VAL, T2.CNTR_CNT,
+                    RANK() OVER(PARTITION BY Z.CNTR_TPSZ_CD, Z.LSE_RCV_CHG_TP_CD 
+                                    ORDER BY Z.AGMT_CHG_VAL DESC) AS RANK_NO                                                       
+            FROM    PARAM P, TEMP_DROP02 T2,
+                   (SELECT  A.AGMT_CTY_CD, A.AGMT_SEQ, A.CNTR_TPSZ_CD, A.CNTR_RNTL_CHG_TP_CD, 
+                            A.AGMT_CHG_DYS, B.DPP_TP_CD, A.AGMT_CHG_VAL,
+                            CASE A.CNTR_RNTL_CHG_TP_CD 
+                                WHEN 'PDGV' THEN 'PDM' 
+                                ELSE 'DPP' 
+                            END LSE_RCV_CHG_TP_CD,
+                            CASE A.CNTR_RNTL_CHG_TP_CD 
+                                WHEN 'PDGV' THEN N1ST_CHG_AMT
+                                ELSE N2ND_CHG_AMT
+                            END CHG_RT_AMT,
+                            CASE WHEN A.CNTR_RNTL_CHG_TP_CD = 'DPPV' THEN A.AGMT_CHG_DYS
+                                 WHEN A.CNTR_RNTL_CHG_TP_CD = 'LDPV' AND B.DPP_TP_CD = 'L' 
+                                 THEN A.AGMT_CHG_DYS
+                                 ELSE 0 END CL_DPP_FRDAY                                 
+                    FROM    LSE_AGMT_RT A,
+                            LSE_AGREEMENT B
+                    WHERE   A.AGMT_CTY_CD = B.AGMT_CTY_CD
+                    AND     A.AGMT_SEQ = B.AGMT_SEQ                            
+                    AND    (A.CNTR_RNTL_CHG_TP_CD = 'PDGV'  
+                    OR      A.CNTR_RNTL_CHG_TP_CD = 'DPPV'
+                    AND     B.DPP_TP_CD = 'Y')
+                    ) Z                             
+            WHERE   Z.AGMT_CTY_CD = P.AGMT_CTY_CD
+            AND     Z.AGMT_SEQ = P.AGMT_SEQ
+            AND     Z.CNTR_TPSZ_CD = T2.CNTR_TPSZ_CD            
+            AND     Z.AGMT_CHG_VAL <= T2.CNTR_CNT                                         
+    ) A
+    WHERE   A.RANK_NO = 1            
+)         
+SELECT  COST_YRMON, AGMT_CTY_CD, AGMT_SEQ, RCV_RNTL_SEQ, LSTM_CD, CNTR_NO, 
+        CNTR_TPSZ_CD, ONH_DT, ONH_LOC_CD, OFFH_DT, OFFH_LOC_CD, BIL_FM_DT, 
+        BIL_TO_DT, TTL_DYS, FREE_DYS, BIL_DYS, LSE_RCV_CHG_TP_CD, CHG_RT_AMT, 
+        COST_AMT, PKUP_CHG_FLG, PKUP_CHG_AMT, LON_CHG_FLG, LOF_CHG_FLG, LFT_CHG_AMT
+FROM   (SELECT  A.COST_YRMON,         
+                A.AGMT_CTY_CD, 
+                A.AGMT_SEQ,
+                A.RCV_RNTL_SEQ,
+                A.LSTM_CD,   
+                A.RTN_CNTR_NO AS CNTR_NO, 
+                A.RTN_CNTR_TPSZ_CD AS CNTR_TPSZ_CD,        
+                TO_CHAR(A.CNTR_STS_EVNT_DT,'YYYYMMDD') AS ONH_DT,
+                A.LOC_CD AS ONH_LOC_CD,
+                TO_CHAR(A.RTN_DT,'YYYYMMDD') AS OFFH_DT,
+                A.RTN_LOC_CD AS OFFH_LOC_CD,
+                CASE WHEN A.CNTR_STS_EVNT_DT > TO_DATE(A.QTY_YRMON,'YYYYMM') 
+                     THEN TO_CHAR(A.CNTR_STS_EVNT_DT,'YYYYMMDD')
+                     ELSE TO_CHAR(TO_DATE(A.QTY_YRMON,'YYYYMM'),'YYYYMMDD') 
+                END BIL_FM_DT,
+                CASE WHEN A.RTN_DT < LAST_DAY(TO_DATE(A.QTY_YRMON,'YYYYMM')) 
+                     THEN TO_CHAR(A.RTN_DT,'YYYYMMDD')
+                     ELSE TO_CHAR(LAST_DAY(TO_DATE(A.QTY_YRMON,'YYYYMM')),'YYYYMMDD') 
+                END BIL_TO_DT,              
+                DECODE(A.LSE_RCV_CHG_TP_CD, 'PDM', A.TTL_DYS,  0) AS TTL_DYS,
+                DECODE(A.LSE_RCV_CHG_TP_CD, 'PDM', A.FREE_DYS, 0) AS FREE_DYS,
+                DECODE(A.LSE_RCV_CHG_TP_CD, 'PDM', A.PDM_DYS,  0) AS BIL_DYS,
+                A.LSE_RCV_CHG_TP_CD,
+                CASE WHEN A.LSE_RCV_CHG_TP_CD = 'PDM' THEN A.CHG_RT_AMT
+                     WHEN A.LSE_RCV_CHG_TP_CD = 'DPP' THEN A.AGMT_CHG_VAL
+                     ELSE 0 END CHG_RT_AMT,     
+                CASE WHEN A.LSE_RCV_CHG_TP_CD = 'PDM' THEN A.PDM_DYS * A.CHG_RT_AMT
+                     WHEN A.LSE_RCV_CHG_TP_CD = 'DPP' THEN A.AGMT_CHG_VAL  
+                     ELSE DECODE(TO_CHAR(A.RTN_DT, 'YYYYMM'), A.QTY_YRMON, A.CHG_RT_AMT, 0)
+                     END COST_AMT,
+                CASE WHEN A.QTY_YRMON = TO_CHAR(A.CNTR_STS_EVNT_DT,'YYYYMM') 
+                      AND A.PKUP_CHG_AMT > 0 THEN 'PUC'
+                     WHEN A.QTY_YRMON = TO_CHAR(A.CNTR_STS_EVNT_DT,'YYYYMM') 
+                      AND A.PKUP_CHG_AMT < 0 THEN 'PCR'
+                     ELSE 'NON' END PKUP_CHG_FLG,                    
+                A.PKUP_CHG_AMT,
+                CASE WHEN A.QTY_YRMON = TO_CHAR(A.CNTR_STS_EVNT_DT,'YYYYMM') 
+                      AND A.LFT_CHG_AMT != 0 THEN 'LON' 
+                     ELSE 'NON' END LON_CHG_FLG,
+                CASE WHEN A.QTY_YRMON = TO_CHAR(A.RTN_DT,'YYYYMM') 
+                      AND A.LFT_CHG_AMT != 0 THEN 'LOF' 
+                     ELSE 'NON' END LOF_CHG_FLG,                     
+                A.LFT_CHG_AMT
+        FROM   (SELECT  B.AGMT_CTY_CD, B.AGMT_SEQ, B.QTY_YRMON, 
+                        B.COST_YRMON, B.RCV_RNTL_SEQ, B.LSTM_CD, 
+                        B.LSE_RCV_CHG_TP_CD, B.CHG_RT_AMT, B.AGMT_CHG_VAL,
+                        B.RTN_CNTR_NO,
+                        B.RTN_CNTR_TPSZ_CD,
+                        A.CNTR_STS_CD,
+                        A.CNTR_STS_EVNT_DT,
+                        TO_CHAR(A.CNTR_STS_EVNT_DT,'YYYYMM') AS CNTR_STS_EVNT_YRMON,
+                        SUBSTR(A.YD_CD,1,5) AS LOC_CD,
+                        NVL(A.RNTL_CHG_FREE_DYS,0) AS FREE_DYS, 
+                        CASE WHEN TO_CHAR(A.CNTR_STS_EVNT_DT,'YYYYMM') = SUBSTR(B.QTY_YRMON, 1, 6)
+                             THEN B.RTN_DT - A.CNTR_STS_EVNT_DT +1
+                             ELSE B.RTN_DT - TO_DATE(B.QTY_YRMON,'YYYYMM') +1
+                        END TTL_DYS,
+                        CASE WHEN TO_CHAR(A.CNTR_STS_EVNT_DT + NVL(A.RNTL_CHG_FREE_DYS,0) - 1,'YYYYMM') = SUBSTR(B.QTY_YRMON,1,6)
+                             THEN CASE SIGN(B.RTN_DT - (A.CNTR_STS_EVNT_DT + NVL(A.RNTL_CHG_FREE_DYS,0) -1)) 
+                                  WHEN 1 THEN B.RTN_DT - (A.CNTR_STS_EVNT_DT + NVL(A.RNTL_CHG_FREE_DYS,0)) +1
+                                  ELSE 0 END                       
+                             ELSE CASE SIGN(TO_DATE(B.QTY_YRMON,'YYYYMM') - (A.CNTR_STS_EVNT_DT + NVL(A.RNTL_CHG_FREE_DYS,0) - 1)) 
+                                  WHEN 1 THEN B.RTN_DT - TO_DATE(B.QTY_YRMON,'YYYYMM') +1
+                                  ELSE 0 END    
+                        END PDM_DYS,
+                        RTN_CNTR_STS_CD,
+                        RTN_DT,
+                        RTN_YRMON,
+                        CASE WHEN TO_CHAR(A.CNTR_STS_EVNT_DT + B.CL_DPP_FRDAY,'YYYYMM') = SUBSTR(B.QTY_YRMON,1,6)
+                             THEN CASE SIGN(B.RTN_DT - A.CNTR_STS_EVNT_DT + B.CL_DPP_FRDAY -1) 
+                                  WHEN 1 THEN B.RTN_DT - A.CNTR_STS_EVNT_DT + B.CL_DPP_FRDAY +1
+                                  ELSE 0 END                       
+                             ELSE CASE SIGN(TO_DATE(B.QTY_YRMON,'YYYYMM') - (A.CNTR_STS_EVNT_DT + B.CL_DPP_FRDAY - 1)) 
+                                  WHEN 1 THEN B.RTN_DT - TO_DATE(B.QTY_YRMON,'YYYYMM') +1
+                                  ELSE 0 END                   
+                        END DPP_DYS,
+                        CASE WHEN TO_CHAR(A.CNTR_STS_EVNT_DT,'YYYYMM') = SUBSTR(B.QTY_YRMON,1,6)
+                             THEN NVL(B.CL_DPP_FRDAY,0)
+                             ELSE CASE SIGN(NVL(B.CL_DPP_FRDAY,0) - (TO_DATE(B.QTY_YRMON,'YYYYMM') - A.CNTR_STS_EVNT_DT))
+                                  WHEN 1 THEN NVL(B.CL_DPP_FRDAY,0) - (TO_DATE(B.QTY_YRMON,'YYYYMM') - A.CNTR_STS_EVNT_DT)
+                                  ELSE 0 END 
+                        END DPP_FREE_DYS,
+                        RTN_LOC_CD,
+                        NVL(A.CNTR_PKUP_CHG_AMT,0) PKUP_CHG_AMT,
+                        NVL(A.CNTR_LFT_CHG_AMT,0) LFT_CHG_AMT
+                FROM    MST_CNTR_STS_HIS A,
+                       (SELECT  /*+ INDEX(A XAK4MST_CNTR_STS_HIS) */
+                                DISTINCT A.CNTR_NO AS RTN_CNTR_NO,
+                                B.CNTR_TPSZ_CD AS RTN_CNTR_TPSZ_CD,
+                                A.CNTR_STS_CD AS RTN_CNTR_STS_CD,
+                                A.CNTR_STS_EVNT_DT AS RTN_DT,
+                                TO_CHAR(A.CNTR_STS_EVNT_DT,'YYYYMM') AS RTN_YRMON,
+                                SUBSTR(A.YD_CD,1,5) AS RTN_LOC_CD,
+                                A.PRNR_STS_SEQ PARTN_SEQ,
+                                T1.AGMT_CTY_CD, T1.AGMT_SEQ, T1.QTY_YRMON, 
+                                T1.COST_YRMON, T1.RCV_RNTL_SEQ, T1.LSTM_CD, 
+                                T1.LSE_RCV_CHG_TP_CD, T1.CHG_RT_AMT, 
+                                T1.AGMT_CHG_VAL, T1.CL_DPP_FRDAY
+                        FROM    MST_CNTR_STS_HIS A,
+                                MST_CONTAINER B,
+                                TEMP_DROP01 T1
+                        WHERE   A.CNTR_NO = B.CNTR_NO
+                        AND     A.AGMT_CTY_CD = T1.AGMT_CTY_CD
+                        AND     A.AGMT_SEQ    = T1.AGMT_SEQ
+                        AND     B.CNTR_TPSZ_CD = T1.CNTR_TPSZ_CD
+                        AND     A.CNTR_STS_CD IN ('SBI', 'MUI')
+                        AND     TO_CHAR(A.CNTR_STS_EVNT_DT, 'YYYYMM') = T1.QTY_YRMON                            
+                        ) B         
+                WHERE   A.CNTR_NO = B.RTN_CNTR_NO
+                AND     A.CNTR_STS_SEQ = B.PARTN_SEQ
+                AND     A.CNTR_STS_CD IN ('SBO','MUO')
+                UNION
+                SELECT  P.AGMT_CTY_CD AS AGMT_CTY_CD, 
+                        P.AGMT_SEQ AS AGMT_SEQ, 
+                        P.QTY_YRMON AS QTY_YRMON, 
+                        P.COST_YRMON AS COST_YRMON, 
+                        P.RCV_RNTL_SEQ AS RCV_RNTL_SEQ, 
+                        P.LSTM_CD AS LSTM_CD, 
+                        T1.LSE_RCV_CHG_TP_CD AS LSE_RCV_CHG_TP_CD, 
+                        T1.CHG_RT_AMT AS CHG_RT_AMT,
+                        T1.AGMT_CHG_VAL AS AGMT_CHG_VAL,
+                        A.CNTR_NO AS RTN_CNTR_NO,
+                        MAX(B.CNTR_TPSZ_CD) AS RTN_CNTR_TPSZ_CD,
+                        MAX(A.CNTR_STS_CD) AS CNTR_STS_CD,
+                        MAX(A.CNTR_STS_EVNT_DT) AS CNTR_STS_EVNT_DT,        
+                        TO_CHAR(MAX(A.CNTR_STS_EVNT_DT),'YYYYMM') AS CNTR_STS_EVNT_YRMON,
+                        MAX(SUBSTR(A.YD_CD,1,5)) AS LOC_CD,        
+                        MAX(NVL(A.RNTL_CHG_FREE_DYS,0)) AS FREE_DYS,
+                        MAX(CASE WHEN TO_CHAR(A.CNTR_STS_EVNT_DT,'YYYYMM') = SUBSTR(T1.QTY_YRMON, 1, 6)
+                                 THEN LAST_DAY(TO_DATE(T1.QTY_YRMON,'YYYYMM')) - A.CNTR_STS_EVNT_DT +1
+                                 ELSE LAST_DAY(TO_DATE(T1.QTY_YRMON,'YYYYMM')) - TO_DATE(T1.QTY_YRMON,'YYYYMM') +1
+                            END) TTL_DYS, 
+                        MAX(CASE WHEN TO_CHAR(A.CNTR_STS_EVNT_DT + NVL(A.RNTL_CHG_FREE_DYS,0) - 1,'YYYYMM') = SUBSTR(T1.QTY_YRMON, 1, 6)
+                                 THEN LAST_DAY(TO_DATE(T1.QTY_YRMON,'YYYYMM')) - (A.CNTR_STS_EVNT_DT + NVL(A.RNTL_CHG_FREE_DYS,0)) +1                       
+                                 ELSE CASE SIGN(TO_DATE(T1.QTY_YRMON,'YYYYMM') - (A.CNTR_STS_EVNT_DT + NVL(A.RNTL_CHG_FREE_DYS,0) - 1)) 
+                                      WHEN 1 THEN LAST_DAY(TO_DATE(T1.QTY_YRMON,'YYYYMM')) - TO_DATE(T1.QTY_YRMON,'YYYYMM') +1
+                                      ELSE 0 END    
+                            END) PDM_DYS,
+                        NULL AS RTN_CNTR_STS_CD,
+                        TO_DATE(NULL) AS RTN_DT,
+                        NULL AS RTN_YRMON,
+                        MAX(CASE WHEN TO_CHAR(A.CNTR_STS_EVNT_DT + T1.CL_DPP_FRDAY, 'YYYYMM') = SUBSTR(T1.QTY_YRMON, 1, 6)
+                                 THEN LAST_DAY(TO_DATE(T1.QTY_YRMON,'YYYYMM')) - A.CNTR_STS_EVNT_DT + T1.CL_DPP_FRDAY +1                       
+                                 ELSE CASE SIGN(TO_DATE(T1.QTY_YRMON,'YYYYMM') - (A.CNTR_STS_EVNT_DT + T1.CL_DPP_FRDAY - 1)) 
+                                      WHEN 1 THEN LAST_DAY(TO_DATE(T1.QTY_YRMON,'YYYYMM')) - TO_DATE(T1.QTY_YRMON,'YYYYMM') +1
+                                      ELSE 0 END                   
+                            END) DPP_DYS,
+                        MAX(CASE WHEN TO_CHAR(A.CNTR_STS_EVNT_DT,'YYYYMM') = SUBSTR(T1.QTY_YRMON, 1, 6)
+                                 THEN NVL(T1.CL_DPP_FRDAY,0)
+                                 ELSE CASE SIGN(NVL(T1.CL_DPP_FRDAY,0) - (TO_DATE(T1.QTY_YRMON,'YYYYMM') - A.CNTR_STS_EVNT_DT))
+                                      WHEN 1 THEN NVL(T1.CL_DPP_FRDAY,0) - (TO_DATE(T1.QTY_YRMON,'YYYYMM') - A.CNTR_STS_EVNT_DT)
+                                      ELSE 0 END 
+                            END) DPP_FREE_DYS,
+                        NULL AS RTN_LOC_CD,
+                        MAX(NVL(A.CNTR_PKUP_CHG_AMT,0)) PKUP_CHG_AMT,   
+                        MAX(NVL(A.CNTR_LFT_CHG_AMT,0)) LFT_CHG_AMT                                     
+                FROM    PARAM P,
+                        TEMP_DROP01 T1,
+                        MST_CNTR_STS_HIS A, 
+                        MST_CONTAINER B,
+                       (SELECT   /*+ INDEX(Z XAK4MST_CNTR_STS_HIS) */
+                                 Z.CNTR_NO, Z.CNTR_STS_SEQ, Z.CNTR_STS_CD,
+                                 RANK() OVER(PARTITION BY Z.CNTR_NO ORDER BY Z.CNTR_STS_EVNT_DT DESC, Z.CNTR_STS_SEQ DESC) AS RANK_NO             
+                        FROM     PARAM P, 
+                                 MST_CNTR_STS_HIS Z                                                 
+                        WHERE    Z.AGMT_CTY_CD = P.AGMT_CTY_CD
+                        AND      Z.AGMT_SEQ = P.AGMT_SEQ
+                        AND      Z.CNTR_STS_CD IN ('SBO','SBI','MUO','MUI')    
+                        AND      TO_CHAR(Z.CNTR_STS_EVNT_DT, 'YYYYMM') <= P.QTY_YRMON                                                          
+                        ) C
+                WHERE   A.CNTR_NO = B.CNTR_NO
+                AND     A.CNTR_NO = C.CNTR_NO
+                AND     A.CNTR_STS_SEQ = C.CNTR_STS_SEQ
+                AND     A.AGMT_CTY_CD = T1.AGMT_CTY_CD
+                AND     A.AGMT_SEQ    = T1.AGMT_SEQ     
+                AND     B.CNTR_TPSZ_CD = T1.CNTR_TPSZ_CD                           
+                AND     C.RANK_NO = 1
+                AND     C.CNTR_STS_CD IN('SBO','MUO')
+                GROUP BY A.CNTR_NO, A.CNTR_STS_SEQ, T1.LSE_RCV_CHG_TP_CD, T1.CHG_RT_AMT, T1.AGMT_CHG_VAL
+        ) A
+        WHERE   A.LSE_RCV_CHG_TP_CD = 'PDM'
+        OR      A.QTY_YRMON = TO_CHAR(A.RTN_DT,'YYYYMM')
+)
+WHERE   LSE_RCV_CHG_TP_CD = 'PDM'
+OR      COST_AMT != 0			]]></sql>
+			<params>
+				<param name="agmt_cty_cd" type="12" value="" out="N"/>
+				<param name="agmt_seq" type="2" value="" out="N"/>
+				<param name="qty_yrmon" type="12" value="" out="N"/>
+				<param name="cost_yrmon" type="12" value="" out="N"/>
+				<param name="rcv_rntl_seq" type="2" value="" out="N"/>
+				<param name="lstm_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

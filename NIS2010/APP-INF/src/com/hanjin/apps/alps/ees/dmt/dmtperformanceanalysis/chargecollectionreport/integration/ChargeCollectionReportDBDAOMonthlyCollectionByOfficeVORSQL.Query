@@ -1,0 +1,733 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ChargeCollectionReportDBDAOMonthlyCollectionByOfficeVORSQL">
+			<desc><![CDATA[월별 Billable/Invoiced/Collection 된 금액 정보를 조회한다.]]></desc>
+			<sql><![CDATA[
+WITH 
+TMP1 AS 
+(
+	SELECT /*+ MATERIALIZE */
+		OFC_CD,
+		OFC_RHQ_CD,
+		YRMON,
+        TARIFF,
+        IO_BND,
+        O_CURR,
+        SUM(NVL(O_COUNT, 0)) O_COUNT,
+        SUM(NVL(O_AMT, 0)) O_AMT,
+        -- '' I_CURR, 
+        0 I_COUNT, 0 I_AMT, 0 M_COUNT, 0 M_AMT,
+        0 AF_COUNT, 0 AF_AMT, 0 MF_COUNT, 0 MF_AMT, 0 BF_COUNT, 0 BF_AMT, 0 UF_COUNT, 0 UF_AMT
+
+    FROM (
+		SELECT  OFC_CD, OFC_RHQ_CD,
+				TO_CHAR(C.TO_MVMT_DT, 'YYYYMM') YRMON,
+	            DECODE(SUBSTR(C.DMDT_TRF_CD, 2, 1), 'M', 'DEM', 'DET') TARIFF,
+	            DECODE(SUBSTR(C.DMDT_TRF_CD, 3, 1), 'I', 'I/B', 'O/B') IO_BND,
+	            DECODE(@[curr_flg], 'U', 'USD', C.BZC_TRF_CURR_CD ) O_CURR,
+	            SUM(DECODE(C.BIL_AMT,0,0,1)) O_COUNT,  -- 20091222 수정
+	            SUM(ROUND(DECODE(@[curr_flg], 'U', C.BIL_AMT / F.USD_LOCL_XCH_RT, C.BIL_AMT), 2 ) ) O_AMT,
+	            -- '' I_CURR, 
+	            0 I_COUNT, 0 I_AMT, 0 M_COUNT, 0 M_AMT,
+	            0 AF_COUNT, 0 AF_AMT, 0 MF_COUNT, 0 MF_AMT, 0 BF_COUNT, 0 BF_AMT, 0 UF_COUNT, 0 UF_AMT
+            
+        FROM    DMT_CHG_CALC        C,
+            	GL_MON_XCH_RT       F    /*_______ SMLINE THE EXCHNAGE RATE MANAGEMENT TABLE */
+	    
+	    WHERE   C.TO_MVMT_DT BETWEEN TO_DATE(@[start_dt], 'YYYYMMDD') AND TO_DATE(@[end_dt], 'YYYYMMDD') + .99999
+	    AND		C.DMDT_CHG_STS_CD	IN ('F', 'C', 'I')	-- 2009/12/22 수정
+			  
+		#if (${ofc_flg} == 'O')
+		AND		C.OFC_CD	IN (
+			#foreach( $an_ofc in ${ofc_cd_list} )
+				#if($velocityCount < $ofc_cd_list.size()) '$an_ofc', #else '$an_ofc' #end
+			#end
+			)
+		#elseif (${ofc_flg} == 'R' && ${ofc_cd} != 'All') 
+		AND		C.OFC_RHQ_CD = @[ofc_cd]
+		#end
+	
+	    /* DEM/DET */
+		#if (${chg_flg} == 'M')
+			#if (${io_bnd_flg} == 'I')
+				AND	C.DMDT_TRF_CD = 'DMIF'
+			#elseif (${io_bnd_flg} == 'O')
+				AND	C.DMDT_TRF_CD = 'DMOF'
+			#else
+				AND C.DMDT_TRF_CD	IN	('DMIF', 'DMOF')
+			#end
+		#elseif (${chg_flg} == 'T') 
+			#if (${io_bnd_flg} == 'I')
+				AND	C.DMDT_TRF_CD	IN	('DTIC', 'CTIC')
+			#elseif (${io_bnd_flg} == 'O')
+				AND	C.DMDT_TRF_CD	IN	('DTOC', 'CTOC')
+			#else
+				AND C.DMDT_TRF_CD	IN	('DTIC', 'CTIC', 'DTOC', 'CTOC')
+			#end
+		#else
+			#if (${io_bnd_flg} == 'I')
+				AND	C.DMDT_TRF_CD	IN	('DMIF', 'DTIC', 'CTIC')
+			#elseif (${io_bnd_flg} == 'O')
+				AND	C.DMDT_TRF_CD	IN	('DMOF', 'DTOC', 'CTOC')
+			#end
+		#end
+		
+		AND		C.DMDT_CHG_LOC_DIV_CD <> 'SZP'			-- 2010/03/18 추가
+		AND		-- 2010/03/25 추가
+		(
+		    (C.DUL_TP_EXPT_FLG = 'Y' AND SUBSTR(C.DMDT_TRF_CD, 1, 1) = 'C')
+		    OR        
+		    (C.DUL_TP_EXPT_FLG = 'N')
+		)
+		-- 2010.11.01 HOLD Status 제외 조건 추가
+		AND
+		(
+			(
+				C.DMDT_CHG_STS_CD = 'I'
+				AND 'H' NOT IN (SELECT DMDT_AR_IF_CD FROM DMT_INV_MN WHERE DMDT_INV_NO = C.DMDT_INV_NO)
+			)
+			OR
+			(C.DMDT_CHG_STS_CD <> 'I')
+		)
+
+--	    AND		C.ORG_CHG_AMT		>	0		20091222 수정
+	    AND		F.ACCT_XCH_RT_YRMON	=	TO_CHAR(C.TO_MVMT_DT,'YYYYMM')
+	    AND		F.ACCT_XCH_RT_LVL	=	'1'
+	    AND		F.CURR_CD			=	C.BZC_TRF_CURR_CD
+	    
+	    GROUP BY    OFC_CD, OFC_RHQ_CD, 
+					TO_CHAR(C.TO_MVMT_DT, 'YYYYMM'),
+	                DECODE(SUBSTR(C.DMDT_TRF_CD, 2, 1), 'M', 'DEM', 'DET'),
+	                DECODE(SUBSTR(C.DMDT_TRF_CD, 3, 1), 'I', 'I/B', 'O/B'),
+	                DECODE(@[curr_flg], 'U', 'USD', C.BZC_TRF_CURR_CD )
+    )
+              
+    GROUP BY OFC_CD,
+			OFC_RHQ_CD,
+			YRMON,
+			TARIFF,
+			IO_BND,
+			O_CURR 
+),
+
+TMP2 AS
+(
+	SELECT	/*+ MATERIALIZE */
+			BB.OFC_CD,
+            BB.OFC_RHQ_CD,
+			YRMON,
+			BB.TARIFF, 
+			BB.IO_BND, 
+			BB.O_CURR, 
+			BB.O_COUNT, 
+			BB.O_AMT, 
+			SUM(BB.I_COUNT) 	I_COUNT, 
+			SUM(BB.I_AMT)		I_AMT, 
+			-- SUM(BB.M_COUNT)	M_COUNT, 
+			SUM(BB.M_AMT)		M_AMT,
+			SUM(BB.AF_COUNT)	AF_COUNT, 
+			SUM(BB.AF_AMT)		AF_AMT, 
+			SUM(BB.MF_COUNT)	MF_COUNT, 
+			SUM(BB.MF_AMT)		MF_AMT, 
+			SUM(BB.BF_COUNT)	BF_COUNT, 
+			SUM(BB.BF_AMT)		BF_AMT,
+			SUM(BB.UF_COUNT)	UF_COUNT, 
+			SUM(BB.UF_AMT)		UF_AMT
+    FROM
+    (
+    	SELECT	  OFC_CD,
+                  OFC_RHQ_CD,
+				  YRMON,
+                  BB.TARIFF,
+                  BB.IO_BND,
+                  BB.O_CURR,
+                  SUM(BB.O_COUNT)   O_COUNT,
+                  SUM(BB.O_AMT)     O_AMT,
+                  -- SUM(BB.I_CURR)	I_CURR,
+                  SUM(BB.I_COUNT)   I_COUNT,
+                  SUM(BB.I_AMT)     I_AMT,
+                  SUM(BB.M_AMT)		M_AMT,
+                  SUM(BB.AF_COUNT)	AF_COUNT,
+                  SUM(BB.AF_AMT)	AF_AMT,
+                  SUM(BB.MF_COUNT)	MF_COUNT,
+                  SUM(BB.MF_AMT)	MF_AMT,
+                  SUM(BB.BF_COUNT)	BF_COUNT,
+                  SUM(BB.BF_AMT)	BF_AMT,
+                  SUM(BB.UF_COUNT)	UF_COUNT,
+                  SUM(BB.UF_AMT)	UF_AMT
+        FROM (
+            SELECT  C.OFC_N8TH_LVL_CD	OFC_CD,
+              		C.OFC_N3RD_LVL_CD	OFC_RHQ_CD,
+					TO_CHAR(V.CRE_DT, 'YYYYMM') YRMON,
+                    DECODE(SUBSTR(V.DMDT_TRF_CD, 2, 1), 'M', 'DEM', 'DET') TARIFF,
+                    DECODE(SUBSTR(V.DMDT_TRF_CD, 3, 1), 'I', 'I/B', 'O/B') IO_BND,
+                    DECODE(@[curr_flg], 'U', 'USD', V.INV_CURR_CD ) O_CURR,
+                    0 O_COUNT,
+                    0 O_AMT,
+                    DECODE(SUBSTR(V.DMDT_INV_NO, 3, 1), 'M', 0, COUNT(ID.CNTR_NO)) I_COUNT,
+                    DECODE(SUBSTR(V.DMDT_INV_NO, 3, 1), 'M', 0, SUM( DECODE(@[curr_flg], 'U', ROUND(NVL(ID.CNTR_INV_AMT, 0) /F.USD_LOCL_XCH_RT, 2), NVL(ID.CNTR_INV_AMT, 0) ))) I_AMT,
+                    DECODE(SUBSTR(V.DMDT_INV_NO, 3, 1), 'M', SUM(DISTINCT DECODE(@[curr_flg], 'U', ROUND(V.INV_CHG_AMT/F.USD_LOCL_XCH_RT, 2), V.INV_CHG_AMT)), 0) M_AMT,
+                    0 AF_COUNT, 0 AF_AMT, 0 MF_COUNT, 0 MF_AMT, 0 BF_COUNT, 0 BF_AMT, 0 UF_COUNT, 0 UF_AMT
+
+            FROM    DMT_OFC_LVL_V   C,
+                    GL_MON_XCH_RT   F,
+                    DMT_INV_MN      V,
+                    DMT_INV_DTL		ID
+
+            WHERE   V.CRE_DT    BETWEEN TO_DATE(@[start_dt], 'YYYYMMDD') AND TO_DATE(@[end_dt], 'YYYYMMDD') + .99999
+            AND     V.DMDT_AR_IF_CD     <> 'H'                /*    HOLD EXCEPTION    */
+            AND     C.OFC_N8TH_LVL_CD   =  V.CRE_OFC_CD
+            AND	 V.DMDT_INV_STS_CD	= 'I'
+	 		#if (${ofc_flg} == 'O')
+				AND		V.CRE_OFC_CD	IN (
+					#foreach( $an_ofc in ${ofc_cd_list} )
+						#if($velocityCount < $ofc_cd_list.size()) '$an_ofc', #else '$an_ofc' #end
+					#end
+				)
+			#elseif (${ofc_flg} == 'R' && ${ofc_cd} != 'All') 
+	            AND		V.CRE_OFC_CD	IN (
+				                            SELECT OFC_CD
+				                            FROM   MDM_ORGANIZATION
+				                            START WITH OFC_CD = @[ofc_cd]
+				                            CONNECT BY NOCYCLE PRIOR OFC_CD = PRNT_OFC_CD
+				                            )
+			#end
+            
+              AND   V.DMDT_INV_NO = ID.DMDT_INV_NO(+)
+              AND V.CRE_OFC_CD = ID.CRE_OFC_CD(+)              
+            
+
+            /* DEM/DET */
+			#if (${chg_flg} == 'M')
+				#if (${io_bnd_flg} == 'I')
+					AND	V.DMDT_TRF_CD = 'DMIF'
+				#elseif (${io_bnd_flg} == 'O')
+					AND	V.DMDT_TRF_CD = 'DMOF'
+				#else
+					AND V.DMDT_TRF_CD	IN	('DMIF', 'DMOF')
+				#end
+			#elseif (${chg_flg} == 'T') 
+				#if (${io_bnd_flg} == 'I')
+					AND	V.DMDT_TRF_CD	IN	('DTIC', 'CTIC')
+				#elseif (${io_bnd_flg} == 'O')
+					AND	V.DMDT_TRF_CD	IN	('DTOC', 'CTOC')
+				#else
+					AND V.DMDT_TRF_CD	IN	('DTIC', 'CTIC', 'DTOC', 'CTOC')
+				#end
+			#else
+				#if (${io_bnd_flg} == 'I')
+					AND	V.DMDT_TRF_CD	IN	('DMIF', 'DTIC', 'CTIC')
+				#elseif (${io_bnd_flg} == 'O')
+					AND	V.DMDT_TRF_CD	IN	('DMOF', 'DTOC', 'CTOC')
+				#end
+			#end
+
+            AND        F.ACCT_XCH_RT_YRMON  =    TO_CHAR(V.CRE_DT,'YYYYMM')
+            AND        F.ACCT_XCH_RT_LVL    =    '1'
+            AND        F.CURR_CD            =    V.INV_CURR_CD
+
+            GROUP BY    C.OFC_N8TH_LVL_CD, C.OFC_N3RD_LVL_CD,
+						TO_CHAR(V.CRE_DT, 'YYYYMM'),
+                        V.DMDT_INV_NO,
+                        DECODE(SUBSTR(V.DMDT_TRF_CD, 2, 1), 'M', 'DEM', 'DET'),
+                        DECODE(SUBSTR(V.DMDT_TRF_CD, 3, 1), 'I', 'I/B', 'O/B'),
+                        DECODE(@[curr_flg], 'U', 'USD', V.INV_CURR_CD )
+        ) BB
+        GROUP BY	OFC_CD,
+                    OFC_RHQ_CD,
+					YRMON,
+                    BB.TARIFF,
+                    BB.IO_BND,
+                    BB.O_CURR   
+    ) BB
+    
+	GROUP BY	BB.OFC_CD,
+                BB.OFC_RHQ_CD,
+                YRMON,
+				BB.TARIFF,
+				BB.IO_BND,
+				BB.O_CURR,
+				BB.O_COUNT,
+				BB.O_AMT
+),
+
+TMP_AR AS
+(
+	SELECT	/*+ MATERIALIZE */	  
+			OFC_CD,
+            OFC_RHQ_CD,
+			YRMON,
+			CC.TARIFF,
+			CC.IO_BND,
+			CC.O_CURR,
+			SUM(CC.O_COUNT)   AS O_COUNT,
+			SUM(CC.O_AMT)     AS O_AMT,
+			-- SUM(CC.I_CURR)    AS I_CURR,
+			SUM(CC.I_COUNT)   AS I_COUNT,
+			SUM(CC.I_AMT)     AS I_AMT,
+			SUM(CC.AF_COUNT) AF_COUNT,
+			SUM(CC.AF_AMT) AF_AMT ,
+			SUM(CC.MF_AMT) MF_AMT,
+			SUM(CC.BF_COUNT) BF_COUNT,
+			SUM(CC.I_AMT) BF_AMT,
+			SUM(CC.UF_COUNT) UF_COUNT,
+			SUM(CC.UF_AMT) UF_AMT           
+	FROM (
+			SELECT  C.OFC_N8TH_LVL_CD   	OFC_CD,
+					C.OFC_N3RD_LVL_CD     	OFC_RHQ_CD,
+					TO_CHAR(V.AR_IF_DT, 'YYYYMM')		YRMON,
+					DECODE(SUBSTR(V.DMDT_TRF_CD, 2, 1), 'M', 'DEM', 'DET') TARIFF,
+					DECODE(SUBSTR(V.DMDT_TRF_CD, 3, 1), 'I', 'I/B', 'O/B') IO_BND,
+					DECODE(@[curr_flg], 'U', 'USD', V.INV_CURR_CD ) O_CURR,
+					0 O_COUNT,
+					0 O_AMT,
+					-- '' I_CURR,
+					0 I_COUNT,
+					0 I_AMT,
+					0 M_COUNT,
+					0 M_AMT,
+					DECODE(SUBSTR(V.DMDT_INV_NO, 3, 1), 'M', 0, SUM(DECODE(V.DMDT_INV_STS_CD, 'I', 1, 'X', 1, 'C', -1) )) AF_COUNT, -- 20091222 수정
+					DECODE(SUBSTR(V.DMDT_INV_NO, 3, 1), 'M', 0, SUM( DECODE(V.DMDT_AR_IF_CD, 'Y', DECODE(@[curr_flg], 'U', ROUND(NVL(ID.CNTR_INV_AMT, 0) /F.USD_LOCL_XCH_RT, 2), NVL(ID.CNTR_INV_AMT, 0) ) ) ) ) AF_AMT,	-- 20091222 수정
+					DECODE(SUBSTR(V.DMDT_INV_NO, 3, 1), 'M', SUM(DISTINCT DECODE(@[curr_flg], 'U', ROUND(V.INV_CHG_AMT/F.USD_LOCL_XCH_RT, 2), V.INV_CHG_AMT)), 0) MF_AMT,
+					0 BF_COUNT,
+					0 BF_AMT,
+					0 UF_COUNT,
+					0 UF_AMT
+			FROM	DMT_OFC_LVL_V   C,
+					GL_MON_XCH_RT   F,
+					DMT_INV_MN      V,
+			    	DMT_INV_DTL		ID	-- 20091222 수정
+				                        
+			WHERE	V.AR_IF_DT BETWEEN TO_DATE(@[start_dt], 'YYYYMMDD') AND TO_DATE(@[end_dt], 'YYYYMMDD') + .99999
+			AND		V.DMDT_AR_IF_CD = 'Y' 			/*    HOLD EXCEPTION    */
+			AND		C.OFC_N8TH_LVL_CD = V.AR_IF_OFC_CD
+				
+			#if (${ofc_flg} == 'O')
+				AND		V.AR_IF_OFC_CD	IN (
+						#foreach( $an_ofc in ${ofc_cd_list} )
+							#if($velocityCount < $ofc_cd_list.size()) '$an_ofc', #else '$an_ofc' #end
+						#end
+				)
+			#elseif (${ofc_flg} == 'R' && ${ofc_cd} != 'All') 
+				AND		V.AR_IF_OFC_CD	IN (
+				                            SELECT OFC_CD
+				                            FROM   MDM_ORGANIZATION
+				                            START WITH OFC_CD = @[ofc_cd]
+				                            CONNECT BY NOCYCLE PRIOR OFC_CD = PRNT_OFC_CD
+	                            			)
+			#end
+
+			AND		V.DMDT_INV_NO = ID.DMDT_INV_NO(+)	-- 20091222 수정
+			AND		V.CRE_OFC_CD = ID.CRE_OFC_CD(+)    	-- 20091222 수정          
+			
+			#if (${chg_flg} == 'M')
+				#if (${io_bnd_flg} == 'I')
+					AND	V.DMDT_TRF_CD = 'DMIF'
+				#elseif (${io_bnd_flg} == 'O')
+					AND	V.DMDT_TRF_CD = 'DMOF'
+				#else
+					AND V.DMDT_TRF_CD	IN	('DMIF', 'DMOF')
+				#end
+			#elseif (${chg_flg} == 'T') 
+				#if (${io_bnd_flg} == 'I')
+					AND	V.DMDT_TRF_CD	IN	('DTIC', 'CTIC')
+				#elseif (${io_bnd_flg} == 'O')
+					AND	V.DMDT_TRF_CD	IN	('DTOC', 'CTOC')
+				#else
+					AND V.DMDT_TRF_CD	IN	('DTIC', 'CTIC', 'DTOC', 'CTOC')
+				#end
+			#else
+				#if (${io_bnd_flg} == 'I')
+					AND	V.DMDT_TRF_CD	IN	('DMIF', 'DTIC', 'CTIC')
+				#elseif (${io_bnd_flg} == 'O')
+					AND	V.DMDT_TRF_CD	IN	('DMOF', 'DTOC', 'CTOC')
+				#end
+			#end
+			
+			AND		F.ACCT_XCH_RT_YRMON = TO_CHAR(V.CRE_DT, 'YYYYMM')
+			AND		F.ACCT_XCH_RT_LVL = '1'
+			AND		F.CURR_CD = V.INV_CURR_CD
+			
+			GROUP BY    C.OFC_N8TH_LVL_CD, C.OFC_N3RD_LVL_CD,	-- 20091222 수정
+						TO_CHAR(V.AR_IF_DT, 'YYYYMM'),
+						V.DMDT_INV_NO,
+						DECODE(SUBSTR(V.DMDT_TRF_CD, 2, 1), 'M', 'DEM', 'DET'), 
+						DECODE(SUBSTR(V.DMDT_TRF_CD, 3, 1), 'I', 'I/B', 'O/B'), 
+						DECODE(@[curr_flg], 'U', 'USD', V.INV_CURR_CD )
+		
+		) CC
+        GROUP BY    OFC_CD,
+	                OFC_RHQ_CD,
+					YRMON,
+                    CC.TARIFF,
+                    CC.IO_BND,
+                    CC.O_CURR
+),
+ 
+TMP3 AS
+(
+	SELECT	/*+ MATERIALIZE */	  
+			CC.OFC_CD,
+            CC.OFC_RHQ_CD,
+			CC.YRMON,
+			CC.TARIFF,
+			CC.IO_BND,
+			CC.O_CURR,
+			SUM(CC.O_COUNT)   AS O_COUNT,
+			SUM(CC.O_AMT)     AS O_AMT,
+			-- SUM(CC.I_CURR)    AS I_CURR,
+			SUM(CC.I_COUNT)   AS I_COUNT,
+			SUM(CC.I_AMT)     AS I_AMT,
+			SUM(CC.AF_COUNT) AF_COUNT,
+			SUM(CC.AF_AMT) AF_AMT ,
+			SUM(CC.MF_AMT) MF_AMT,
+			SUM(CC.BF_COUNT) BF_COUNT,
+			SUM(CC.I_AMT) BF_AMT,
+			SUM(CC.UF_COUNT) UF_COUNT,
+			SUM(CC.UF_AMT) UF_AMT           
+	FROM (
+			SELECT  C.OFC_N8TH_LVL_CD   OFC_CD,
+					C.OFC_N3RD_LVL_CD   OFC_RHQ_CD,
+					TO_CHAR(R.INV_PAY_LOCL_DT, 'YYYYMM')	YRMON,
+					DECODE(SUBSTR(V.DMDT_TRF_CD, 2, 1), 'M', 'DEM', 'DET') TARIFF,
+					DECODE(SUBSTR(V.DMDT_TRF_CD, 3, 1), 'I', 'I/B', 'O/B') IO_BND,
+					DECODE(@[curr_flg], 'U', 'USD', R.INV_CURR_CD ) O_CURR,
+					0 O_COUNT,
+					0 O_AMT,
+					-- '' I_CURR,
+					0 I_COUNT,
+					0 I_AMT,
+					0 M_COUNT,
+					0 M_AMT,
+					MAX(DECODE(SUBSTR(V.DMDT_INV_NO, 3, 1), 'M', 0, DECODE(V.DMDT_INV_STS_CD, 'I', 1, 'X', 1, 'C', -1)*( SELECT COUNT(*) FROM DMT_INV_DTL WHERE DMDT_INV_NO = V.DMDT_INV_NO ) )
+					* 	CASE WHEN SUBSTR(V.DMDT_INV_NO, 3, 1) = 'M' THEN 0
+								 WHEN NVL(R.INV_PAY_AMT,0) != 0 THEN 1
+								 ELSE 0
+                            END
+                            )
+					 AF_COUNT, -- 20091222 수정
+					
+					SUM(CASE WHEN SUBSTR(V.DMDT_INV_NO, 3, 1) = 'M' THEN 0
+						ELSE
+							NVL(DECODE(@[curr_flg], 'U', ROUND(R.INV_PAY_AMT/F.USD_LOCL_XCH_RT,2), R.INV_PAY_AMT),0)
+                        END
+                    ) AF_AMT,
+					
+					SUM(CASE WHEN SUBSTR(V.DMDT_INV_NO, 3, 1) != 'M' THEN 0                                 
+						ELSE
+							NVL(DECODE(@[curr_flg], 'U', ROUND(INV_PAY_AMT/F.USD_LOCL_XCH_RT,2), INV_PAY_AMT),0)
+                        END
+                    ) MF_AMT,	 
+					0 BF_COUNT,
+					0 BF_AMT,
+					0 UF_COUNT,
+					0 UF_AMT
+			FROM	DMT_OFC_LVL_V   C,
+					GL_MON_XCH_RT   F,
+					DMT_INV_MN      V,
+					DMT_INV_OTS_PAY_RCV R
+			WHERE	R.INV_PAY_LOCL_DT BETWEEN TO_DATE(@[start_dt], 'YYYYMMDD') AND TO_DATE(@[end_dt], 'YYYYMMDD') + .99999
+            AND     V.DMDT_INV_NO = R.DMDT_INV_NO
+			AND		V.DMDT_AR_IF_CD = 'Y' 			/*    HOLD EXCEPTION    */
+			AND		C.OFC_N8TH_LVL_CD = V.AR_IF_OFC_CD
+				
+			#if (${ofc_flg} == 'O')
+				AND		V.AR_IF_OFC_CD	IN (
+						#foreach( $an_ofc in ${ofc_cd_list} )
+							#if($velocityCount < $ofc_cd_list.size()) '$an_ofc', #else '$an_ofc' #end
+						#end
+				)
+			#elseif (${ofc_flg} == 'R' && ${ofc_cd} != 'All') 
+				AND		V.AR_IF_OFC_CD	IN (
+				                            SELECT OFC_CD
+				                            FROM   MDM_ORGANIZATION
+				                            START WITH OFC_CD = @[ofc_cd]
+				                            CONNECT BY NOCYCLE PRIOR OFC_CD = PRNT_OFC_CD
+	                            			)
+			#end
+			
+			--AND		V.DMDT_INV_NO = ID.DMDT_INV_NO(+)	-- 20091222 수정
+			--AND		V.CRE_OFC_CD = ID.CRE_OFC_CD(+)    	-- 20091222 수정          
+			AND R.DMDT_INV_PAY_TP_CD = 'M'
+			AND EXISTS 
+				( 
+					SELECT  'X' 
+					  FROM  DMT_HRD_CDG_CTNT H
+					 WHERE  1 = 1
+					   AND  V.AR_IF_OFC_CD = H.ATTR_CTNT1
+            		   AND  H.HRD_CDG_ID = 'AUTO_AR_IF_OFC'
+				)
+
+			#if (${chg_flg} == 'M')
+				#if (${io_bnd_flg} == 'I')
+					AND	V.DMDT_TRF_CD = 'DMIF'
+				#elseif (${io_bnd_flg} == 'O')
+					AND	V.DMDT_TRF_CD = 'DMOF'
+				#else
+					AND V.DMDT_TRF_CD	IN	('DMIF', 'DMOF')
+				#end
+			#elseif (${chg_flg} == 'T') 
+				#if (${io_bnd_flg} == 'I')
+					AND	V.DMDT_TRF_CD	IN	('DTIC', 'CTIC')
+				#elseif (${io_bnd_flg} == 'O')
+					AND	V.DMDT_TRF_CD	IN	('DTOC', 'CTOC')
+				#else
+					AND V.DMDT_TRF_CD	IN	('DTIC', 'CTIC', 'DTOC', 'CTOC')
+				#end
+			#else
+				#if (${io_bnd_flg} == 'I')
+					AND	V.DMDT_TRF_CD	IN	('DMIF', 'DTIC', 'CTIC')
+				#elseif (${io_bnd_flg} == 'O')
+					AND	V.DMDT_TRF_CD	IN	('DMOF', 'DTOC', 'CTOC')
+				#end
+			#end
+			
+			AND		F.ACCT_XCH_RT_YRMON = TO_CHAR(V.CRE_DT, 'YYYYMM')
+			AND		F.ACCT_XCH_RT_LVL = '1'
+			AND		F.CURR_CD = R.INV_CURR_CD
+			
+			GROUP BY    C.OFC_N8TH_LVL_CD, C.OFC_N3RD_LVL_CD,	-- 20091222 수정
+						TO_CHAR(R.INV_PAY_LOCL_DT, 'YYYYMM'),
+						V.DMDT_INV_NO,
+						DECODE(SUBSTR(V.DMDT_TRF_CD, 2, 1), 'M', 'DEM', 'DET'), 
+						DECODE(SUBSTR(V.DMDT_TRF_CD, 3, 1), 'I', 'I/B', 'O/B'), 
+						DECODE(@[curr_flg], 'U', 'USD', R.INV_CURR_CD )
+		) CC
+        GROUP BY    OFC_CD,
+	                OFC_RHQ_CD,
+					YRMON,
+                    CC.TARIFF,
+                    CC.IO_BND,
+                    CC.O_CURR
+),
+ 
+TMP4 AS
+(
+	SELECT  /*+ MATERIALIZE */
+			OFC_CD,
+            OFC_RHQ_CD,
+			YRMON,
+            CC.TARIFF,
+            CC.IO_BND,
+            CC.O_CURR,            
+            SUM(CC.CHG_AMT) AS CHG_AMT
+    FROM (
+		SELECT	/*+NO_MERGE(L)  USE_NL(L M C F) ORDERED*/
+	      		L.OFC_N8TH_LVL_CD   OFC_CD,
+                L.OFC_N3RD_LVL_CD   OFC_RHQ_CD,
+				SUBSTR(M.BL_INV_IF_DT, 0, 6)	YRMON,
+	      		DECODE(C.CHG_CD, 'DMR', 'DEM', 'DTC', 'DET','CDD','DET') TARIFF, DECODE(M.IO_BND_CD, 'I', 'I/B', 'O/B') IO_BND,
+	      		DECODE(@[curr_flg], 'U', 'USD', C.CURR_CD) 	O_CURR,
+	      		SUM(DECODE(@[curr_flg], 'U', ROUND(C.CHG_AMT/F.USD_LOCL_XCH_RT, 2), C.CHG_AMT)) CHG_AMT
+	    FROM	INV_AR_MN		M,
+				INV_AR_CHG		C, 
+				GL_MON_XCH_RT	F,
+				DMT_OFC_LVL_V	L
+	    WHERE	M.AR_IF_NO = C.AR_IF_NO
+		AND		M.BL_INV_IF_DT BETWEEN @[start_dt] AND @[end_dt]
+		AND		L.OFC_N8TH_LVL_CD = M.AR_OFC_CD
+		
+		#if (${ofc_flg} == 'O')
+			AND  M.AR_OFC_CD IN (
+				#foreach( $an_ofc in ${ofc_cd_list} )
+					#if($velocityCount < $ofc_cd_list.size()) '$an_ofc', #else '$an_ofc' #end
+				#end
+				)
+		#elseif (${ofc_flg} == 'R' && ${ofc_cd} != 'All') 
+			AND	M.AR_OFC_CD IN (
+								SELECT OFC_CD
+								FROM   MDM_ORGANIZATION
+								START WITH OFC_CD = @[ofc_cd]
+								CONNECT BY NOCYCLE PRIOR OFC_CD = PRNT_OFC_CD
+								)
+		#end
+	
+		#if (${chg_flg} == '') ##ALL 을 선택 했을 경우
+			AND C.CHG_CD IN ('DMR','DTC','CDD')
+		#elseif (${chg_flg} == 'M')
+			AND C.CHG_CD = 'DMR'
+		#elseif (${chg_flg} == 'T')   
+			AND C.CHG_CD IN ('DTC','CDD')
+		#end
+	
+		#if (${io_bnd_flg} == 'I')
+			AND  M.IO_BND_CD = 'I'
+		#elseif (${io_bnd_flg} == 'O') 
+			AND  M.IO_BND_CD = 'O'
+		#end
+	
+		AND (M.REV_TP_CD IN ('B','C') OR (M.REV_TP_CD = 'M' AND M.REV_SRC_CD NOT IN ('DM','DT','CD')))
+		AND F.ACCT_XCH_RT_YRMON = SUBSTR(M.BL_INV_IF_DT, 1, 6)
+		AND F.ACCT_XCH_RT_LVL = '1'
+		AND F.CURR_CD = C.CURR_CD
+		
+		GROUP BY    --M.AR_OFC_CD,
+                    L.OFC_N8TH_LVL_CD, L.OFC_N3RD_LVL_CD, 
+					SUBSTR(M.BL_INV_IF_DT, 0, 6),
+                    DECODE(C.CHG_CD, 'DMR', 'DEM', 'DTC', 'DET','CDD','DET'),
+                    DECODE(M.IO_BND_CD, 'I', 'I/B', 'O/B'), 
+                    DECODE(@[curr_flg], 'U', 'USD', C.CURR_CD)   
+	) CC
+
+	GROUP BY    OFC_CD,
+                OFC_RHQ_CD,
+				YRMON,
+				TARIFF,
+                CC.IO_BND,
+                CC.O_CURR
+),
+
+TMP5 AS
+(
+	SELECT /*+ OPT_PARAM('_OPTIMIZER_NATIVE_FULL_OUTER_JOIN', 'FORCE') */
+		  COALESCE(CC.OFC_CD, I.OFC_CD, AR.OFC_CD) OFC_CD,
+		  COALESCE(CC.OFC_RHQ_CD, I.OFC_RHQ_CD, AR.OFC_RHQ_CD) OFC_RHQ_CD,
+		  COALESCE(CC.YRMON, I.YRMON, AR.YRMON) YRMON,
+          COALESCE(CC.TARIFF, I.TARIFF, AR.TARIFF) TARIFF, 
+          COALESCE(CC.IO_BND, I.IO_BND, AR.IO_BND) IO_BND, 
+          COALESCE(CC.O_CURR, I.O_CURR, AR.O_CURR) O_CURR, 
+          CC.O_COUNT, CC.O_AMT, 
+       -- CC.I_CURR,
+          CC.I_COUNT, 
+          CC.I_AMT, 
+          SUM(CC.AF_COUNT) AF_COUNT, 
+          SUM(CC.AF_AMT) AF_AMT,
+       -- SUM(CC.MF_COUNT) MF_COUNT,
+          SUM(CC.MF_AMT) MF_AMT, 
+          SUM(CC.BF_COUNT) BF_COUNT, 
+          SUM(I.CHG_AMT) BF_AMT, 
+          SUM(CC.UF_COUNT) UF_COUNT, 
+          SUM(CC.UF_AMT) UF_AMT,
+          SUM(AR.AF_COUNT) AR_CNTR,
+          SUM(AR.AF_AMT) AR_AMT,
+          SUM(AR.MF_AMT) AR_M_AMT
+    FROM TMP3 CC
+    
+		 FULL OUTER JOIN 
+    	 TMP4 I
+         ON ( CC.OFC_CD = I.OFC_CD
+			  AND CC.OFC_RHQ_CD = I.OFC_RHQ_CD
+			  AND CC.YRMON = I.YRMON
+              AND CC.TARIFF = I.TARIFF
+              AND CC.IO_BND = I.IO_BND
+              AND CC.O_CURR = I.O_CURR )
+
+		 FULL OUTER JOIN 
+    	 TMP_AR AR
+         ON ( AR.OFC_CD = CC.OFC_CD
+			  AND AR.OFC_RHQ_CD = CC.OFC_RHQ_CD
+			  AND AR.YRMON = CC.YRMON
+              AND AR.TARIFF = CC.TARIFF
+              AND AR.IO_BND = CC.IO_BND
+              AND AR.O_CURR = CC.O_CURR )
+	GROUP BY	COALESCE(CC.OFC_CD, I.OFC_CD, AR.OFC_CD), COALESCE(CC.OFC_RHQ_CD, I.OFC_RHQ_CD, AR.OFC_RHQ_CD), COALESCE(CC.YRMON, I.YRMON, AR.YRMON), COALESCE(CC.TARIFF, I.TARIFF, AR.TARIFF) , COALESCE(CC.IO_BND, I.IO_BND, AR.IO_BND), 
+				COALESCE(CC.O_CURR, I.O_CURR, AR.O_CURR) , CC.O_COUNT, CC.O_AMT, CC.I_COUNT, CC.I_AMT 
+), 
+MAIN AS 
+(			
+	SELECT	COALESCE(A.OFC_CD, B.OFC_CD, C.OFC_CD) OFC_CD,
+	        COALESCE(A.OFC_RHQ_CD, B.OFC_RHQ_CD, C.OFC_RHQ_CD) OFC_RHQ_CD,
+			COALESCE(A.YRMON, B.YRMON, C.YRMON) YRMON,
+	        COALESCE(A.TARIFF, B.TARIFF, C.TARIFF) TARIFF,
+	        COALESCE(A.IO_BND, B.IO_BND, C.IO_BND) IO_BND,
+	        COALESCE(A.O_CURR, B.O_CURR, C.O_CURR) CURR_CD,
+	        SUM(NVL(A.O_COUNT, 0)) BILL_CNTR,
+	        SUM(NVL(A.O_AMT, 0)) BILL_AMT,
+	      -- MAX(B.I_CURR) I_CURR,
+	        SUM(NVL(B.I_COUNT, 0)) INV_CNTR,
+	        SUM(NVL(B.I_AMT, 0)) INV_AMT,
+	      -- SUM(NVL(B.M_COUNT, 0))    INV_M_CNTR,
+	        SUM(NVL(B.M_AMT, 0)) INV_M_AMT,
+	        SUM(NVL(C.AF_COUNT, 0)) COLL_CNTR,
+	        SUM(NVL(C.AF_AMT, 0)) COLL_AMT,
+	      -- SUM(NVL(C.MF_COUNT, 0))    COLL_M_CNTR,
+	        SUM(NVL(C.MF_AMT, 0)) COLL_M_AMT,
+	        SUM(NVL(C.BF_AMT, 0)) COLL_OTH_AMT,        
+	        SUM(NVL(C.AR_CNTR, 0)) AR_IF_CNTR,
+	        SUM(NVL(C.AR_AMT, 0)) AR_IF_AMT,
+	        SUM(NVL(C.AR_M_AMT, 0)) AR_IF_M_AMT,
+	        SUM(NVL(C.BF_AMT, 0)) AR_IF_OTH_AMT
+	FROM TMP1 A FULL OUTER JOIN TMP2 B
+			ON (	B.OFC_CD = A.OFC_CD
+				AND B.OFC_RHQ_CD = A.OFC_RHQ_CD
+				AND B.YRMON = A.YRMON
+	            AND B.TARIFF = A.TARIFF
+	            AND B.IO_BND = A.IO_BND
+	            AND B.O_CURR = A.O_CURR ) 
+	     FULL OUTER JOIN TMP5 C
+			ON (  C.OFC_CD = A.OFC_CD
+	          AND C.OFC_RHQ_CD = A.OFC_RHQ_CD
+			  AND C.YRMON = A.YRMON
+		      AND C.TARIFF = A.TARIFF
+		      AND C.IO_BND = A.IO_BND
+		      AND C.O_CURR = A.O_CURR )
+	GROUP BY COALESCE(A.OFC_CD, B.OFC_CD, C.OFC_CD), COALESCE(A.OFC_RHQ_CD, B.OFC_RHQ_CD, C.OFC_RHQ_CD), COALESCE(A.YRMON, B.YRMON, C.YRMON), COALESCE(A.TARIFF, B.TARIFF, C.TARIFF), COALESCE(A.IO_BND, B.IO_BND, C.IO_BND), COALESCE(A.O_CURR, B.O_CURR, C.O_CURR)
+	ORDER BY COALESCE(A.OFC_CD, B.OFC_CD, C.OFC_CD), COALESCE(A.OFC_RHQ_CD, B.OFC_RHQ_CD, C.OFC_RHQ_CD), COALESCE(A.YRMON, B.YRMON, C.YRMON), COALESCE(A.TARIFF, B.TARIFF, C.TARIFF), COALESCE(A.IO_BND, B.IO_BND, C.IO_BND)
+)
+
+SELECT 	OFC_CD,
+		TARIFF,
+		IO_BND,
+		CURR_CD,
+		BILL_CNTR,
+		BILL_AMT,
+		INV_CNTR,
+		INV_AMT,
+		INV_M_AMT,
+		COLL_CNTR,
+		COLL_AMT,
+		COLL_M_AMT,
+		COLL_OTH_AMT,
+		AR_IF_CNTR,
+		AR_IF_AMT,
+		AR_IF_M_AMT,
+		AR_IF_OTH_AMT,
+		SUBSTR(YRMON, 0, 4) YEAR,
+		SUBSTR(YRMON, 5, 2) MONTH,
+		YRMON,
+		OFC_RHQ_CD,
+		(
+			SELECT CASE WHEN main.ofc_cd='DXBBA' -- DXBBA 오피스는 테이블 값이 존재하지않아 강제로 값을 정함
+     				     THEN 'DXBSC' 
+		        	 ELSE 
+			        	(SELECT CASE WHEN 
+				        	-- 아래 오피스는 4레벨
+					         MAIN.OFC_CD IN (
+					            --HAMRU
+					            'KOPBA', 'TLLBA', 'CASBA', 'LEIBA', 'LISBA', 'TUNBA', 
+					            --NYCRA
+					            'CCSBA',
+				    	        --SHARC
+				        	    'CANSO', 'KHHBA',
+				            	--TYOIB
+					            'KIJBA', 'NGOSO', 'TMKBA',
+					            --SINRS
+					            'BLRBA', 'BRCBA', 'HYDBA', 'IDRBA', 'JPRBA', 'KNPBA', 'MUNBA', 'NAGBA', 'PAVKS', 'PNVBA', 
+					            'TUTBA', 'TUTBS', 'VPMKS', 'CMBSC', 'CGPKS', 'DACSC', 'DARBA', 'DJIBA', 'DURBA', 'AUHSO', 
+					            'DOHBA', 'DXBBA', 'DXBSC', 'IRQBA', 'JORBA', 'THRBA', 'DMNBA', 'JEDBA', 'BLWBA', 'JKTBA', 
+					            'JKTSC', 'KHIBA', 'KWIBA', 'MBABA', 'MNLBA'
+								) THEN OFC_N4TH_LVL_CD
+							    WHEN -- OFC_KND_CD & OFC_LVL 조합으로 5레벨 컨트롤 오피스인 부분만 구한다
+						               (OFC_KND_CD = 6 AND OFC_LVL = 5)
+						            OR (OFC_KND_CD = 6 AND OFC_LVL = 6)
+						            OR (OFC_KND_CD = 3 AND OFC_LVL = 5)
+						            OR (OFC_KND_CD = 4 AND OFC_LVL = 6)
+					            THEN OFC_N5TH_LVL_CD
+						        ELSE OFC_N4TH_LVL_CD   -- 그외에는 모두 4레벨
+						        END 
+						FROM DMT_OFC_LVL_V
+	       			 WHERE OFC_N8TH_LVL_CD = MAIN.OFC_CD
+        			) 
+    	END 
+	FROM DUAL ) CTRL_OFC_CD 
+FROM MAIN			]]></sql>
+			<params>
+				<param name="curr_flg" type="12" value="" out="N"/>
+				<param name="start_dt" type="12" value="" out="N"/>
+				<param name="end_dt" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

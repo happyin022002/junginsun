@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PrdCreateManageDBDAOUpdatePrdMstByPodMgmtCnstUSQL">
+			<desc><![CDATA[1. Inland Route POD Management에서 정의한 Constraint를 적용한다.
+2. 2011.07.04 이수진 [CHM-201111709] PRD > Network Constraint 관련 data upload 및 기능개선 요청]]></desc>
+			<sql><![CDATA[
+-- match되는 경우에만 update하기 위해 사용한다.
+MERGE INTO PRD_PROD_CTL_MST T
+USING (
+    SELECT PCTL_NO,SLAN_CD, POD_CD, DEL_CD ,BKG_DE_TERM_CD, TRSP_MOD_CD, BKG_RMK, DECODE(NVL(APLY_SVC_MOD_FLG, 'Y'), 'N', 'X', 'R') APLY_SVC_MOD_FLG
+    FROM (
+        SELECT PCTL_NO, CNST.SLAN_CD, CNST.POD_CD, CNST.DEL_CD, BKG_DE_TERM_CD, TRSP_MOD_CD, BKG_RMK, APLY_SVC_MOD_FLG
+--                     , ROW_NUMBER() OVER (PARTITION BY PCTL_NO ORDER BY DECODE(BKG_DE_TERM_CD, 'A', 1, 0), DECODE(TRSP_MOD_CD, 'AL', 1, 0)) ODR
+                     , ROW_NUMBER() OVER (PARTITION BY PCTL_NO ORDER BY  
+                                                        DECODE(INSTR(NVL(PCTL_IMDG_CLSS_CTNT, NVL(COLUMN_VALUE,'XX')) ,NVL(COLUMN_VALUE,'XX') ) , 0, 999,0) ,
+                                                        DECODE(APLY_SVC_MOD_FLG,'Y',1,0),DECODE(BKG_DE_TERM_CD, 'A', 1, 0), DECODE(TRSP_MOD_CD, 'AL', 1, 0)) ODR
+					 , COLUMN_VALUE BKG_IMDG -- 입력된 BKG IMDG
+                     , PCTL_IMDG_CLSS_CTNT -- POD_MGMT 에 등록된 IMDG 
+                     -- BKG 에서 받은 IMDG 값들이 POD_MGMT 에 포함되는지 확인-- BKG 에서 받은 IMDG는 단건으로 분리하여 ROW별로 처리 한다.
+					 , INSTR(NVL(PCTL_IMDG_CLSS_CTNT, NVL(COLUMN_VALUE,'XX')) ,NVL(COLUMN_VALUE,'XX') ) INSTR_VAL -- POD_IMDG 에 등록된 값중 BKG의 값이 있는 위치 INDEX
+        FROM (
+            SELECT PCTL_NO, IO_BND_CD, POD_CD, DEL_CD, TERM_CD
+                  , SLAN_CD, FDR_SLAN_CD
+                 , CASE WHEN SUBSTR(TRSP_MOD, 1,1) = 'T' AND REPLACE(TRSP_MOD, 'T', '') IS NULL THEN 'TD'
+                        WHEN REPLACE(TRSP_MOD, 'R', '') IS NULL THEN 'RD'
+                        WHEN SUBSTR(TRSP_MOD, 1,2) = 'TR' AND REPLACE(SUBSTR(TRSP_MOD, 3), 'R', '') IS NULL THEN 'RD'
+                        WHEN SUBSTR(TRSP_MOD, -2) = 'RT' THEN 'RT'
+                        WHEN REPLACE(TRSP_MOD, 'W', '') IS NULL THEN 'WD'
+                        WHEN SUBSTR(TRSP_MOD, 1,2) = 'TW' AND REPLACE(SUBSTR(TRSP_MOD, 3), 'W', '') IS NULL THEN 'WD'
+                        WHEN SUBSTR(TRSP_MOD, -2) = 'WT' THEN 'WT'
+                        WHEN INSTR(TRSP_MOD, 'WR') > 0 THEN 'WR'
+                   END TRSP_MOD
+            FROM (
+                    SELECT PCTL_NO, IO_BND_CD
+                     , MAX(DECODE(IO_BND_CD, 'O', POL_CD, POD_CD)) POD_CD
+                     , MAX(DECODE(IO_BND_CD, 'O', POR_CD, DEL_CD)) DEL_CD
+                     , DECODE(MAX(DECODE(IO_BND_CD, 'O', BKG_RCV_TERM_CD, BKG_DE_TERM_CD)), 'D','D','Y') TERM_CD
+                     , MAX(DECODE(use_pctl, 'Y',DECODE(RN, 1, TRSP_MOD))) 
+                      ||MAX(DECODE(use_pctl, 'Y',DECODE(RN, 2, TRSP_MOD)))
+                      ||MAX(DECODE(use_pctl, 'Y',DECODE(RN, 3, TRSP_MOD)))
+                      ||MAX(DECODE(use_pctl, 'Y',DECODE(RN, 4, TRSP_MOD)))
+                      ||MAX(DECODE(use_pctl, 'Y',DECODE(RN, 5, TRSP_MOD)))
+                      ||MAX(DECODE(use_pctl, 'Y',DECODE(RN, 6, TRSP_MOD)))
+                      ||MAX(DECODE(use_pctl, 'Y',DECODE(RN, 7, TRSP_MOD)))
+                      ||MAX(DECODE(use_pctl, 'Y',DECODE(RN, 8, TRSP_MOD)))
+                      ||MAX(DECODE(use_pctl, 'Y',DECODE(RN, 9, TRSP_MOD)))
+                      ||MAX(DECODE(use_pctl, 'Y',DECODE(RN,10, TRSP_MOD))) TRSP_MOD
+                    , MAX(VSL_SLAN_CD) SLAN_CD
+                    , MAX(VSL_FDR_SLAN_CD) FDR_SLAN_CD
+                FROM (
+                    SELECT PMST.PCTL_NO, PDTL.PCTL_SEQ, PMST.POR_CD, PMST.POL_CD, PMST.POD_CD, PMST.DEL_CD , PMST.BKG_RCV_TERM_CD, PMST.BKG_DE_TERM_CD
+                          , DECODE(PDTL.PCTL_IO_BND_CD, 'O','O','I','I'
+                                  , DECODE(PDTL.PCTL_SEQ, MIN(PDTL.PCTL_SEQ) OVER (PARTITION BY PMST.PCTL_NO, PDTL.PCTL_IO_BND_CD), 'O')
+                                  )  IO_BND_CD
+                          , PDTL.PCTL_IO_BND_CD
+                       , PDTL.PCTL_SEQ
+                        , SUBSTR(PDTL.TRSP_MOD_CD,1,1) TRSP_MOD
+                        , DECODE(PDTL.PCTL_IO_BND_CD, 'T', NULL, ROW_NUMBER() OVER (PARTITION BY PMST.PCTL_NO, PDTL.PCTL_IO_BND_CD ORDER BY PCTL_SEQ)) RN
+                        , PDTL.VSL_SLAN_CD, DECODE(MLAN.VSL_SVC_TP_CD, 'O', 'FDR') VSL_FDR_SLAN_CD
+                        , decode(pdtl.pctl_seq, min(pdtl.pctl_seq) over (partition by pmst.pctl_no), 'X'
+                                              , max(pdtl.pctl_seq) over (partition by pmst.pctl_no), 'X'
+                                              , 'Y' ) use_pctl
+                    FROM PRD_PROD_CTL_MST PMST
+                       , PRD_PROD_CTL_ROUT_DTL PDTL
+                       , MDM_VSL_SVC_LANE MLAN
+                    WHERE PMST.PCTL_NO LIKE DECODE(@[hd_pctl_no], NULL, NULL, @[hd_pctl_no] ||'%')
+                    AND PMST.PCTL_NO = PDTL.PCTL_NO
+                    AND PDTL.TRSP_MOD_CD <> 'X'
+                    AND PDTL.PCTL_IO_BND_CD IN ('O','T')
+                    AND MLAN.VSL_SLAN_CD(+) = PDTL.VSL_SLAN_CD
+                    UNION ALL
+                    SELECT PMST.PCTL_NO, PDTL.PCTL_SEQ, PMST.POR_CD, PMST.POL_CD, PMST.POD_CD, PMST.DEL_CD , PMST.BKG_RCV_TERM_CD, PMST.BKG_DE_TERM_CD
+                          , DECODE(PDTL.PCTL_IO_BND_CD, 'O','O','I','I'
+                                  , DECODE(PDTL.PCTL_SEQ, MAX(PDTL.PCTL_SEQ) OVER (PARTITION BY PMST.PCTL_NO, PDTL.PCTL_IO_BND_CD), 'I')
+                                  )  IO_BND_CD
+                          , PDTL.PCTL_IO_BND_CD
+                       , PDTL.PCTL_SEQ
+                        , SUBSTR(PDTL.TRSP_MOD_CD,1,1) TRSP_MOD
+                        , DECODE(PDTL.PCTL_IO_BND_CD, 'T', NULL, ROW_NUMBER() OVER (PARTITION BY PMST.PCTL_NO, PDTL.PCTL_IO_BND_CD ORDER BY PCTL_SEQ)) RN
+                        , PDTL.VSL_SLAN_CD, DECODE(MLAN.VSL_SVC_TP_CD, 'O', 'FDR') VSL_FDR_SLAN_CD
+                        , decode(pdtl.pctl_seq, min(pdtl.pctl_seq) over (partition by pmst.pctl_no), 'X'
+                                              , max(pdtl.pctl_seq) over (partition by pmst.pctl_no), 'X'
+                                              , 'Y' ) use_pctl
+                    FROM PRD_PROD_CTL_MST PMST
+                       , PRD_PROD_CTL_ROUT_DTL PDTL
+                       , MDM_VSL_SVC_LANE MLAN
+                    WHERE PMST.PCTL_NO LIKE DECODE(@[hd_pctl_no], NULL, NULL, @[hd_pctl_no] ||'%')
+                    AND PMST.PCTL_NO = PDTL.PCTL_NO
+                    AND PDTL.TRSP_MOD_CD <> 'X'
+                    AND PDTL.PCTL_IO_BND_CD IN ('I','T')
+                    AND MLAN.VSL_SLAN_CD(+) = PDTL.VSL_SLAN_CD
+                     ) 
+                WHERE IO_BND_CD IS NOT NULL
+                GROUP BY PCTL_NO, IO_BND_CD
+                )
+           ) SUBX
+           , PRD_POD_MGMT CNST
+		   --, TABLE(SELECT BKG_SPLIT_FNC( _[imdg], ',') IMDG_TBL_STR FROM DUAL) BKG_IMDG
+           , TABLE(SELECT BKG_SPLIT_FNC(
+                            TO_CHAR(BKG_JOIN_CLOB_FNC( CURSOR(SELECT DISTINCT IMDG_CLSS_CD 
+                                                          FROM BKG_DG_CGO DG 
+                                                          WHERE DG.BKG_NO = @[bkg_no] 
+                                                        AND DG.IMDG_CLSS_CD IS NOT NULL
+                                                                                 AND NVL(DG.SPCL_CGO_APRO_CD, 'N') <> 'C' )
+                             )) ,',') IMDG_TBL_STR FROM DUAL) BKG_IMDG
+        WHERE INSTR(SUBX.SLAN_CD || ',' || SUBX.FDR_SLAN_CD || ',ALL', CNST.SLAN_CD) > 0
+          AND SUBX.IO_BND_CD = CNST.PCTL_IO_BND_CD
+          AND SUBX.POD_CD    = DECODE(CNST.POD_CD, 'ALL', SUBX.POD_CD, CNST.POD_CD)
+          AND SUBX.DEL_CD    = DECODE(CNST.DEL_CD, 'ALL', SUBX.DEL_CD, CNST.DEL_CD)
+          AND SUBX.TERM_CD   = DECODE(CNST.BKG_DE_TERM_CD, 'A', SUBX.TERM_CD, CNST.BKG_DE_TERM_CD)
+          AND SUBX.TRSP_MOD  = DECODE(CNST.TRSP_MOD_CD, 'AL', SUBX.TRSP_MOD, CNST.TRSP_MOD_CD)
+          AND NVL(CNST.DELT_FLG, 'N') = 'N'
+        )
+    WHERE ODR = 1
+      AND INSTR_VAL > 0
+    ) S
+ON (S.PCTL_NO = T.PCTL_NO)
+WHEN MATCHED THEN
+UPDATE SET T.CNST_FLG = DECODE(T.CNST_FLG, 'X', 'X', S.APLY_SVC_MOD_FLG)			]]></sql>
+			<params>
+				<param name="hd_pctl_no" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

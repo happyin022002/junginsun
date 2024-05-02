@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LaneSimulationDBDAOTransferPortSendRSQL">
+			<desc><![CDATA[ocean out bound qty를 구한다.]]></desc>
+			<sql><![CDATA[
+WITH RESULT_DATA AS ( 
+    	                 SELECT B1.SIM_DT 
+    	                       ,B1.SIM_NO 
+    	                       ,B1.SKD_DIR_CD 
+    	                       ,SUBSTR(B1.TML_CD,1,5) AS PORT_CD 
+    	                       ,B1.PORT_SEQ 
+    	                       ,B1.VSL_DBL_CALL_SEQ 
+    	                       ,B1.TURN_PORT_IND_CD 
+    	                       ,NVL(ROUND(SUM(B1.QTY/B1.FREQ_NO),2),0) AS QTY 
+    	                   FROM ( 
+    	                         SELECT A1.SIM_DT 
+    	                               ,A1.SIM_NO 
+    	                               ,A1.SKD_DIR_CD 
+    	                               ,A1.TML_CD 
+    	                               ,A1.PORT_SEQ 
+    	                               ,A1.VSL_DBL_CALL_SEQ 
+    	                               ,A1.TURN_PORT_IND_CD 
+    	                               ,A1.TML_CNT 
+    	                               ,A1.TML_SEQ 
+    	                               ,A1.CNT 
+    	                               ,A2.CODE 
+    	                               ,A2.PORT_CD 
+    	                               ,A2.FREQ_NO 
+    	                               ,CASE WHEN A1.TURN_PORT_IND_CD = 'Y' OR A1.TML_CNT = 1 THEN 
+    	                                          A2.PORT_PAIR_LOD_QTY 
+    	                                     ELSE 
+    	                                          CASE WHEN A1.CNT <= 2 AND A1.TML_CNT > 1 THEN 
+    	                                                    DECODE(A1.TML_SEQ,1, DECODE(A2.CODE, 'POL', A2.PORT_PAIR_LOD_QTY) 
+    	                                                                     ,2, DECODE(A2.CODE, 'POD', A2.PORT_PAIR_LOD_QTY)) 
+    	                                               WHEN A1.CNT>2 AND A1.TML_CNT > 1 THEN 
+    	                                                    DECODE(A1.TML_SEQ,1, DECODE(A2.CODE, 'POL', A2.PORT_PAIR_LOD_QTY, 'POD', A2.PORT_PAIR_LOD_QTY) 
+    	                                                                     ,2, DECODE(A2.CODE, 'POL', A2.PORT_PAIR_LOD_QTY, 'POD', A2.PORT_PAIR_LOD_QTY)) 
+    	                                          END 
+    	                                END QTY 
+    	                          FROM  ( 
+    	               SELECT 
+    	                  B1.SIM_DT 
+    	                 ,B1.SIM_NO 
+    	                 ,B1.TML_CD 
+    	                 ,B1.SKD_DIR_CD 
+    	                 ,B1.PORT_SEQ 
+    	                 ,B1.VSL_DBL_CALL_SEQ 
+    	                 ,B1.TURN_PORT_IND_CD 
+    	                 ,B1.CONTI_CD2 AS CONTI_CD 
+    	                 ,COUNT(B1.TML_CD) OVER(PARTITION BY B1.TML_CD) TML_CNT 
+    	                 ,ROW_NUMBER() OVER(PARTITION BY B1.TML_CD ORDER BY PORT_SEQ) TML_SEQ 
+    	                 ,COUNT(DISTINCT B1.CONTI_CD2) OVER() CNT 
+    	                FROM (SELECT 
+    	                          A1.SIM_DT 
+    	                         ,A1.SIM_NO 
+    	                         ,A1.TML_CD 
+    	                         ,A1.SKD_DIR_CD 
+    	                         ,A1.PORT_SEQ 
+    	                         ,A1.VSL_DBL_CALL_SEQ 
+    	                         ,A1.TURN_PORT_IND_CD 
+    	                         ,A2.CONTI_CD 
+    	                         ,DECODE('EBX','INX',DECODE(A2.CONTI_CD,'F','A',A2.CONTI_CD) 
+    	                                            ,'RES',DECODE(A2.CONTI_CD,'F','A',A2.CONTI_CD) 
+    	                                            ,DECODE(A2.CONTI_CD,'F','E',A2.CONTI_CD)) CONTI_CD2 
+    	                        FROM MAS_SIM_TML_INFO A1 
+    	                            ,MDM_LOCATION     A2 
+    	                       WHERE SUBSTR(A1.TML_CD,1,5) = A2.LOC_CD 
+    	                         AND A1.SIM_DT = @[f_sim_dt]
+    	                         AND A1.SIM_NO = @[f_sim_no]
+    	                     ) B1 
+    	                ORDER BY B1.PORT_SEQ 
+    	          )  A1 
+    	                               ,(SELECT /*+ READING(A1 A2 A3) USE_NL(A1 A2) USE_HASH(A2)*/
+    	                   A1.SIM_DT 
+    	                  ,A1.SIM_NO 
+    	                  ,A1.SECT_NO 
+    	                  ,A1.SKD_DIR_CD 
+    	                  ,DECODE(A3.NUM, 1, 'POL', 2, 'POD') CODE 
+    	                  ,DECODE(A3.NUM, 1, A2.POL_CD, 2, A2.POD_CD) PORT_CD 
+    	                  ,A2.PORT_PAIR_LOD_QTY 
+    	                  ,A1.FREQ_NO 
+    	                 FROM MAS_SIM_SVC_LANE A1 
+    	                     ,MAS_SIM_VOL_PRJ A2 
+    	                     ,(SELECT CPY_NO NUM 
+    	                 FROM COM_CPY_NO 
+    	                WHERE CPY_NO BETWEEN 1 AND 2) A3 
+    	                WHERE A1.SIM_DT = A2.SIM_DT 
+    	                  AND A1.SIM_NO = A2.SIM_NO 
+    	                  AND A1.SECT_NO = A2.SECT_NO 
+    	                  AND A1.SIM_DT = @[f_sim_dt]
+    	                  AND A1.SIM_NO = @[f_sim_no]
+    	              ) A2 
+    	                          WHERE A1.SIM_DT = A2.SIM_DT(+) 
+    	                            AND A1.SIM_NO = A2.SIM_NO(+) 
+    	                            AND A1.SKD_DIR_CD = DECODE(A1.TURN_PORT_IND_CD,'Y',A1.SKD_DIR_CD, A2.SKD_DIR_CD(+)) 
+    	                            AND SUBSTR(A1.TML_CD,1,5) = A2.PORT_CD(+) 
+    	                          ORDER BY A2.PORT_CD, TML_SEQ,A2.CODE, A1.SKD_DIR_CD 
+    	                        ) B1 
+    	                 GROUP BY B1.SIM_DT 
+    	                         ,B1.SIM_NO 
+    	                         ,B1.SKD_DIR_CD 
+    	                         ,B1.TML_CD 
+    	                         ,B1.PORT_SEQ 
+    	                         ,B1.TURN_PORT_IND_CD 
+    	                         ,B1.VSL_DBL_CALL_SEQ 
+    	              ) 
+    	 SELECT  
+    	        A1.SIM_DT 
+    	       ,A1.SIM_NO 
+    	       ,A1.SKD_DIR_CD 
+    	       ,A1.PORT_CD 
+    	       ,A1.PORT_SEQ 
+    	       ,A1.VSL_DBL_CALL_SEQ 
+    	       ,A1.TURN_PORT_IND_CD 
+    	       ,NVL(CASE  
+    	         WHEN A1.PORT_SEQ = (SELECT MIN(PORT_SEQ) FROM RESULT_DATA) 
+    	           THEN A1.QTY + A2.LAST_QTY 
+    	         WHEN A1.PORT_SEQ = (SELECT MAX(PORT_SEQ) FROM RESULT_DATA) 
+    	           THEN 0 
+    	         ELSE A1.QTY 
+    	        END,0) QTY 
+    	   FROM RESULT_DATA A1 
+    	      ,(SELECT QTY LAST_QTY  
+    	          FROM RESULT_DATA  
+    	         WHERE PORT_SEQ = (SELECT MAX(PORT_SEQ) FROM RESULT_DATA) 
+    	       ) A2 
+    	  ORDER BY A1.PORT_SEQ			]]></sql>
+			<params>
+				<param name="f_sim_dt" type="12" value="" out="Y"/>
+				<param name="f_sim_no" type="12" value="" out="Y"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

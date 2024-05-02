@@ -1,0 +1,1315 @@
+/*=========================================================
+*Copyright(c) 2010 CyberLogitec
+*@FileName : RepairResultListVO.java
+*@FileTitle : RepairResultListVO
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2010.04.26
+*@LastModifier : 함형석
+*@LastVersion : 1.0
+* 2010.04.26 함형석 
+* 1.0 Creation
+=========================================================*/
+
+package com.hanjin.apps.alps.ees.mnr.operationmanage.repairmgt.vo;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+
+import javax.servlet.http.HttpServletRequest;
+
+import org.apache.commons.lang.builder.ToStringBuilder;
+import org.apache.commons.lang.builder.ToStringStyle;
+
+import com.hanjin.framework.component.common.AbstractValueObject;
+import com.hanjin.framework.component.util.JSPUtil;
+
+/**
+ * Table Value Ojbect<br>
+ * 관련 Event 에서 생성, 서버실행요청시 Data 전달역할을 수행하는 Value Object
+ *
+ * @author 함형석
+ * @since J2EE 1.6
+ * @see AbstractValueObject
+ */
+
+public class RepairResultListVO extends AbstractValueObject {
+
+	private static final long serialVersionUID = 1L;
+	
+	private Collection<RepairResultListVO> models = new ArrayList<RepairResultListVO>();
+	
+	/* Column Info */
+	private String mnrVrfyTpCd = null;
+	/* Column Info */
+	private String payInvSeq = null;
+	/* Column Info */
+	private String rprRqstVerNo = null;
+	/* Column Info */
+	private String rqstRefNo = null;
+	/* Column Info */
+	private String sprPrtNo = null;
+	/* Column Info */
+	private String creDt = null;
+	/* Column Info */
+	private String mnrRtTpCd = null;
+	/* Column Info */
+	private String sprPrtNm = null;
+	/* Column Info */
+	private String rprRsltDays = null;
+	/* Page Number */
+	private String pagerows = null;
+	/* Column Info */
+	private String mnrOrdOfcCtyCd = null;
+	/* VO Data Value( C:Creation, U:Update, D:Delete ) */
+	private String ibflag = null;
+	/* Column Info */
+	private String rprStsCdNm = null;
+	/* Column Info */
+	private String eqNo = null;
+	/* Column Info */
+	private String costCd = null;
+	/* Column Info */
+	private String costAmt = null;
+	/* Column Info */
+	private String mnrWrkAmt = null;
+	/* Column Info */
+	private String acctCd = null;
+	/* Column Info */
+	private String mnrHngrBarTpCd = null;
+	/* Column Info */
+	private String invAmt = null;
+	/* Column Info */
+	private String rprQty = null;
+	/* Column Info */
+	private String n3ptyBilTtlAmt = null;
+	/* Column Info */
+	private String rprOffhFlg = null;
+	/* Column Info */
+	private String rprRqstSeq = null;
+	/* Column Info */
+	private String sprPrtUcAmt = null;
+	/* Column Info */
+	private String updUsrId = null;
+	/* Column Info */
+	private String n3ptyFlg = null;
+	/* Column Info */
+	private String updDt = null;
+	/* Column Info */
+	private String rqstDt = null;
+	/* Column Info */
+	private String ordDtlSeq = null;
+	/* Column Info */
+	private String ordDtlRmk = null;
+	/* Column Info */
+	private String costDtlCd = null;
+	/* Column Info */
+	private String eqKndCd = null;
+	/* Column Info */
+	private String bzcAmt = null;
+	/* Column Info */
+	private String mnrExpnDtlNm = null;
+	/* Column Info */
+	private String eqTpszCd = null;
+	/* Column Info */
+	private String invNo = null;
+	/* Column Info */
+	private String mnrDmgFlg = null;
+	/* Column Info */
+	private String creUsrId = null;
+	/* Column Info */
+	private String ydCd = null;
+	/* Column Info */
+	private String mnrOrdSeq = null;
+	/* Column Info */
+	private String sprPrtUtTpNm = null;
+	/* Column Info */
+	private String fileSeq = null;
+	/* Column Info */
+	private String pigEngNm = null;
+	/* Column Info */
+	private String rprRsltDt = null;
+
+	/*	테이블 컬럼의 값을 저장하는 Hashtable */
+	private HashMap<String, String> hashColumns = new HashMap<String, String>();
+
+	/*	테이블 컬럼에 대응되는 멤버변수를 저장하는 Hashtable */
+	private HashMap<String, String> hashFields = new HashMap<String, String>();
+	
+	public RepairResultListVO() {}
+
+	public RepairResultListVO(String ibflag, String pagerows, String mnrVrfyTpCd, String payInvSeq, String rprRqstVerNo, String rqstRefNo, String creDt, String sprPrtNo, String mnrRtTpCd, String rprRsltDays, String sprPrtNm, String mnrOrdOfcCtyCd, String rprStsCdNm, String eqNo, String costCd, String costAmt, String acctCd, String mnrHngrBarTpCd, String invAmt, String rprQty, String n3ptyBilTtlAmt, String rprOffhFlg, String rprRqstSeq, String sprPrtUcAmt, String updUsrId, String updDt, String n3ptyFlg, String rqstDt, String ordDtlRmk, String ordDtlSeq, String costDtlCd, String eqKndCd, String mnrExpnDtlNm, String bzcAmt, String eqTpszCd, String invNo, String mnrDmgFlg, String creUsrId, String mnrOrdSeq, String ydCd, String fileSeq, String sprPrtUtTpNm, String pigEngNm, String rprRsltDt, String mnrWrkAmt) {
+		this.mnrVrfyTpCd = mnrVrfyTpCd;
+		this.payInvSeq = payInvSeq;
+		this.rprRqstVerNo = rprRqstVerNo;
+		this.rqstRefNo = rqstRefNo;
+		this.sprPrtNo = sprPrtNo;
+		this.creDt = creDt;
+		this.mnrRtTpCd = mnrRtTpCd;
+		this.sprPrtNm = sprPrtNm;
+		this.rprRsltDays = rprRsltDays;
+		this.pagerows = pagerows;
+		this.mnrOrdOfcCtyCd = mnrOrdOfcCtyCd;
+		this.ibflag = ibflag;
+		this.rprStsCdNm = rprStsCdNm;
+		this.eqNo = eqNo;
+		this.costCd = costCd;
+		this.costAmt = costAmt;
+		this.mnrWrkAmt = mnrWrkAmt;
+		this.acctCd = acctCd;
+		this.mnrHngrBarTpCd = mnrHngrBarTpCd;
+		this.invAmt = invAmt;
+		this.rprQty = rprQty;
+		this.n3ptyBilTtlAmt = n3ptyBilTtlAmt;
+		this.rprOffhFlg = rprOffhFlg;
+		this.rprRqstSeq = rprRqstSeq;
+		this.sprPrtUcAmt = sprPrtUcAmt;
+		this.updUsrId = updUsrId;
+		this.n3ptyFlg = n3ptyFlg;
+		this.updDt = updDt;
+		this.rqstDt = rqstDt;
+		this.ordDtlSeq = ordDtlSeq;
+		this.ordDtlRmk = ordDtlRmk;
+		this.costDtlCd = costDtlCd;
+		this.eqKndCd = eqKndCd;
+		this.bzcAmt = bzcAmt;
+		this.mnrExpnDtlNm = mnrExpnDtlNm;
+		this.eqTpszCd = eqTpszCd;
+		this.invNo = invNo;
+		this.mnrDmgFlg = mnrDmgFlg;
+		this.creUsrId = creUsrId;
+		this.ydCd = ydCd;
+		this.mnrOrdSeq = mnrOrdSeq;
+		this.sprPrtUtTpNm = sprPrtUtTpNm;
+		this.fileSeq = fileSeq;
+		this.pigEngNm = pigEngNm;
+		this.rprRsltDt = rprRsltDt;
+	}
+	
+	/**
+	 * 테이블 컬럼에 저장할 값을 Hashtable<"column_name", "value"> 로 반환
+	 * @return HashMap
+	 */
+	public HashMap<String, String> getColumnValues(){
+		this.hashColumns.put("mnr_vrfy_tp_cd", getMnrVrfyTpCd());
+		this.hashColumns.put("pay_inv_seq", getPayInvSeq());
+		this.hashColumns.put("rpr_rqst_ver_no", getRprRqstVerNo());
+		this.hashColumns.put("rqst_ref_no", getRqstRefNo());
+		this.hashColumns.put("spr_prt_no", getSprPrtNo());
+		this.hashColumns.put("cre_dt", getCreDt());
+		this.hashColumns.put("mnr_rt_tp_cd", getMnrRtTpCd());
+		this.hashColumns.put("spr_prt_nm", getSprPrtNm());
+		this.hashColumns.put("rpr_rslt_days", getRprRsltDays());
+		this.hashColumns.put("pagerows", getPagerows());
+		this.hashColumns.put("mnr_ord_ofc_cty_cd", getMnrOrdOfcCtyCd());
+		this.hashColumns.put("ibflag", getIbflag());
+		this.hashColumns.put("rpr_sts_cd_nm", getRprStsCdNm());
+		this.hashColumns.put("eq_no", getEqNo());
+		this.hashColumns.put("cost_cd", getCostCd());
+		this.hashColumns.put("cost_amt", getCostAmt());
+		this.hashColumns.put("mnr_wrk_amt", getMnrWrkAmt());
+		this.hashColumns.put("acct_cd", getAcctCd());
+		this.hashColumns.put("mnr_hngr_bar_tp_cd", getMnrHngrBarTpCd());
+		this.hashColumns.put("inv_amt", getInvAmt());
+		this.hashColumns.put("rpr_qty", getRprQty());
+		this.hashColumns.put("n3pty_bil_ttl_amt", getN3ptyBilTtlAmt());
+		this.hashColumns.put("rpr_offh_flg", getRprOffhFlg());
+		this.hashColumns.put("rpr_rqst_seq", getRprRqstSeq());
+		this.hashColumns.put("spr_prt_uc_amt", getSprPrtUcAmt());
+		this.hashColumns.put("upd_usr_id", getUpdUsrId());
+		this.hashColumns.put("n3pty_flg", getN3ptyFlg());
+		this.hashColumns.put("upd_dt", getUpdDt());
+		this.hashColumns.put("rqst_dt", getRqstDt());
+		this.hashColumns.put("ord_dtl_seq", getOrdDtlSeq());
+		this.hashColumns.put("ord_dtl_rmk", getOrdDtlRmk());
+		this.hashColumns.put("cost_dtl_cd", getCostDtlCd());
+		this.hashColumns.put("eq_knd_cd", getEqKndCd());
+		this.hashColumns.put("bzc_amt", getBzcAmt());
+		this.hashColumns.put("mnr_expn_dtl_nm", getMnrExpnDtlNm());
+		this.hashColumns.put("eq_tpsz_cd", getEqTpszCd());
+		this.hashColumns.put("inv_no", getInvNo());
+		this.hashColumns.put("mnr_dmg_flg", getMnrDmgFlg());
+		this.hashColumns.put("cre_usr_id", getCreUsrId());
+		this.hashColumns.put("yd_cd", getYdCd());
+		this.hashColumns.put("mnr_ord_seq", getMnrOrdSeq());
+		this.hashColumns.put("spr_prt_ut_tp_nm", getSprPrtUtTpNm());
+		this.hashColumns.put("file_seq", getFileSeq());
+		this.hashColumns.put("pig_eng_nm", getPigEngNm());
+		this.hashColumns.put("rpr_rslt_dt", getRprRsltDt());
+		return this.hashColumns;
+	}
+	
+	/**
+	 * 컬럼명에 대응되는 멤버변수명을 저장하여 Hashtable<"column_name", "variable"> 로 반환   
+	 * @return
+	 */
+	public HashMap<String, String> getFieldNames(){
+		this.hashFields.put("mnr_vrfy_tp_cd", "mnrVrfyTpCd");
+		this.hashFields.put("pay_inv_seq", "payInvSeq");
+		this.hashFields.put("rpr_rqst_ver_no", "rprRqstVerNo");
+		this.hashFields.put("rqst_ref_no", "rqstRefNo");
+		this.hashFields.put("spr_prt_no", "sprPrtNo");
+		this.hashFields.put("cre_dt", "creDt");
+		this.hashFields.put("mnr_rt_tp_cd", "mnrRtTpCd");
+		this.hashFields.put("spr_prt_nm", "sprPrtNm");
+		this.hashFields.put("rpr_rslt_days", "rprRsltDays");
+		this.hashFields.put("pagerows", "pagerows");
+		this.hashFields.put("mnr_ord_ofc_cty_cd", "mnrOrdOfcCtyCd");
+		this.hashFields.put("ibflag", "ibflag");
+		this.hashFields.put("rpr_sts_cd_nm", "rprStsCdNm");
+		this.hashFields.put("eq_no", "eqNo");
+		this.hashFields.put("cost_cd", "costCd");
+		this.hashFields.put("cost_amt", "costAmt");
+		this.hashFields.put("mnr_wrk_amt", "mnrWrkAmt");
+		this.hashFields.put("acct_cd", "acctCd");
+		this.hashFields.put("mnr_hngr_bar_tp_cd", "mnrHngrBarTpCd");
+		this.hashFields.put("inv_amt", "invAmt");
+		this.hashFields.put("rpr_qty", "rprQty");
+		this.hashFields.put("n3pty_bil_ttl_amt", "n3ptyBilTtlAmt");
+		this.hashFields.put("rpr_offh_flg", "rprOffhFlg");
+		this.hashFields.put("rpr_rqst_seq", "rprRqstSeq");
+		this.hashFields.put("spr_prt_uc_amt", "sprPrtUcAmt");
+		this.hashFields.put("upd_usr_id", "updUsrId");
+		this.hashFields.put("n3pty_flg", "n3ptyFlg");
+		this.hashFields.put("upd_dt", "updDt");
+		this.hashFields.put("rqst_dt", "rqstDt");
+		this.hashFields.put("ord_dtl_seq", "ordDtlSeq");
+		this.hashFields.put("ord_dtl_rmk", "ordDtlRmk");
+		this.hashFields.put("cost_dtl_cd", "costDtlCd");
+		this.hashFields.put("eq_knd_cd", "eqKndCd");
+		this.hashFields.put("bzc_amt", "bzcAmt");
+		this.hashFields.put("mnr_expn_dtl_nm", "mnrExpnDtlNm");
+		this.hashFields.put("eq_tpsz_cd", "eqTpszCd");
+		this.hashFields.put("inv_no", "invNo");
+		this.hashFields.put("mnr_dmg_flg", "mnrDmgFlg");
+		this.hashFields.put("cre_usr_id", "creUsrId");
+		this.hashFields.put("yd_cd", "ydCd");
+		this.hashFields.put("mnr_ord_seq", "mnrOrdSeq");
+		this.hashFields.put("spr_prt_ut_tp_nm", "sprPrtUtTpNm");
+		this.hashFields.put("file_seq", "fileSeq");
+		this.hashFields.put("pig_eng_nm", "pigEngNm");
+		this.hashFields.put("rpr_rslt_dt", "rprRsltDt");
+		return this.hashFields;
+	}
+	
+	/**
+	 * Column Info
+	 * @return mnrVrfyTpCd
+	 */
+	public String getMnrVrfyTpCd() {
+		return this.mnrVrfyTpCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @return payInvSeq
+	 */
+	public String getPayInvSeq() {
+		return this.payInvSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @return rprRqstVerNo
+	 */
+	public String getRprRqstVerNo() {
+		return this.rprRqstVerNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @return rqstRefNo
+	 */
+	public String getRqstRefNo() {
+		return this.rqstRefNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @return sprPrtNo
+	 */
+	public String getSprPrtNo() {
+		return this.sprPrtNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @return creDt
+	 */
+	public String getCreDt() {
+		return this.creDt;
+	}
+	
+	/**
+	 * Column Info
+	 * @return mnrRtTpCd
+	 */
+	public String getMnrRtTpCd() {
+		return this.mnrRtTpCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @return sprPrtNm
+	 */
+	public String getSprPrtNm() {
+		return this.sprPrtNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @return rprRsltDays
+	 */
+	public String getRprRsltDays() {
+		return this.rprRsltDays;
+	}
+	
+	/**
+	 * Page Number
+	 * @return pagerows
+	 */
+	public String getPagerows() {
+		return this.pagerows;
+	}
+	
+	/**
+	 * Column Info
+	 * @return mnrOrdOfcCtyCd
+	 */
+	public String getMnrOrdOfcCtyCd() {
+		return this.mnrOrdOfcCtyCd;
+	}
+	
+	/**
+	 * VO Data Value( C:Creation, U:Update, D:Delete )
+	 * @return ibflag
+	 */
+	public String getIbflag() {
+		return this.ibflag;
+	}
+	
+	/**
+	 * Column Info
+	 * @return rprStsCdNm
+	 */
+	public String getRprStsCdNm() {
+		return this.rprStsCdNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @return eqNo
+	 */
+	public String getEqNo() {
+		return this.eqNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @return costCd
+	 */
+	public String getCostCd() {
+		return this.costCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @return costAmt
+	 */
+	public String getCostAmt() {
+		return this.costAmt;
+	}
+	
+	/**
+	 * Column Info
+	 * @return mnrWrkAmt
+	 */
+	public String getMnrWrkAmt() {
+		return this.mnrWrkAmt;
+	}
+	
+	/**
+	 * Column Info
+	 * @return acctCd
+	 */
+	public String getAcctCd() {
+		return this.acctCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @return mnrHngrBarTpCd
+	 */
+	public String getMnrHngrBarTpCd() {
+		return this.mnrHngrBarTpCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @return invAmt
+	 */
+	public String getInvAmt() {
+		return this.invAmt;
+	}
+	
+	/**
+	 * Column Info
+	 * @return rprQty
+	 */
+	public String getRprQty() {
+		return this.rprQty;
+	}
+	
+	/**
+	 * Column Info
+	 * @return n3ptyBilTtlAmt
+	 */
+	public String getN3ptyBilTtlAmt() {
+		return this.n3ptyBilTtlAmt;
+	}
+	
+	/**
+	 * Column Info
+	 * @return rprOffhFlg
+	 */
+	public String getRprOffhFlg() {
+		return this.rprOffhFlg;
+	}
+	
+	/**
+	 * Column Info
+	 * @return rprRqstSeq
+	 */
+	public String getRprRqstSeq() {
+		return this.rprRqstSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @return sprPrtUcAmt
+	 */
+	public String getSprPrtUcAmt() {
+		return this.sprPrtUcAmt;
+	}
+	
+	/**
+	 * Column Info
+	 * @return updUsrId
+	 */
+	public String getUpdUsrId() {
+		return this.updUsrId;
+	}
+	
+	/**
+	 * Column Info
+	 * @return n3ptyFlg
+	 */
+	public String getN3ptyFlg() {
+		return this.n3ptyFlg;
+	}
+	
+	/**
+	 * Column Info
+	 * @return updDt
+	 */
+	public String getUpdDt() {
+		return this.updDt;
+	}
+	
+	/**
+	 * Column Info
+	 * @return rqstDt
+	 */
+	public String getRqstDt() {
+		return this.rqstDt;
+	}
+	
+	/**
+	 * Column Info
+	 * @return ordDtlSeq
+	 */
+	public String getOrdDtlSeq() {
+		return this.ordDtlSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @return ordDtlRmk
+	 */
+	public String getOrdDtlRmk() {
+		return this.ordDtlRmk;
+	}
+	
+	/**
+	 * Column Info
+	 * @return costDtlCd
+	 */
+	public String getCostDtlCd() {
+		return this.costDtlCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @return eqKndCd
+	 */
+	public String getEqKndCd() {
+		return this.eqKndCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @return bzcAmt
+	 */
+	public String getBzcAmt() {
+		return this.bzcAmt;
+	}
+	
+	/**
+	 * Column Info
+	 * @return mnrExpnDtlNm
+	 */
+	public String getMnrExpnDtlNm() {
+		return this.mnrExpnDtlNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @return eqTpszCd
+	 */
+	public String getEqTpszCd() {
+		return this.eqTpszCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @return invNo
+	 */
+	public String getInvNo() {
+		return this.invNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @return mnrDmgFlg
+	 */
+	public String getMnrDmgFlg() {
+		return this.mnrDmgFlg;
+	}
+	
+	/**
+	 * Column Info
+	 * @return creUsrId
+	 */
+	public String getCreUsrId() {
+		return this.creUsrId;
+	}
+	
+	/**
+	 * Column Info
+	 * @return ydCd
+	 */
+	public String getYdCd() {
+		return this.ydCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @return mnrOrdSeq
+	 */
+	public String getMnrOrdSeq() {
+		return this.mnrOrdSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @return sprPrtUtTpNm
+	 */
+	public String getSprPrtUtTpNm() {
+		return this.sprPrtUtTpNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @return fileSeq
+	 */
+	public String getFileSeq() {
+		return this.fileSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @return pigEngNm
+	 */
+	public String getPigEngNm() {
+		return this.pigEngNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @return rprRsltDt
+	 */
+	public String getRprRsltDt() {
+		return this.rprRsltDt;
+	}
+	
+
+	/**
+	 * Column Info
+	 * @param mnrVrfyTpCd
+	 */
+	public void setMnrVrfyTpCd(String mnrVrfyTpCd) {
+		this.mnrVrfyTpCd = mnrVrfyTpCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param payInvSeq
+	 */
+	public void setPayInvSeq(String payInvSeq) {
+		this.payInvSeq = payInvSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @param rprRqstVerNo
+	 */
+	public void setRprRqstVerNo(String rprRqstVerNo) {
+		this.rprRqstVerNo = rprRqstVerNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @param rqstRefNo
+	 */
+	public void setRqstRefNo(String rqstRefNo) {
+		this.rqstRefNo = rqstRefNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @param sprPrtNo
+	 */
+	public void setSprPrtNo(String sprPrtNo) {
+		this.sprPrtNo = sprPrtNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @param creDt
+	 */
+	public void setCreDt(String creDt) {
+		this.creDt = creDt;
+	}
+	
+	/**
+	 * Column Info
+	 * @param mnrRtTpCd
+	 */
+	public void setMnrRtTpCd(String mnrRtTpCd) {
+		this.mnrRtTpCd = mnrRtTpCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param sprPrtNm
+	 */
+	public void setSprPrtNm(String sprPrtNm) {
+		this.sprPrtNm = sprPrtNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @param rprRsltDays
+	 */
+	public void setRprRsltDays(String rprRsltDays) {
+		this.rprRsltDays = rprRsltDays;
+	}
+	
+	/**
+	 * Page Number
+	 * @param pagerows
+	 */
+	public void setPagerows(String pagerows) {
+		this.pagerows = pagerows;
+	}
+	
+	/**
+	 * Column Info
+	 * @param mnrOrdOfcCtyCd
+	 */
+	public void setMnrOrdOfcCtyCd(String mnrOrdOfcCtyCd) {
+		this.mnrOrdOfcCtyCd = mnrOrdOfcCtyCd;
+	}
+	
+	/**
+	 * VO Data Value( C:Creation, U:Update, D:Delete )
+	 * @param ibflag
+	 */
+	public void setIbflag(String ibflag) {
+		this.ibflag = ibflag;
+	}
+	
+	/**
+	 * Column Info
+	 * @param rprStsCdNm
+	 */
+	public void setRprStsCdNm(String rprStsCdNm) {
+		this.rprStsCdNm = rprStsCdNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @param eqNo
+	 */
+	public void setEqNo(String eqNo) {
+		this.eqNo = eqNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @param costCd
+	 */
+	public void setCostCd(String costCd) {
+		this.costCd = costCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param costAmt
+	 */
+	public void setCostAmt(String costAmt) {
+		this.costAmt = costAmt;
+	}
+	
+	/**
+	 * Column Info
+	 * @param mnrWrkAmt
+	 */
+	public void setMnrWrkAmt(String mnrWrkAmt) {
+		this.mnrWrkAmt = mnrWrkAmt;
+	}
+	
+	/**
+	 * Column Info
+	 * @param acctCd
+	 */
+	public void setAcctCd(String acctCd) {
+		this.acctCd = acctCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param mnrHngrBarTpCd
+	 */
+	public void setMnrHngrBarTpCd(String mnrHngrBarTpCd) {
+		this.mnrHngrBarTpCd = mnrHngrBarTpCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param invAmt
+	 */
+	public void setInvAmt(String invAmt) {
+		this.invAmt = invAmt;
+	}
+	
+	/**
+	 * Column Info
+	 * @param rprQty
+	 */
+	public void setRprQty(String rprQty) {
+		this.rprQty = rprQty;
+	}
+	
+	/**
+	 * Column Info
+	 * @param n3ptyBilTtlAmt
+	 */
+	public void setN3ptyBilTtlAmt(String n3ptyBilTtlAmt) {
+		this.n3ptyBilTtlAmt = n3ptyBilTtlAmt;
+	}
+	
+	/**
+	 * Column Info
+	 * @param rprOffhFlg
+	 */
+	public void setRprOffhFlg(String rprOffhFlg) {
+		this.rprOffhFlg = rprOffhFlg;
+	}
+	
+	/**
+	 * Column Info
+	 * @param rprRqstSeq
+	 */
+	public void setRprRqstSeq(String rprRqstSeq) {
+		this.rprRqstSeq = rprRqstSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @param sprPrtUcAmt
+	 */
+	public void setSprPrtUcAmt(String sprPrtUcAmt) {
+		this.sprPrtUcAmt = sprPrtUcAmt;
+	}
+	
+	/**
+	 * Column Info
+	 * @param updUsrId
+	 */
+	public void setUpdUsrId(String updUsrId) {
+		this.updUsrId = updUsrId;
+	}
+	
+	/**
+	 * Column Info
+	 * @param n3ptyFlg
+	 */
+	public void setN3ptyFlg(String n3ptyFlg) {
+		this.n3ptyFlg = n3ptyFlg;
+	}
+	
+	/**
+	 * Column Info
+	 * @param updDt
+	 */
+	public void setUpdDt(String updDt) {
+		this.updDt = updDt;
+	}
+	
+	/**
+	 * Column Info
+	 * @param rqstDt
+	 */
+	public void setRqstDt(String rqstDt) {
+		this.rqstDt = rqstDt;
+	}
+	
+	/**
+	 * Column Info
+	 * @param ordDtlSeq
+	 */
+	public void setOrdDtlSeq(String ordDtlSeq) {
+		this.ordDtlSeq = ordDtlSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @param ordDtlRmk
+	 */
+	public void setOrdDtlRmk(String ordDtlRmk) {
+		this.ordDtlRmk = ordDtlRmk;
+	}
+	
+	/**
+	 * Column Info
+	 * @param costDtlCd
+	 */
+	public void setCostDtlCd(String costDtlCd) {
+		this.costDtlCd = costDtlCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param eqKndCd
+	 */
+	public void setEqKndCd(String eqKndCd) {
+		this.eqKndCd = eqKndCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param bzcAmt
+	 */
+	public void setBzcAmt(String bzcAmt) {
+		this.bzcAmt = bzcAmt;
+	}
+	
+	/**
+	 * Column Info
+	 * @param mnrExpnDtlNm
+	 */
+	public void setMnrExpnDtlNm(String mnrExpnDtlNm) {
+		this.mnrExpnDtlNm = mnrExpnDtlNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @param eqTpszCd
+	 */
+	public void setEqTpszCd(String eqTpszCd) {
+		this.eqTpszCd = eqTpszCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param invNo
+	 */
+	public void setInvNo(String invNo) {
+		this.invNo = invNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @param mnrDmgFlg
+	 */
+	public void setMnrDmgFlg(String mnrDmgFlg) {
+		this.mnrDmgFlg = mnrDmgFlg;
+	}
+	
+	/**
+	 * Column Info
+	 * @param creUsrId
+	 */
+	public void setCreUsrId(String creUsrId) {
+		this.creUsrId = creUsrId;
+	}
+	
+	/**
+	 * Column Info
+	 * @param ydCd
+	 */
+	public void setYdCd(String ydCd) {
+		this.ydCd = ydCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param mnrOrdSeq
+	 */
+	public void setMnrOrdSeq(String mnrOrdSeq) {
+		this.mnrOrdSeq = mnrOrdSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @param sprPrtUtTpNm
+	 */
+	public void setSprPrtUtTpNm(String sprPrtUtTpNm) {
+		this.sprPrtUtTpNm = sprPrtUtTpNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @param fileSeq
+	 */
+	public void setFileSeq(String fileSeq) {
+		this.fileSeq = fileSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @param pigEngNm
+	 */
+	public void setPigEngNm(String pigEngNm) {
+		this.pigEngNm = pigEngNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @param rprRsltDt
+	 */
+	public void setRprRsltDt(String rprRsltDt) {
+		this.rprRsltDt = rprRsltDt;
+	}
+	
+/**
+	 * Request 의 데이터를 추출하여 VO 의 멤버변수에 설정.
+	 * @param request
+	 */
+	public void fromRequest(HttpServletRequest request) {
+		fromRequest(request,"");
+	}
+
+	/**
+	 * Request 의 데이터를 추출하여 VO 의 멤버변수에 설정.
+	 * @param request
+	 */
+	public void fromRequest(HttpServletRequest request, String prefix) {
+		setMnrVrfyTpCd(JSPUtil.getParameter(request, prefix + "mnr_vrfy_tp_cd", ""));
+		setPayInvSeq(JSPUtil.getParameter(request, prefix + "pay_inv_seq", ""));
+		setRprRqstVerNo(JSPUtil.getParameter(request, prefix + "rpr_rqst_ver_no", ""));
+		setRqstRefNo(JSPUtil.getParameter(request, prefix + "rqst_ref_no", ""));
+		setSprPrtNo(JSPUtil.getParameter(request, prefix + "spr_prt_no", ""));
+		setCreDt(JSPUtil.getParameter(request, prefix + "cre_dt", ""));
+		setMnrRtTpCd(JSPUtil.getParameter(request, prefix + "mnr_rt_tp_cd", ""));
+		setSprPrtNm(JSPUtil.getParameter(request, prefix + "spr_prt_nm", ""));
+		setRprRsltDays(JSPUtil.getParameter(request, prefix + "rpr_rslt_days", ""));
+		setPagerows(JSPUtil.getParameter(request, prefix + "pagerows", ""));
+		setMnrOrdOfcCtyCd(JSPUtil.getParameter(request, prefix + "mnr_ord_ofc_cty_cd", ""));
+		setIbflag(JSPUtil.getParameter(request, prefix + "ibflag", ""));
+		setRprStsCdNm(JSPUtil.getParameter(request, prefix + "rpr_sts_cd_nm", ""));
+		setEqNo(JSPUtil.getParameter(request, prefix + "eq_no", ""));
+		setCostCd(JSPUtil.getParameter(request, prefix + "cost_cd", ""));
+		setCostAmt(JSPUtil.getParameter(request, prefix + "cost_amt", ""));
+		setMnrWrkAmt(JSPUtil.getParameter(request, prefix + "mnr_wrk_amt", ""));
+		setAcctCd(JSPUtil.getParameter(request, prefix + "acct_cd", ""));
+		setMnrHngrBarTpCd(JSPUtil.getParameter(request, prefix + "mnr_hngr_bar_tp_cd", ""));
+		setInvAmt(JSPUtil.getParameter(request, prefix + "inv_amt", ""));
+		setRprQty(JSPUtil.getParameter(request, prefix + "rpr_qty", ""));
+		setN3ptyBilTtlAmt(JSPUtil.getParameter(request, prefix + "n3pty_bil_ttl_amt", ""));
+		setRprOffhFlg(JSPUtil.getParameter(request, prefix + "rpr_offh_flg", ""));
+		setRprRqstSeq(JSPUtil.getParameter(request, prefix + "rpr_rqst_seq", ""));
+		setSprPrtUcAmt(JSPUtil.getParameter(request, prefix + "spr_prt_uc_amt", ""));
+		setUpdUsrId(JSPUtil.getParameter(request, prefix + "upd_usr_id", ""));
+		setN3ptyFlg(JSPUtil.getParameter(request, prefix + "n3pty_flg", ""));
+		setUpdDt(JSPUtil.getParameter(request, prefix + "upd_dt", ""));
+		setRqstDt(JSPUtil.getParameter(request, prefix + "rqst_dt", ""));
+		setOrdDtlSeq(JSPUtil.getParameter(request, prefix + "ord_dtl_seq", ""));
+		setOrdDtlRmk(JSPUtil.getParameter(request, prefix + "ord_dtl_rmk", ""));
+		setCostDtlCd(JSPUtil.getParameter(request, prefix + "cost_dtl_cd", ""));
+		setEqKndCd(JSPUtil.getParameter(request, prefix + "eq_knd_cd", ""));
+		setBzcAmt(JSPUtil.getParameter(request, prefix + "bzc_amt", ""));
+		setMnrExpnDtlNm(JSPUtil.getParameter(request, prefix + "mnr_expn_dtl_nm", ""));
+		setEqTpszCd(JSPUtil.getParameter(request, prefix + "eq_tpsz_cd", ""));
+		setInvNo(JSPUtil.getParameter(request, prefix + "inv_no", ""));
+		setMnrDmgFlg(JSPUtil.getParameter(request, prefix + "mnr_dmg_flg", ""));
+		setCreUsrId(JSPUtil.getParameter(request, prefix + "cre_usr_id", ""));
+		setYdCd(JSPUtil.getParameter(request, prefix + "yd_cd", ""));
+		setMnrOrdSeq(JSPUtil.getParameter(request, prefix + "mnr_ord_seq", ""));
+		setSprPrtUtTpNm(JSPUtil.getParameter(request, prefix + "spr_prt_ut_tp_nm", ""));
+		setFileSeq(JSPUtil.getParameter(request, prefix + "file_seq", ""));
+		setPigEngNm(JSPUtil.getParameter(request, prefix + "pig_eng_nm", ""));
+		setRprRsltDt(JSPUtil.getParameter(request, prefix + "rpr_rslt_dt", ""));
+	}
+
+	/**
+	 * Request 의 데이터를 VO 배열로 변환하여 반환.
+	 * @param request
+	 * @return RepairResultListVO[]
+	 */
+	public RepairResultListVO[] fromRequestGrid(HttpServletRequest request) {
+		return fromRequestGrid(request, "");
+	}
+
+	/**
+	 * Request 넘어온 여러 건 DATA를 VO Class 에 담는다. 
+	 * @param request
+	 * @param prefix
+	 * @return RepairResultListVO[]
+	 */
+	public RepairResultListVO[] fromRequestGrid(HttpServletRequest request, String prefix) {
+		RepairResultListVO model = null;
+		
+		String[] tmp = request.getParameterValues(prefix + "ibflag");
+  		if(tmp == null)
+   			return null;
+
+  		int length = request.getParameterValues(prefix + "ibflag").length;
+  
+		try {
+			String[] mnrVrfyTpCd = (JSPUtil.getParameter(request, prefix	+ "mnr_vrfy_tp_cd", length));
+			String[] payInvSeq = (JSPUtil.getParameter(request, prefix	+ "pay_inv_seq", length));
+			String[] rprRqstVerNo = (JSPUtil.getParameter(request, prefix	+ "rpr_rqst_ver_no", length));
+			String[] rqstRefNo = (JSPUtil.getParameter(request, prefix	+ "rqst_ref_no", length));
+			String[] sprPrtNo = (JSPUtil.getParameter(request, prefix	+ "spr_prt_no", length));
+			String[] creDt = (JSPUtil.getParameter(request, prefix	+ "cre_dt", length));
+			String[] mnrRtTpCd = (JSPUtil.getParameter(request, prefix	+ "mnr_rt_tp_cd", length));
+			String[] sprPrtNm = (JSPUtil.getParameter(request, prefix	+ "spr_prt_nm", length));
+			String[] rprRsltDays = (JSPUtil.getParameter(request, prefix	+ "rpr_rslt_days", length));
+			String[] pagerows = (JSPUtil.getParameter(request, prefix	+ "pagerows", length));
+			String[] mnrOrdOfcCtyCd = (JSPUtil.getParameter(request, prefix	+ "mnr_ord_ofc_cty_cd", length));
+			String[] ibflag = (JSPUtil.getParameter(request, prefix	+ "ibflag", length));
+			String[] rprStsCdNm = (JSPUtil.getParameter(request, prefix	+ "rpr_sts_cd_nm", length));
+			String[] eqNo = (JSPUtil.getParameter(request, prefix	+ "eq_no", length));
+			String[] costCd = (JSPUtil.getParameter(request, prefix	+ "cost_cd", length));
+			String[] costAmt = (JSPUtil.getParameter(request, prefix	+ "cost_amt", length));
+			String[] mnrWrkAmt = (JSPUtil.getParameter(request, prefix	+ "mnr_wrk_amt", length));
+			String[] acctCd = (JSPUtil.getParameter(request, prefix	+ "acct_cd", length));
+			String[] mnrHngrBarTpCd = (JSPUtil.getParameter(request, prefix	+ "mnr_hngr_bar_tp_cd", length));
+			String[] invAmt = (JSPUtil.getParameter(request, prefix	+ "inv_amt", length));
+			String[] rprQty = (JSPUtil.getParameter(request, prefix	+ "rpr_qty", length));
+			String[] n3ptyBilTtlAmt = (JSPUtil.getParameter(request, prefix	+ "n3pty_bil_ttl_amt", length));
+			String[] rprOffhFlg = (JSPUtil.getParameter(request, prefix	+ "rpr_offh_flg", length));
+			String[] rprRqstSeq = (JSPUtil.getParameter(request, prefix	+ "rpr_rqst_seq", length));
+			String[] sprPrtUcAmt = (JSPUtil.getParameter(request, prefix	+ "spr_prt_uc_amt", length));
+			String[] updUsrId = (JSPUtil.getParameter(request, prefix	+ "upd_usr_id", length));
+			String[] n3ptyFlg = (JSPUtil.getParameter(request, prefix	+ "n3pty_flg", length));
+			String[] updDt = (JSPUtil.getParameter(request, prefix	+ "upd_dt", length));
+			String[] rqstDt = (JSPUtil.getParameter(request, prefix	+ "rqst_dt", length));
+			String[] ordDtlSeq = (JSPUtil.getParameter(request, prefix	+ "ord_dtl_seq", length));
+			String[] ordDtlRmk = (JSPUtil.getParameter(request, prefix	+ "ord_dtl_rmk", length));
+			String[] costDtlCd = (JSPUtil.getParameter(request, prefix	+ "cost_dtl_cd", length));
+			String[] eqKndCd = (JSPUtil.getParameter(request, prefix	+ "eq_knd_cd", length));
+			String[] bzcAmt = (JSPUtil.getParameter(request, prefix	+ "bzc_amt", length));
+			String[] mnrExpnDtlNm = (JSPUtil.getParameter(request, prefix	+ "mnr_expn_dtl_nm", length));
+			String[] eqTpszCd = (JSPUtil.getParameter(request, prefix	+ "eq_tpsz_cd", length));
+			String[] invNo = (JSPUtil.getParameter(request, prefix	+ "inv_no", length));
+			String[] mnrDmgFlg = (JSPUtil.getParameter(request, prefix	+ "mnr_dmg_flg", length));
+			String[] creUsrId = (JSPUtil.getParameter(request, prefix	+ "cre_usr_id", length));
+			String[] ydCd = (JSPUtil.getParameter(request, prefix	+ "yd_cd", length));
+			String[] mnrOrdSeq = (JSPUtil.getParameter(request, prefix	+ "mnr_ord_seq", length));
+			String[] sprPrtUtTpNm = (JSPUtil.getParameter(request, prefix	+ "spr_prt_ut_tp_nm", length));
+			String[] fileSeq = (JSPUtil.getParameter(request, prefix	+ "file_seq", length));
+			String[] pigEngNm = (JSPUtil.getParameter(request, prefix	+ "pig_eng_nm", length));
+			String[] rprRsltDt = (JSPUtil.getParameter(request, prefix	+ "rpr_rslt_dt", length));
+			
+			for (int i = 0; i < length; i++) {
+				model = new RepairResultListVO();
+				if (mnrVrfyTpCd[i] != null)
+					model.setMnrVrfyTpCd(mnrVrfyTpCd[i]);
+				if (payInvSeq[i] != null)
+					model.setPayInvSeq(payInvSeq[i]);
+				if (rprRqstVerNo[i] != null)
+					model.setRprRqstVerNo(rprRqstVerNo[i]);
+				if (rqstRefNo[i] != null)
+					model.setRqstRefNo(rqstRefNo[i]);
+				if (sprPrtNo[i] != null)
+					model.setSprPrtNo(sprPrtNo[i]);
+				if (creDt[i] != null)
+					model.setCreDt(creDt[i]);
+				if (mnrRtTpCd[i] != null)
+					model.setMnrRtTpCd(mnrRtTpCd[i]);
+				if (sprPrtNm[i] != null)
+					model.setSprPrtNm(sprPrtNm[i]);
+				if (rprRsltDays[i] != null)
+					model.setRprRsltDays(rprRsltDays[i]);
+				if (pagerows[i] != null)
+					model.setPagerows(pagerows[i]);
+				if (mnrOrdOfcCtyCd[i] != null)
+					model.setMnrOrdOfcCtyCd(mnrOrdOfcCtyCd[i]);
+				if (ibflag[i] != null)
+					model.setIbflag(ibflag[i]);
+				if (rprStsCdNm[i] != null)
+					model.setRprStsCdNm(rprStsCdNm[i]);
+				if (eqNo[i] != null)
+					model.setEqNo(eqNo[i]);
+				if (costCd[i] != null)
+					model.setCostCd(costCd[i]);
+				if (costAmt[i] != null)
+					model.setCostAmt(costAmt[i]);
+				if (mnrWrkAmt[i] != null)
+					model.setMnrWrkAmt(mnrWrkAmt[i]);
+				if (acctCd[i] != null)
+					model.setAcctCd(acctCd[i]);
+				if (mnrHngrBarTpCd[i] != null)
+					model.setMnrHngrBarTpCd(mnrHngrBarTpCd[i]);
+				if (invAmt[i] != null)
+					model.setInvAmt(invAmt[i]);
+				if (rprQty[i] != null)
+					model.setRprQty(rprQty[i]);
+				if (n3ptyBilTtlAmt[i] != null)
+					model.setN3ptyBilTtlAmt(n3ptyBilTtlAmt[i]);
+				if (rprOffhFlg[i] != null)
+					model.setRprOffhFlg(rprOffhFlg[i]);
+				if (rprRqstSeq[i] != null)
+					model.setRprRqstSeq(rprRqstSeq[i]);
+				if (sprPrtUcAmt[i] != null)
+					model.setSprPrtUcAmt(sprPrtUcAmt[i]);
+				if (updUsrId[i] != null)
+					model.setUpdUsrId(updUsrId[i]);
+				if (n3ptyFlg[i] != null)
+					model.setN3ptyFlg(n3ptyFlg[i]);
+				if (updDt[i] != null)
+					model.setUpdDt(updDt[i]);
+				if (rqstDt[i] != null)
+					model.setRqstDt(rqstDt[i]);
+				if (ordDtlSeq[i] != null)
+					model.setOrdDtlSeq(ordDtlSeq[i]);
+				if (ordDtlRmk[i] != null)
+					model.setOrdDtlRmk(ordDtlRmk[i]);
+				if (costDtlCd[i] != null)
+					model.setCostDtlCd(costDtlCd[i]);
+				if (eqKndCd[i] != null)
+					model.setEqKndCd(eqKndCd[i]);
+				if (bzcAmt[i] != null)
+					model.setBzcAmt(bzcAmt[i]);
+				if (mnrExpnDtlNm[i] != null)
+					model.setMnrExpnDtlNm(mnrExpnDtlNm[i]);
+				if (eqTpszCd[i] != null)
+					model.setEqTpszCd(eqTpszCd[i]);
+				if (invNo[i] != null)
+					model.setInvNo(invNo[i]);
+				if (mnrDmgFlg[i] != null)
+					model.setMnrDmgFlg(mnrDmgFlg[i]);
+				if (creUsrId[i] != null)
+					model.setCreUsrId(creUsrId[i]);
+				if (ydCd[i] != null)
+					model.setYdCd(ydCd[i]);
+				if (mnrOrdSeq[i] != null)
+					model.setMnrOrdSeq(mnrOrdSeq[i]);
+				if (sprPrtUtTpNm[i] != null)
+					model.setSprPrtUtTpNm(sprPrtUtTpNm[i]);
+				if (fileSeq[i] != null)
+					model.setFileSeq(fileSeq[i]);
+				if (pigEngNm[i] != null)
+					model.setPigEngNm(pigEngNm[i]);
+				if (rprRsltDt[i] != null)
+					model.setRprRsltDt(rprRsltDt[i]);
+				models.add(model);
+			}
+
+		} catch (Exception e) {
+			return null;
+		}
+		return getRepairResultListVOs();
+	}
+
+	/**
+	 * VO 배열을 반환
+	 * @return RepairResultListVO[]
+	 */
+	public RepairResultListVO[] getRepairResultListVOs(){
+		RepairResultListVO[] vos = (RepairResultListVO[])models.toArray(new RepairResultListVO[models.size()]);
+		return vos;
+	}
+	
+	/**
+	 * VO Class의 내용을 String으로 변환
+	 */
+	public String toString() {
+		   return ToStringBuilder.reflectionToString(this, ToStringStyle.MULTI_LINE_STYLE );
+	   }
+
+	/**
+	* 포맷팅된 문자열에서 특수문자 제거("-","/",",",":")
+	*/
+	public void unDataFormat(){
+		this.mnrVrfyTpCd = this.mnrVrfyTpCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.payInvSeq = this.payInvSeq .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.rprRqstVerNo = this.rprRqstVerNo .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.rqstRefNo = this.rqstRefNo .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.sprPrtNo = this.sprPrtNo .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.creDt = this.creDt .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.mnrRtTpCd = this.mnrRtTpCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.sprPrtNm = this.sprPrtNm .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.rprRsltDays = this.rprRsltDays .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.pagerows = this.pagerows .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.mnrOrdOfcCtyCd = this.mnrOrdOfcCtyCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.ibflag = this.ibflag .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.rprStsCdNm = this.rprStsCdNm .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.eqNo = this.eqNo .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.costCd = this.costCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.costAmt = this.costAmt .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.mnrWrkAmt = this.mnrWrkAmt .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.acctCd = this.acctCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.mnrHngrBarTpCd = this.mnrHngrBarTpCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.invAmt = this.invAmt .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.rprQty = this.rprQty .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.n3ptyBilTtlAmt = this.n3ptyBilTtlAmt .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.rprOffhFlg = this.rprOffhFlg .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.rprRqstSeq = this.rprRqstSeq .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.sprPrtUcAmt = this.sprPrtUcAmt .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.updUsrId = this.updUsrId .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.n3ptyFlg = this.n3ptyFlg .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.updDt = this.updDt .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.rqstDt = this.rqstDt .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.ordDtlSeq = this.ordDtlSeq .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.ordDtlRmk = this.ordDtlRmk .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.costDtlCd = this.costDtlCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.eqKndCd = this.eqKndCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.bzcAmt = this.bzcAmt .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.mnrExpnDtlNm = this.mnrExpnDtlNm .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.eqTpszCd = this.eqTpszCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.invNo = this.invNo .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.mnrDmgFlg = this.mnrDmgFlg .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.creUsrId = this.creUsrId .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.ydCd = this.ydCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.mnrOrdSeq = this.mnrOrdSeq .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.sprPrtUtTpNm = this.sprPrtUtTpNm .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.fileSeq = this.fileSeq .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.pigEngNm = this.pigEngNm .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.rprRsltDt = this.rprRsltDt .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+	}
+}

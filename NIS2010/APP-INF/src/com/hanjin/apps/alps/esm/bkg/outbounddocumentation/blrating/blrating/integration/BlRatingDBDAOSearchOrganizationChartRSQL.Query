@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="BlRatingDBDAOSearchOrganizationChartRSQL">
+			<desc><![CDATA[Charge Amend Request 승인 권한자 조회를 위해 조직도를 조회한다.]]></desc>
+			<sql><![CDATA[
+WITH OFC AS (
+    SELECT PRNT_OFC_CD AS PNODE_ID
+         , OFC_CD AS NODE_ID
+         , OFC_CD AS NODE_NM
+         , OFC_CD
+         , '' AS USR_ID
+         , '' AS USR_NM
+         , '' AS USR_EML
+         , 'O' AS TYPE_FLG
+         , 'N' AS AUTH_FLG
+    FROM (
+            SELECT PRNT_OFC_CD
+                 , OFC_CD
+                 , LTRIM(SYS_CONNECT_BY_PATH(LPAD(OFC_CD, 6, ' '), '|'), '|') BY_PATH
+            FROM MDM_ORGANIZATION
+            WHERE 1=1
+            AND   (OFC_CD = 'SELDC' OR OFC_KND_CD <> '1')
+            AND   DECODE(DELT_FLG, 'Y', 0, 1) = 1
+            START WITH OFC_CD='SELDC'
+            CONNECT BY PRIOR OFC_CD = PRNT_OFC_CD
+         ) OFC
+    UNION ALL
+    SELECT US.OFC_CD AS PNODE_ID
+         , 'USR_'||US.USR_ID AS NODE_ID
+         , '('||US.USR_ID||')'||' '||US.USR_NM AS NODE_NM
+         , US.OFC_CD
+         , US.USR_ID
+         , US.USR_NM
+         , US.USR_EML
+         , 'U' AS TYPE_FLG
+         , DECODE(AU.USR_ID, NULL, 'N', 'Y') AS AUTH_FLG
+    FROM COM_USER US
+       , (SELECT DISTINCT USR_ID
+          FROM BKG_CHG_AMD_AUTH_USR
+          WHERE SYSDATE BETWEEN EFF_DT AND EXP_DT) AU
+    WHERE US.USE_FLG = 'Y'
+    AND   AU.USR_ID(+) = US.USR_ID
+)
+#if (${pnode_id} == '' && (${ofc_cd} != '' || ${usr_id} != '' || ${usr_nm} != ''))
+, CHL AS (
+    SELECT LEVEL LVL
+         , PNODE_ID
+         , NODE_ID
+         , OFC_CD
+         , USR_ID
+         , USR_NM
+         , USR_EML
+         , NODE_NM
+    FROM OFC
+    START WITH DECODE(@[ofc_cd], NULL, 1, OFC_CD, 1, 0) = 1
+           AND DECODE(@[usr_id], NULL, 1, USR_ID, 1, 0) = 1
+           AND DECODE(@[usr_nm], NULL, 1, INSTR(UPPER(USR_NM), UPPER(@[usr_nm]))) > 0
+    CONNECT BY NODE_ID = PRIOR PNODE_ID
+)
+#end
+#if (${pnode_id} != '') 
+SELECT * FROM (
+#end
+SELECT LEVEL
+     , PNODE_ID
+     , NODE_ID
+     , NODE_NM
+     , OFC_CD
+     , USR_ID
+     , USR_EML
+     , TYPE_FLG
+     , AUTH_FLG
+#if (${pnode_id} == '' && (${ofc_cd} != '' || ${usr_id} != '' || ${usr_nm} != ''))
+     , CASE WHEN A.OFC_CD IN (SELECT B.OFC_CD FROM CHL B)
+            THEN 1
+            ELSE CONNECT_BY_ISLEAF
+       END AS HAVE_CHILD
+#else
+     , CONNECT_BY_ISLEAF AS HAVE_CHILD
+#end
+     , USR_NM
+FROM OFC A
+WHERE 1=1
+#if (${pnode_id} == '')
+    #if (${ofc_cd} != '' || ${usr_id} != '' || ${usr_nm} != '')
+AND   (A.NODE_ID IN (SELECT B.NODE_ID FROM CHL B)
+    OR A.PNODE_ID IN (SELECT B.NODE_ID FROM CHL B) )
+    #else
+AND   LEVEL = 1
+    #end
+#end
+START WITH NODE_ID='SELDC'
+CONNECT BY PRIOR NODE_ID = PNODE_ID
+ORDER SIBLINGS BY TYPE_FLG, NODE_NM
+#if (${pnode_id} != '') 
+)
+WHERE PNODE_ID = @[pnode_id]
+ORDER BY TYPE_FLG, NODE_NM
+#end			]]></sql>
+			<params>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="usr_nm" type="12" value="" out="N"/>
+				<param name="pnode_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

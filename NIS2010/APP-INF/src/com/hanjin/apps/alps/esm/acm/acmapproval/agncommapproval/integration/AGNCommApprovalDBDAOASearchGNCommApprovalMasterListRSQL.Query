@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AGNCommApprovalDBDAOASearchGNCommApprovalMasterListRSQL">
+			<desc><![CDATA[AGNCommApprovalMaster
+
+* 2014.06.27 박다은 [CHM-201430726] Audit / CSR 생성 시 건수 제한 로직 추가 요청]]></desc>
+			<sql><![CDATA[
+SELECT A.AUD_NO,
+       A.AGN_CD, 
+       ((SELECT COUNT(COUNT(AAC.BKG_NO)) FROM ACM_AGN_COMM AAC WHERE AAC.AUD_NO = A.AUD_NO GROUP BY AAC.BKG_NO) 
+       +(SELECT COUNT(COUNT(AAO.OTR_COMM_NO)) FROM ACM_AGN_OTR_COMM AAO WHERE AAO.AUD_NO = A.AUD_NO GROUP BY AAO.OTR_COMM_NO)) AS CNT,
+--       A.CNT,
+       A.VVD_CNT, 
+       A.CURR_CD,
+       A.NET_AMT,
+       A.VAT,
+       A.WHLD,
+       A.TTL_AMT,
+       A.CSR_NO,
+       A.APRO_DT,
+       A.IF_DT,
+       CASE B.IF_FLG
+         WHEN 'Y' THEN 'Success'
+         ELSE
+         CASE SUBSTR(B.IF_ERR_RSN, 0, 20)
+           WHEN 'Duplicate CSR Number' THEN 'Already Interfaced'
+           ELSE B.IF_ERR_RSN
+         END
+       END AS IF_FLG_MSG,
+       CASE B.RCV_ERR_FLG
+         WHEN 'Y' THEN 'Success'
+         ELSE B.RCV_ERR_RSN
+       END AS RCV_ERR_FLG_MSG,
+       CASE SUBSTR(B.IF_ERR_RSN, 0, 20)
+         WHEN 'Duplicate CSR Number' THEN 'Y'
+         ELSE B.IF_FLG
+       END AS IF_FLG,
+       B.RCV_ERR_FLG,
+       B.PAY_AMT,
+       B.PAY_DT,
+       B.PAY_MZD_LU_CD,
+       APPRO_YN,
+       COMM_STND_COST_CD
+  FROM (SELECT AUD_NO,
+               AGN_CD,
+--               COUNT(BKG_NO) AS CNT,
+               COUNT(DISTINCT AC_VSL_CD||AC_SKD_VOY_NO||AC_SKD_DIR_CD||AC_REV_DIR_CD) AS VVD_CNT,
+               CURR_CD,
+               ROUND(NVL(SUM(PAY_IF_AMT),  0), 2) AS NET_AMT,
+               ROUND(NVL(AVG(INV_TAX_RT),  0), 2) AS VAT,
+               ROUND(NVL(AVG(WHLD_TAX_RT), 0), 2) AS WHLD,
+               SUM(PAY_IF_AMT)
+               +ROUND(SUM((PAY_IF_AMT * NVL(INV_TAX_RT , 0) / 100)), DECODE(CURR_CD, 'JPY', 0, 2)) 
+               +ROUND(SUM((PAY_IF_AMT * NVL(WHLD_TAX_RT, 0) / 100)), DECODE(CURR_CD, 'JPY', 0, 2)) 
+               AS TTL_AMT,
+               CSR_NO,
+               TO_CHAR(APRO_DT, 'YYYYMMDD') AS APRO_DT,
+               TO_CHAR(IF_DT, 'YYYYMMDD') AS IF_DT,
+               'Y' AS APPRO_YN,
+               '' AS COMM_STND_COST_CD
+          FROM ACM_AGN_COMM
+         WHERE 1=1
+           AND AGN_CD = @[agn_cd]
+#if(${ac_sts_cd} == 'AS')
+           AND AC_STS_CD = 'AS'
+#elseif(${ac_sts_cd} == 'AL')
+           AND AC_STS_CD = 'AL'
+#elseif(${ac_sts_cd} == 'PS')
+           AND AC_STS_CD IN ( 'PS', 'IF' )
+#elseif(${ac_sts_cd} == 'IC')
+           AND AC_STS_CD = @[ac_sts_cd]
+#end
+           AND CRE_USR_ID <> 'COST' -- 2007.05.07 이전데이터는 검색대상에서 제외
+#if(${ac_sts_cd} == 'AS')
+           AND AUD_DT          >= TO_DATE(REPLACE(@[date_fm],'-', ''),'YYYYMMDD')
+           AND AUD_DT          <  TO_DATE(REPLACE(@[date_to],'-', ''),'YYYYMMDD') + 1  -- AS(Audit Success)
+#elseif(${ac_sts_cd} == 'PS' || ${ac_sts_cd} == 'AL')
+           AND (
+                (APRO_DT BETWEEN TO_DATE(REPLACE(@[date_fm],'-', ''),'YYYYMMDD') AND TO_DATE(REPLACE(@[date_to],'-', ''),'YYYYMMDD') + 1 ) -- PS
+             OR (IF_DT   BETWEEN TO_DATE(REPLACE(@[date_fm],'-', ''),'YYYYMMDD') AND TO_DATE(REPLACE(@[date_to],'-', ''),'YYYYMMDD') + 1 ) -- IF
+                )
+#elseif(${ac_sts_cd} == 'IC')
+           AND UPD_DT           >= TO_DATE(REPLACE(@[date_fm],'-', ''),'YYYYMMDD')
+           AND UPD_DT           <  TO_DATE(REPLACE(@[date_to],'-', ''),'YYYYMMDD') + 1  -- IF(Interface Success)
+#end
+         GROUP BY AUD_NO,
+               AGN_CD,
+               CURR_CD,
+               CSR_NO,
+               TO_CHAR(APRO_DT, 'YYYYMMDD'),
+               TO_CHAR(IF_DT, 'YYYYMMDD') 
+UNION ALL 
+
+SELECT AUD_NO,
+               AGN_CD,
+--               COUNT(OTR_COMM_NO) AS CNT,
+               COUNT(DISTINCT AC_VSL_CD||AC_SKD_VOY_NO||AC_SKD_DIR_CD||AC_REV_DIR_CD) AS VVD_CNT,
+               CURR_CD,
+               ROUND(NVL(SUM(PAY_IF_AMT), 0), 2) AS NET_AMT,
+               ROUND(NVL(AVG(INV_TAX_RT), 0), 2) AS VAT,
+               ROUND(NVL(AVG(WHLD_TAX_RT), 0), 2) AS WHLD,
+               SUM(PAY_IF_AMT)
+               +ROUND(SUM((PAY_IF_AMT * NVL(INV_TAX_RT , 0) / 100)), DECODE(CURR_CD, 'JPY', 0, 2)) 
+               +ROUND(SUM((PAY_IF_AMT * NVL(WHLD_TAX_RT, 0) / 100)), DECODE(CURR_CD, 'JPY', 0, 2)) 
+               AS TTL_AMT,
+               CSR_NO,
+               TO_CHAR(APRO_DT, 'YYYYMMDD') AS APRO_DT,
+               TO_CHAR(IF_DT, 'YYYYMMDD') AS IF_DT,
+			   -- 2017.04.14 DECODE(COMM_STND_COST_CD, '512691', 'N', '512692', 'N', '512693', 'N', 'Y') AS APPRO_YN,
+               'Y' AS APPRO_YN,
+               COMM_STND_COST_CD
+          FROM ACM_AGN_OTR_COMM
+         WHERE 1=1
+           AND AGN_CD = @[agn_cd]
+#if(${ac_sts_cd} == 'AS')
+           AND AC_STS_CD = 'AS'
+#elseif(${ac_sts_cd} == 'AL')
+           AND AC_STS_CD = 'AL'
+#elseif(${ac_sts_cd} == 'PS')
+           AND AC_STS_CD IN ( 'PS', 'IF' )
+#elseif(${ac_sts_cd} == 'IC')
+           AND AC_STS_CD = @[ac_sts_cd]
+#end
+           AND CRE_USR_ID <> 'COST' -- 2007.05.07 이전데이터는 검색대상에서 제외
+#if(${ac_sts_cd} == 'AS')
+           AND AUD_DT          >= TO_DATE(REPLACE(@[date_fm],'-', ''),'YYYYMMDD')
+           AND AUD_DT          <  TO_DATE(REPLACE(@[date_to],'-', ''),'YYYYMMDD') + 1  -- AS(Audit Success)
+#elseif(${ac_sts_cd} == 'PS' || ${ac_sts_cd} == 'AL')
+           AND (
+                (APRO_DT BETWEEN TO_DATE(REPLACE(@[date_fm],'-', ''),'YYYYMMDD') AND TO_DATE(REPLACE(@[date_to],'-', ''),'YYYYMMDD') + 1 ) -- PS
+             OR (IF_DT   BETWEEN TO_DATE(REPLACE(@[date_fm],'-', ''),'YYYYMMDD') AND TO_DATE(REPLACE(@[date_to],'-', ''),'YYYYMMDD') + 1 ) -- IF
+                )
+#elseif(${ac_sts_cd} == 'IC')
+           AND UPD_DT           >= TO_DATE(REPLACE(@[date_fm],'-', ''),'YYYYMMDD')
+           AND UPD_DT           <  TO_DATE(REPLACE(@[date_to],'-', ''),'YYYYMMDD') + 1  -- IF(Interface Success)
+#end
+         GROUP BY AUD_NO,
+               AGN_CD,
+               CURR_CD,
+               CSR_NO,
+               APRO_DT,
+               IF_DT ,
+               COMM_STND_COST_CD
+) A,
+       AP_INV_HDR B
+ WHERE A.CSR_NO = B.CSR_NO(+)
+#if(${appro_yn} == 'N')
+   AND APPRO_YN = 'N'
+#elseif(${appro_yn} == 'Y')
+   AND APPRO_YN = 'Y'
+#end
+ ORDER BY 1			]]></sql>
+			<params>
+				<param name="agn_cd" type="12" value="" out="N"/>
+				<param name="ac_sts_cd" type="12" value="" out="N"/>
+				<param name="date_fm" type="12" value="" out="N"/>
+				<param name="date_to" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

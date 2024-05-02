@@ -1,0 +1,717 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LeaseReportDBDAOsearchOnHireResultbyTermLessorDetailRSQL">
+			<desc><![CDATA[임차장비 임차실적 조회 (On-Hire Result by Lease Term/Lessor-Option)
+2010.09.10 남궁진호 [CHM-201005773-01] USED DAYS계산시 FREE DYAS 제외,RENTAL CHARGE계산로직 수정
+2010.11.15 [CHM-201007039-01] 남궁진호 Term Change 조건에 따른 조회로직 수정
+ "Including"  -> 해당월 LSI 로 시작, 짝 lso 가 찾기==> TERM CHANGE FLAG 무시
+ "Excluding" -> 해당월 LSI 가 T/C='N' 로 시작, 짝 lso 가 T/C='N' 만
+ "Only"       -> 해당월 LSI  T/C='N', LSO가 T/C='Y' , 실제 반납한 LSO(기준 LSI 보다 큰 LSO 이고 T/C='N')
+2010.12.13 장창수 [CHM-201007442-01] LT일때 Per-Diem LCC로 변경]]></desc>
+			<sql><![CDATA[
+WITH PARAM
+AS (
+    SELECT 
+         @[period_stdt] PERIOD_STDT
+        ,@[period_eddt] PERIOD_EDDT
+        ,@[company]  COMPANY
+        ,@[loc_cd] LOC_CD
+        ,@[loc_tp] LOC_TP
+        ,@[vndr_seq] VNDR_SEQ
+        ,@[detail_lstm_cd] DTL_LSTM_CD
+        ,@[detail_vndr_seq] DTL_VNDR_SEQ       
+        ,@[detail_cntr_tpsz_cd] DTL_CNTR_TP_SZ        
+        ,@[term_change] TERM_CHANGE  /* Including(NULL), Excluding('N'), Only('Y') */
+	FROM   DUAL
+)
+
+SELECT    ROW_SEQ
+        , CNTRNO
+        , TYSZ
+        , AGMT_NO
+        , TERM
+        , REF_NO
+        , CNMV_STS_CD
+        , OHDATE
+        , OHLOC
+        , FDAYS
+        , OFHDATE
+        , OFHLOC
+        , USEDDAYS
+        , MINOHDAYS
+        , TERM_CHANGE
+        , DII 
+        , IMMEDIATELY
+        , NVL(RENTAL_CHARGE, 0 ) RENTAL_CHARGE
+        , NVL(LON, 0 ) LON
+        , NVL(PUC, 0 ) PUC
+        , NVL(PCR, 0 ) PCR
+        , NVL(LOF, 0 ) LOF
+        , NVL(DOC, 0 ) DOC
+        , NVL(DCR, 0 ) DCR
+        , NVL(ON_HIRE_DRAYAGE, 0 ) ON_HIRE_DRAYAGE
+        , NVL(OFF_HIRE_DRAYAGE, 0 ) OFF_HIRE_DRAYAGE
+        , NVL(M_R_COST, 0 ) M_R_COST
+        , NVL(DPP, 0 ) DPP
+        , NVL(RENTAL_CHARGE, 0 ) + NVL(LON, 0 ) + NVL(PUC, 0 ) - NVL(PCR, 0 ) + NVL(LOF, 0 ) + NVL(DOC, 0 ) - NVL(DCR, 0 ) + NVL(DPP, 0 ) + NVL(M_R_COST, 0 ) + NVL(ON_HIRE_DRAYAGE, 0 ) + NVL(OFF_HIRE_DRAYAGE, 0 ) AS G_TTL
+        ,BKG_NO
+        ,POL_CD
+        ,POR_CD
+        ,POD_CD
+        ,DEL_CD
+        ,POL_ETD_DT ETD_DT
+        ,POD_ETA_DT ETA_DT
+        , VVD   
+FROM    (
+/* CASE 1 */
+        SELECT  ROW_NUMBER() OVER(ORDER BY T13.CNTR_NO , T13.CNTR_TPSZ_CD) AS ROW_SEQ
+                , T10.CNTR_NO                                 AS CNTRNO
+                , T13.CNTR_TPSZ_CD                            AS TYSZ
+                , T10.AGMT_CTY_CD||LPAD(T10.AGMT_SEQ, 6, '0') AS AGMT_NO
+                , T15.LSTM_CD                                 AS TERM
+                , T15.REF_NO                                  AS REF_NO
+                , T13.CNMV_STS_CD                             AS CNMV_STS_CD
+                , TO_CHAR(T10.CNTR_STS_EVNT_DT, 'YYYYMMDD')   AS OHDATE
+                , T10.YD_CD                                   AS OHLOC                
+                #if (${loc_tp} == 'R' ) 
+				, T10.LCC_CD AS RCC
+                #elseif (${loc_tp} == 'L' ) 
+                , T10.SCC_CD AS RCC
+                #elseif (${loc_tp} == 'S' ) 
+                , T10.YD_CD  AS RCC
+                #elseif (${loc_tp} == '' ) 
+                , T10.RCC_CD AS RCC
+                #end
+                , T10.CNTR_LSTM_CNG_FLG                     AS TERM_CHANGE
+                , NVL(T10.RNTL_CHG_FREE_DYS , 0)            AS FDAYS
+                , TO_CHAR(T12.CNTR_STS_EVNT_DT, 'YYYYMMDD') AS OFHDATE
+                , T12.YD_CD                                 AS OFHLOC
+                , CASE WHEN ( T15.LSTM_CD = 'OW' OR T15.LSTM_CD = 'LP' OR T15.LSTM_CD = 'OL' ) THEN 
+                        NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) -  T13.MFT_DT + 1
+                  ELSE 
+                        NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) -  T10.CNTR_STS_EVNT_DT + 1
+                  END                                       AS USEDDAYS
+                , NVL(T10.CNTR_MIN_ONH_DYS , 0 )            AS MINOHDAYS
+                , DECODE(T10.CNTR_STS_CD, 'DII', 'Y', 'N')  AS DII
+                , T13.IMDT_EXT_FLG                          AS IMMEDIATELY                
+                , NVL(GREATEST(
+            		  CASE WHEN T15.LSTM_CD IN('OW','LP','OL') 
+                          THEN NVL( 
+                               (SELECT  ( NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) -  T13.MFT_DT - NVL(T10.RNTL_CHG_FREE_DYS , 0 ) + 1 ) * N1ST_CHG_AMT
+                                FROM    LSE_AGMT_RT RT
+                                WHERE   RT.AGMT_CTY_CD         (+) = T10.AGMT_CTY_CD
+                                AND     RT.AGMT_SEQ            (+) = T10.AGMT_SEQ
+                                AND     RT.LOC_CD              (+) = DECODE(T15.LSTM_CD, 'LT', T10.LCC_CD, 'KRSEL')
+                                AND     RT.AGMT_CHG_VAL        (+) = 1
+                                AND     RT.CNTR_TPSZ_CD        (+) = T13.CNTR_TPSZ_CD
+                                AND     RT.CNTR_RNTL_CHG_TP_CD (+) = 'PDGV'),
+                               (SELECT  ( NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) -  T13.MFT_DT - NVL(T10.RNTL_CHG_FREE_DYS , 0 ) + 1 ) * AVG(N1ST_CHG_AMT)
+                                FROM    LSE_AGMT_RT RT
+                                WHERE   RT.AGMT_CTY_CD         (+) = T10.AGMT_CTY_CD
+                                AND     RT.AGMT_SEQ            (+) = T10.AGMT_SEQ
+                                AND     RT.AGMT_CHG_VAL        (+) = 1
+                                AND     RT.CNTR_TPSZ_CD        (+) = T13.CNTR_TPSZ_CD
+                                AND     RT.CNTR_RNTL_CHG_TP_CD (+) = 'PDGV'))
+                          ELSE  NVL( 
+                               (SELECT  ( NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) - T10.CNTR_STS_EVNT_DT - NVL(T10.RNTL_CHG_FREE_DYS , 0 ) + 1 ) * N1ST_CHG_AMT
+                                FROM    LSE_AGMT_RT RT
+                                WHERE   RT.AGMT_CTY_CD         (+) = T10.AGMT_CTY_CD
+                                AND     RT.AGMT_SEQ            (+) = T10.AGMT_SEQ
+                                AND     RT.LOC_CD              (+) = DECODE(T15.LSTM_CD, 'LT', T10.LCC_CD, 'KRSEL')
+                                AND     RT.AGMT_CHG_VAL        (+) = 1
+                                AND     RT.CNTR_TPSZ_CD        (+) = T13.CNTR_TPSZ_CD
+                                AND     RT.CNTR_RNTL_CHG_TP_CD (+) = 'PDGV'),
+                               (SELECT  ( NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) - T10.CNTR_STS_EVNT_DT - NVL(T10.RNTL_CHG_FREE_DYS , 0 ) + 1 ) * AVG(N1ST_CHG_AMT)
+                                FROM    LSE_AGMT_RT RT
+                                WHERE   RT.AGMT_CTY_CD         (+) = T10.AGMT_CTY_CD
+                                AND     RT.AGMT_SEQ            (+) = T10.AGMT_SEQ
+                                AND     RT.AGMT_CHG_VAL        (+) = 1
+                                AND     RT.CNTR_TPSZ_CD        (+) = T13.CNTR_TPSZ_CD
+                                AND     RT.CNTR_RNTL_CHG_TP_CD (+) = 'PDGV'))  
+                      END, 0), 0)                                                AS RENTAL_CHARGE
+            , NVL(T10.CNTR_LFT_CHG_AMT,0)                                        AS LON
+            , DECODE(SIGN(T10.CNTR_PKUP_CHG_AMT),  1,  T10.CNTR_PKUP_CHG_AMT, 0) AS PUC
+            , DECODE(SIGN(T10.CNTR_PKUP_CHG_AMT), -1, -T10.CNTR_PKUP_CHG_AMT, 0) AS PCR
+            , NVL(T12.CNTR_LFT_CHG_AMT,0)                                        AS LOF
+            , DECODE(SIGN(T12.CNTR_DRFF_CR_AMT),   1,  T12.CNTR_DRFF_CR_AMT,  0) AS DOC
+            , DECODE(SIGN(T12.CNTR_DRFF_CR_AMT),  -1, -T12.CNTR_DRFF_CR_AMT,  0) AS DCR
+            , ( SELECT  /*+ SO INDEX_DESC(XPKTRS_TRSP_SVC_ORD) */
+                        SO.NEGO_AMT
+                FROM    TRS_TRSP_SVC_ORD SO
+                WHERE   SO.EQ_NO                = T13.CNTR_NO
+                AND     SO.TRSP_COST_DTL_MOD_CD = 'CN' --CNTR S/T ON-HIRE
+                AND     ROWNUM                  = 1) AS ON_HIRE_DRAYAGE
+            , ( SELECT  /*+ SO INDEX_DESC(XPKTRS_TRSP_SVC_ORD) */
+                        SO.NEGO_AMT
+                FROM    TRS_TRSP_SVC_ORD SO
+                WHERE   SO.EQ_NO                = T13.CNTR_NO
+                AND     SO.TRSP_COST_DTL_MOD_CD = 'CF' --CNTR S/T OFF-HIRE
+                AND     ROWNUM                  = 1) AS OFF_HIRE_DRAYAGE
+            , ( SELECT  MNR_COMMON_PKG.MNR_GET_RPRCOST_FNC('U',  T13.CNTR_NO)
+                FROM    MNR_ORD_DTL OD,
+                        MNR_ORD_HDR OH
+                WHERE   1=1
+                AND     OD.EQ_NO              = T13.CNTR_NO
+                AND     OD.MNR_ORD_OFC_CTY_CD = OH.MNR_ORD_OFC_CTY_CD
+                AND     OD.MNR_ORD_SEQ        = OH.MNR_ORD_SEQ
+                GROUP BY T13.CNTR_NO ) AS M_R_COST
+            , (SELECT  RT.AGMT_CHG_VAL                                 
+               FROM    LSE_AGMT_RT RT,        
+                       LSE_AGREEMENT AM
+               WHERE   RT.AGMT_CTY_CD         = AM.AGMT_CTY_CD
+               AND     RT.AGMT_SEQ            = AM.AGMT_SEQ                              
+               AND     RT.CNTR_RNTL_CHG_TP_CD = 'DPPV'     
+               AND     AM.DPP_TP_CD           = 'Y'
+               AND     RT.AGMT_CTY_CD         = T12.AGMT_CTY_CD
+               AND     RT.AGMT_SEQ            = T12.AGMT_SEQ
+               AND     RT.CNTR_TPSZ_CD        = T13.CNTR_TPSZ_CD 
+               AND     TO_CHAR(T12.CNTR_STS_EVNT_DT, 'YYYYMMDD') BETWEEN PERIOD_STDT AND PERIOD_EDDT ) AS DPP
+            ,BKG.BKG_NO
+            ,BKG.POL_CD
+            ,BKG.POR_CD
+            ,BKG.POD_CD
+            ,BKG.DEL_CD
+            ,TO_CHAR(BKG.POL_ETD_DT,'YYYY-MM-DD') POL_ETD_DT
+            ,TO_CHAR(BKG.POD_ETA_DT,'YYYY-MM-DD') POD_ETA_DT
+            ,BKG.VSL_CD || BKG.SKD_VOY_NO || BKG.SKD_DIR_CD VVD    
+       FROM    (
+                SELECT  T01.CNTR_NO, T01.CNTR_STS_SEQ, T01.YD_CD, T01.AGMT_CTY_CD, T01.AGMT_SEQ, T01.CNTR_STS_EVNT_DT, T01.CNTR_STS_CD, T01.CNTR_LSTM_CNG_FLG
+                	    , T01.RCC_CD, T01.LCC_CD, T01.SCC_CD, T01.CNTR_MIN_ONH_DYS, T01.RNTL_CHG_FREE_DYS, T01.CNTR_LFT_CHG_AMT, T01.CNTR_PKUP_CHG_AMT, 
+                        (
+                        SELECT /*+ INDEX_ASC(T02 XPKMST_CNTR_STS_HIS) */
+                               CNTR_STS_SEQ
+                        FROM   MST_CNTR_STS_HIS T02
+                        WHERE  T01.CNTR_NO      = T02.CNTR_NO
+                        AND    T01.CNTR_STS_SEQ < T02.CNTR_STS_SEQ
+                        AND    T02.CNTR_STS_CD  = 'LSO'
+                        AND    ROWNUM           = 1
+                        ) AS FST_CNTR_STS_SEQ
+                        , P.VNDR_SEQ, P.COMPANY, PERIOD_STDT, P.PERIOD_EDDT, P.DTL_CNTR_TP_SZ, P.LOC_CD
+                FROM    MST_CNTR_STS_HIS T01,
+                        PARAM P
+                WHERE   1=1
+                AND     DECODE(NVL(TERM_CHANGE, 'I'), 'I', 'I')   = NVL(TERM_CHANGE, 'I')
+                #if (${dii} != '' )
+  			        		#if (${dii} == 'N' )
+                AND CNTR_STS_CD IN ('LSI','OWN')
+  			        		#elseif (${dii} == 'Y' ) 
+                AND CNTR_STS_CD = 'DII'
+  			        		#end
+				        #else
+				        AND CNTR_STS_CD IN ('LSI','DII','OWN')
+				        #end
+                AND     T01.AGMT_SEQ      <> 999990                				
+                AND     CNTR_STS_EVNT_DT BETWEEN TO_DATE(P.PERIOD_STDT, 'YYYYMMDD') AND TO_DATE(P.PERIOD_EDDT, 'YYYYMMDD')                
+                ) T10,
+                MST_CNTR_STS_HIS T12,
+                MST_CONTAINER    T13,
+                MDM_CNTR_TP_SZ   T14,
+                LSE_AGREEMENT    T15,
+                MDM_VENDOR       T17,
+                BKG_BOOKING      BKG
+        WHERE   1=1
+        AND     T10.CNTR_NO             = T13.CNTR_NO
+        AND     T13.CNTR_TPSZ_CD        = T14.CNTR_TPSZ_CD
+        AND     T10.CNTR_NO             = T12.CNTR_NO      (+)  
+        AND     T10.FST_CNTR_STS_SEQ    = T12.CNTR_STS_SEQ (+)
+        AND     T10.AGMT_CTY_CD         = T15.AGMT_CTY_CD
+        AND     T10.AGMT_SEQ            = T15.AGMT_SEQ
+        AND     T15.VNDR_SEQ            = T17.VNDR_SEQ
+        AND     T13.HJS_CRE_FLG         = 'N'
+        AND     BKG.BKG_NO(+)           = T13.BKG_NO
+       	#if (${detail_lstm_cd} != '' ) 
+        AND   T15.LSTM_CD = @[detail_lstm_cd] 
+      	#end      
+      	#if (${detail_vndr_seq} != '' ) 
+         AND   T15.VNDR_SEQ = @[detail_vndr_seq] 
+      	#end            	
+      	#if (${vndr_seq} != '' ) 
+        AND   T15.VNDR_SEQ = @[vndr_seq] 
+      	#end            	
+        #if (${detail_cntr_tpsz_cd} != '' ) 
+        AND     T13.CNTR_TPSZ_CD        = T10.DTL_CNTR_TP_SZ
+        #end   
+        #if (${vndr_seq} != '' ) 
+		AND     T10.VNDR_SEQ            = T17.VNDR_SEQ
+		#end				
+		#if (${cntr_tpsz_cd_str} != '' )
+	    AND  T13.CNTR_TPSZ_CD IN( #foreach($key IN ${cntr_tpsz_cd})
+	        #if($velocityCount < $cntr_tpsz_cd.size())
+	           '$key',
+	        #else
+	           '$key'
+	        #end
+	                             #end )
+		     #end
+		#if (${company} != '' )
+		AND    T13.CNTR_USE_CO_CD = T10.COMPANY 
+		#end
+		#if (${lstm_cd_str} != '' ) 
+		AND   T15.LSTM_CD IN ( #foreach($key IN ${lstm_cd})
+		     	                                 #if($velocityCount < $lstm_cd.size())
+		     	                                     '$key',
+		     	                                 #else
+		     	                                     '$key'
+		     	                                 #end
+		     	                             #end )
+		     		#end
+
+UNION ALL
+/* CASE 2 */
+        SELECT  ROW_NUMBER() OVER(ORDER BY T13.CNTR_NO , T13.CNTR_TPSZ_CD) AS ROW_SEQ
+                , T10.CNTR_NO                                 AS CNTRNO
+                , T13.CNTR_TPSZ_CD                            AS TYSZ
+                , T10.AGMT_CTY_CD||LPAD(T10.AGMT_SEQ, 6, '0') AS AGMT_NO
+                , T15.LSTM_CD                                 AS TERM
+                , T15.REF_NO                                  AS REF_NO
+                , T13.CNMV_STS_CD                             AS CNMV_STS_CD
+                , TO_CHAR(T10.CNTR_STS_EVNT_DT, 'YYYYMMDD')   AS OHDATE
+                , T10.YD_CD                                   AS OHLOC
+                #if (${loc_tp} == 'R' ) 
+				, T10.LCC_CD AS RCC
+                #elseif (${loc_tp} == 'L' ) 
+                , T10.SCC_CD AS RCC
+                #elseif (${loc_tp} == 'S' ) 
+                , T10.YD_CD  AS RCC
+                #elseif (${loc_tp} == '' ) 
+                , T10.RCC_CD AS RCC
+                #end
+                , T10.CNTR_LSTM_CNG_FLG                     AS TERM_CHANGE
+                , NVL(T10.RNTL_CHG_FREE_DYS , 0)            AS FDAYS
+                , TO_CHAR(T12.CNTR_STS_EVNT_DT, 'YYYYMMDD') AS OFHDATE
+                , T12.YD_CD                                 AS OFHLOC
+                , CASE WHEN ( T15.LSTM_CD = 'OW' OR T15.LSTM_CD = 'LP' OR T15.LSTM_CD = 'OL' ) THEN 
+                        NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) -  T13.MFT_DT + 1
+                  ELSE 
+                        NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) -  T10.CNTR_STS_EVNT_DT + 1
+                  END                                       AS USEDDAYS
+                , NVL(T10.CNTR_MIN_ONH_DYS , 0 )            AS MINOHDAYS
+                , DECODE(T10.CNTR_STS_CD, 'DII', 'Y', 'N')  AS DII
+                , T13.IMDT_EXT_FLG                          AS IMMEDIATELY                
+                , NVL(GREATEST(
+            		  CASE WHEN T15.LSTM_CD IN('OW','LP','OL') 
+                          THEN NVL( 
+                               (SELECT  ( NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) -  T13.MFT_DT - NVL(T10.RNTL_CHG_FREE_DYS , 0 ) + 1 ) * N1ST_CHG_AMT
+                                FROM    LSE_AGMT_RT RT
+                                WHERE   RT.AGMT_CTY_CD         (+) = T10.AGMT_CTY_CD
+                                AND     RT.AGMT_SEQ            (+) = T10.AGMT_SEQ
+                                AND     RT.LOC_CD              (+) = DECODE(T15.LSTM_CD, 'LT', T10.LCC_CD, 'KRSEL')
+                                AND     RT.AGMT_CHG_VAL        (+) = 1
+                                AND     RT.CNTR_TPSZ_CD        (+) = T13.CNTR_TPSZ_CD
+                                AND     RT.CNTR_RNTL_CHG_TP_CD (+) = 'PDGV'),
+                               (SELECT  ( NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) -  T13.MFT_DT - NVL(T10.RNTL_CHG_FREE_DYS , 0 ) + 1 ) * AVG(N1ST_CHG_AMT)
+                                FROM    LSE_AGMT_RT RT
+                                WHERE   RT.AGMT_CTY_CD         (+) = T10.AGMT_CTY_CD
+                                AND     RT.AGMT_SEQ            (+) = T10.AGMT_SEQ
+                                AND     RT.AGMT_CHG_VAL        (+) = 1
+                                AND     RT.CNTR_TPSZ_CD        (+) = T13.CNTR_TPSZ_CD
+                                AND     RT.CNTR_RNTL_CHG_TP_CD (+) = 'PDGV'))
+                          ELSE  NVL( 
+                               (SELECT  ( NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) - T10.CNTR_STS_EVNT_DT - NVL(T10.RNTL_CHG_FREE_DYS , 0 ) + 1 ) * N1ST_CHG_AMT
+                                FROM    LSE_AGMT_RT RT
+                                WHERE   RT.AGMT_CTY_CD         (+) = T10.AGMT_CTY_CD
+                                AND     RT.AGMT_SEQ            (+) = T10.AGMT_SEQ
+                                AND     RT.LOC_CD              (+) = DECODE(T15.LSTM_CD, 'LT', T10.LCC_CD, 'KRSEL')
+                                AND     RT.AGMT_CHG_VAL        (+) = 1
+                                AND     RT.CNTR_TPSZ_CD        (+) = T13.CNTR_TPSZ_CD
+                                AND     RT.CNTR_RNTL_CHG_TP_CD (+) = 'PDGV'),
+                               (SELECT  ( NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) - T10.CNTR_STS_EVNT_DT - NVL(T10.RNTL_CHG_FREE_DYS , 0 ) + 1 ) * AVG(N1ST_CHG_AMT)
+                                FROM    LSE_AGMT_RT RT
+                                WHERE   RT.AGMT_CTY_CD         (+) = T10.AGMT_CTY_CD
+                                AND     RT.AGMT_SEQ            (+) = T10.AGMT_SEQ
+                                AND     RT.AGMT_CHG_VAL        (+) = 1
+                                AND     RT.CNTR_TPSZ_CD        (+) = T13.CNTR_TPSZ_CD
+                                AND     RT.CNTR_RNTL_CHG_TP_CD (+) = 'PDGV'))  
+                      END, 0), 0)                                                AS RENTAL_CHARGE
+            , NVL(T10.CNTR_LFT_CHG_AMT,0)                                        AS LON
+            , DECODE(SIGN(T10.CNTR_PKUP_CHG_AMT),  1,  T10.CNTR_PKUP_CHG_AMT, 0) AS PUC
+            , DECODE(SIGN(T10.CNTR_PKUP_CHG_AMT), -1, -T10.CNTR_PKUP_CHG_AMT, 0) AS PCR
+            , NVL(T12.CNTR_LFT_CHG_AMT,0)                                        AS LOF
+            , DECODE(SIGN(T12.CNTR_DRFF_CR_AMT),   1,  T12.CNTR_DRFF_CR_AMT,  0) AS DOC
+            , DECODE(SIGN(T12.CNTR_DRFF_CR_AMT),  -1, -T12.CNTR_DRFF_CR_AMT,  0) AS DCR
+            , ( SELECT  /*+ SO INDEX_DESC(XPKTRS_TRSP_SVC_ORD) */
+                        SO.NEGO_AMT
+                FROM    TRS_TRSP_SVC_ORD SO
+                WHERE   SO.EQ_NO                = T13.CNTR_NO
+                AND     SO.TRSP_COST_DTL_MOD_CD = 'CN' --CNTR S/T ON-HIRE
+                AND     ROWNUM                  = 1) AS ON_HIRE_DRAYAGE
+            , ( SELECT  /*+ SO INDEX_DESC(XPKTRS_TRSP_SVC_ORD) */
+                        SO.NEGO_AMT
+                FROM    TRS_TRSP_SVC_ORD SO
+                WHERE   SO.EQ_NO                = T13.CNTR_NO
+                AND     SO.TRSP_COST_DTL_MOD_CD = 'CF' --CNTR S/T OFF-HIRE
+                AND     ROWNUM                  = 1) AS OFF_HIRE_DRAYAGE
+            , ( SELECT  MNR_COMMON_PKG.MNR_GET_RPRCOST_FNC('U',  T13.CNTR_NO)
+                FROM    MNR_ORD_DTL OD,
+                        MNR_ORD_HDR OH
+                WHERE   1=1
+                AND     OD.EQ_NO              = T13.CNTR_NO
+                AND     OD.MNR_ORD_OFC_CTY_CD = OH.MNR_ORD_OFC_CTY_CD
+                AND     OD.MNR_ORD_SEQ        = OH.MNR_ORD_SEQ
+                GROUP BY T13.CNTR_NO ) AS M_R_COST
+            , (SELECT  RT.AGMT_CHG_VAL                                 
+               FROM    LSE_AGMT_RT RT,        
+                       LSE_AGREEMENT AM
+               WHERE   RT.AGMT_CTY_CD         = AM.AGMT_CTY_CD
+               AND     RT.AGMT_SEQ            = AM.AGMT_SEQ                              
+               AND     RT.CNTR_RNTL_CHG_TP_CD = 'DPPV'     
+               AND     AM.DPP_TP_CD           = 'Y'
+               AND     RT.AGMT_CTY_CD         = T12.AGMT_CTY_CD
+               AND     RT.AGMT_SEQ            = T12.AGMT_SEQ
+               AND     RT.CNTR_TPSZ_CD        = T13.CNTR_TPSZ_CD 
+               AND     TO_CHAR(T12.CNTR_STS_EVNT_DT, 'YYYYMMDD') BETWEEN PERIOD_STDT AND PERIOD_EDDT ) AS DPP
+            ,BKG.BKG_NO
+            ,BKG.POL_CD
+            ,BKG.POR_CD
+            ,BKG.POD_CD
+            ,BKG.DEL_CD
+            ,TO_CHAR(BKG.POL_ETD_DT,'YYYY-MM-DD') POL_ETD_DT
+            ,TO_CHAR(BKG.POD_ETA_DT,'YYYY-MM-DD') POD_ETA_DT
+            ,BKG.VSL_CD || BKG.SKD_VOY_NO || BKG.SKD_DIR_CD VVD    
+       FROM    (
+                SELECT  T01.CNTR_NO, T01.CNTR_STS_SEQ, T01.YD_CD, T01.AGMT_CTY_CD, T01.AGMT_SEQ, T01.CNTR_STS_EVNT_DT, T01.CNTR_STS_CD, T01.CNTR_LSTM_CNG_FLG
+                	    , T01.RCC_CD, T01.LCC_CD, T01.SCC_CD, T01.CNTR_MIN_ONH_DYS, T01.RNTL_CHG_FREE_DYS, T01.CNTR_LFT_CHG_AMT, T01.CNTR_PKUP_CHG_AMT, 
+                        (
+                        SELECT /*+ INDEX_ASC(T02 XPKMST_CNTR_STS_HIS) */
+                               CNTR_STS_SEQ
+                        FROM   MST_CNTR_STS_HIS T02
+                        WHERE  T01.CNTR_NO      = T02.CNTR_NO
+                        AND    T01.CNTR_STS_SEQ < T02.CNTR_STS_SEQ
+                        AND    T02.CNTR_STS_CD  = 'LSO'
+                        AND    ROWNUM           = 1
+                        ) AS FST_CNTR_STS_SEQ
+                        , P.VNDR_SEQ, P.COMPANY, PERIOD_STDT, P.PERIOD_EDDT, P.DTL_CNTR_TP_SZ, P.LOC_CD
+                FROM    MST_CNTR_STS_HIS T01,
+                        PARAM P
+                WHERE   1=1
+                AND     DECODE(TERM_CHANGE, 'N', 'N')   = TERM_CHANGE
+                #if (${dii} != '' )
+  			        		#if (${dii} == 'N' )
+                AND CNTR_STS_CD IN ('LSI','OWN')
+  			        		#elseif (${dii} == 'Y' ) 
+                AND CNTR_STS_CD = 'DII'
+  			        		#end
+				        #else
+				        AND CNTR_STS_CD IN ('LSI','DII','OWN')
+				        #end
+                AND     T01.AGMT_SEQ      <> 999990                				
+                AND     CNTR_STS_EVNT_DT BETWEEN TO_DATE(P.PERIOD_STDT, 'YYYYMMDD') AND TO_DATE(P.PERIOD_EDDT, 'YYYYMMDD')                
+                ) T10,
+                MST_CNTR_STS_HIS T12,
+                MST_CONTAINER    T13,
+                MDM_CNTR_TP_SZ   T14,
+                LSE_AGREEMENT    T15,
+                MDM_VENDOR       T17,
+                BKG_BOOKING      BKG 
+        WHERE   1=1
+        AND     T10.CNTR_NO             = T13.CNTR_NO
+        AND     T13.CNTR_TPSZ_CD        = T14.CNTR_TPSZ_CD
+        AND     T10.CNTR_NO             = T12.CNTR_NO      (+)  
+        AND     T10.FST_CNTR_STS_SEQ    = T12.CNTR_STS_SEQ (+)
+        AND     'N'                     = T10.CNTR_LSTM_CNG_FLG
+        AND     'N'                     = NVL(T12.CNTR_LSTM_CNG_FLG,  'N')
+        AND     T10.AGMT_CTY_CD         = T15.AGMT_CTY_CD
+        AND     T10.AGMT_SEQ            = T15.AGMT_SEQ
+        AND     T15.VNDR_SEQ            = T17.VNDR_SEQ
+        AND     T13.HJS_CRE_FLG         = 'N'
+        AND     BKG.BKG_NO(+)           = T13.BKG_NO
+       	#if (${detail_lstm_cd} != '' ) 
+        AND   T15.LSTM_CD = @[detail_lstm_cd] 
+      	#end      
+      	#if (${detail_vndr_seq} != '' ) 
+         AND   T15.VNDR_SEQ = @[detail_vndr_seq] 
+      	#end            	
+      	#if (${vndr_seq} != '' ) 
+        AND   T15.VNDR_SEQ = @[vndr_seq] 
+      	#end 
+        #if (${detail_cntr_tpsz_cd} != '' ) 
+        AND     T13.CNTR_TPSZ_CD        = T10.DTL_CNTR_TP_SZ
+        #end   
+        #if (${vndr_seq} != '' ) 
+		AND     T10.VNDR_SEQ            = T17.VNDR_SEQ
+		#end				
+		#if (${cntr_tpsz_cd_str} != '' )
+	    AND  T13.CNTR_TPSZ_CD IN( #foreach($key IN ${cntr_tpsz_cd})
+	        #if($velocityCount < $cntr_tpsz_cd.size())
+	           '$key',
+	        #else
+	           '$key'
+	        #end
+	                             #end )
+		     #end
+		#if (${company} != '' )
+		AND    T13.CNTR_USE_CO_CD = T10.COMPANY 
+		#end
+		#if (${lstm_cd_str} != '' ) 
+		AND   T15.LSTM_CD IN ( #foreach($key IN ${lstm_cd})
+		     	                                 #if($velocityCount < $lstm_cd.size())
+		     	                                     '$key',
+		     	                                 #else
+		     	                                     '$key'
+		     	                                 #end
+		     	                             #end )
+		     		#end
+
+UNION ALL
+/* CASE 3 */
+
+        SELECT  ROW_NUMBER() OVER(ORDER BY T10.CNTR_NO , T13.CNTR_TPSZ_CD) AS ROW_SEQ
+                , T10.CNTR_NO                                 AS CNTRNO
+                , T13.CNTR_TPSZ_CD                            AS TYSZ
+                , T10.AGMT_CTY_CD||LPAD(T10.AGMT_SEQ, 6, '0') AS AGMT_NO
+                , T15.LSTM_CD                                 AS TERM
+                , T15.REF_NO                                  AS REF_NO
+                , T13.CNMV_STS_CD                             AS CNMV_STS_CD
+                , TO_CHAR(T10.LSI_EVNT_DT, 'YYYYMMDD')   AS OHDATE
+                , T10.LSI_YD_CD                               AS OHLOC
+                #if (${loc_tp} == 'R' ) 
+                , T10.LSI_LCC_CD AS RCC
+                #elseif (${loc_tp} == 'L' ) 
+                , T10.LSI_SCC_CD AS RCC
+                #elseif (${loc_tp} == 'S' ) 
+                , T10.LSI_YD_CD  AS RCC
+                #elseif (${loc_tp} == '' ) 
+                , T10.LSI_RCC_CD AS RCC
+                #end
+                , T10.CNTR_LSTM_CNG_FLG                     AS TERM_CHANGE
+                , NVL(T10.RNTL_CHG_FREE_DYS , 0)            AS FDAYS
+                , TO_CHAR(T10.LSO_EVNT_DT, 'YYYYMMDD')      AS OFHDATE
+                , T10.LSO_YD_CD                             AS OFHLOC
+                , CASE WHEN ( T15.LSTM_CD = 'OW' OR T15.LSTM_CD = 'LP' OR T15.LSTM_CD = 'OL' ) THEN 
+                        NVL(T10.LSO_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) -  T13.MFT_DT + 1
+                  ELSE 
+                        NVL(T10.LSO_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) -  T10.LSI_EVNT_DT + 1
+                  END                                       AS USEDDAYS
+                , NVL(T10.LSI_MIN_ONH_DYS , 0 )             AS MINOHDAYS
+                , DECODE(T10.CNTR_STS_CD, 'DII', 'Y', 'N')  AS DII
+                , T13.IMDT_EXT_FLG                          AS IMMEDIATELY                
+                , NVL(GREATEST(
+            		  CASE WHEN T15.LSTM_CD IN('OW','LP','OL') 
+                          THEN NVL( 
+                               (SELECT  ( NVL(T10.LSO_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) -  T13.MFT_DT - NVL(T10.RNTL_CHG_FREE_DYS , 0 ) + 1 ) * N1ST_CHG_AMT
+                                FROM    LSE_AGMT_RT RT
+                                WHERE   RT.AGMT_CTY_CD         (+) = T10.AGMT_CTY_CD
+                                AND     RT.AGMT_SEQ            (+) = T10.AGMT_SEQ
+                                AND     RT.LOC_CD              (+) = DECODE(T15.LSTM_CD, 'LT', T10.LSI_LCC_CD, 'KRSEL')
+                                AND     RT.AGMT_CHG_VAL        (+) = 1
+                                AND     RT.CNTR_TPSZ_CD        (+) = T13.CNTR_TPSZ_CD
+                                AND     RT.CNTR_RNTL_CHG_TP_CD (+) = 'PDGV'),
+                               (SELECT  ( NVL(T10.LSO_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) -  T13.MFT_DT - NVL(T10.RNTL_CHG_FREE_DYS , 0 ) + 1 ) * AVG(N1ST_CHG_AMT)
+                                FROM    LSE_AGMT_RT RT
+                                WHERE   RT.AGMT_CTY_CD         (+) = T10.AGMT_CTY_CD
+                                AND     RT.AGMT_SEQ            (+) = T10.AGMT_SEQ
+                                AND     RT.AGMT_CHG_VAL        (+) = 1
+                                AND     RT.CNTR_TPSZ_CD        (+) = T13.CNTR_TPSZ_CD
+                                AND     RT.CNTR_RNTL_CHG_TP_CD (+) = 'PDGV'))
+                          ELSE  NVL( 
+                               (SELECT  ( NVL(T10.LSO_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) - T10.LSI_EVNT_DT - NVL(T10.RNTL_CHG_FREE_DYS , 0 ) + 1 ) * N1ST_CHG_AMT
+                                FROM    LSE_AGMT_RT RT
+                                WHERE   RT.AGMT_CTY_CD         (+) = T10.AGMT_CTY_CD
+                                AND     RT.AGMT_SEQ            (+) = T10.AGMT_SEQ
+                                AND     RT.LOC_CD              (+) = DECODE(T15.LSTM_CD, 'LT', T10.LSI_LCC_CD, 'KRSEL')
+                                AND     RT.AGMT_CHG_VAL        (+) = 1
+                                AND     RT.CNTR_TPSZ_CD        (+) = T13.CNTR_TPSZ_CD
+                                AND     RT.CNTR_RNTL_CHG_TP_CD (+) = 'PDGV'),
+                               (SELECT  ( NVL(T10.LSO_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE,'RRRR/MM/DD'),'RRRR/MM/DD')) - T10.LSI_EVNT_DT - NVL(T10.RNTL_CHG_FREE_DYS , 0 ) + 1 ) * AVG(N1ST_CHG_AMT)
+                                FROM    LSE_AGMT_RT RT
+                                WHERE   RT.AGMT_CTY_CD         (+) = T10.AGMT_CTY_CD
+                                AND     RT.AGMT_SEQ            (+) = T10.AGMT_SEQ
+                                AND     RT.AGMT_CHG_VAL        (+) = 1
+                                AND     RT.CNTR_TPSZ_CD        (+) = T13.CNTR_TPSZ_CD
+                                AND     RT.CNTR_RNTL_CHG_TP_CD (+) = 'PDGV'))  
+                      END, 0), 0)                                              AS RENTAL_CHARGE
+            , NVL(T10.LSI_LFT_CHG_AMT,0)                                       AS LON
+            , DECODE(SIGN(T10.LSI_PKUP_CHG_AMT),  1,  T10.LSI_PKUP_CHG_AMT, 0) AS PUC
+            , DECODE(SIGN(T10.LSI_PKUP_CHG_AMT), -1, -T10.LSI_PKUP_CHG_AMT, 0) AS PCR            
+            , NVL(T10.LSO_LFT_CHG_AMT,0)                                       AS LOF            
+            , DECODE(SIGN(T10.LSO_DRFF_CR_AMT),   1,  T10.LSO_DRFF_CR_AMT,  0) AS DOC
+            , DECODE(SIGN(T10.LSO_DRFF_CR_AMT),  -1, -T10.LSO_DRFF_CR_AMT,  0) AS DCR
+
+            , ( SELECT  /*+ SO INDEX_DESC(XPKTRS_TRSP_SVC_ORD) */
+                        SO.NEGO_AMT
+                FROM    TRS_TRSP_SVC_ORD SO
+                WHERE   SO.EQ_NO                = T13.CNTR_NO
+                AND     SO.TRSP_COST_DTL_MOD_CD = 'CN' --CNTR S/T ON-HIRE
+                AND     ROWNUM                  = 1) AS ON_HIRE_DRAYAGE
+            , ( SELECT  /*+ SO INDEX_DESC(XPKTRS_TRSP_SVC_ORD) */
+                        SO.NEGO_AMT
+                FROM    TRS_TRSP_SVC_ORD SO
+                WHERE   SO.EQ_NO                = T13.CNTR_NO
+                AND     SO.TRSP_COST_DTL_MOD_CD = 'CF' --CNTR S/T OFF-HIRE
+                AND     ROWNUM                  = 1) AS OFF_HIRE_DRAYAGE
+            , ( SELECT  MNR_COMMON_PKG.MNR_GET_RPRCOST_FNC('U',  T13.CNTR_NO)
+                FROM    MNR_ORD_DTL OD,
+                        MNR_ORD_HDR OH
+                WHERE   1=1
+                AND     OD.EQ_NO              = T13.CNTR_NO
+                AND     OD.MNR_ORD_OFC_CTY_CD = OH.MNR_ORD_OFC_CTY_CD
+                AND     OD.MNR_ORD_SEQ        = OH.MNR_ORD_SEQ
+                GROUP BY T13.CNTR_NO ) AS M_R_COST
+            , (SELECT  RT.AGMT_CHG_VAL                                 
+               FROM    LSE_AGMT_RT RT,        
+                       LSE_AGREEMENT AM
+               WHERE   RT.AGMT_CTY_CD         = AM.AGMT_CTY_CD
+               AND     RT.AGMT_SEQ            = AM.AGMT_SEQ                              
+               AND     RT.CNTR_RNTL_CHG_TP_CD = 'DPPV'     
+               AND     AM.DPP_TP_CD           = 'Y'
+               AND     RT.AGMT_CTY_CD         = T10.LSO_AGMT_CTY_CD
+               AND     RT.AGMT_SEQ            = T10.LSO_AGMT_SEQ
+               AND     RT.CNTR_TPSZ_CD        = T13.CNTR_TPSZ_CD 
+               AND     TO_CHAR(T10.LSO_EVNT_DT, 'YYYYMMDD') BETWEEN P_PERIOD_STDT AND P_PERIOD_EDDT ) AS DPP               
+            ,BKG.BKG_NO
+            ,BKG.POL_CD
+            ,BKG.POR_CD
+            ,BKG.POD_CD
+            ,BKG.DEL_CD
+            ,TO_CHAR(BKG.POL_ETD_DT,'YYYY-MM-DD') POL_ETD_DT
+            ,TO_CHAR(BKG.POD_ETA_DT,'YYYY-MM-DD') POD_ETA_DT
+            ,BKG.VSL_CD || BKG.SKD_VOY_NO || BKG.SKD_DIR_CD VVD    
+        FROM    (
+                SELECT  T12.CNTR_NO, T12.AGMT_CTY_CD, T12.AGMT_SEQ, T12.CNTR_STS_EVNT_DT AS LSI_EVNT_DT, T12.CNTR_STS_SEQ
+                        , T12.CNTR_STS_CD, T12.CNTR_LSTM_CNG_FLG, T12.RCC_CD AS LSI_RCC_CD, T12.LCC_CD AS LSI_LCC_CD, T12.SCC_CD AS LSI_SCC_CD, T12.YD_CD AS LSI_YD_CD
+                        , T12.RNTL_CHG_FREE_DYS
+                        , T12.CNTR_MIN_ONH_DYS  AS LSI_MIN_ONH_DYS
+                        , T12.CNTR_LFT_CHG_AMT  AS LSI_LFT_CHG_AMT
+                        , T12.CNTR_PKUP_CHG_AMT AS LSI_PKUP_CHG_AMT
+                        , T11.VNDR_SEQ, T11.COMPANY, T11.P_LOC_TP, T11.P_LOC_CD
+                        , ROW_NUMBER(               ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS RN
+                        , LEAD(T12.RCC_CD           ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_RCC_CD                        
+                        , LEAD(T12.LCC_CD           ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_LCC_CD
+                        , LEAD(T12.SCC_CD           ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_SCC_CD
+                        , LEAD(T12.YD_CD            ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_YD_CD                        
+                        , LEAD(T12.CNTR_STS_CD      ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_STS_CD
+                        , LEAD(T12.AGMT_CTY_CD      ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_AGMT_CTY_CD
+                        , LEAD(T12.AGMT_SEQ         ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_AGMT_SEQ
+                        , LEAD(T12.CNTR_STS_EVNT_DT ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_EVNT_DT
+                        , LEAD(T12.CNTR_STS_SEQ     ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_STS_SEQ
+                        , LEAD(T12.CNTR_LSTM_CNG_FLG) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_LSTM_CHG_CD
+                        , LEAD(T12.CNTR_LFT_CHG_AMT ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_LFT_CHG_AMT
+                        , LEAD(T12.CNTR_DRFF_CR_AMT ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_DRFF_CR_AMT
+                        , P_PERIOD_STDT, P_PERIOD_EDDT, DTL_CNTR_TP_SZ
+                FROM    (
+                        SELECT T01.CNTR_NO,
+                               T01.CNTR_STS_SEQ,
+                               T01.YD_CD,
+                               T01.AGMT_CTY_CD,
+                               T01.AGMT_SEQ,
+                               T01.CNTR_STS_EVNT_DT,
+                               T01.CNTR_STS_CD,
+                               T01.CNTR_LSTM_CNG_FLG,
+                               T01.RCC_CD,
+                               (SELECT /*+ INDEX_ASC(T03 XPKMST_CNTR_STS_HIS) */
+                                       CNTR_STS_SEQ
+                                FROM   MST_CNTR_STS_HIS T03
+                                WHERE  T02.CNTR_NO = T03.CNTR_NO
+                                AND    T02.CNTR_STS_SEQ < T03.CNTR_STS_SEQ
+                                AND    T03.CNTR_LSTM_CNG_FLG = 'N'
+                                AND    T03.CNTR_STS_CD = 'LSO'
+                                AND    ROWNUM = 1 ) AS LSO_CNTR_STS_SEQ ,
+                               P.VNDR_SEQ,
+                               P.COMPANY,                               
+                               P.LOC_TP AS P_LOC_TP,
+                               P.LOC_CD AS P_LOC_CD,							   
+                               P.PERIOD_STDT AS P_PERIOD_STDT, 
+                               P.PERIOD_EDDT AS P_PERIOD_EDDT, 
+                               P.DTL_CNTR_TP_SZ AS DTL_CNTR_TP_SZ
+                        FROM   MST_CNTR_STS_HIS T01,
+                         /* LSI */
+                          MST_CNTR_STS_HIS T02,
+                         /* LSI 이후 TERM CHANAGED LSO */
+                          PARAM P
+                        WHERE  1=1
+                        AND    DECODE(TERM_CHANGE, 'Y', 'Y') = TERM_CHANGE
+                        AND    T01.CNTR_NO = T02.CNTR_NO
+                        AND    T01.CNTR_STS_SEQ = T02.PRNR_STS_SEQ 
+                    #if (${dii} != '' ) 
+                       #if (${dii} == 'N' )
+                        AND    T01.CNTR_STS_CD IN ('LSI','OWN') 
+                       #elseif (${dii} == 'Y' )
+                        AND    T01.CNTR_STS_CD = 'DII' 
+                       #end 
+                   #else
+                        AND    T01.CNTR_STS_CD IN ('LSI','DII','OWN') 
+                   #end
+                        AND    T02.CNTR_LSTM_CNG_FLG = 'Y'
+                        AND    T01.AGMT_SEQ <> 999990
+                        AND    T01.CNTR_STS_EVNT_DT BETWEEN TO_DATE(P.PERIOD_STDT, 'YYYYMMDD') AND TO_DATE(P.PERIOD_EDDT, 'YYYYMMDD') 
+                        ) T11, MST_CNTR_STS_HIS T12                        
+                WHERE   T11.CNTR_NO         = T12.CNTR_NO
+                AND     T12.CNTR_STS_SEQ    IN (T11.CNTR_STS_SEQ, T11.LSO_CNTR_STS_SEQ)
+                )                T10,
+                MST_CONTAINER    T13,
+                MDM_CNTR_TP_SZ   T14,
+                LSE_AGREEMENT    T15,
+                MDM_VENDOR       T17,
+                BKG_BOOKING      BKG
+        WHERE   1=1
+        AND     T10.CNTR_NO             = T13.CNTR_NO
+        AND     T13.CNTR_TPSZ_CD        = T14.CNTR_TPSZ_CD
+        AND     T10.AGMT_CTY_CD         = T15.AGMT_CTY_CD
+        AND     T10.AGMT_SEQ            = T15.AGMT_SEQ
+        AND     T15.VNDR_SEQ            = T17.VNDR_SEQ
+        AND     T13.HJS_CRE_FLG         = 'N'
+        AND     BKG.BKG_NO(+)           = T13.BKG_NO
+        AND     RN                      = 1
+        #if (${detail_lstm_cd} != '' ) 
+        AND   T15.LSTM_CD = @[detail_lstm_cd] 
+      	#end      
+      	#if (${detail_vndr_seq} != '' ) 
+         AND   T15.VNDR_SEQ = @[detail_vndr_seq] 
+      	#end            	
+      	#if (${vndr_seq} != '' ) 
+        AND   T15.VNDR_SEQ = @[vndr_seq] 
+      	#end 
+        #if (${detail_cntr_tpsz_cd} != '' ) 
+        AND     T13.CNTR_TPSZ_CD        = T10.DTL_CNTR_TP_SZ
+        #end      
+        #if (${vndr_seq} != '' ) 
+		AND     T10.VNDR_SEQ            = T17.VNDR_SEQ
+		#end
+		#if (${detail_agmt_seq} != '' && ${detail_agmt_cty_cd} != 'ZZ' )
+		AND T10.AGMT_CTY_CD     = P_AGMT_CTY_CD       
+		AND T10.AGMT_SEQ        = P_AGMT_SEQ
+		#end				
+		#if (${cntr_tpsz_cd_str} != '' )
+	    AND  T13.CNTR_TPSZ_CD IN( #foreach($key IN ${cntr_tpsz_cd})
+	                                     #if($velocityCount < $cntr_tpsz_cd.size())
+	                                        '$key',
+	                                     #else
+	                                        '$key'
+	                                     #end
+	                                 #end )
+		#end
+		#if (${company} != '' )
+		AND T13.CNTR_USE_CO_CD = T10.COMPANY 
+		#end
+		#if (${lstm_cd_str} != '' ) 
+		AND   T15.LSTM_CD IN ( #foreach($key IN ${lstm_cd})
+			                                 #if($velocityCount < $lstm_cd.size())
+			                                     '$key',
+			                                 #else
+			                                     '$key'
+			                                 #end
+			                             #end )
+		#end
+        )
+WHERE	1=1
+#if (${startno} != '') 
+AND 	ROW_SEQ BETWEEN @[startno] AND @[endno]
+#end			]]></sql>
+			<params>
+				<param name="period_stdt" type="12" value="" out="N"/>
+				<param name="period_eddt" type="12" value="" out="N"/>
+				<param name="company" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="loc_tp" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="12" value="" out="N"/>
+				<param name="detail_lstm_cd" type="12" value="" out="N"/>
+				<param name="detail_vndr_seq" type="12" value="" out="N"/>
+				<param name="detail_cntr_tpsz_cd" type="12" value="" out="N"/>
+				<param name="term_change" type="12" value="" out="N"/>
+				<param name="startno" type="2" value="" out="N"/>
+				<param name="endno" type="2" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

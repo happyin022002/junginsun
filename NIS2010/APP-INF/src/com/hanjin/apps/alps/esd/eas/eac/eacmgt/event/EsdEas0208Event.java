@@ -1,0 +1,102 @@
+/*=========================================================
+*Copyright(c) 2014 CyberLogitec
+*@FileName : EsdEas0208Event.java
+*@FileTitle : EAC Code Inquiry
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2014.10.30
+*@LastModifier : 백형인
+*@LastVersion : 1.0
+* 2014.10.30 백형인
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esd.eas.eac.eacmgt.event;
+
+import com.hanjin.apps.alps.esd.eas.eac.eacmgt.vo.EACCdVO;
+import com.hanjin.apps.alps.esd.eas.eac.eacmgt.vo.EacSearchVO;
+import com.hanjin.framework.support.layer.event.EventSupport;
+
+
+/**
+ * ESD_EAS_0208 에 대한 PDTO(Data Transfer Object including Parameters)<br>
+ * -  ESD_EAS_0208HTMLAction에서 작성<br>
+ * - ServiceCommand Layer로 전달하는 PDTO로 사용<br>
+ *
+ * @author HI
+ * @see ESD_EAS_0208HTMLAction 참조
+ * @since J2EE 1.6
+ */
+
+public class EsdEas0208Event extends EventSupport {
+
+	private static final long serialVersionUID = 1L;
+	
+	/** Table Value Object 조회 조건 및 단건 처리  */
+	EACCdVO eacCdVO = null;
+	
+	/** Table Value Object Multi Data 처리 */
+	EACCdVO[] eacCdVOs = null;
+
+	/** Table Value Object MultiCombo 조회 조건 및 단건 처리  */
+	EacSearchVO eacSearchVO = null;
+	
+	/** Table Value Object MultiCombo Data 처리 */
+	EacSearchVO[] eacSearchVOs = null;	
+	
+	public EsdEas0208Event(){}
+	
+
+
+	public EACCdVO getEacCdVO() {
+		return eacCdVO;
+	}
+
+	public void setEacCdVO(EACCdVO eacCdVO) {
+		this.eacCdVO = eacCdVO;
+	}
+
+	public EACCdVO[] getEacCdVOs() {
+		EACCdVO[] rtnVOs = null;
+		if (this.eacCdVOs != null) {
+			rtnVOs = new EACCdVO[eacCdVOs.length];
+			System.arraycopy(eacCdVOs, 0, rtnVOs, 0, rtnVOs.length);
+		}
+		return rtnVOs;
+	}
+
+	public void setEacCdVOs(EACCdVO[] eacCdVOs){
+		if(eacCdVOs != null){
+			EACCdVO[] tmpVOs = new EACCdVO[eacCdVOs.length];
+			System.arraycopy(eacCdVOs, 0, tmpVOs, 0, tmpVOs.length);
+			this.eacCdVOs = tmpVOs;
+		}
+	}
+
+	public EacSearchVO getEacSearchVO() {
+		return eacSearchVO;
+	}
+
+	public void setEacSearchVO(EacSearchVO eacSearchVO) {
+		this.eacSearchVO = eacSearchVO;
+	}
+
+	public EacSearchVO[] getEacSearchVOs() {
+		EacSearchVO[] rtnVOs = null;
+		if (this.eacSearchVOs != null) {
+			rtnVOs = new EacSearchVO[eacSearchVOs.length];
+			System.arraycopy(eacSearchVOs, 0, rtnVOs, 0, rtnVOs.length);
+		}
+		return rtnVOs;
+	}
+
+	public void setEacSearchVOs(EacSearchVO[] eacSearchVOs){
+		if(eacSearchVOs != null){
+			EacSearchVO[] tmpVOs = new EacSearchVO[eacSearchVOs.length];
+			System.arraycopy(eacSearchVOs, 0, tmpVOs, 0, tmpVOs.length);
+			this.eacSearchVOs = tmpVOs;
+		}
+	}
+	
+	
+
+}

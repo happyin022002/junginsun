@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ContainerOnOffhireDBDAOModifyCntrMasterByMvmtDataUSQL">
+			<desc><![CDATA[ModifyCntrMasterByMvmtData
+2010.12.02 남궁진호[CHM-201007506-01] velParam  변수의 null값 인식오류에 의한 수정
+2011.05.02 남궁진호[CHM-201110515-01] U/C으로 Flagging되어있는 CNTR가 ID 상태에서 MT 상태로 변경될대 U/C Flagging 자동해제
+2013.04.05 채창호[CHM-201323894]  ALPS Master에서L/S & U/C Creation 자동 Unflagging 요청         ]]></desc>
+			<sql><![CDATA[
+UPDATE MST_CONTAINER MST
+      SET  
+#if (${new_flg} == 'C' ) -- 'C' : 신조 MOVEMENT 취소,'X' : 'SH' 장비 XX 처리
+         ONH_YD_CD       = 'KRSEL1H',
+         CRNT_YD_CD      = 'KRSEL1H', 
+         LOC_CD          = 'KRSEL',
+         SCC_CD          = 'KRSEL',
+         ECC_CD          = 'KREIW',
+         LCC_CD          = 'KRINC',
+         RCC_CD          = 'KRSEL',
+         CNMV_DT         = MST.MFT_DT,
+         CNMV_GDT	     = GLOBALDATE_PKG.TIME_CONV_FNC ( 'KRSEL', MST.MFT_DT, 'GMT' ),
+         ACIAC_DIV_CD    = 'I',
+         HJS_CRE_FLG     = 'Y',
+         SYS_AREA_GRP_ID = 'KOR',
+         CNTR_AUTH_NO    = null,
+         CNMV_STS_CD     = 'MT',
+#else
+         SYS_AREA_GRP_ID = @[cntr_svr_id]   ,
+         #if (${new_flg} == 'B' )
+	     ONH_DT		    = TRUNC(TO_DATE(@[cnmv_evnt_dt], 'YYYYMMDD HH24:MI')),	
+	     ONH_YD_CD  	= @[org_yd_cd],	
+         #end
+	     CNMV_YR        = @[cnmv_yr]        ,
+         CNMV_ID_NO     = @[cnmv_id_no]     ,
+         CNMV_SEQ       = @[cnmv_seq]       ,
+         CNMV_SPLIT_NO  = @[cnmv_split_no]  ,
+         CNMV_CYC_NO    = @[cnmv_cyc_no]    ,
+         CNMV_DT        = TO_DATE(@[cnmv_evnt_dt], 'YYYYMMDD HH24:MI'),
+         CNMV_GDT	    = GLOBALDATE_PKG.TIME_CONV_FNC ( SUBSTR(@[org_yd_cd], 1, 5), TO_DATE(@[cnmv_evnt_dt], 'YYYYMMDD HH24:MI'), 'GMT' ),
+	     PRE_STS_FLG    = @[pre_sts_flg]    ,
+	     BKG_NO         = @[bkg_no] 	    ,
+	     BKG_KNT        = @[bkg_knt]	    ,
+         FULL_FLG       = DECODE(@[fcntr_flg], NULL, 'N' ,'F', 'Y', 'M', 'N', 'Y','Y', 'E', 'N', @[fcntr_flg] ),
+         CRNT_YD_CD     = @[org_yd_cd]      ,
+         DEST_YD_CD     = @[dest_yd_cd]     ,
+         VSL_CD         = SUBSTR(@[cntr_id], 0,4)        ,
+         SKD_VOY_NO     = SUBSTR(@[cntr_id], 5,4)        ,
+         SKD_DIR_CD     = SUBSTR(@[cntr_id], 9,1)        ,
+         CNMV_STS_CD    = @[mvmt_sts_cd]    ,
+		 IMDT_EXT_FLG   = DECODE(@[mvmt_sts_cd]||MST.LSTM_CD,'VLOF','Y','VLMI','Y',MST.IMDT_EXT_FLG),
+	     (LOC_CD, SCC_CD, LCC_CD, ECC_CD, RCC_CD) = 
+	     (
+	       SELECT
+                   B.LOC_CD, 
+                   A.SCC_CD,
+                   A.LCC_CD, 
+                   A.ECC_CD,
+                   A.RCC_CD 
+            FROM   MDM_EQ_ORZ_CHT A, MDM_LOCATION B
+            WHERE  A.SCC_CD = B.SCC_CD
+            AND    B.LOC_CD = SUBSTR(@[org_yd_cd],0,5) 		
+	     ),
+         #if (${ctm_ui_yn} == 'Y' )
+         -- CTM/Movement History Update UI에서 호출시 (제외)
+         #else
+         -- 다른 UI and EDI에서 호출시.
+         -- As-Is : UI을 통해서 MT 일 경우에 Manual 작업으로 Uncliamed Status를 해제 했다.
+         -- To-Be : Manual 작업 뿐만 아니라, Auto로 Uncliamed Status를 해제할 수 있도록 한다.
+         -- [변경 내용]
+         --  (U) Uncliamed Container 이면서 ID상태에서 MT 이 입력되면 Uncliamed Status를 해제한다.
+         --현재 LS & UC Creation 자동 Unflagging 요청
+              -- L  - LS_FLG 일때 조건  MVMT 가 ID-> MT or OC->VL or MT-> VL or MT->OC 변동 시, L- LS-FLG 제거
+              -- U -  UC_FLG 일때 조건  MVMT 가 ID-> MT or OC->VL 변동 시,  UC_FLG 제거
+              -- MVMT CD 가 MT 에서 VL로 변동 하거나 MT가 OC로 변동 하게 되면  L/S Flag 를 제거 한다 
+          UCLM_LS_DIV_CD 	    =  CASE WHEN UCLM_LS_DIV_CD ='U' THEN
+                                        CASE WHEN  CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] = ('OCVL') THEN
+                                            UCLM_LS_DIV_CD
+                                        ELSE
+                                            UCLM_LS_DIV_CD
+                                        END
+                                   ELSE
+                                        CASE WHEN UCLM_LS_DIV_CD ='L' THEN
+                                             CASE WHEN CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('OCVL') OR
+                                                       CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTVL') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTOP') THEN
+                                                  NULL
+                                             ELSE
+                                                  UCLM_LS_DIV_CD
+                                             END
+                               
+                                        END 
+                                   END,            
+	        UCLM_DT 		    =  CASE WHEN UCLM_LS_DIV_CD ='U' THEN
+                                        CASE WHEN  CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] = ('OCVL') THEN
+                                            UCLM_DT
+                                        ELSE
+                                            UCLM_DT
+                                        END
+                                   ELSE
+                                        CASE WHEN UCLM_LS_DIV_CD ='L' THEN
+                                             CASE WHEN CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('OCVL') OR
+                                                       CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTVL') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTOP') THEN
+                                                  NULL
+                                             ELSE
+                                                  UCLM_DT
+                                             END
+                                        END  
+                                   END,
+	        UCLM_FREE_DYS		= CASE WHEN UCLM_LS_DIV_CD ='U' THEN
+                                        CASE WHEN  CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] = ('OCVL') THEN
+                                            UCLM_FREE_DYS
+                                        ELSE
+                                            UCLM_FREE_DYS
+                                        END
+                                   ELSE
+                                        CASE WHEN UCLM_LS_DIV_CD ='L' THEN
+                                             CASE WHEN CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('OCVL') OR
+                                                       CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTVL') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTOP') THEN
+                                                  NULL
+                                             ELSE
+                                                  UCLM_FREE_DYS
+                                             END
+                                        END
+                                   END,
+	        UCLM_END_DT		    = CASE WHEN UCLM_LS_DIV_CD ='U' THEN
+                                        CASE WHEN  CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] = ('OCVL') THEN
+                                            UCLM_END_DT
+                                        ELSE
+                                            UCLM_END_DT
+                                        END
+                                   ELSE
+                                        CASE WHEN UCLM_LS_DIV_CD ='L' THEN
+                                             CASE WHEN CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('OCVL') OR
+                                                       CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTVL') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTOP') THEN
+                                                  NULL
+                                             ELSE
+                                                  UCLM_END_DT
+                                             END
+                                         END 
+                                   END,
+	        UCLM_RSN		    = CASE WHEN UCLM_LS_DIV_CD ='U' THEN
+                                        CASE WHEN  CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] = ('OCVL') THEN
+                                            UCLM_RSN
+                                        ELSE
+                                            UCLM_RSN
+                                        END
+                                   ELSE
+                                        CASE WHEN UCLM_LS_DIV_CD ='L' THEN
+                                             CASE WHEN CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('OCVL') OR
+                                                       CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTVL') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTOP') THEN
+                                                  NULL
+                                             ELSE
+                                                  UCLM_RSN
+                                             END
+                                        END 
+                                   END,
+	        UCLM_PLN_RMK		= CASE WHEN UCLM_LS_DIV_CD ='U' THEN
+                                        CASE WHEN  CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] = ('OCVL') THEN
+                                             UCLM_PLN_RMK
+                                        ELSE
+                                            UCLM_PLN_RMK
+                                        END
+                                   ELSE
+                                        CASE WHEN UCLM_LS_DIV_CD ='L' THEN
+                                             CASE WHEN CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('OCVL') OR
+                                                       CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTVL') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTOP') THEN
+                                                  NULL
+                                             ELSE
+                                                  UCLM_PLN_RMK
+                                             END
+                        
+                                        END 
+                                   END,
+	        UCLM_CNTC_PNT_NM	= CASE WHEN UCLM_LS_DIV_CD ='U' THEN
+                                        CASE WHEN  CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] = ('OCVL') THEN
+                                             UCLM_CNTC_PNT_NM
+                                        ELSE
+                                            UCLM_CNTC_PNT_NM
+                                        END
+                                   ELSE
+                                        CASE WHEN UCLM_LS_DIV_CD ='L' THEN
+                                             CASE WHEN CNMV_STS_CD || @[mvmt_sts_cd] IN ('IDMT') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('OCVL') OR
+                                                       CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTVL') OR  CNMV_STS_CD || @[mvmt_sts_cd] IN ('MTOP') THEN
+                                                  NULL
+                                             ELSE
+                                                  UCLM_CNTC_PNT_NM
+                                             END
+                                
+                                        END 
+                                   END,
+         #end 
+         HJS_CRE_FLG        = 'N' ,
+         ACIAC_DIV_CD       = NVL(@[aciac_div_cd],'A'),
+#end
+#if (${new_flg} == 'X')
+	 CNTR_STS_CD	= 'LSO',
+	 LST_STS_YD_CD  = @[org_yd_cd],
+	 LST_STS_SEQ    = MST_CNTR_STS_HIS_SEQ.NEXTVAL,
+#end
+	 UPD_USR_ID     = @[upd_usr_id],
+	 UPD_DT         = SYSDATE
+WHERE 
+	 MST.CNTR_NO = @[cntr_no]			]]></sql>
+			<params>
+				<param name="cntr_svr_id" type="12" value="" out="N"/>
+				<param name="cnmv_evnt_dt" type="12" value="" out="N"/>
+				<param name="org_yd_cd" type="12" value="" out="N"/>
+				<param name="cnmv_yr" type="12" value="" out="N"/>
+				<param name="cnmv_id_no" type="12" value="" out="N"/>
+				<param name="cnmv_seq" type="12" value="" out="N"/>
+				<param name="cnmv_split_no" type="12" value="" out="N"/>
+				<param name="cnmv_cyc_no" type="12" value="" out="N"/>
+				<param name="pre_sts_flg" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="bkg_knt" type="12" value="" out="N"/>
+				<param name="fcntr_flg" type="12" value="" out="N"/>
+				<param name="dest_yd_cd" type="12" value="" out="N"/>
+				<param name="cntr_id" type="12" value="" out="N"/>
+				<param name="mvmt_sts_cd" type="12" value="" out="N"/>
+				<param name="aciac_div_cd" type="12" value="" out="N"/>
+				<param name="upd_usr_id" type="12" value="" out="N"/>
+				<param name="cntr_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="VesselScheduleMgtDBDAOSearchVslSkdActCloseRSQL">
+			<desc><![CDATA[Active & Closing VVD 리스트를 조회한다.]]></desc>
+			<sql><![CDATA[
+SELECT  VSL_SLAN_CD
+	, PF_SKD_TP_CD
+	, VSL_CD
+	, VSL_ENG_NM
+	, SKD_VOY_NO
+	, SKD_DIR_CD
+    , ORG_SKD_STS_CD
+	, SKD_STS_CD
+	, VIR_SKD_STS_CD
+	, TURN_SKD_VOY_NO
+	, TURN_SKD_DIR_CD
+	, CRE_DT
+	, N1ST_PORT_BRTH_DT
+	, SKD_STS_MNL_FLG
+	, CRE_USR_ID
+	, UPD_USR_ID
+	, CUR_CRR_CD
+	, ACT_CRR_CD
+FROM (
+		SELECT  T1.VSL_SLAN_CD
+    		, T1.PF_SKD_TP_CD
+			, T1.VSL_CD
+			, T2.VSL_ENG_NM
+			, T1.SKD_VOY_NO
+			, T1.SKD_DIR_CD
+            , T1.SKD_STS_CD AS ORG_SKD_STS_CD
+			, DECODE(T1.SKD_STS_CD, 'CLO', 'CLO', 
+				DECODE((SELECT
+							CASE WHEN T4.VPS_ETA_DT > SYSDATE + 3 THEN '1' /* ETA - 3일 전 BOOKING 삭제 가능  */
+							ELSE '2'                                       /* ETA - 3일 후 BOOKING 삭제 불가  */
+							END
+						FROM BKG_VVD S1,BKG_BOOKING S2
+						WHERE 1 = 1
+						AND   S1.BKG_NO     = S2.BKG_NO
+						AND   S1.VSL_CD     = T1.VSL_CD
+						AND   S1.SKD_VOY_NO = T1.SKD_VOY_NO
+						AND   S1.SKD_DIR_CD = T1.SKD_DIR_CD
+						AND   S2.BKG_STS_CD != 'X'
+						AND   ROWNUM        = 1), NULL, T1.SKD_STS_CD, '1', 'BKG', '2', 'BKGNOD'
+			)) AS SKD_STS_CD
+			, DECODE(T1.SKD_STS_CD, 'CLO', 'CLO', 
+				DECODE((SELECT
+							CASE WHEN S3.VPS_ETA_DT > SYSDATE + 3 THEN '1' /* ETA - 3일 전 BOOKING 삭제 가능  */
+							ELSE '2'                                       /* ETA - 3일 후 BOOKING 삭제 불가  */
+							END
+						FROM BKG_VVD S1, BKG_BOOKING S2, VSK_VSL_PORT_SKD S3
+						WHERE 1 = 1
+						AND   S1.BKG_NO     = S2.BKG_NO
+						AND   S1.VSL_CD     = S3.VSL_CD
+						AND   S1.SKD_VOY_NO = S3.SKD_VOY_NO
+						AND   S1.SKD_DIR_CD = S3.SKD_DIR_CD
+						AND   S3.ROWID      = NVL(
+												(SELECT /*+ INDEX_ASC(S XAK4VSK_VSL_PORT_SKD) */
+													S.ROWID /* 일부 SKIP된  PORT일 경우 : SKIP이 아닌 첫번째을 대상으로 함. */
+													FROM   VSK_VSL_PORT_SKD S
+													WHERE 1 = 1
+													AND   S.VSL_CD     = T4.VSL_CD
+													AND   S.SKD_VOY_NO = T4.TURN_SKD_VOY_NO
+													AND   S.SKD_DIR_CD = T4.TURN_SKD_DIR_CD
+													AND   'S'          != NVL(S.SKD_CNG_STS_CD, ' ')
+													AND   S.TURN_PORT_IND_CD IN ('D', 'V', 'F')
+													AND   ROWNUM       = 1),
+												(SELECT /*+ INDEX_ASC(S XAK4VSK_VSL_PORT_SKD) */
+													S.ROWID	/* 모두 SKIP된 PORT일 경우 : DELETE 기능 사용을 위해 조회해야 함. */
+													FROM   VSK_VSL_PORT_SKD S
+													WHERE  1 = 1
+													AND    S.VSL_CD        = T4.VSL_CD
+													AND    S.SKD_VOY_NO    = T4.TURN_SKD_VOY_NO
+													AND    S.SKD_DIR_CD    = T4.TURN_SKD_DIR_CD
+													AND    S.TURN_PORT_IND_CD IN ('D', 'V', 'F')
+													AND    ROWNUM          = 1))
+						AND   S2.BKG_STS_CD  != 'X'
+						AND   ROWNUM          = 1), NULL, T1.SKD_STS_CD, '1', 'BKG', '2', 'BKGNOD'
+			)) AS VIR_SKD_STS_CD
+			, T4.TURN_SKD_VOY_NO                              AS TURN_SKD_VOY_NO
+			, T4.TURN_SKD_DIR_CD                              AS TURN_SKD_DIR_CD
+			, TO_CHAR(T1.CRE_DT, 'YYYY-MM-DD')                AS CRE_DT
+			, TO_CHAR(T1.N1ST_PORT_BRTH_DT, 'YYYY-MM-DD')     AS N1ST_PORT_BRTH_DT
+			, T1.SKD_STS_MNL_FLG
+			, T1.CRE_USR_ID
+			, T1.UPD_USR_ID
+			, T2.CRR_CD AS CUR_CRR_CD
+			, T1.ACT_CRR_CD
+		FROM    VSK_VSL_SKD  T1
+		, MDM_VSL_CNTR       T2
+		, MDM_VSL_SVC_LANE   T3
+		, VSK_VSL_PORT_SKD   T4
+		WHERE   1             = 1                
+		AND     T1.VSL_CD     = T4.VSL_CD     (+)
+		AND     T1.SKD_VOY_NO = T4.SKD_VOY_NO (+)
+		AND     T1.SKD_DIR_CD = T4.SKD_DIR_CD (+)
+		AND     T3.VSL_TP_CD  = 'C' /*컨테이너선*/
+		AND     (T4.ROWID      = NVL((SELECT /*+ INDEX_ASC(S XAK4VSK_VSL_PORT_SKD) */
+										S.ROWID /* 일부 SKIP된  PORT일 경우 : SKIP이 아닌 첫번째을 대상으로 함. */
+									FROM   VSK_VSL_PORT_SKD S
+									WHERE  1 = 1
+									AND    S.VSL_CD        = T1.VSL_CD
+									AND    S.SKD_VOY_NO    = T1.SKD_VOY_NO
+									AND    S.SKD_DIR_CD    = T1.SKD_DIR_CD
+									AND    'S'            != NVL(S.SKD_CNG_STS_CD, ' ')
+									AND    ROWNUM          = 1
+									),
+									(SELECT /*+ INDEX_ASC(S XAK4VSK_VSL_PORT_SKD) */
+										S.ROWID /* 모두 SKIP된 PORT일 경우 : DELETE 기능 사용을 위해 조회해야 함. */
+									FROM   VSK_VSL_PORT_SKD S
+									WHERE  1 = 1
+									AND    S.VSL_CD        = T1.VSL_CD
+									AND    S.SKD_VOY_NO    = T1.SKD_VOY_NO
+									AND    S.SKD_DIR_CD    = T1.SKD_DIR_CD
+									AND    ROWNUM          = 1
+									))
+                OR
+					/* Calling Port 가 전혀 존재하지 않는 Vessel Schedule 경우 : DELETE 기능 사용을 위해 조회해야 함. */
+                    NOT EXISTS (
+                        SELECT 'X' 
+                        from VSK_VSL_PORT_SKD S 
+                                        WHERE  S.VSL_CD        = T1.VSL_CD
+                                        AND    S.SKD_VOY_NO    = T1.SKD_VOY_NO
+                                        AND    S.SKD_DIR_CD    = T1.SKD_DIR_CD
+                    )
+		        )
+		AND     T1.VSL_SLAN_CD     = T3.VSL_SLAN_CD
+#if (${vsl_svc_tp_cd} == 'T') 
+		AND     T3.VSL_SVC_TP_CD  != 'O'
+#elseif (${vsl_svc_tp_cd} == 'F') 
+		AND     T3.VSL_SVC_TP_CD   = 'O'
+#end
+#if (${vsl_slan_cd} != '') 
+                AND     T1.VSL_SLAN_CD     = @[vsl_slan_cd]
+#end
+#if (${vsl_cd} != '') 
+		AND     T1.VSL_CD          LIKE @[vsl_cd] || '%'
+#end
+		AND     T1.VSL_CD          = T2.VSL_CD
+
+#if (${skd_sts_cd} == 'CLO')
+		AND     (T1.SKD_STS_CD    = 'CLO' AND T1.SKD_STS_MNL_FLG = 'N') /* AUTO CLOSE */
+#elseif (${skd_sts_cd} == 'RDY')
+		AND     (T1.SKD_STS_CD    = 'RDY') /* Ready */
+#elseif (${skd_sts_cd} == 'ACT')
+		AND     (T1.SKD_STS_CD    = 'ACT' OR T1.SKD_STS_MNL_FLG = 'Y') /* Activate 면서 AUTO CLOSE가 아닌것 */
+#end
+
+		AND     T1.RUSE_PROHI_FLG  = 'N' /* DELETE OR CLOSE 기능을 위한 조회이므로 재무VVD는 조회하지 않음 */
+		AND     T1.N1ST_PORT_BRTH_DT != TO_DATE('0001/01/01', 'YYYY/MM/DD') /* 껍데기 VVD 선별, 나중에 삭제 */
+
+#if (${fm_dt} != '' && ${to_dt} != '')
+		AND     T4.VPS_ETB_DT BETWEEN TO_DATE(@[fm_dt],'YYYY-MM-DD') AND TO_DATE(@[to_dt],'YYYY-MM-DD')+0.99999
+#end
+
+#if (${lane_tp_cd} == 'T')
+		AND     T3.FDR_DIV_CD		= 'T'
+#elseif (${lane_tp_cd} == 'O')
+		AND     T3.FDR_DIV_CD		<> 'T'
+#end
+
+	)
+
+ORDER BY N1ST_PORT_BRTH_DT			]]></sql>
+			<params>
+				<param name="vsl_slan_cd" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="fm_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

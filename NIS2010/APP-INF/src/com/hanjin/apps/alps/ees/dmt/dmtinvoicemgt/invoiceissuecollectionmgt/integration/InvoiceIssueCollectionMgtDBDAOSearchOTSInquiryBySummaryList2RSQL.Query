@@ -1,0 +1,608 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="InvoiceIssueCollectionMgtDBDAOSearchOTSInquiryBySummaryList2RSQL">
+			<desc><![CDATA[INVOICE 생성 및 징수관리
+EES_DMT_4009
+Outstanding Inquiry by Customer N Issue for Sales Rep
+김기태]]></desc>
+			<sql><![CDATA[
+WITH MN_DATA AS (
+SELECT  DISTINCT
+        DMDT_INV_NO
+       ,M.ACT_PAYR_CNT_CD
+       ,M.ACT_PAYR_SEQ 
+       ,DMDT_VT_INV_STS_CD
+       ,( SELECT VNDR_LGL_ENG_NM FROM MDM_VENDOR WHERE M.ACT_PAYR_SEQ = VNDR_SEQ AND ROWNUM = 1 ) VNDR_LGL_ENG_NM 
+       ,M.INV_CURR_CD
+       ,( SELECT CUST_LGL_ENG_NM FROM MDM_CUSTOMER WHERE M.ACT_PAYR_CNT_CD = CUST_CNT_CD AND M.ACT_PAYR_SEQ = CUST_SEQ AND ROWNUM = 1 ) CUST_LGL_ENG_NM
+       ,M.DMDT_TRF_CD 
+       ,M.INV_CHG_AMT
+       ,M.TAX_AMT
+       ,M.DMDT_INV_STS_CD 
+       ,M.TAX_RTO
+       ,M.INV_AMT
+       ,M.CRE_OFC_CD
+       ,INV_XCH_RT
+       ,TO_CHAR(AR_IF_DT, 'YYYY-MM-DD') AS AR_IF_DT
+       ,CASE 
+			WHEN ATTR_CTNT1 IS NULL THEN 	-- AUTO I/F 가 아닐 경우 (INVOICE 발행 OFFICE 가 AUTO I/F 대상 OFFICE 가 아닐 경우)
+				CASE 
+					WHEN DMDT_INV_STS_CD = 'I' AND DMDT_AR_IF_CD = 'Y' THEN 
+						'Y'
+					ELSE 
+						'N'
+				END
+			ELSE 	-- AUTO I/F 일 경우 (INVOICE 발행 OFFICE 가 AUTO I/F 대상 OFFICE 일 경우)
+				NVL(OTS_CLT_FLG, 'N')
+	    END V_COLLECTED				
+       ,CASE 
+			WHEN ATTR_CTNT1 IS NOT NULL THEN 
+				'Y' 
+			ELSE 
+				'N' 
+		END AUTO_AR_IF_OFC_FLG       -- AUTO I/F OFFICE 인지 여부를 나타내는 FLAG	 
+       ,(
+			SELECT  SYS_AREA_GRP_ID SVR_ID 
+			  FROM  COM_SYS_AREA_GRP_ID
+             WHERE  CNT_CD = 
+					(
+						SELECT  CNT_CD 
+						  FROM  MDM_LOCATION 
+						 WHERE  LOC_CD = 
+								(
+									SELECT  LOC_CD 
+									  FROM  MDM_ORGANIZATION 
+									 WHERE  OFC_CD = SUBSTR(M.CRE_OFC_CD, 0, 5)
+								)
+					) 
+			   AND  CO_IND_CD = 'H'
+		) SVR_ID
+       ,(SELECT SC_NO  FROM BKG_BOOKING WHERE BKG_NO = M.BKG_NO ) AS SC_NO
+       ,(SELECT RFA_NO FROM BKG_BOOKING WHERE BKG_NO = M.BKG_NO ) AS RFA_NO
+       ,(SELECT TAA_NO FROM BKG_BOOKING WHERE BKG_NO = M.BKG_NO ) AS TAA_NO
+	   ,(
+			SELECT  USD_LOCL_XCH_RT
+    	      FROM  GL_MON_XCH_RT
+        	 WHERE  1 = 1
+	           AND  ACCT_XCH_RT_YRMON = TO_CHAR(SYSDATE,'YYYYMM') 
+	           AND  ACCT_XCH_RT_LVL = '1'
+    	       AND  CURR_CD = M.INV_CURR_CD 
+		) AS USD_LOCL_XCH_RT -- USD 환율
+			
+  FROM  DMT_INV_MN    		M	
+	   ,DMT_HRD_CDG_CTNT 	D
+	   
+ WHERE  1 = 1
+   AND  M.CRE_OFC_CD = D.ATTR_CTNT1(+)
+   AND  D.HRD_CDG_ID(+) = 'AUTO_AR_IF_OFC'
+   AND  M.CRE_DT  BETWEEN TO_DATE(REPLACE(@[frdt2],'-',''), 'YYYYMMDD') AND TO_DATE(REPLACE(@[todt2],'-',''), 'YYYYMMDD') + .99999       /* INVOICE ISSUE DATE */
+#if ( ${isof} != '' )
+   AND M.CRE_OFC_CD IN (#foreach( $is_ofc_cd in ${tempISOFList}) #if($velocityCount < $tempISOFList.size()) '$is_ofc_cd', #else '$is_ofc_cd' #end #end)
+#end
+   AND (M.DMDT_INV_STS_CD = 'I' or (M.DMDT_INV_STS_CD = 'X' and M.DMDT_VT_INV_STS_CD = 'C'))	-- NOT CANCELED INVOICE or VIRTUAL INVOICE modified 2014.12.30 by jameskai
+#if ( ${arif} != '' )
+   AND ( 1!=1 
+		#if (${uncollected} == 'N')
+        OR ( DMDT_INV_STS_CD = 'I' AND DMDT_AR_IF_CD = 'N' )
+		OR ( DMDT_INV_STS_CD = 'X' AND DMDT_AR_IF_CD = 'N' AND M.DMDT_VT_INV_STS_CD = 'C' )
+		#end 
+		#if (${collected} == 'Y')
+		OR DMDT_AR_IF_CD = 'Y'
+		#end 
+		#if (${hold} == 'H')
+		OR DMDT_AR_IF_CD = 'H'
+		#end 
+		#if (${hold_Litigation} == 'L')
+		OR (DMDT_AR_IF_CD = 'H' AND INV_HLD_RSN_CD = 'LIT')
+		#end 
+		)
+#end
+#if ( ${tftp} != 'A' )
+    AND M.DMDT_TRF_CD IN (#foreach( $dmdt_trf_cd_p in ${tempTFTPList}) #if($velocityCount < $tempTFTPList.size())'$dmdt_trf_cd_p', #else '$dmdt_trf_cd_p' #end #end)
+#end
+#if ( ${payc2} != '' )
+   and  M.ACT_PAYR_CNT_CD     =   decode(length(@[payc2]), 8, nvl(substr(@[payc2], 1, 2), M.ACT_PAYR_CNT_CD), 6, M.ACT_PAYR_CNT_CD, M.ACT_PAYR_CNT_CD)
+   and  M.ACT_PAYR_SEQ        =   decode(length(@[payc2]), 8, nvl(substr(@[payc2], 3, 6), M.ACT_PAYR_SEQ),    6, @[payc2],           M.ACT_PAYR_SEQ)
+#end
+#if ( ${prg_ex_in_cd2} == 'EX' )
+   and  nvl(M.PRG_FLG, 'N') = 'N'   -- PURGE BOOKING 제외
+#elseif ( ${prg_ex_in_cd2} == 'ON' )
+   and  nvl(M.PRG_FLG, 'N') = 'Y'   -- PURGE BOOKING 제외
+#end
+#if ( ${cuno2} != '' )
+   and  M.BKG_NO in
+		(
+			select  BKG_NO
+			  from  BKG_CUSTOMER    BC
+			 where  BC.CUST_CNT_CD = 
+					(
+						case when @[cuno2] is null then BC.CUST_CNT_CD else substr(@[cuno2], 1, 2) end
+					) -- 2013.10.22 (ALPS 통합 로그 Error) 숫자 컬럼에 문자 입력시 ORACLE Exception Error가 발생하지 않도록 처리함.
+			   and  BC.CUST_SEQ = 
+					(
+						case when @[cuno2] is null then BC.CUST_SEQ
+							 when REGEXP_INSTR(substr(@[cuno2], 3, 6), '[[:alpha:]]', 1, 1) = 0 then to_number(substr(@[cuno2], 3, 6))
+							 else -999999
+						end
+					)	-- 2013.10.22 (ALPS 통합 로그 Error) 숫자 컬럼에 문자 입력시 ORACLE Exception Error가 발생하지 않도록 처리함.;
+														
+	#if ( ${cutp} != 'A,S,C,N' )
+		#if ( ${cutp} == '' )
+			   and  1 = 1
+		#else
+			   and  BKG_CUST_TP_CD in 
+					(
+						#foreach( $bkg_cust_tp_cd_p in ${tempCUTPList}) 
+							#if($velocityCount < $tempCUTPList.size()) 
+							   '$bkg_cust_tp_cd_p', 
+							#else 
+							   '$bkg_cust_tp_cd_p' 
+							#end 
+						#end
+					)
+		#end
+	#else
+			   and  BKG_CUST_TP_CD in ('S','C','N')
+	#end
+		)
+#end
+
+#if ( ${grop_cust} != '' )
+   AND  ( M.ACT_PAYR_CNT_CD, M.ACT_PAYR_SEQ ) IN
+			( SELECT A.CUST_CNT_CD, A.CUST_SEQ FROM MDM_CUSTOMER A, MDM_CUST_PERF_GRP B
+			   WHERE A.CUST_GRP_ID = B.CUST_GRP_ID
+				 AND A.DELT_FLG ='N'
+				 AND B.DELT_FLG ='N'
+				 AND A.CUST_GRP_ID = 'G-'||@[grop_cust] )
+#end
+
+#if ( ${scNoList} != '' || ${rfaNoList} != '' || ${taaNoList} != '' )
+	AND (1 = 0 
+#if ( ${scNoList} != '' )
+   	OR (SELECT SC_NO FROM BKG_BOOKING WHERE BKG_NO = M.BKG_NO ) IN (
+			#foreach( $scNo in ${scNoList}) #if($velocityCount < $scNoList.size()) '$scNo', #else '$scNo' #end #end
+		)
+#end
+#if ( ${rfaNoList} != '' )
+   	OR (SELECT RFA_NO FROM BKG_BOOKING WHERE BKG_NO = M.BKG_NO ) IN (
+			#foreach( $rfaNo in ${rfaNoList}) #if($velocityCount < $rfaNoList.size()) '$rfaNo', #else '$rfaNo' #end #end
+		)
+#end
+#if ( ${taaNoList} != '' )
+   	OR (SELECT TAA_NO FROM BKG_BOOKING WHERE BKG_NO = M.BKG_NO ) IN (
+			#foreach( $taaNo in ${taaNoList}) #if($velocityCount < $taaNoList.size()) '$taaNo', #else '$taaNo' #end #end
+		)
+#end
+	)
+#end
+
+#if ( ${coll} != '' && ${coll} != 'A' )	 
+	#if ( ${coll} == 'N' ) 
+   AND  CASE 
+			WHEN D.ATTR_CTNT1 IS NOT NULL AND M.DMDT_AR_IF_CD = 'Y' THEN 
+				NVL(OTS_CLT_FLG, 'N')
+            WHEN D.ATTR_CTNT1 IS NOT NULL AND M.DMDT_INV_STS_CD = 'X' AND M.DMDT_AR_IF_CD = 'N' THEN 
+				'Y'
+            WHEN M.DMDT_INV_STS_CD = 'I' AND M.DMDT_AR_IF_CD = 'Y' THEN 
+				'Y'
+            WHEN M.DMDT_INV_STS_CD = 'I' AND M.DMDT_AR_IF_CD = 'N' THEN 
+				'N'
+            WHEN M.DMDT_INV_STS_CD IN ( 'C','X' ) THEN 
+				'Y'
+            ELSE 
+				'N' 
+		END  = 'N'
+	#else 
+
+   AND  CASE 
+			WHEN D.ATTR_CTNT1 IS NOT NULL AND M.DMDT_AR_IF_CD = 'Y' THEN 
+				NVL(OTS_CLT_FLG, 'N')
+            WHEN D.ATTR_CTNT1 IS NOT NULL AND M.DMDT_INV_STS_CD = 'X' AND M.DMDT_AR_IF_CD = 'N' THEN 
+				'Y'
+            WHEN M.DMDT_INV_STS_CD = 'I' AND M.DMDT_AR_IF_CD = 'Y' THEN 
+				'Y'
+            WHEN M.DMDT_INV_STS_CD = 'I' AND M.DMDT_AR_IF_CD = 'N' THEN 
+				'N'
+            WHEN M.DMDT_INV_STS_CD IN ( 'C','X' ) THEN 
+				'Y'
+            ELSE 
+				'N' 
+		END  = 'Y'
+	#end 
+#end  
+)
+, PRI_INFO AS (
+    SELECT *
+      FROM ( SELECT /*+ LEADING(A,HDR,MN,PTY) USE_NL(HDR,MN,PTY) */ 
+                    A.*, NVL(MN.REAL_CUST_SLS_OFC_CD, PTY.CTRT_CUST_SLS_OFC_CD) PRI_OFC_CD
+                    , NVL(MN.REAL_CUST_SREP_CD, PTY.CTRT_CUST_SREP_CD) PRI_SREP_CD
+                    , CASE WHEN REAL_CUST_CNT_CD||TRIM(TO_CHAR(REAL_CUST_SEQ,'000000')) IS NULL 
+                                THEN PTY.CUST_CNT_CD
+                           ELSE REAL_CUST_CNT_CD END CTRT_CUST_CNT_CD
+                    , CASE WHEN REAL_CUST_CNT_CD||TRIM(TO_CHAR(REAL_CUST_SEQ,'000000')) IS NULL 
+                                THEN PTY.CUST_SEQ
+                           ELSE REAL_CUST_SEQ END CTRT_CUST_SEQ
+               FROM MN_DATA A,
+                    PRI_SP_HDR HDR, 
+                    PRI_SP_MN MN, 
+                    PRI_SP_CTRT_PTY PTY
+              WHERE 1=1
+                AND A.SC_NO IS NOT NULL
+                AND A.SC_NO = HDR.SC_NO
+#if ( ${ctof} != '' )
+   	AND NVL(MN.REAL_CUST_SLS_OFC_CD, PTY.CTRT_CUST_SLS_OFC_CD) IN (
+			#foreach( $ctrt_ofc_cd in ${tempCTOFList}) #if($velocityCount < $tempCTOFList.size()) '$ctrt_ofc_cd', #else '$ctrt_ofc_cd' #end #end
+		)
+#end
+#if ( ${chk_srep_flg2} == 'Y' && ${ob_srep_cd2} != '' )
+   	AND NVL(MN.REAL_CUST_SREP_CD, PTY.CTRT_CUST_SREP_CD) = @[ob_srep_cd2]
+#end
+    AND HDR.PROP_NO = MN.PROP_NO
+    AND MN.PROP_STS_CD ='F'
+    AND MN.AMDT_SEQ = (SELECT /*+ NO_UNNEST */ 
+                              MAX(AMDT_SEQ)
+                       FROM PRI_SP_MN 
+                       WHERE 1=1
+                         AND PROP_NO = MN.PROP_NO
+                         AND PROP_STS_CD = MN.PROP_STS_CD 
+                       )    
+    AND PTY.PROP_NO                  = MN.PROP_NO
+    AND PTY.AMDT_SEQ                  = MN.AMDT_SEQ
+    AND PTY.PRC_CTRT_PTY_TP_CD        = 'C'
+#if ( ${scNoList} != '' )
+		   AND HDR.SC_NO IN (
+			#foreach( $scNo in ${scNoList}) #if($velocityCount < $scNoList.size()) '$scNo', #else '$scNo' #end #end
+		)
+#end
+#if ( ${ctrt_cust} != '' )
+   and  CASE WHEN REAL_CUST_CNT_CD||TRIM(TO_CHAR(REAL_CUST_SEQ,'000000')) IS NULL 
+                                THEN PTY.CUST_CNT_CD
+                           ELSE REAL_CUST_CNT_CD END     =   substr(@[ctrt_cust], 1, 2)
+   and  CASE WHEN REAL_CUST_CNT_CD||TRIM(TO_CHAR(REAL_CUST_SEQ,'000000')) IS NULL 
+                                THEN PTY.CUST_SEQ
+                           ELSE REAL_CUST_SEQ END        =   substr(@[ctrt_cust], 3, 6)
+#end  
+UNION ALL
+             SELECT /*+ LEADING(A) USE_NL(HDR,MN) */
+                    A.*, NVL(MN.RESPB_SLS_OFC_CD, MN.PROP_OFC_CD) PRI_OFC_CD
+                    , NVL(MN.RESPB_SREP_CD, MN.PROP_SREP_CD) PRI_SREP_CD
+                    , MN.CTRT_CUST_CNT_CD, MN.CTRT_CUST_SEQ
+               FROM MN_DATA A,
+                    PRI_RP_HDR HDR, 
+                    PRI_RP_MN MN
+    WHERE 1=1
+                AND A.RFA_NO IS NOT NULL
+                AND A.RFA_NO = HDR.RFA_NO
+#if ( ${ctof} != '' )
+   	AND NVL(MN.RESPB_SLS_OFC_CD, MN.PROP_OFC_CD) IN (
+			#foreach( $ctrt_ofc_cd in ${tempCTOFList}) #if($velocityCount < $tempCTOFList.size()) '$ctrt_ofc_cd', #else '$ctrt_ofc_cd' #end #end
+		)
+#end
+#if ( ${chk_srep_flg2} == 'Y' && ${ob_srep_cd2} != '' )
+   	AND NVL(MN.RESPB_SREP_CD, MN.PROP_SREP_CD) = @[ob_srep_cd2]
+#end
+    AND HDR.PROP_NO = MN.PROP_NO
+    AND MN.PROP_STS_CD  = 'A' 
+    AND MN.AMDT_SEQ = (SELECT /*+ NO_UNNEST */
+                              MAX(AMDT_SEQ)
+                       FROM PRI_RP_MN 
+                       WHERE 1=1
+                         AND PROP_NO = MN.PROP_NO
+                         AND PROP_STS_CD = MN.PROP_STS_CD 
+                       )
+#if ( ${rfaNoList} != '' )
+		   AND HDR.RFA_NO IN (
+			#foreach( $rfaNo in ${rfaNoList}) #if($velocityCount < $rfaNoList.size()) '$rfaNo', #else '$rfaNo' #end #end
+		)
+#end
+#if ( ${ctrt_cust} != '' )
+   and  MN.CTRT_CUST_CNT_CD     =   substr(@[ctrt_cust], 1, 2)
+   and  MN.CTRT_CUST_SEQ        =   substr(@[ctrt_cust], 3, 6)
+#end  
+    
+UNION ALL
+             SELECT /*+ LEADING(A) USE_NL(MN)  */
+                    A.*, MN.RESPB_SLS_OFC_CD PRI_OFC_CD
+                    , MN.RESPB_SREP_CD PRI_SREP_CD
+                    , MN.CTRT_CUST_CNT_CD, MN.CTRT_CUST_SEQ
+               FROM MN_DATA A,
+                    PRI_TAA_HDR HDR, 
+                    PRI_TAA_MN MN
+    WHERE 1=1
+                AND A.TAA_NO IS NOT NULL
+                AND A.TAA_NO = HDR.TAA_NO
+#if ( ${ctof} != '' )
+   	AND MN.RESPB_SLS_OFC_CD IN (
+			#foreach( $ctrt_ofc_cd in ${tempCTOFList}) #if($velocityCount < $tempCTOFList.size()) '$ctrt_ofc_cd', #else '$ctrt_ofc_cd' #end #end
+		)
+#end
+#if ( ${chk_srep_flg2} == 'Y' && ${ob_srep_cd2} != '' )
+   	AND MN.RESPB_SREP_CD = @[ob_srep_cd2]
+#end
+    AND HDR.TAA_PROP_NO = MN.TAA_PROP_NO
+    AND MN.CFM_FLG  = 'Y' 
+    AND MN.AMDT_SEQ = (SELECT /*+ NO_UNNEST */ MAX(AMDT_SEQ)
+                       FROM PRI_TAA_MN 
+                       WHERE 1=1
+                         AND TAA_PROP_NO = MN.TAA_PROP_NO
+                         AND CFM_FLG = MN.CFM_FLG 
+                       )
+#if ( ${taaNoList} != '' )
+		   AND HDR.TAA_NO IN (
+			#foreach( $taaNo in ${taaNoList}) #if($velocityCount < $taaNoList.size()) '$taaNo', #else '$taaNo' #end #end
+		)
+#end  
+
+#if ( ${ctrt_cust} != '' )
+   and  MN.CTRT_CUST_CNT_CD     =   substr(@[ctrt_cust], 1, 2)
+   and  MN.CTRT_CUST_SEQ        =   substr(@[ctrt_cust], 3, 6)
+#end  
+))
+
+, MAIN AS (
+    
+    select  M.DMDT_INV_NO, decode(M.ACT_PAYR_CNT_CD , '00' , '' , M.ACT_PAYR_CNT_CD)||to_char(M.ACT_PAYR_SEQ , 'FM000000')		as PAYERC
+    	   ,replace( nvl(M.CUST_LGL_ENG_NM , M.VNDR_LGL_ENG_NM ) , '/' , '_' )									as PAYERN     /* PAYER NAME - CUSTOMER NAME OR VENDOR NAME */
+    	   ,M.INV_CURR_CD                                               										as INVOCR     /* INVOICE CURRENCY */
+    	   ,M.DMDT_TRF_CD                                                                                      	as TARFTP
+    	   ,case when M.DMDT_INV_STS_CD = 'X' and M.DMDT_VT_INV_STS_CD = 'C' 
+    			 then 1
+                 else 0
+            end																									as VTINVCNT
+    	   ,case when M.DMDT_INV_STS_CD = 'X' and M.DMDT_VT_INV_STS_CD = 'C' 
+    			 then
+    					(
+    						select  sum(T3.BIL_AMT)
+    						  from  DMT_INV_MN   	T1
+    							   ,DMT_INV_DTL  	T2
+    							   ,DMT_CHG_CALC	T3
+    						 where  T1.DMDT_INV_NO			= M.DMDT_INV_NO
+    						   and  T1.CRE_OFC_CD  			= M.CRE_OFC_CD
+    						   and  T1.DMDT_INV_NO 			= T2.DMDT_INV_NO
+    						   and  T1.CRE_OFC_CD  			= T2.CRE_OFC_CD
+    						   and  T2.SYS_AREA_GRP_ID 		= T3.SYS_AREA_GRP_ID
+    						   and  T2.CNTR_NO 				= T3.CNTR_NO
+    						   and  T2.CNTR_CYC_NO 			= T3.CNTR_CYC_NO
+    						   and  T2.DMDT_TRF_CD 			= T3.DMDT_TRF_CD
+    						   and  T2.DMDT_CHG_LOC_DIV_CD 	= T3.DMDT_CHG_LOC_DIV_CD 
+    						   and  T2.CHG_SEQ				= T3.CHG_SEQ
+    					)
+    			 else
+    					M.INV_CHG_AMT
+    		end																								as INV_CHG_AMT
+    	   ,case when M.DMDT_INV_STS_CD = 'X' and M.DMDT_VT_INV_STS_CD = 'C' 
+    			 then
+    					case when nvl(M.TAX_RTO, 0) = 0
+    					     then 0
+    						 else
+    								(
+    									select  sum(T3.BIL_AMT/M.TAX_RTO)
+    									  from  DMT_INV_MN   	T1
+    										   ,DMT_INV_DTL  	T2
+    										   ,DMT_CHG_CALC	T3
+    									 where  T1.DMDT_INV_NO			= M.DMDT_INV_NO
+    									   and  T1.CRE_OFC_CD  			= M.CRE_OFC_CD
+    									   and  T1.DMDT_INV_NO 			= T2.DMDT_INV_NO
+    									   and  T1.CRE_OFC_CD  			= T2.CRE_OFC_CD
+    									   and  T2.SYS_AREA_GRP_ID 		= T3.SYS_AREA_GRP_ID
+    									   and  T2.CNTR_NO 				= T3.CNTR_NO
+    									   and  T2.CNTR_CYC_NO 			= T3.CNTR_CYC_NO
+    									   and  T2.DMDT_TRF_CD 			= T3.DMDT_TRF_CD
+    									   and  T2.DMDT_CHG_LOC_DIV_CD 	= T3.DMDT_CHG_LOC_DIV_CD 
+    									   and  T2.CHG_SEQ				= T3.CHG_SEQ
+    									)
+    					end
+    
+    			 else
+    					M.TAX_AMT
+    		end																								as TAX_AMT   
+    	   ,case when M.DMDT_INV_STS_CD = 'X' and M.DMDT_VT_INV_STS_CD = 'C' 
+    			 then
+    					case when nvl(M.TAX_RTO, 0) = 0
+    						 then 
+    								(
+    									select  sum(T3.BIL_AMT)
+    									  from  DMT_INV_MN   	T1
+    										   ,DMT_INV_DTL  	T2
+    										   ,DMT_CHG_CALC	T3
+    									 where  T1.DMDT_INV_NO			= M.DMDT_INV_NO
+    									   and  T1.CRE_OFC_CD  			= M.CRE_OFC_CD
+    									   and  T1.DMDT_INV_NO 			= T2.DMDT_INV_NO
+    									   and  T1.CRE_OFC_CD  			= T2.CRE_OFC_CD
+    									   and  T2.SYS_AREA_GRP_ID 		= T3.SYS_AREA_GRP_ID
+    									   and  T2.CNTR_NO 				= T3.CNTR_NO
+    									   and  T2.CNTR_CYC_NO 			= T3.CNTR_CYC_NO
+    									   and  T2.DMDT_TRF_CD 			= T3.DMDT_TRF_CD
+    									   and  T2.DMDT_CHG_LOC_DIV_CD 	= T3.DMDT_CHG_LOC_DIV_CD 
+    									   and  T2.CHG_SEQ				= T3.CHG_SEQ															
+    								)
+    						 else
+    								(
+    									select  sum(T3.BIL_AMT + T3.BIL_AMT/M.TAX_RTO)
+    									  from  DMT_INV_MN   	T1
+    										   ,DMT_INV_DTL  	T2
+    										   ,DMT_CHG_CALC	T3
+    									 where  T1.DMDT_INV_NO			= M.DMDT_INV_NO
+    									   and  T1.CRE_OFC_CD  			= M.CRE_OFC_CD
+    									   and  T1.DMDT_INV_NO 			= T2.DMDT_INV_NO
+    									   and  T1.CRE_OFC_CD  			= T2.CRE_OFC_CD
+    									   and  T2.SYS_AREA_GRP_ID 		= T3.SYS_AREA_GRP_ID
+    									   and  T2.CNTR_NO 				= T3.CNTR_NO
+    									   and  T2.CNTR_CYC_NO 			= T3.CNTR_CYC_NO
+    									   and  T2.DMDT_TRF_CD 			= T3.DMDT_TRF_CD
+    									   and  T2.DMDT_CHG_LOC_DIV_CD 	= T3.DMDT_CHG_LOC_DIV_CD 
+    									   and  T2.CHG_SEQ				= T3.CHG_SEQ														
+    								)
+    					end
+    			 else
+    					M.INV_AMT
+    		end																												AS INV_AMT
+    	   ,M.PRI_SREP_CD AS CTRT_SREP_CD
+       ,DECODE(AUTO_AR_IF_OFC_FLG, 'Y', COL_CHARGE, DECODE(V_COLLECTED, 'Y', INV_CHG_AMT, 0)) 								AS COL_CHARGE
+       ,DECODE(AUTO_AR_IF_OFC_FLG, 'Y', COL_TAX,    DECODE(V_COLLECTED, 'Y', TAX_AMT, 0)) 									AS COL_TAX
+       ,DECODE(AUTO_AR_IF_OFC_FLG, 'Y', TO_CHAR(B.COL_DATE, 'YYYY-MM-DD'), DECODE(V_COLLECTED, 'Y', AR_IF_DT, NULL)) 		AS COL_DATE						   
+    	-- 미수금(INVOICE CURRENCY)
+       ,DECODE(AUTO_AR_IF_OFC_FLG, 'Y', INV_AMT-(NVL(COL_CHARGE,0)+NVL(COL_TAX,0)), DECODE(V_COLLECTED, 'Y', 0, INV_AMT))  	AS UNCOL_AMT
+       ,TO_CHAR(B.COL_DUE_DT, 'YYYY-MM-DD') AS COL_DUE_DT
+       , USD_LOCL_XCH_RT
+       , OTS_SH_GRP_CD, SND_CYC_CD, SND_CNTR_LIST_FLG, SND_INV_FLG
+       , (SELECT DECODE(COUNT(PAYR_CNTC_PNT_EML), 0, 'N', 'Y')
+          FROM   DMT_PAYR_CNTC_PNT
+          WHERE  SYS_AREA_GRP_ID = M.SVR_ID
+          AND    CUST_CNT_CD = M.ACT_PAYR_CNT_CD
+          AND    CUST_SEQ = M.ACT_PAYR_SEQ
+          AND    REGEXP_LIKE(PAYR_CNTC_PNT_EML, @[reg_ex])) EML_EXIST_FLG
+       , M.PRI_OFC_CD AS CTRT_OFC_CD
+       , M.CTRT_CUST_CNT_CD || LPAD(M.CTRT_CUST_SEQ, 6, 0) CTRT_CUST_CD
+       , (SELECT CUST_LGL_ENG_NM FROM MDM_CUSTOMER WHERE CUST_CNT_CD = M.CTRT_CUST_CNT_CD AND CUST_SEQ = M.CTRT_CUST_SEQ) CTRT_CUST_NM
+       , DECODE(SC_NO, NULL, DECODE(RFA_NO, NULL, DECODE(TAA_NO, NULL, 'OTH', 'TAA'), 'RFA'), 'SC') CTRT_TP
+       , DECODE(SC_NO, NULL, DECODE(RFA_NO, NULL, TAA_NO, RFA_NO), SC_NO) CTRT_NO
+    FROM PRI_INFO M, DMT_PAYR_INFO P
+    ,(
+         SELECT 
+             A.DMDT_INV_NO 
+    	    ,SUM(DECODE(DMDT_INV_PAY_TP_CD,'M',INV_PAY_AMT*DECODE(A.INV_CURR_CD,B.INV_CURR_CD,1,INV_XCH_RT),0)) AS COL_CHARGE
+            ,SUM(DECODE(DMDT_INV_PAY_TP_CD,'V',INV_PAY_AMT*DECODE(A.INV_CURR_CD,B.INV_CURR_CD,1,INV_XCH_RT),0)) AS COL_TAX
+            ,MAX(INV_PAY_DT) AS COL_DATE
+            ,MAX(INV_PAY_COFF_DT) AS COL_DUE_DT
+          FROM DMT_INV_OTS_PAY_RCV A, MN_DATA B
+          WHERE A.DMDT_INV_NO = B.DMDT_INV_NO
+          GROUP BY A.DMDT_INV_NO
+      ) B
+      WHERE M.DMDT_INV_NO = B.DMDT_INV_NO(+)
+        AND M.ACT_PAYR_CNT_CD = P.CUST_CNT_CD(+)
+        AND M.ACT_PAYR_SEQ = P.CUST_SEQ(+)
+        AND M.SVR_ID = P.SYS_AREA_GRP_ID(+)
+    #if ( ${coll} != '' && ${coll} != 'A' )	 
+    	AND  
+        #if ( ${coll} == 'N' ) 
+        		DECODE(AUTO_AR_IF_OFC_FLG, 'Y', INV_AMT-(NVL(COL_CHARGE,0)+NVL(COL_TAX,0)), DECODE(V_COLLECTED, 'Y', 0, INV_AMT)) != 0 
+        #else 
+        		DECODE(AUTO_AR_IF_OFC_FLG, 'Y', INV_AMT-(NVL(COL_CHARGE,0)+NVL(COL_TAX,0)), DECODE(V_COLLECTED, 'Y', 0, INV_AMT)) = 0 
+        #end 
+    #end  
+)
+select  CTRT_SREP_CD
+        , CTRT_OFC_CD
+#if ( ${chk_ctrt_cust} != '' && ${chk_ctrt_cust} != 'N' )
+        , CTRT_CUST_CD
+        , CTRT_CUST_NM
+#end
+#if ( ${chk_ctrt_no} != '' && ${chk_ctrt_no} != 'N' )
+        , CTRT_NO
+#end
+#if ( ${chk_payr_info} != '' && ${chk_payr_info} != 'N' )	 
+        , PAYERC
+        , PAYERN
+#end
+
+       ,sum(INVOCN )                     					as INVOCN
+#if(${chk_usd} != '' && ${chk_usd} == 'Y')
+       ,'USD'	as INVOCR
+#else
+       ,INVOCR
+#end
+       ,sum(decode(TARFTP, 'DMIF', 1, 0)) 					as DMIFYN
+       ,sum(decode(TARFTP, 'DTIC', 1, 0)) 					as DTICYN
+       ,sum(decode(TARFTP, 'DMOF', 1, 0)) 					as DMOFYN
+       ,sum(decode(TARFTP, 'DTOC', 1, 0)) 					as DTOCYN
+       ,sum(decode(TARFTP, 'CTIC', 1, 0)) 					as CTICYN
+       ,sum(decode(TARFTP, 'CTOC', 1, 0)) 					as CTOCYN
+	   ,case when sum(VTINVCNT) > 0 then 'Y' else 'N' end	as DMDT_VT_INV_YN
+#if(${chk_usd} != '' && ${chk_usd} == 'Y')
+       ,ROUND(sum(BLLAMT ), 2)  					AS BLLAMT
+       ,ROUND(sum(TAXAMT ), 2)                     	as TAXAMT
+       ,ROUND(sum(TOTAMT ), 2)     					as TOTAMT
+       ,ROUND(sum(COL_CHARGE), 2) 					AS COL_CHARGE
+       ,ROUND(sum(COL_TAX), 2)  					AS COL_TAX
+	   ,ROUND(sum(UNCOL_AMT), 2)  					AS UNCOL_AMT
+#else
+       ,sum(BLLAMT )                     					as BLLAMT
+       ,sum(TAXAMT )                     					as TAXAMT
+       ,sum(TOTAMT )                     					as TOTAMT
+       ,sum(COL_CHARGE) AS COL_CHARGE
+       ,sum(COL_TAX) AS COL_TAX
+	   ,sum(UNCOL_AMT) AS UNCOL_AMT
+#end
+       ,CASE WHEN MAX(COL_DATE) = '0000-01-01' THEN '' ELSE MAX(COL_DATE) END AS COL_DATE
+       , CTRT_TP
+
+from    (
+			select  PAYERC
+				   ,PAYERN
+				   ,CTRT_SREP_CD
+				   ,INVOCR
+				   ,TARFTP
+				   ,nvl(count(*) , 0 )                                         												as INVOCN     /* INVOICE 개수 */
+
+#if(${chk_usd} != '' && ${chk_usd} == 'Y')
+				   ,nvl(sum(INV_CHG_AMT/USD_LOCL_XCH_RT ) , 0 )                                                                     		as BLLAMT     /* TOTAL INVOICE BILLING AMOUNT */
+				   ,nvl(sum(TAX_AMT/USD_LOCL_XCH_RT     ) , 0 )                                                                     		as TAXAMT     /* TOTAL INVOICE TAX AMOUNT */
+				   ,nvl(sum(INV_AMT/USD_LOCL_XCH_RT     ) , 0 )                                                                     		as TOTAMT     /* TOTAL INVOICE AMOUNT = TOTAL BILLING AMOUNT + TOTAL TAX AMOUNT */			
+				   ,sum(UNCOL_AMT/USD_LOCL_XCH_RT) 											AS UNCOL_AMT
+				   ,sum(COL_CHARGE/USD_LOCL_XCH_RT)											AS COL_CHARGE
+				   ,sum(COL_TAX/USD_LOCL_XCH_RT)											AS COL_TAX
+#else
+				   ,nvl(sum(INV_CHG_AMT ) , 0 )                                                                     		as BLLAMT     /* TOTAL INVOICE BILLING AMOUNT */
+				   ,nvl(sum(TAX_AMT     ) , 0 )                                                                     		as TAXAMT     /* TOTAL INVOICE TAX AMOUNT */
+				   ,nvl(sum(INV_AMT     ) , 0 )                                                                     		as TOTAMT     /* TOTAL INVOICE AMOUNT = TOTAL BILLING AMOUNT + TOTAL TAX AMOUNT */			
+				   ,sum(UNCOL_AMT) 											AS UNCOL_AMT
+				   ,sum(COL_CHARGE)											AS COL_CHARGE
+				   ,sum(COL_TAX)											AS COL_TAX
+#end
+				   ,sum(VTINVCNT)																							as VTINVCNT
+                   ,MAX(CASE WHEN COL_DATE IS NULL THEN '0000-01-01' ELSE COL_DATE END) AS COL_DATE
+				   , USD_LOCL_XCH_RT
+                   , CTRT_OFC_CD
+                   , CTRT_CUST_CD
+                   , CTRT_CUST_NM
+                   , CTRT_TP
+                   , CTRT_NO
+			  from  MAIN
+			group by PAYERC
+                    ,PAYERN
+					,INVOCR
+					,TARFTP
+					, CTRT_SREP_CD
+                    , CTRT_OFC_CD
+                    , CTRT_CUST_CD
+                    , CTRT_CUST_NM
+                    , CTRT_TP
+                    , CTRT_NO
+					, USD_LOCL_XCH_RT
+		) A
+ where  1 = 1
+group by CTRT_SREP_CD
+        , CTRT_OFC_CD
+#if ( ${chk_ctrt_cust} != '' && ${chk_ctrt_cust} != 'N' )
+        , CTRT_CUST_CD
+        , CTRT_CUST_NM
+#end
+#if ( ${chk_ctrt_no} != '' && ${chk_ctrt_no} != 'N' )
+        , CTRT_NO
+#end
+#if ( ${chk_payr_info} != '' && ${chk_payr_info} != 'N' )	 
+        , PAYERC
+        , PAYERN
+#end
+
+#if(${chk_usd} != '' && ${chk_usd} == 'Y')
+#else
+        , INVOCR
+#end
+        , CTRT_TP
+order by CTRT_SREP_CD			]]></sql>
+			<params>
+				<param name="frdt2" type="12" value="" out="N"/>
+				<param name="todt2" type="12" value="" out="N"/>
+				<param name="payc2" type="12" value="" out="N"/>
+				<param name="cuno2" type="12" value="" out="N"/>
+				<param name="grop_cust" type="12" value="" out="N"/>
+				<param name="ob_srep_cd2" type="12" value="" out="N"/>
+				<param name="ctrt_cust" type="12" value="" out="N"/>
+				<param name="reg_ex" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

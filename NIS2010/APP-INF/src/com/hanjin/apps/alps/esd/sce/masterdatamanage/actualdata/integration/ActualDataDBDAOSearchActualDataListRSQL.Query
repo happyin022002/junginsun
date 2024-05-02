@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ActualDataDBDAOSearchActualDataListRSQL">
+			<desc><![CDATA[--------------------------------------------------------
+History
+2013.05.14 김상수 [CHM-201324115] Actual Data Receiving Status 보완요청
+                   - CNTR no 입력후 retrieve 시 다른 조회 조건은 필요하지 않도록 로직 수정
+                   - CNTR No.가 없는 건 (SMCU0000000) 대상에서 제외
+                   - EDI MSG ID, EDI 컬럼을 Service Provider 앞 위치로 이동시키고 그 위치에 VVD 컬럼 추가
+                   - On Time 정렬기능 추가
+                   - Activity 컬럼 앞에 Activity Code 컬럼 추가
+2013.06.21 김상수 [CHM-201324903] Actual Data Receiving Status 보완요청(추가)
+                   - 조회조건에 다건의 Yard Code 입력 가능하게 수정
+]]></desc>
+			<sql><![CDATA[
+SELECT
+  T2.CNTR_NO,
+  T2.COP_NO,
+  T2.BKG_NO,
+  T2.NOD_CD,
+  T2.ACT_CD,
+  T2.ACT_NM,
+  T2.VNDR_SEQ,
+  T2.ACT_RCV_TP_CD,
+
+#if (${actual_receiving} == 'Y')
+  @[act_rcv_tp_cd] AS ACT_RCV_TP_NM,
+#else
+  '' AS ACT_RCV_TP_NM,
+#end
+
+  T2.ACT_STS_MAPG_CD,
+  T2.EDI_MSG_TP_CD,
+  T2.STND_EDI_STS_CD,
+  TO_CHAR(T2.ACT_DT, 'YYYY-MM-DD') ACT_DATE,
+  TO_CHAR(T2.ACT_DT, 'HH24:MI') ACT_TIME,
+  TO_CHAR(T2.PLN_DT, 'YYYY-MM-DD') PLN_DATE,
+  TO_CHAR(T2.PLN_DT, 'HH24:MI') PLN_TIME,
+  TO_CHAR(T2.ACT_DAT_RCV_DT, 'YYYY-MM-DD') RCV_DATE,
+  TO_CHAR(T2.ACT_DAT_RCV_DT, 'HH24:MI') RCV_TIME,
+
+  CASE
+    WHEN T2.ACT_DAT_RCV_DT - T2.ACT_DT <= 1 THEN TO_CHAR(0)
+    ELSE TO_CHAR(1)
+  END AS ON_TIME_CK,
+
+  CASE
+    WHEN T2.ACT_DAT_RCV_DT - T2.ACT_DT <= 1 THEN TO_CHAR(1)
+    ELSE TO_CHAR(0)
+  END AS ON_TIME,
+
+  CASE
+    WHEN T2.ACT_DAT_RCV_DT - T2.ACT_DT <= 1 THEN TO_CHAR(0)
+    ELSE TO_CHAR(1)
+  END AS NON_ON_TIME,
+
+#if (${actual_receiving} == 'Y')
+  NVL(USR_ID,'SceAutoMapped') AS USR_ID
+#else
+  USR_ID
+#end
+	,VVD
+FROM (
+    SELECT T1.*
+    FROM (
+        SELECT /*+ no_expand */
+          SCD.NOD_CD,
+          SCD.ACT_CD,
+          MA.ACT_NM,
+          SCH.CNTR_NO,
+          SCH.COP_NO,
+          SCH.BKG_NO,
+          SCD.VNDR_SEQ,
+          SCD.ACT_RCV_TP_CD,
+          SCD.ACT_STS_MAPG_CD,
+          SCD.EDI_MSG_TP_CD,
+          SCD.STND_EDI_STS_CD,
+          SCD.UPD_DT,
+          SCD.ACT_DT,
+          SCD.PLN_DT,
+          SCD.ACT_DAT_RCV_DT,
+          (
+           CASE
+             WHEN SCD.ACT_RCV_TP_CD = '1' THEN
+			   (
+					SELECT  UPD_USR_ID
+					FROM    CTM_MOVEMENT
+					WHERE   ( CNTR_NO, CNMV_YR, CNMV_SEQ, CNMV_SPLIT_NO )
+							=
+							(
+								SELECT AI.CNTR_NO, AI.CNMV_YR, AI.CNMV_SEQ, NVL(AI.CNMV_SPLIT_NO,' ')
+								FROM SCE_ACT_RCV_IF AI
+								WHERE AI.BKG_NO   = SCH.BKG_NO
+								AND  AI.CNTR_NO   = SCH.CNTR_NO
+								AND  AI.ACT_DAT_RCV_DT = SCD.ACT_DAT_RCV_DT
+								AND  AI.ACT_DT   = SCD.ACT_DT
+								AND  AI.ACT_STS_MAPG_CD = SCD.ACT_STS_MAPG_CD
+								AND  AI.ACT_UMCH_TP_CD = '99'
+								AND  ROWNUM    = 1
+							)
+				)
+             WHEN SCD.ACT_RCV_TP_CD = '2' THEN (
+                SELECT AI.CRE_USR_ID
+                FROM SCE_ACT_RCV_IF AI
+                WHERE AI.VSL_CD = SCD.VSL_CD
+                  AND AI.SKD_VOY_NO = SCD.SKD_VOY_NO
+                  AND AI.SKD_DIR_CD = SCD.SKD_DIR_CD
+                  AND AI.VPS_PORT_CD = SCD.VPS_PORT_CD
+                  --AND AI.ACT_DAT_RCV_DT =	SCD.ACT_DAT_RCV_DT
+                  AND AI.CLPT_IND_SEQ = SCD.CLPT_IND_SEQ
+                  AND AI.ACT_DT = SCD.ACT_DT
+                  AND SUBSTR(AI.ACT_STS_MAPG_CD, 3, 1) = SUBSTR(SCD.ACT_CD, 5, 1)
+                  AND AI.ACT_UMCH_TP_CD = '99'
+                  AND ROWNUM = 1 )
+             ELSE ''
+             END ) USR_ID
+			 ,SCD.VSL_CD||SCD.SKD_VOY_NO||SCD.SKD_DIR_CD	VVD
+
+          /* New (3) */
+        FROM SCE_COP_HDR SCH,
+          (
+            SELECT D.*
+            FROM SCE_COP_DTL D ,
+              MDM_COUNTRY C
+
+			WHERE 1 = 1
+
+            #if (${nod_cd} != '')
+               AND NOD_CD IN (${nod_cd})
+            #end
+            #if (${cntr_no} != '')
+               AND	COP_NO	IN	(
+									SELECT	H.COP_NO
+									FROM	SCE_COP_HDR H
+									WHERE	CNTR_NO			= @[cntr_no]
+									AND		H.COP_STS_CD	<> 'X'
+									AND		H.CNTR_NO		<> 'SMCU0000000'
+								)
+            #end
+              AND SUBSTR(D.NOD_CD, 1, 2) = C.CNT_CD
+              AND ( (
+						SUBSTR(C.SCONTI_CD, 1, 1) <> 'M'
+						AND D.ACT_CD NOT IN (	'FIRRLO',
+												'FIRRUD',
+												'FORRLO',
+												'FORRUD'
+											)
+					)
+					OR
+					( SUBSTR(C.SCONTI_CD, 1, 1) = 'M' )
+				  )
+			  AND  D.ACT_CD NOT IN
+					(
+							'MOTZAD',
+							'FITZAD',
+							'FIWMDO',
+							'FIWMLO',
+							'FIWMUD',
+							'FLWMUD',
+							'FOWMLO',
+							'FUWMLO'
+					)
+            #if(${sc_cd} != '')
+              AND VNDR_SEQ = @[sc_cd]
+            #end
+
+            #if (${actual_receiving} == 'Y')
+              #if (${act_rcv_tp_cd} == 'MVMT')
+             -- AND ACT_RCV_TP_CD = '1'
+                AND ACT_RCV_TP_CD IN ( '1' ,'3', '9' )
+              #elseif (${act_rcv_tp_cd} == 'VSK')
+                AND ACT_RCV_TP_CD = '2'
+              #end
+			#else
+			  #if (${act_rcv_tp_cd} == 'MVMT')
+			  AND	(
+						ACT_CD IN ( 'FUWMDO', 'FIWMAD', 'FLWMAD', 'FOWMDO' )
+						OR
+						NOT ( SUBSTR(ACT_CD,5,1)  IN ( 'A','B', 'D' ) AND SUBSTR(ACT_CD,3,1)  IN ( 'V','W' ) )
+					)
+			  #elseif (${act_rcv_tp_cd} == 'VSK')
+			   AND	(
+						ACT_CD NOT IN ( 'FUWMDO', 'FIWMAD', 'FLWMAD', 'FOWMDO' )
+						AND
+						( SUBSTR(ACT_CD,5,1)  IN ( 'A','B', 'D' ) AND SUBSTR(ACT_CD,3,1)  IN ( 'V','W' ) )
+					)
+			  #end
+            #end
+
+            #if (${actual_receiving} == 'Y')
+              #if (${on_time} == 'Y')
+              AND ( ACT_DAT_RCV_DT - ACT_DT ) <= 1
+              #elseif (${on_time} == 'N')
+              AND ( ACT_DAT_RCV_DT - ACT_DT ) > 1
+              #end
+            #end
+
+            #if (${act_sts_mapg_cd} != '')
+              AND ACT_STS_MAPG_CD = @[act_sts_mapg_cd]
+            #end #if (${act_cd} != '')
+              #if (${act_cd} != 'ALL')
+                AND ACT_CD = @[act_cd]
+              #end
+            #end
+
+		#if (${act_dt1} != '' && ${act_dt2} != '')
+			 AND PLN_DT BETWEEN TO_DATE(@[act_dt1], 'yyyy-MM-dd') AND TO_DATE(@[act_dt2], 'yyyy-MM-dd') + .99999
+		#end
+
+		#if (${actual_receiving} == 'Y')
+               AND	ACT_DT IS NOT NULL
+		#else
+               AND	ACT_DT IS NULL
+		#end
+          #if (${cntr_no} != '')
+               ORDER BY PLN_DT
+          #end
+            ) SCD ,
+          MDM_ACTIVITY MA ,
+          BKG_BOOKING BK
+        WHERE SCH.COP_NO = SCD.COP_NO
+          AND SCH.COP_STS_CD <> 'X'
+          AND SCH.BKG_NO = BK.BKG_NO
+          AND BK.BKG_CGO_TP_CD <> 'R'
+          AND BK.BKG_STS_CD = 'F'
+          AND SCD.ACT_CD = MA.ACT_CD
+        #if (${cntr_no} != '')
+          AND SCH.CNTR_NO = @[cntr_no]
+        #end
+          AND SCH.CNTR_NO <> 'SMCU0000000'
+         ) T1
+    ) T2			]]></sql>
+			<params>
+				<param name="act_rcv_tp_cd" type="12" value="" out="N"/>
+				<param name="cntr_no" type="12" value="" out="N"/>
+				<param name="sc_cd" type="12" value="" out="N"/>
+				<param name="act_sts_mapg_cd" type="12" value="" out="N"/>
+				<param name="act_cd" type="12" value="" out="N"/>
+				<param name="act_dt1" type="12" value="" out="N"/>
+				<param name="act_dt2" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

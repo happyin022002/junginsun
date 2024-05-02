@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="EstimationDBDAOSearchMonEstmCsmTgtVvdRSQL">
+			<desc><![CDATA[Search target VVD for a monthly estimation consumption.
+============================================================================]]></desc>
+			<sql><![CDATA[
+WITH TGT_VVD AS (
+    SELECT EXE_YRMON
+         , REV_YRMON
+         , VSL_CD
+         , SKD_VOY_NO
+         , SKD_DIR_CD
+         , REV_DIR_CD
+         , ESTM_VVD_TP_CD
+         , PRE_ESTM_VVD_TP_CD
+         , ESTM_IOC_DIV_CD
+         , CSM_OIL_TP_CD
+         , (SELECT CNTR_DZN_CAPA FROM MDM_VSL_CNTR
+            WHERE T1.VSL_CD = VSL_CD) CNTR_DZN_CAPA
+         , (SELECT RLANE_CD FROM AR_MST_REV_VVD
+            WHERE T1.VSL_CD = VSL_CD
+            AND   T1.SKD_VOY_NO = SKD_VOY_NO
+            AND   T1.SKD_DIR_CD = SKD_DIR_CD
+            AND   T1.REV_DIR_CD = RLANE_DIR_CD) RLANE_CD
+         , NVL((SELECT ACT_CRR_CD FROM VSK_VSL_SKD
+                WHERE T1.VSL_CD = VSL_CD
+                AND   T1.SKD_VOY_NO = SKD_VOY_NO
+                AND   T1.SKD_DIR_CD = SKD_DIR_CD),
+               (SELECT CRR_CD FROM MDM_VSL_CNTR WHERE T1.VSL_CD=VSL_CD)) CRR_CD
+    FROM (
+        SELECT EXE_YRMON
+             , REV_YRMON
+             , VSL_CD
+             , SKD_VOY_NO
+             , SKD_DIR_CD
+             , REV_DIR_CD
+             , ESTM_VVD_TP_CD
+             , ESTM_IOC_DIV_CD
+             , DECODE(T1.EXE_YRMON, T1.REV_YRMON, NULL, (SELECT ESTM_VVD_TP_CD FROM GL_ESTM_REV_VVD
+                                                         WHERE 1=1
+                                                         AND   EXE_YRMON = TO_CHAR(ADD_MONTHS(TO_DATE(T1.EXE_YRMON, 'YYYYMM'), -1), 'YYYYMM')
+                                                         AND   REV_YRMON = T1.REV_YRMON
+                                                         AND   VSL_CD = T1.VSL_CD
+                                                         AND   SKD_VOY_NO = T1.SKD_VOY_NO
+                                                         AND   SKD_DIR_CD = T1.SKD_DIR_CD
+                                                         AND   REV_DIR_CD = T1.REV_DIR_CD
+                                                         AND   ESTM_IOC_DIV_CD = T1.ESTM_IOC_DIV_CD)) PRE_ESTM_VVD_TP_CD             
+             , ROW_NUMBER() OVER(PARTITION BY EXE_YRMON, REV_YRMON, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, REV_DIR_CD ORDER BY ESTM_IOC_DIV_CD DESC) SEQ
+        FROM   GL_ESTM_REV_VVD T1
+        WHERE  EXE_YRMON=@[exe_yrmon]
+        AND    REV_YRMON IN (TO_CHAR(ADD_MONTHS(TO_DATE(REPLACE(@[exe_yrmon], '-', ''), 'YYYYMM'), -1), 'YYYYMM')
+                     , REPLACE(@[exe_yrmon], '-', '')
+                     , TO_CHAR(ADD_MONTHS(TO_DATE(REPLACE(@[exe_yrmon], '-', ''), 'YYYYMM'), 1), 'YYYYMM'))
+        AND    EXISTS (SELECT 'X'
+                       FROM   VSK_VSL_SKD S1, MDM_VSL_CNTR S2
+                       WHERE  1=1
+                       AND    S1.VSL_CD=S2.VSL_CD
+                       AND    NVL(S1.ACT_CRR_CD, S2.CRR_CD)='SML'
+                       AND    T1.VSL_CD=S1.VSL_CD
+                       AND    T1.SKD_VOY_NO=S1.SKD_VOY_NO
+                       AND    T1.SKD_DIR_CD=S1.SKD_DIR_CD)
+    ) T1, (SELECT 'HFO' CSM_OIL_TP_CD FROM DUAL
+        UNION ALL
+        SELECT 'MDO' CSM_OIL_TP_CD FROM DUAL)
+    WHERE SEQ=1
+),
+ERP AS (
+    SELECT *
+    FROM (
+        SELECT   ESTM_SEQ
+               , EXE_YRMON
+               , REV_YRMON
+               , RLANE_CD
+               , VSL_CD
+               , SKD_VOY_NO
+               , SKD_DIR_CD
+               , REV_DIR_CD
+               , ESTM_VVD_TP_CD
+               , CSM_OIL_TP_CD
+               , (SELECT DECODE(NVL(MAX(FLET_CTRT_TP_CD), 'XX'), 'TO', 'Y', 'N')
+                  FROM FMS_CONTRACT
+                  WHERE 1=1
+                  AND VSL_CD = T1.VSL_CD
+                  AND (TO_DATE(ST_DT, 'YYYYMMDD') BETWEEN EFF_DT AND EXP_DT-1 OR
+                       TO_DATE(END_DT, 'YYYYMMDD')-1 BETWEEN EFF_DT AND EXP_DT)) TO_FLG
+               , ST_DT AS TMP_ST_DT
+               , ST_PORT_CD AS TMP_ST_PORT_CD
+               , END_DT AS TMP_END_DT
+               , END_PORT_CD AS TMP_END_PORT_CD
+               , MON_BGN_INVT_WGT
+               , PRE_VVD_INVT_WGT
+               , PO_RCV_WGT
+               , BOD_WGT
+               , BOR_WGT
+               , VOY_SEA_DYS
+               , VOY_PORT_DYS
+               , ESTM_SEA_DYS
+               , ESTM_PORT_DYS
+               , (SELECT DECODE(T1.CSM_OIL_TP_CD,
+                             'HFO', NVL(S1.FOIL_RMN_WGT, 0) + NVL(S1.LOW_SULP_FOIL_RMN_WGT, 0),
+                             'MDO', NVL(S1.DOIL_RMN_WGT, 0) + NVL(S1.LOW_SULP_DOIL_RMN_WGT, 0),
+                             0)
+                 FROM   FCM_RMN_OIL_MON_END_RPT S1
+                 WHERE  S1.REV_YRMON  = REPLACE(@[exe_yrmon], '-', '')
+                 AND    S1.VSL_CD     = T1.VSL_CD
+                 AND    S1.SKD_VOY_NO = T1.SKD_VOY_NO
+                 AND    S1.SKD_DIR_CD = T1.SKD_DIR_CD) AS MON_END_RMN_WGT
+               , ESTM_MON_CSM_WGT
+        FROM   FCM_ESTM_MON_CSM_IF T1
+        WHERE  EXE_YRMON=REPLACE(@[exe_yrmon], '-', '')
+        ORDER BY ESTM_SEQ
+    ))
+SELECT T1.*
+     , (SELECT DECODE(T1.CSM_OIL_TP_CD,
+                     'HFO', NVL(S1.FOIL_RMN_WGT, 0) + NVL(S1.LOW_SULP_FOIL_RMN_WGT, 0),
+                     'MDO', NVL(S1.DOIL_RMN_WGT, 0) + NVL(S1.LOW_SULP_DOIL_RMN_WGT, 0),
+                     0)
+        FROM   FCM_RMN_OIL_MON_END_RPT S1
+        WHERE  S1.REV_YRMON  = REPLACE(@[exe_yrmon], '-', '')
+        AND    S1.VSL_CD     = T1.VSL_CD
+        AND    S1.SKD_VOY_NO = T1.SKD_VOY_NO
+        AND    S1.SKD_DIR_CD = T1.SKD_DIR_CD) AS MON_END_RMN_WGT
+     , T2.ESTM_SEQ
+     , T2.TO_FLG
+     , T2.TMP_ST_DT
+     , T2.TMP_ST_PORT_CD
+     , T2.TMP_END_DT
+     , T2.TMP_END_PORT_CD
+     , T2.MON_BGN_INVT_WGT
+     , T2.PRE_VVD_INVT_WGT
+     , T2.PO_RCV_WGT
+     , T2.BOD_WGT
+     , T2.BOR_WGT
+     , T2.VOY_SEA_DYS
+     , T2.VOY_PORT_DYS
+     , T2.ESTM_SEA_DYS
+     , T2.ESTM_PORT_DYS
+     , T2.ESTM_MON_CSM_WGT
+FROM TGT_VVD T1, ERP T2
+WHERE 1=1
+AND   T1.EXE_YRMON = T2.EXE_YRMON(+)
+AND   T1.VSL_CD = T2.VSL_CD(+)
+AND   T1.SKD_VOY_NO = T2.SKD_VOY_NO(+)
+AND   T1.SKD_DIR_CD = T2.SKD_DIR_CD(+)
+AND   T1.REV_DIR_CD = T2.REV_DIR_CD(+)
+AND   T1.CSM_OIL_TP_CD = T2.CSM_OIL_TP_CD(+)
+ORDER BY T1.EXE_YRMON
+       , T1.REV_YRMON
+       , T1.VSL_CD
+       , T1.SKD_VOY_NO
+       , T1.SKD_DIR_CD
+       , T1.REV_DIR_CD
+       , T1.CSM_OIL_TP_CD			]]></sql>
+			<params>
+				<param name="exe_yrmon" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

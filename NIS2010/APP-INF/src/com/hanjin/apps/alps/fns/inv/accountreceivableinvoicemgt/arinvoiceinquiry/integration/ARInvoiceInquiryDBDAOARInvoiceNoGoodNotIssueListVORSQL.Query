@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ARInvoiceInquiryDBDAOARInvoiceNoGoodNotIssueListVORSQL">
+			<desc><![CDATA[   ]]></desc>
+			<sql><![CDATA[
+#if (${date_option} == 'I')                        
+SELECT /*+ index(A XAK3INV_AR_MN)  */ A.AR_OFC_CD, --20100708
+#elseif (${date_option} == 'A')
+SELECT /*+ index(A XAK8INV_AR_MN)  */ A.AR_OFC_CD,
+#elseif (${date_option} == 'S')
+SELECT /*+ index(A XAK9INV_AR_MN)  */ A.AR_OFC_CD,
+#end
+       A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD VVD,
+       A.SAIL_ARR_DT,
+       A.SAIL_DT,
+       A.BL_SRC_NO,
+       A.AR_IF_NO,
+       A.BKG_CORR_NO,
+       A.BKG_NO,
+       A.ACT_CUST_CNT_CD||'-'||LPAD(TO_CHAR(A.ACT_CUST_SEQ), 6, '0') CUSTOMER,
+	   (SELECT CUST_LGL_ENG_NM  FROM MDM_CUSTOMER WHERE A.ACT_CUST_CNT_CD = CUST_CNT_CD  AND A.ACT_CUST_SEQ = CUST_SEQ ) CUST_NM,
+       DECODE(A.REV_TP_CD, 'B', 'B/L', 'C', 'C/A', 'M', 'MRI') REV_TP_CD,
+       A.REV_SRC_CD,
+       DECODE(A.IO_BND_CD, 'I', 'I/B', 'O', 'O/B') IO_BND_CD,
+       A.POL_CD,
+       A.POD_CD,
+       SUM(DECODE(B.CURR_CD, 'USD', B.CHG_AMT, 0)) USD_CHG_TOT, 
+       ROUND(SUM(DECODE(B.CURR_CD, 'USD', 0, B.CHG_AMT*B.INV_XCH_RT)),F.DP_PRCS_KNT) LCL_CHG_TOT, 
+       A.USD_XCH_RT INV_XCH_RT,
+	   DECODE(A.XCH_RT_USD_TP_CD,'I','I','') XCH_RT_USD_TP_CD,
+       A.INV_TTL_LOCL_AMT,
+       A.BL_INV_IF_DT,
+       F.DP_PRCS_KNT
+  FROM INV_AR_MN A, 
+       INV_AR_CHG B,
+       MDM_CURRENCY F
+ WHERE A.AR_IF_NO = B.AR_IF_NO
+   AND A.LOCL_CURR_CD = F.CURR_CD
+#if (${date_option} == 'I' && ${from_date} != '' && ${to_date} != '') 
+   AND A.BL_INV_IF_DT BETWEEN REPLACE(@[from_date], '-', '') AND REPLACE(@[to_date], '-', '') -- I/F DATE 20100708
+#elseif (${date_option} == 'A' && ${from_date} != '' && ${to_date} != '')
+   AND A.SAIL_ARR_DT BETWEEN REPLACE(@[from_date], '-', '') AND REPLACE(@[to_date], '-', '') -- S/A DATE
+#elseif (${date_option} == 'S' && ${from_date} != '' && ${to_date} != '')
+   AND A.SAIL_DT BETWEEN REPLACE(@[from_date], '-', '') AND REPLACE(@[to_date], '-', '') -- SAILING DATE
+#end
+#if (${office} != '')
+   AND A.AR_OFC_CD = @[office] -- OFFICE
+#else 
+   AND A.AR_OFC_CD IN ( SELECT OFC_CD -- OFC ALL 선택시 적용..  
+                          FROM MDM_ORGANIZATION
+                         WHERE AR_HD_QTR_OFC_CD = ( SELECT AR_HD_QTR_OFC_CD
+                                                      FROM MDM_ORGANIZATION
+                                                     WHERE OFC_CD = ( SELECT AR_OFC_CD
+                                                                        FROM MDM_ORGANIZATION
+                                                                       WHERE OFC_CD = @[user_ofc_cd]))
+                           AND OFC_CD = AR_OFC_CD )
+#end
+   AND NVL(A.INV_DELT_DIV_CD, 'N') <> 'Y'
+   AND A.INV_CLR_FLG = 'N'
+   AND B.INV_CLR_FLG = 'N'
+   --AND A.BL_INV_IF_DT BETWEEN TO_CHAR(SYSDATE-365,'YYYYMMDD') AND TO_CHAR(SYSDATE,'YYYYMMDD')
+   AND A.BL_INV_IF_DT >= '20070101' --20100715
+#if (${select_option} == 'A')
+   AND A.BL_INV_CFM_DT IS NULL
+#elseif (${select_option} == 'B')
+   AND A.INV_ISS_FLG = 'N'
+   AND A.BL_INV_CFM_DT IS NOT NULL
+   AND A.INV_SRC_NO IS NULL          --2010-07-08
+   AND A.AR_OFC_CD IN (SELECT AR_OFC_CD
+                         FROM INV_AR_STUP_OFC
+                        WHERE OTS_SMRY_CD IN ('INV','CLR')
+                          AND DELT_FLG = 'N')
+#elseif (${select_option} == 'C')
+   AND A.ACT_CUST_CNT_CD = (
+     SELECT REP_CUST_CNT_CD
+     FROM MDM_ORGANIZATION
+     WHERE OFC_CD = @[office])
+   AND A.ACT_CUST_SEQ = (
+     SELECT REP_CUST_SEQ
+     FROM MDM_ORGANIZATION
+     WHERE OFC_CD = @[office])
+   AND A.BL_INV_CFM_DT IS NOT NULL
+#elseif (${select_option} == 'D')
+   AND EXISTS (SELECT 'X' 
+                 FROM INV_AR_CHG D 
+                WHERE A.AR_IF_NO = D.AR_IF_NO 
+                  AND INV_XCH_RT = 0 ) 
+   AND A.BL_INV_CFM_DT IS NOT NULL
+#end
+#if (${rev_tp_cd} != '')
+   AND A.REV_TP_CD = @[rev_tp_cd]
+#end
+#if (${io_bnd_cd} != '')
+   AND A.IO_BND_CD = @[io_bnd_cd]
+#if ((${io_bnd_cd} == 'I') && (${port} != ''))
+   AND A.POD_CD = @[port]
+#elseif ((${io_bnd_cd} == 'O') && (${port} != ''))
+   AND A.POL_CD = @[port]
+#end
+#else
+#if (${port} != '')
+   AND ((A.IO_BND_CD = 'I' AND A.POD_CD = @[port]) OR (A.IO_BND_CD = 'O' AND A.POL_CD = @[port]))
+#end
+#end
+GROUP BY A.AR_OFC_CD, A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD, A.SAIL_ARR_DT, A.SAIL_DT, A.BL_SRC_NO, A.AR_IF_NO, A.BKG_CORR_NO, A.BKG_NO, A.ACT_CUST_CNT_CD||'-'||LPAD(TO_CHAR(A.ACT_CUST_SEQ), 6, '0'), DECODE(A.REV_TP_CD, 'B', 'B/L', 'C', 'C/A', 'M', 'MRI'), A.REV_SRC_CD, DECODE(A.IO_BND_CD, 'I', 'I/B', 'O', 'O/B'), A.POL_CD, A.POD_CD, A.USD_XCH_RT, A.INV_TTL_LOCL_AMT, A.BL_INV_IF_DT, F.DP_PRCS_KNT, DECODE(A.XCH_RT_USD_TP_CD,'I','I',''),A.ACT_CUST_CNT_CD,A.ACT_CUST_SEQ			]]></sql>
+			<params>
+				<param name="from_date" type="12" value="" out="N"/>
+				<param name="to_date" type="12" value="" out="N"/>
+				<param name="office" type="12" value="" out="N"/>
+				<param name="user_ofc_cd" type="12" value="" out="N"/>
+				<param name="rev_tp_cd" type="12" value="" out="N"/>
+				<param name="io_bnd_cd" type="12" value="" out="N"/>
+				<param name="port" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

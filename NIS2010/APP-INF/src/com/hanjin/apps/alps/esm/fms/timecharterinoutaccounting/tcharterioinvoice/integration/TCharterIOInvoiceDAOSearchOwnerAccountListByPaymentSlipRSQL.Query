@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TCharterIOInvoiceDAOSearchOwnerAccountListByPaymentSlipRSQL">
+			<desc><![CDATA[기 작성된 Owner’s Account / Window 중 지급 전표로 처리할 항목 선정 대상 자료를 조회한다.(Prepayment, Standard)]]></desc>
+			<sql><![CDATA[
+SELECT A.*,
+       TO_CHAR(ABS(INITIAL_AMT_USD) - ABS(N1ST_AMT),'FM999,999,999,999,999,990.00') EX_DIFF_USD,
+       ROUND(INITIAL_AMT_USD * FLET_OLAY_COMM_RT_AMT / 100, 2)  REFUND_ADD_COMM
+FROM
+(
+    SELECT  (SELECT C.ACCT_ITM_NM
+             FROM FMS_ACCT_ITM C
+             WHERE C.ACCT_CD = '962111'
+               AND FO.ACCT_ITM_SEQ = C.ACCT_ITM_SEQ) ACCT_ITM_NM,
+            FO.AP_DESC,  -- DESCRIPTION 
+            FO.VSL_CD || FO.SKD_VOY_NO || FO.SKD_DIR_CD || FO.REV_DIR_CD VVD_BUNKER,  -- VVD 
+            (SELECT DECODE(SIGN(C.FLET_OLAY_COMM_RT_AMT), 1, 'Y', 'N')
+             FROM FMS_CONTRACT C
+             WHERE C.FLET_CTRT_NO = @[flet_ctrt_no]) OA_COMM_FLAG,
+            DECODE(FO.OA_STL_STS_CD, 'RC', 'RECEIVED', 'RF', 'REFUND') OA_STL_STS_CD,  -- SETTLEMENT
+            FO.SLP_TP_CD||FO.SLP_FUNC_CD||FO.SLP_OFC_CD||FO.SLP_ISS_DT||FO.SLP_SER_NO||FO.SLP_SEQ_NO ORG_SLP_NO,  -- CSR NO
+            FO.N1ST_AMT ,  -- USD AMT
+         
+            FO.PAIR_SLP_TP_CD||FO.PAIR_SLP_FUNC_CD||FO.PAIR_SLP_OFC_CD||FO.PAIR_SLP_ISS_DT||FO.PAIR_SLP_SER_NO||FO.PAIR_SLP_SEQ_NO MATCHING_SLIP_NO,  -- MATCHING SLIP NO
+    
+            FO.N2ND_CURR_CD LOC_CURR_CD, -- CUR
+            TO_CHAR(FO.N2ND_AMT,'FM999,999,999,999,999,990.00') LOC_AMT, -- LCL AMT
+            
+            (SELECT P.N1ST_AMT
+             FROM FMS_OWNR_ACCT_SLP P
+             WHERE 1 = 1
+               AND FO.PAIR_SLP_TP_CD = P.SLP_TP_CD
+               AND FO.PAIR_SLP_FUNC_CD = P.SLP_FUNC_CD
+               AND FO.PAIR_SLP_OFC_CD = P.SLP_OFC_CD
+               AND FO.PAIR_SLP_ISS_DT = P.SLP_ISS_DT
+               AND FO.PAIR_SLP_SER_NO = P.SLP_SER_NO
+               AND FO.PAIR_SLP_SEQ_NO = P.SLP_SEQ_NO) INITIAL_AMT_USD, -- INITIAL AMT(USD)
+    
+            (SELECT AP_CTR_CD
+              FROM MDM_ORGANIZATION
+              WHERE OFC_CD = @[ofc_cd]
+              AND ROWNUM = 1) CTR_CD,
+            (SELECT LOC_CD
+              FROM MDM_ORGANIZATION
+              WHERE OFC_CD = @[ofc_cd]
+              AND ROWNUM = 1) SLP_LOC_CD,
+            '04' FLET_SRC_TP_CD,
+            
+            (SELECT DECODE(FLET_OLAY_COMM_RT_AMT,NULL,0,TO_CHAR(FLET_OLAY_COMM_RT_AMT,'FM999,999,999,990.00'))
+              FROM FMS_CONTRACT 
+              WHERE FLET_CTRT_NO = @[flet_ctrt_no]) FLET_OLAY_COMM_RT_AMT,
+              
+            FO.SLP_TP_CD,
+            FO.SLP_FUNC_CD,
+            FO.SLP_OFC_CD,
+            FO.SLP_ISS_DT,
+            FO.SLP_SER_NO,
+            FO.SLP_SEQ_NO,
+            (SELECT DECODE(VSL_CD, NULL, 'N', 'Y')
+              FROM AR_MST_REV_VVD
+              WHERE 1 = 1
+                AND VSL_CD = FO.VSL_CD
+                AND SKD_VOY_NO = FO.SKD_VOY_NO
+                AND SKD_DIR_CD = FO.SKD_DIR_CD
+                AND RLANE_DIR_CD = FO.REV_DIR_CD
+                AND NVL(DELT_FLG, 'N') = 'N') VVD_YN,
+                
+           (SELECT P.AP_DESC
+             FROM FMS_OWNR_ACCT_SLP P
+             WHERE 1 = 1
+               AND FO.PAIR_SLP_TP_CD = P.SLP_TP_CD
+               AND FO.PAIR_SLP_FUNC_CD = P.SLP_FUNC_CD
+               AND FO.PAIR_SLP_OFC_CD = P.SLP_OFC_CD
+               AND FO.PAIR_SLP_ISS_DT = P.SLP_ISS_DT
+               AND FO.PAIR_SLP_SER_NO = P.SLP_SER_NO
+               AND FO.PAIR_SLP_SEQ_NO = P.SLP_SEQ_NO) INITIAL_DESC -- INITIAL_DESC       
+           
+    FROM FMS_OWNR_ACCT_SLP FO
+    WHERE FO.ACCT_CD = '111071'
+      AND FO.CSR_SLP_FLG = 'N'
+      AND FO.VSL_CD IN (SELECT VSL_CD
+                        FROM FMS_CONTRACT
+                        WHERE FLET_CTRT_NO = @[flet_ctrt_no]  -- 입력값
+                        UNION ALL
+                        SELECT VSL_CD
+                        FROM FMS_ID_VSL
+                        WHERE FLET_CTRT_NO = @[flet_ctrt_no]  -- 입력값
+                        AND USE_FLG = 'Y')
+    -- Slip Type Condition                   
+    --  AND FO.OA_STL_STS_CD IN ('RF')    --  Slip Type : Standard  and  Owner's Account 버튼 실행시    
+    --  AND FO.OA_STL_STS_CD IN ('RC')    --  Slip Type : Payment   and  Owner's Account 버튼 실행시    
+   
+    #if(${slp_tp} == 'S')
+       AND FO.OA_STL_STS_CD IN ('RC', 'RF') 
+    #end
+
+    #if(${slp_tp} == 'P')
+        AND FO.OA_STL_STS_CD IN ('RC', 'RF')  -- 2017.04.27 RF 추가
+    #end
+
+) A
+#if(${slp_tp} == 'S')
+ --WHERE ABS(N1ST_AMT) <> ABS(INITIAL_AMT_USD)
+#end			]]></sql>
+			<params>
+				<param name="flet_ctrt_no" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

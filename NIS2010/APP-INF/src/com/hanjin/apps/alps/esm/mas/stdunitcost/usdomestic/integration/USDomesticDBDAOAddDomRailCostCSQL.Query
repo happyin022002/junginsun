@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="USDomesticDBDAOAddDomRailCostCSQL">
+			<desc><![CDATA[AddDomRailCost]]></desc>
+			<sql><![CDATA[
+--Rail Operation data I/F--
+MERGE INTO MAS_USA_DMST_UT_COST B1
+     USING 
+            (SELECT REPLACE(@[f_cost_yrmon], '-', '')         AS COST_YRMON
+                    ,ORGLOC ORG_RAIL_LOC_CD
+                    ,CNTRTP24 CNTR_TPSZ_CD
+                    ,SUM(VOL) VOL
+                    ,SUM(EXP) EXPN
+              FROM(
+                    SELECT A.ORGLOC
+                          ,A.DESTLOC
+                          ,A.CNTRTP24
+                          ,COUNT(A.CNTRTP24) VOL
+                          ,SUM(EXP) EXP
+                    FROM (
+                        SELECT RM.DMST_BKG_NO
+                              ,RM.ROUT_ORG_LOC_CD ORGLOC
+                              ,RM.ROUT_DEST_LOC_CD DESTLOC
+                              ,MAX(DECODE(MC.CNTR_TPSZ_CD, 'D7', 'D7', 'D5', 'D5', 'D4', 'D4', 'D2', 'D2', 'OTHER')) CNTRTP24
+                              ,SUM(DECODE(DMST_INV_BIL_STY_CD, 'C', (NVL(RD1.AGMT_RT_AMT, 0) + NVL(RD2.AGMT_RT_AMT , 0))/2, NVL(RD1.AGMT_RT_AMT, 0) + NVL(RD2.AGMT_RT_AMT , 0))) EXP
+                         FROM DOM_RAIL_SO_MST RM
+                             ,DOM_RAIL_SO_DTL RD1
+                             ,DOM_RAIL_SO_DTL RD2
+                             ,MST_CONTAINER MC
+                             ,MDM_VENDOR M1
+                             ,MDM_VENDOR M2
+                        WHERE RM.TRSP_SO_OFC_CTY_CD = RD1.TRSP_SO_OFC_CTY_CD(+)
+                          AND RM.TRSP_SO_SEQ = RD1.TRSP_SO_SEQ(+)
+                          AND RM.TRSP_SO_OFC_CTY_CD = RD2.TRSP_SO_OFC_CTY_CD(+)
+                          AND RM.TRSP_SO_SEQ = RD2.TRSP_SO_SEQ(+)
+                          AND RD1.SUB_RAIL_SEQ(+) = '1'
+                          AND RD2.SUB_RAIL_SEQ(+) <> '1'
+                          AND RD1.VNDR_SEQ = M1.VNDR_SEQ(+)
+                          AND RD2.VNDR_SEQ = M2.VNDR_SEQ(+)
+                          AND RM.CRE_DT BETWEEN TO_DATE(REPLACE(@[f_cre_start_dt], '-', '')||'01', 'YYYY-MM-DD') AND LAST_DAY(TO_DATE(REPLACE(@[f_cre_end_dt], '-', ''), 'YYYY-MM')) + .99999  -- SO Cre DT 조건
+                          AND RM.DMST_SO_STS_CD in ('O','C')
+                          AND RM.CNTR_NO = MC.CNTR_NO
+                      GROUP BY DMST_BKG_NO, ROUT_ORG_LOC_CD, ROUT_DEST_LOC_CD
+                      HAVING COUNT(*)>1 
+                      UNION ALL               
+                        SELECT RM.DMST_BKG_NO
+                              ,RM.ROUT_ORG_LOC_CD ORGLOC
+                              ,RM.ROUT_DEST_LOC_CD DESTLOC
+                              ,MAX(DECODE(MC.CNTR_TPSZ_CD, 'D7', 'D7', 'D5', 'D5', 'D4', 'D4', 'D2', 'D2', 'OTHER')) CNTRTP24
+                              ,SUM(NVL(RD1.AGMT_RT_AMT, 0) + NVL(RD2.AGMT_RT_AMT, 0)) EXP
+                         FROM DOM_RAIL_SO_MST RM
+                             ,DOM_RAIL_SO_DTL RD1
+                             ,DOM_RAIL_SO_DTL RD2
+                             ,MST_CONTAINER MC
+                             ,MDM_VENDOR M1
+                             ,MDM_VENDOR M2
+                       WHERE RM.TRSP_SO_OFC_CTY_CD = RD1.TRSP_SO_OFC_CTY_CD(+)
+                         AND RM.TRSP_SO_SEQ = RD1.TRSP_SO_SEQ(+)
+                         AND RM.TRSP_SO_OFC_CTY_CD = RD2.TRSP_SO_OFC_CTY_CD(+)
+                         AND RM.TRSP_SO_SEQ = RD2.TRSP_SO_SEQ(+)
+                         AND RD1.SUB_RAIL_SEQ(+) = '1'
+                         AND RD2.SUB_RAIL_SEQ(+) <> '1'
+                         AND RD1.VNDR_SEQ = M1.VNDR_SEQ(+)
+                         AND RD2.VNDR_SEQ = M2.VNDR_SEQ(+)
+                         AND RM.CRE_DT BETWEEN TO_DATE(REPLACE(@[f_cre_start_dt], '-', '')||'01', 'YYYY-MM-DD') AND LAST_DAY(TO_DATE(REPLACE(@[f_cre_end_dt], '-', ''), 'YYYY-MM')) + .99999  -- SO Cre DT 조건
+                         AND RM.DMST_SO_STS_CD in ('O', 'C')
+                         AND RM.CNTR_NO = MC.CNTR_NO
+                   GROUP BY DMST_BKG_NO, ROUT_ORG_LOC_CD, ROUT_DEST_LOC_CD
+                     HAVING COUNT(*)=1 ) A
+                    GROUP BY ORGLOC, DESTLOC, CNTRTP24 )AA
+               WHERE CNTRTP24 <> 'OTHER'    
+             GROUP BY ORGLOC, CNTRTP24
+             ) B2
+  ON (    B1.COST_YRMON        = B2.COST_YRMON
+      AND B1.ORG_RAIL_LOC_CD   = B2.ORG_RAIL_LOC_CD
+      AND B1.CNTR_TPSZ_CD = B2.CNTR_TPSZ_CD ) 
+  WHEN MATCHED THEN
+      UPDATE
+         SET B1.RAIL_SO_VOL_QTY = B2.VOL
+            ,B1.RAIL_AGMT_AMT   = B2.EXPN
+            ,B1.UPD_USR_ID = @[upd_usr_id]
+            ,B1.UPD_DT = SYSDATE			]]></sql>
+			<params>
+				<param name="f_cost_yrmon" type="12" value="" out="N"/>
+				<param name="f_cre_start_dt" type="12" value="" out="N"/>
+				<param name="f_cre_end_dt" type="12" value="" out="N"/>
+				<param name="upd_usr_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

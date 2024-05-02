@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="VesselInformationMgtDBDAOVSLPerformanceVORSQL">
+			<desc><![CDATA[VSL Performance 값을 조회한다.
+
+//History
+2014.04.16 박다은 [CHM-201429675-01] Voyage Performance내 Lane Code 구분]]></desc>
+			<sql><![CDATA[
+SELECT   VS.VSL_SLAN_CD                                         /* OPERATION.LANE */
+      ,  VS.PF_SKD_TP_CD
+      ,  (SELECT    ROUND(SUM(D.LNK_DIST)/SUM(D.TZTM_HRS),2)
+          FROM      VSK_PF_SKD_DTL    D
+          WHERE     D.VSL_SLAN_CD     = VS.VSL_SLAN_CD
+          AND       D.PF_SVC_TP_CD    = VS.PF_SKD_TP_CD
+          )                 AS PF_SPD                           /* OPERATION.P/F SPEED */
+         
+      ,   (
+          --=============================================================================
+            SELECT     ROUND(AVG(R.SLP_RT),2)
+            FROM       FCM_NOON_RPT     R
+            WHERE      1 = 1
+            AND        (R.VSL_CD,R.SKD_VOY_NO,R.SKD_DIR_CD)
+                       IN
+                       (
+                        -------------------------------------------------- 
+                        SELECT     VS.VSL_CD,VS.SKD_VOY_NO,VS.SKD_DIR_CD--,VS.PF_SKD_TP_CD
+                        FROM       VSK_VSL_SKD       VS
+                        WHERE      1 = 1
+                        AND        VS.VSL_SLAN_CD    = VSK_VESSEL_SCHEDULE_PKG.GET_SVC_LANE_FOR_CUR_VSL_FNC(@[vsl_cd])
+                        AND        VS.PF_SKD_TP_CD   = VSK_VESSEL_SCHEDULE_PKG.GET_PF_SVC_TP_FOR_CUR_VSL_FNC(@[vsl_cd])
+                        )
+          --=============================================================================          
+          
+          )                AS AVG_SLIP                         /* OPERATION.AVG SLIP */
+
+         
+      ,  (SELECT    ROUND(SUM(D.LNK_DIST)/(SUM(D.TZTM_HRS)+SUM(D.SEA_BUF_HRS)),2)
+          FROM      VSK_PF_SKD_DTL    D
+          WHERE     D.VSL_SLAN_CD     = VS.VSL_SLAN_CD
+          AND       D.PF_SVC_TP_CD    = VS.PF_SKD_TP_CD
+          )                 AS PF_NET_SPD                       /* OPERATION.NET SPEED */
+          
+          -----------------------------------------------------------------------------------------------------
+          -----------------------------------------------------------------------------------------------------
+
+      ,   (
+          --=============================================================================
+            SELECT     	ROUND(SUM(D.TZTM_HRS),2)
+            FROM       	VSK_PF_SKD_DTL   D
+            WHERE      	1 = 1
+            AND        	D.VSL_SLAN_CD	= VSK_VESSEL_SCHEDULE_PKG.GET_SVC_LANE_FOR_CUR_VSL_FNC(@[vsl_cd])
+			AND			D.PF_SVC_TP_CD	= VSK_VESSEL_SCHEDULE_PKG.GET_PF_SVC_TP_FOR_CUR_VSL_FNC(@[vsl_cd])
+          --=============================================================================          
+          )             AS TOT_SEA_TIME_HRS                         
+
+      ,   -- <<P/F FOC>>---------------------------------------------------------------------------------------
+          ROUND
+          (
+          (
+            (SELECT   SUM(D.LNK_DIST)/AVG(D.LNK_SPD)
+             FROM     VSK_PF_SKD_DTL    D
+             WHERE    D.VSL_SLAN_CD     = VSK_VESSEL_SCHEDULE_PKG.GET_SVC_LANE_FOR_CUR_VSL_FNC(@[vsl_cd])
+             AND      D.PF_SVC_TP_CD    = VSK_VESSEL_SCHEDULE_PKG.GET_PF_SVC_TP_FOR_CUR_VSL_FNC(@[vsl_cd])
+            )                
+            *
+            (
+               1.0 -- 연료소모량 --
+            )
+          )
+          +
+          -- <<IN PORT FOC>>-------------------------------------------------- 
+          ( 
+            (
+            SELECT     ROUND(AVG(((  TO_NUMBER(NVL(T1.GNR_FOIL_CSM_QTY,0))+TO_NUMBER(NVL(T1.GNR_LOW_SULP_FOIL_CSM_QTY,0)))/(TO_NUMBER(SUBSTR(T1.SAIL_HRMNT, 1, 2))+(TO_NUMBER(SUBSTR(T1.SAIL_HRMNT, 3, 2))/60)))*24),2)
+            FROM       FCM_NOON_RPT                          T1
+            WHERE      1 = 1
+            AND        T1.VSL_CD                             = @[vsl_cd]
+            AND        T1.NOON_RPT_DT                        BETWEEN SYSDATE-365 AND SYSDATE
+            AND        T1.VSL_CD                             IN (SELECT R.VSL_CD FROM FCM_VSL_CNTR_RGST R WHERE T1.VSL_CD = R.VSL_CD AND NVL(R.TRND_LINE_USE_FLG,' ')<>'N')
+            AND        T1.MN_FOIL_CSM_QTY                    <> '0'
+            AND        T1.MN_FOIL_CSM_QTY                    IS NOT NULL
+            AND        TO_CHAR(TO_NUMBER(SUBSTR(T1.SAIL_HRMNT, 1, 2))+(TO_NUMBER(SUBSTR(T1.SAIL_HRMNT, 3, 2))/60)) IN ('23','24','25')
+            AND        ((T1.SLP_RT > -16)                    AND (T1.SLP_RT < 25))--SLP_RT IS NOT NULL 조건 포함
+            AND        TO_NUMBER(NVL(T1.WND_SCL_NO,0))       <= 7
+            AND        TO_NUMBER(NVL(T1.SEA_STE_NO,0))       <= 7
+            AND        T1.ENG_ML_DIST                        <> '0'
+            )
+            /24
+            *
+            (SELECT   SUM(D.ACT_WRK_HRS)
+             FROM     VSK_PF_SKD_DTL    D
+             WHERE    D.VSL_SLAN_CD     = VSK_VESSEL_SCHEDULE_PKG.GET_SVC_LANE_FOR_CUR_VSL_FNC(@[vsl_cd])
+             AND      D.PF_SVC_TP_CD    = VSK_VESSEL_SCHEDULE_PKG.GET_PF_SVC_TP_FOR_CUR_VSL_FNC(@[vsl_cd])
+            )      
+          )   
+          +
+          -- <<MNVR IN+OUT PORT FOC>>-------------------------------------------------- 
+          (
+            ( 
+            SELECT    T2.MNVR_CSM_WGT
+            FROM      MDM_VSL_CNTR              T1
+                   ,  FCM_VSL_CNTR_RGST         T2
+            WHERE     1 = 1
+            AND       T1.VSL_CD                 = T2.VSL_CD
+            AND       T1.VSL_CD                 = @[vsl_cd]
+           )
+           /24
+            *
+            (SELECT   SUM(D.MNVR_IN_HRS+D.MNVR_OUT_HRS)
+             FROM     VSK_PF_SKD_DTL    D
+             WHERE    D.VSL_SLAN_CD     = VSK_VESSEL_SCHEDULE_PKG.GET_SVC_LANE_FOR_CUR_VSL_FNC(@[vsl_cd])
+             AND      D.PF_SVC_TP_CD    = VSK_VESSEL_SCHEDULE_PKG.GET_PF_SVC_TP_FOR_CUR_VSL_FNC(@[vsl_cd])
+            )         
+          ),2)        AS PF_FOC_QTY                       /* OPERATION.FOC AT P/F */
+          -----------------------------------------------------------------------------------------------------
+          -----------------------------------------------------------------------------------------------------
+          
+          -----------------------------------------------------------------------------------------------------
+          -----------------------------------------------------------------------------------------------------
+      ,   (
+          -- <<AVG ACT FOC>>-----------------------------------------------------------------------------------
+          SELECT   ROUND(SUM( Y.SEA_MN_FOIL_CSM_QTY +Y.SEA_GNR_FOIL_CSM_QTY +Y.SEA_BLR_FOIL_CSM_QTY
+                             +Y.PORT_MN_FOIL_CSM_QTY+Y.PORT_GNR_FOIL_CSM_QTY+Y.PORT_BLR_FOIL_CSM_QTY)/3,2) AS AVG_ACT_FOC_QTY
+          FROM     FCM_DEP_RPT       Y
+          WHERE    (Y.VSL_CD,Y.SKD_VOY_NO,Y.SKD_DIR_CD)
+                   IN
+                   (
+                   --=======================================================================================
+                   --=======================================================================================
+                    SELECT           XX.VSL_CD,XX.SKD_VOY_NO,XX.SKD_DIR_CD
+                    FROM             (
+                                     --===============================================================================
+                    SELECT           ROWNUM                AS RN
+                                 ,   X.*
+                    FROM             VSK_VSL_PORT_SKD      X
+                    START WITH       (X.VSL_CD,X.SKD_VOY_NO,X.SKD_DIR_CD)
+                                     IN
+                                     (
+                                     -----------------------------------------------------------------
+                                      SELECT   VS.VSL_CD,VS.SKD_VOY_NO,VS.SKD_DIR_CD
+                                      FROM     VSK_VSL_SKD        VS
+                                      WHERE    1 = 1
+                                      AND      ROWNUM             = 1
+                                      AND      VS.VSL_CD          = @[vsl_cd]
+                                      AND      EXISTS             (SELECT   ''
+                                                                   FROM     VSK_VSL_PORT_SKD          PS
+                                                                   WHERE    1 = 1
+                                                                   AND      PS.VSL_CD                 = VS.VSL_CD
+                                                                   AND      PS.SKD_VOY_NO             = VS.SKD_VOY_NO
+                                                                   AND      PS.SKD_DIR_CD             = VS.SKD_DIR_CD
+                                                                   AND      PS.TURN_PORT_IND_CD       IN ('Y','N')
+                                                                   AND      PS.CLPT_SEQ               = (SELECT   MIN(PPS.CLPT_SEQ)
+                                                                                                         FROM     VSK_VSL_PORT_SKD  PPS
+                                                                                                         WHERE    PPS.VSL_CD        = PS.VSL_CD
+                                                                                                         AND      PPS.SKD_VOY_NO    = PS.SKD_VOY_NO
+                                                                                                         AND      PPS.SKD_DIR_CD    = PS.SKD_DIR_CD
+                                                                                                         AND      PPS.TURN_PORT_IND_CD = PS.TURN_PORT_IND_CD
+                                                                                                         AND      NVL(PS.SKD_CNG_STS_CD,'*')<> 'S'
+                                                                                                         )
+                                                                   AND      PS.VPS_ETA_DT             < SYSDATE
+                                                                   )
+                                      AND      EXISTS             (SELECT   ''
+                                                                   FROM     VSK_VSL_PORT_SKD          PS
+                                                                   WHERE    1 = 1
+                                                                   AND      PS.VSL_CD                 = VS.VSL_CD
+                                                                   AND      PS.SKD_VOY_NO             = VS.SKD_VOY_NO
+                                                                   AND      PS.SKD_DIR_CD             = VS.SKD_DIR_CD  
+                                                                   AND      PS.TURN_PORT_IND_CD       IN ('Y','N')                          
+                                                                   AND      PS.CLPT_SEQ               = (SELECT   MAX(PPS.CLPT_SEQ)
+                                                                                                         FROM     VSK_VSL_PORT_SKD  PPS
+                                                                                                         WHERE    PPS.VSL_CD        = PS.VSL_CD
+                                                                                                         AND      PPS.SKD_VOY_NO    = PS.SKD_VOY_NO
+                                                                                                         AND      PPS.SKD_DIR_CD    = PS.SKD_DIR_CD
+                                                                                                         AND      PPS.TURN_PORT_IND_CD = PS.TURN_PORT_IND_CD
+                                                                                                         AND      NVL(PS.SKD_CNG_STS_CD,'*')<> 'S'
+                                                                                                         )
+                                                                   AND      PS.VPS_ETD_DT             > SYSDATE
+                                                                   )  
+                                     -----------------------------------------------------------------           
+                                     )
+                    CONNECT BY PRIOR X.VSL_CD              = X.VSL_CD
+                    AND        PRIOR X.TURN_SKD_VOY_NO     = X.SKD_VOY_NO
+                    AND        PRIOR X.TURN_SKD_DIR_CD     = X.SKD_DIR_CD
+                    AND              X.TURN_PORT_FLG       = 'Y'
+                                     --===============================================================================
+                                     ) XX
+                    WHERE            ROWNUM                <= 6       
+                   --=======================================================================================
+                   --=======================================================================================         
+                   )
+          -- <<AVG ACT FOC>>-----------------------------------------------------------------------------------
+          )             AS AVG_ACT_FOC_QTY                  /* OPERATION.AVG ACT FOC */
+		 , VS.VSL_CD
+FROM     VSK_VSL_SKD        VS
+WHERE    1 = 1
+AND      ROWNUM             = 1
+AND      VS.VSL_CD          = @[vsl_cd]
+AND      EXISTS             (SELECT   ''
+                             FROM     VSK_VSL_PORT_SKD          PS
+                             WHERE    1 = 1
+                             AND      PS.VSL_CD                 = VS.VSL_CD
+                             AND      PS.SKD_VOY_NO             = VS.SKD_VOY_NO
+                             AND      PS.SKD_DIR_CD             = VS.SKD_DIR_CD
+                             --AND      PS.TURN_PORT_IND_CD       IN ('Y','N')
+                             AND      PS.CLPT_SEQ               = (SELECT   MIN(PPS.CLPT_SEQ)
+                                                                   FROM     VSK_VSL_PORT_SKD  PPS
+                                                                   WHERE    PPS.VSL_CD        = PS.VSL_CD
+                                                                   AND      PPS.SKD_VOY_NO    = PS.SKD_VOY_NO
+                                                                   AND      PPS.SKD_DIR_CD    = PS.SKD_DIR_CD
+                                                                   AND      PPS.TURN_PORT_IND_CD = PS.TURN_PORT_IND_CD
+                                                                   AND      NVL(PPS.SKD_CNG_STS_CD,'*')<> 'S'
+                                                                   )
+                             AND      PS.VPS_ETA_DT             < SYSDATE 
+                             )
+AND      EXISTS             (SELECT   ''
+                             FROM     VSK_VSL_PORT_SKD          PS
+                             WHERE    1 = 1
+                             AND      PS.VSL_CD                 = VS.VSL_CD
+                             AND      PS.SKD_VOY_NO             = VS.SKD_VOY_NO
+                             AND      PS.SKD_DIR_CD             = VS.SKD_DIR_CD  
+                             --AND      PS.TURN_PORT_IND_CD       IN ('Y','N')                          
+                             AND      PS.CLPT_SEQ               = (SELECT   MAX(PPS.CLPT_SEQ)
+                                                                   FROM     VSK_VSL_PORT_SKD  PPS
+                                                                   WHERE    PPS.VSL_CD        = PS.VSL_CD
+                                                                   AND      PPS.SKD_VOY_NO    = PS.SKD_VOY_NO
+                                                                   AND      PPS.SKD_DIR_CD    = PS.SKD_DIR_CD
+                                                                   AND      PPS.TURN_PORT_IND_CD = PS.TURN_PORT_IND_CD
+                                                                   AND      NVL(PPS.SKD_CNG_STS_CD,'*')<> 'S'
+                                                                   )
+                             AND      PS.VPS_ETD_DT             > SYSDATE
+                             )			]]></sql>
+			<params>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

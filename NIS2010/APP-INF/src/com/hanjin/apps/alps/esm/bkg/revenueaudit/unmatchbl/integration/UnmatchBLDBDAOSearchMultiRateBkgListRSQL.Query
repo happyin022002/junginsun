@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="UnmatchBLDBDAOSearchMultiRateBkgListRSQL">
+			<desc><![CDATA[rating시 OFT가 2개 이상 뜨는 건에 대해 조회한다.]]></desc>
+			<sql><![CDATA[
+SELECT BKG_NO
+      ,RCT_RHQ_CD  
+      ,BKG_OFC_CD
+      ,SVC_SCP_CD
+      ,RT_APLY_DT
+      ,BDR_FLG
+      ,CTRT_TP_CD
+      ,CTRT_NO
+      ,CMDT_CD
+      ,(SELECT CMDT_NM FROM MDM_COMMODITY WHERE CMDT_CD = BKG.CMDT_CD AND DELT_FLG = 'N') CMDT_NM
+      ,BKG_CGO_TP_CD
+      ,POR_CD
+      ,POL_CD
+      ,POD_CD
+      ,DEL_CD
+      ,DCGO_FLG
+      ,RC_FLG
+      ,AWK_CGO_FLG
+      ,BB_CGO_FLG
+      ,RD_CGO_FLG
+      ,HNGR_FLG
+      ,T_VVD
+      ,COUNT(1) OVER (PARTITION BY 1) BL_CNT
+      ,POR_POL_EQUALS
+      ,POD_DEL_EQUALS
+      ,MULTI_CNTR
+  from (
+        SELECT BKG.BKG_NO
+               ,(
+                SELECT  A.OFC_CD
+                FROM    MDM_ORGANIZATION A
+                WHERE   A.OFC_TP_CD = 'HQ'
+                START   WITH A.OFC_CD = BKG.BKG_OFC_CD
+                CONNECT BY PRIOR A.PRNT_OFC_CD = A.OFC_CD
+               ) RCT_RHQ_CD  
+              ,BKG.BKG_OFC_CD
+              ,BKG.SVC_SCP_CD
+              ,TO_CHAR(RT.RT_APLY_DT,'YYYY-MM-DD') RT_APLY_DT
+              ,DECODE(DOC.BDR_FLG , 'N', 'NO', 'Y', 'YES', 'NO')  BDR_FLG
+              ,DECODE(RT.BKG_CTRT_TP_CD, 'R', 'RFA', 'S', 'S/C', 'TAA')  CTRT_TP_CD
+              ,DECODE(RT.BKG_CTRT_TP_CD, 'R', BKG.RFA_NO, 'S', BKG.SC_NO, BKG.TAA_NO) CTRT_NO
+              ,BKG.CMDT_CD
+              ,BKG.BKG_CGO_TP_CD
+              ,BKG.POR_CD
+              ,BKG.POL_CD
+              ,BKG.POD_CD
+              ,BKG.DEL_CD
+              ,BKG.DCGO_FLG
+              ,BKG.RC_FLG
+              ,BKG.AWK_CGO_FLG
+              ,BKG.BB_CGO_FLG
+              ,BKG.RD_CGO_FLG
+              ,BKG.HNGR_FLG
+              ,BKG.VSL_CD||BKG.SKD_VOY_NO||BKG.SKD_DIR_CD T_VVD
+              ,DECODE(BKG.POR_CD, BKG.POL_CD, 'Y', 'N') AS POR_POL_EQUALS
+              ,DECODE(BKG.POD_CD, BKG.DEL_CD, 'Y', 'N') AS POD_DEL_EQUALS
+              ,(
+                SELECT DECODE(COUNT(DISTINCT CNTR_TPSZ_CD), 1, 'N', 'Y')
+                  FROM BKG_QTY_DTL 
+                 WHERE BKG_NO = BKG.BKG_NO 
+                   AND CNTR_TPSZ_CD NOT LIKE 'Q%'
+                ) AS MULTI_CNTR
+          FROM BKG_BOOKING BKG
+              ,BKG_RATE RT
+              ,BKG_REV_COST REV
+              ,BKG_BL_DOC DOC
+        #if (${dt_type} == 'ETD') 
+              ,BKG_VVD VVD
+              ,VSK_VSL_PORT_SKD SKD
+        #end
+        WHERE BKG.BKG_NO = RT.BKG_NO
+          AND BKG.BKG_STS_CD <> 'X'
+          AND BKG.BKG_NO = REV.BKG_NO
+        #if (${from_dt} != '' && ${to_dt} != '')
+
+        #if (${dt_type} == 'BKG')
+          AND BKG.BKG_CRE_DT		>= TO_DATE(@[from_dt], 'YYYY-MM-DD') 
+          AND BKG.BKG_CRE_DT		<= TO_DATE(@[to_dt], 'YYYY-MM-DD') + 0.99999 
+        #elseif (${dt_type} == 'APPL') 
+          AND RT.RT_APLY_DT		    >= TO_DATE(@[from_dt], 'YYYY-MM-DD') 
+          AND RT.RT_APLY_DT		    <= TO_DATE(@[to_dt], 'YYYY-MM-DD') + 0.99999 
+        #elseif (${dt_type} == 'ETD') 
+          AND SKD.VPS_ETD_DT        >= TO_DATE(@[from_dt], 'YYYY-MM-DD') 
+          AND SKD.VPS_ETD_DT		<= TO_DATE(@[to_dt], 'YYYY-MM-DD') + 0.99999
+          AND VVD.VSL_PRE_PST_CD || VVD.VSL_SEQ = (SELECT MIN(VSL_PRE_PST_CD||VSL_SEQ) FROM BKG_VVD WHERE BKG_NO = BKG.BKG_NO)
+          AND VVD.VSL_CD = SKD.VSL_CD
+          AND VVD.SKD_VOY_NO = SKD.SKD_VOY_NO
+          AND VVD.SKD_DIR_CD = SKD.SKD_DIR_CD
+          AND VVD.POL_CD = SKD.VPS_PORT_CD
+          AND VVD.POL_CLPT_IND_SEQ = SKD.CLPT_IND_SEQ
+          AND BKG.BKG_NO = VVD.BKG_NO
+        #end
+
+        #end
+          AND REV.SGL_REV_FLG = 'N'
+          AND REV.REV_COST_SEQ = (SELECT MAX(REV_COST_SEQ) FROM BKG_REV_COST WHERE BKG.BKG_NO = BKG_NO)
+          AND BKG.BKG_NO = DOC.BKG_NO
+        #if (${t_vvd} != '')
+          AND BKG.VSL_CD||BKG.SKD_VOY_NO||BKG.SKD_DIR_CD LIKE '%'||@[t_vvd]||'%'
+        #end
+        #if (${svc_scp_cd} != '')
+          AND BKG.SVC_SCP_CD = @[svc_scp_cd]
+        #end
+        #if (${bkg_ctrt_tp_cd} != '')
+          AND RT.BKG_CTRT_TP_CD = @[bkg_ctrt_tp_cd]
+        #end
+        #if (${ctrt_no} != '')
+          AND @[ctrt_no] IN (BKG.SC_NO,BKG.RFA_NO,BKG.TAA_NO)
+        #end
+        #if (${por_cd} != '')
+          AND BKG.POR_CD = @[por_cd]
+        #end
+        #if (${pol_cd} != '')
+          AND BKG.POL_CD = @[pol_cd]
+        #end
+        #if (${pod_cd} != '')
+          AND BKG.POD_CD = @[pod_cd]
+        #end
+        #if (${del_cd} != '')
+          AND BKG.DEL_CD = @[del_cd]
+        #end
+        #if (${bdr_flg} != '')
+          AND DOC.BDR_FLG = @[bdr_flg]
+        #end
+         ) BKG
+
+WHERE RCT_RHQ_CD = @[rct_rhq_cd]
+#if (${bkg_ofc_cd} != '')
+  AND BKG_OFC_CD = @[bkg_ofc_cd]
+#end
+#if (${por_pol_equals} != '')
+  AND POR_POL_EQUALS = @[por_pol_equals]
+#end
+#if (${pod_del_equals} != '')
+  AND POD_DEL_EQUALS = @[pod_del_equals]
+#end
+#if (${multi_cntr} != '')
+  AND MULTI_CNTR = @[multi_cntr]
+#end
+ORDER BY BKG_NO			]]></sql>
+			<params>
+				<param name="from_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+				<param name="t_vvd" type="12" value="" out="N"/>
+				<param name="svc_scp_cd" type="12" value="" out="N"/>
+				<param name="bkg_ctrt_tp_cd" type="12" value="" out="N"/>
+				<param name="ctrt_no" type="12" value="" out="N"/>
+				<param name="por_cd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="del_cd" type="12" value="" out="N"/>
+				<param name="bdr_flg" type="12" value="" out="N"/>
+				<param name="rct_rhq_cd" type="12" value="" out="N"/>
+				<param name="bkg_ofc_cd" type="12" value="" out="N"/>
+				<param name="por_pol_equals" type="12" value="" out="N"/>
+				<param name="pod_del_equals" type="12" value="" out="N"/>
+				<param name="multi_cntr" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

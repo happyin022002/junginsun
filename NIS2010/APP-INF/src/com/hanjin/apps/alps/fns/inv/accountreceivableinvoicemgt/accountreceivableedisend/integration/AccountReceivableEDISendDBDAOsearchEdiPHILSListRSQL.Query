@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AccountReceivableEDISendDBDAOsearchEdiPHILSListRSQL">
+			<desc><![CDATA[searchEdiPHILSList]]></desc>
+			<sql><![CDATA[
+SELECT BL_SRC_NO,
+  EDI_SND_DT,
+  DECODE(ACK_RSLT_CD, 'A', 'Accept', 'R', 'Reject', '') ACK_RSLT_CD,
+  FRT_USD_RT_AMT,
+  OTR_USD_CONV_AMT,
+  TTL_USD_AMT,
+  VVD,
+  SAIL_ARR_DT,
+  PHILS_LOC_CD_CTNT, 
+  CUST_REF_NO_CTNT,
+  POR_CD,
+  POL_CD,
+  POD_CD,
+  DEL_CD,
+  INV_CUST_CNT_CD,
+  INV_CUST_SEQ,
+  ACT_CUST_CNT_CD,
+  ACT_CUST_SEQ, 
+  OFC_CD
+FROM (
+  SELECT BL_SRC_NO,
+    EDI_SND_DT,
+    ACK_RSLT_CD,
+    FRT_USD_RT_AMT,
+    OTR_USD_CONV_AMT,
+    TTL_USD_AMT,
+    VVD,
+    SAIL_ARR_DT,
+    PHILS_LOC_CD_CTNT,
+    CUST_REF_NO_CTNT,
+    POR_CD,
+    POL_CD,
+    POD_CD,
+    DEL_CD,
+    INV_CUST_CNT_CD,
+    INV_CUST_SEQ,
+    ACT_CUST_CNT_CD,
+    ACT_CUST_SEQ,
+    AR_OFC_CD AS OFC_CD,
+    CASE WHEN EDI_SND_DT IS NULL
+                AND BL_SRC_NO = LEAD(BL_SRC_NO) OVER (ORDER BY BL_SRC_NO, EDI_SND_DT DESC)
+                AND FRT_USD_RT_AMT = LEAD(FRT_USD_RT_AMT) OVER (ORDER BY BL_SRC_NO, EDI_SND_DT DESC)
+                AND OTR_USD_CONV_AMT = LEAD(OTR_USD_CONV_AMT) OVER (ORDER BY BL_SRC_NO, EDI_SND_DT DESC)
+                AND TTL_USD_AMT = LEAD(TTL_USD_AMT) OVER (ORDER BY BL_SRC_NO, EDI_SND_DT DESC)
+           THEN 'N'
+         ELSE 'Y'
+    END IS_VIEW
+  FROM (
+    SELECT PHILS.BL_SRC_NO,
+      TO_CHAR(PHILS.EDI_SND_DT, 'YYYY-MM-DD HH:MI:SS') EDI_SND_DT,
+      ACK.ACK_RSLT_CD,
+      PHILS.FRT_USD_RT_AMT,
+      PHILS.OTR_USD_CONV_AMT,
+      PHILS.TTL_USD_AMT,
+      PHILS.VSL_CD || PHILS.SKD_VOY_NO || PHILS.SKD_DIR_CD VVD,
+      PHILS.SAIL_ARR_DT,
+      PHILS.PHILS_LOC_CD_CTNT,
+      PHILS.CUST_REF_NO_CTNT,
+      PHILS.POR_CD,
+      PHILS.POL_CD,
+      PHILS.POD_CD,
+      PHILS.DEL_CD,
+      PHILS.INV_CUST_CNT_CD,
+      LPAD(TO_CHAR(PHILS.INV_CUST_SEQ),6,'0') INV_CUST_SEQ,
+      PHILS.ACT_CUST_CNT_CD,
+      PHILS.ACT_CUST_SEQ,
+      PHILS.AR_OFC_CD
+    FROM INV_EDI_PHILS PHILS,
+      INV_EDI_ACK ACK
+    WHERE PHILS.FLT_FILE_REF_NO = ACK.ACK_KEY_NO(+)
+      AND PHILS.AR_OFC_CD = @[ofc_cd]
+#if (${retr_opt} == 'B')  -- B/L NO
+      AND PHILS.BL_SRC_NO = @[bl_src_no]
+#end
+#if (${act_cust_cnt_cd} != '' && ${act_cust_seq} != ''  )
+      AND PHILS.ACT_CUST_CNT_CD = @[act_cust_cnt_cd]
+      AND PHILS.ACT_CUST_SEQ = TO_NUMBER(@[act_cust_seq])
+#end 
+#if (${retr_opt} == 'S')  -- S/A DATE
+      AND PHILS.SAIL_ARR_DT BETWEEN REPLACE(@[fm_dt], '-', '') AND REPLACE(@[to_dt], '-', '')
+#end
+#if (${retr_opt} == 'V')  -- VVD
+      AND PHILS.VSL_CD = SUBSTR(@[vvd], 1, 4)
+      AND PHILS.SKD_VOY_NO = SUBSTR(@[vvd], 5, 4)
+      AND PHILS.SKD_DIR_CD = SUBSTR(@[vvd], 9, 1)
+#end
+#if (${retr_opt} == 'E')
+      AND PHILS.EDI_SND_DT BETWEEN TO_DATE(@[fm_dt] || ' 00:00:00', 'YYYY-MM-DD HH24:MI:SS') AND TO_DATE(@[to_dt] || ' 23:59:59', 'YYYY-MM-DD HH24:MI:SS')     -- EDI_SND_DT 는 DATE TYPE 이므로 주의
+#end
+  
+    UNION
+  
+    SELECT T.BL_SRC_NO,
+      '' EDI_SND_DT,
+      '' ACK_RSLT_CD,
+      T.FRT_USD_RT_AMT,
+      T.OTR_USD_CONV_AMT,
+      ( T.FRT_USD_RT_AMT + T.OTR_USD_CONV_AMT ) AS TTL_USD_AMT,
+      T.VVD,
+      T.SAIL_ARR_DT,
+      (SELECT NVL(L.PHILS_LOC_CD_CTNT, '') FROM INV_EDI_PHILS_LOC L WHERE L.CUST_CNT_CD = T.INV_CUST_CNT_CD AND L.CUST_SEQ = T.INV_CUST_SEQ) PHILS_LOC_CD_CTNT,
+      (SELECT NVL(CUST_REF_NO_CTNT, '') FROM BKG_REFERENCE WHERE BKG_NO = T.BKG_NO AND BKG_REF_TP_CD = 'FINV') CUST_REF_NO_CTNT,      
+      T.POR_CD,
+      T.POL_CD,
+      T.POD_CD,
+      T.DEL_CD,
+      T.INV_CUST_CNT_CD,
+      T.INV_CUST_SEQ,
+      T.ACT_CUST_CNT_CD,
+      T.ACT_CUST_SEQ,
+      T.AR_OFC_CD
+    FROM (
+      SELECT A.BL_SRC_NO,
+        A.BKG_NO,
+       ( SELECT NVL(SUM(ROUND(B.CHG_AMT, 2)),0)
+         FROM  INV_AR_MN M , INV_AR_CHG B
+         WHERE M.BL_SRC_NO = A.BL_SRC_NO
+         AND M.AR_OFC_CD   = A.AR_OFC_CD
+         AND M.ACT_CUST_CNT_CD = A.ACT_CUST_CNT_CD
+         AND M.ACT_CUST_SEQ    = A.ACT_CUST_SEQ
+         AND M.INV_DELT_DIV_CD <> 'Y'
+         AND M.REV_TP_CD <> 'M'
+         AND M.AR_IF_NO = B.AR_IF_NO
+         AND B.CURR_CD  = 'USD' ) AS FRT_USD_RT_AMT,
+       ( SELECT NVL(SUM(ROUND(B.CHG_AMT * B.INV_XCH_RT, 2)),0)
+         FROM   INV_AR_MN M , INV_AR_CHG B
+         WHERE M.BL_SRC_NO = A.BL_SRC_NO
+         AND M.AR_OFC_CD   = A.AR_OFC_CD
+         AND M.ACT_CUST_CNT_CD = A.ACT_CUST_CNT_CD
+         AND M.ACT_CUST_SEQ    = A.ACT_CUST_SEQ
+         AND M.INV_DELT_DIV_CD <> 'Y'
+         AND M.REV_TP_CD <> 'M'
+         AND M.AR_IF_NO = B.AR_IF_NO
+         AND B.CURR_CD <> 'USD' ) AS  OTR_USD_CONV_AMT,
+        0 AS TTL_USD_AMT,
+        A.VSL_CD || A.SKD_VOY_NO || A.SKD_DIR_CD VVD,
+        A.SAIL_ARR_DT,
+        A.POR_CD,
+        A.POL_CD,
+        A.POD_CD,
+        A.DEL_CD, 
+        A.INV_CUST_CNT_CD,
+        LPAD(TO_CHAR(A.INV_CUST_SEQ),6,'0') INV_CUST_SEQ,
+        A.ACT_CUST_CNT_CD,
+        A.ACT_CUST_SEQ,
+        A.AR_OFC_CD
+      FROM INV_AR_MN A,
+        (SELECT BL_SRC_NO, MAX(AR_IF_NO) AR_IF_NO
+         FROM INV_AR_MN
+         WHERE AR_OFC_CD = @[ofc_cd]
+    #if (${retr_opt} == 'B')  -- B/L NO
+           AND BL_SRC_NO = @[bl_src_no]
+    #end
+    #if (${act_cust_cnt_cd} != '' && ${act_cust_seq} != ''  )
+           AND ACT_CUST_CNT_CD = @[act_cust_cnt_cd]
+           AND ACT_CUST_SEQ = TO_NUMBER(@[act_cust_seq])
+    #end 
+           AND INV_DELT_DIV_CD <> 'Y'
+           AND REV_TP_CD <> 'M'
+         GROUP BY BL_SRC_NO
+        ) C
+      WHERE A.AR_IF_NO = C.AR_IF_NO
+#if (${retr_opt} == 'B')  -- B/L NO
+        AND A.BL_SRC_NO = @[bl_src_no]
+#end
+#if (${retr_opt} == 'S')  -- S/A DATE
+        AND A.SAIL_ARR_DT BETWEEN REPLACE(@[fm_dt], '-', '') AND REPLACE(@[to_dt], '-', '')
+#end
+#if (${retr_opt} == 'V')  -- VVD
+		AND A.VSL_CD = SUBSTR(@[vvd], 1, 4)
+		AND A.SKD_VOY_NO = SUBSTR(@[vvd], 5, 4)
+		AND A.SKD_DIR_CD = SUBSTR(@[vvd], 9, 1)
+#end
+    ) T
+   WHERE ( T.FRT_USD_RT_AMT + OTR_USD_CONV_AMT ) <> 0 
+  )
+  ORDER BY BL_SRC_NO, EDI_SND_DT
+)
+WHERE IS_VIEW = 'Y'
+#if (${sent_stat} == 'Y')
+  AND EDI_SND_DT IS NOT NULL
+#end
+#if (${sent_stat} == 'N')
+  AND EDI_SND_DT IS NULL
+#end			]]></sql>
+			<params>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="bl_src_no" type="12" value="" out="N"/>
+				<param name="act_cust_cnt_cd" type="12" value="" out="N"/>
+				<param name="act_cust_seq" type="12" value="" out="N"/>
+				<param name="fm_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,423 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : SendHistoryCondVO.java
+*@FileTitle : SendHistoryCondVO
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.11.23
+*@LastModifier : 경종윤
+*@LastVersion : 1.0
+* 2009.11.23 경종윤 
+* 1.0 Creation
+=========================================================*/
+
+package com.hanjin.apps.alps.esm.bkg.terminaldocumentation.specialmanifest.vo;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+
+import javax.servlet.http.HttpServletRequest;
+
+import org.apache.commons.lang.builder.ToStringBuilder;
+import org.apache.commons.lang.builder.ToStringStyle;
+
+import com.hanjin.framework.component.common.AbstractValueObject;
+import com.hanjin.framework.component.util.JSPUtil;
+
+/**
+ * Table Value Ojbect<br>
+ * 관련 Event 에서 생성, 서버실행요청시 Data 전달역할을 수행하는 Value Object
+ *
+ * @author 경종윤
+ * @since J2EE 1.6
+ * @see AbstractValueObject
+ */
+
+public class SendHistoryCondVO extends AbstractValueObject {
+
+	private static final long serialVersionUID = 1L;
+	
+	private Collection<SendHistoryCondVO> models = new ArrayList<SendHistoryCondVO>();
+	
+	/* Column Info */
+	private String callGubun = null;
+	/* VO Data Value( C:Creation, U:Update, D:Delete ) */
+	private String ibflag = null;
+	/* Column Info */
+	private String vvdCd = null;
+	/* Column Info */
+	private String cntrNo = null;
+	/* Column Info */
+	private String dType = null;
+	/* Column Info */
+	private String msgType = null;
+	/* Column Info */
+	private String portCd = null;
+	/* Column Info */
+	private String sndDtTo = null;
+	/* Column Info */
+	private String blNo = null;
+	/* Column Info */
+	private String sndDtFrom = null;
+	/* Page Number */
+	private String pagerows = null;
+
+	/*	테이블 컬럼의 값을 저장하는 Hashtable */
+	private HashMap<String, String> hashColumns = new HashMap<String, String>();
+
+	/*	테이블 컬럼에 대응되는 멤버변수를 저장하는 Hashtable */
+	private HashMap<String, String> hashFields = new HashMap<String, String>();
+	
+	public SendHistoryCondVO() {}
+
+	public SendHistoryCondVO(String ibflag, String pagerows, String dType, String vvdCd, String portCd, String sndDtFrom, String sndDtTo, String blNo, String cntrNo, String msgType, String callGubun) {
+		this.callGubun = callGubun;
+		this.ibflag = ibflag;
+		this.vvdCd = vvdCd;
+		this.cntrNo = cntrNo;
+		this.dType = dType;
+		this.msgType = msgType;
+		this.portCd = portCd;
+		this.sndDtTo = sndDtTo;
+		this.blNo = blNo;
+		this.sndDtFrom = sndDtFrom;
+		this.pagerows = pagerows;
+	}
+	
+	/**
+	 * 테이블 컬럼에 저장할 값을 Hashtable<"column_name", "value"> 로 반환
+	 * @return HashMap
+	 */
+	public HashMap<String, String> getColumnValues(){
+		this.hashColumns.put("call_gubun", getCallGubun());
+		this.hashColumns.put("ibflag", getIbflag());
+		this.hashColumns.put("vvd_cd", getVvdCd());
+		this.hashColumns.put("cntr_no", getCntrNo());
+		this.hashColumns.put("d_type", getDType());
+		this.hashColumns.put("msg_type", getMsgType());
+		this.hashColumns.put("port_cd", getPortCd());
+		this.hashColumns.put("snd_dt_to", getSndDtTo());
+		this.hashColumns.put("bl_no", getBlNo());
+		this.hashColumns.put("snd_dt_from", getSndDtFrom());
+		this.hashColumns.put("pagerows", getPagerows());
+		return this.hashColumns;
+	}
+	
+	/**
+	 * 컬럼명에 대응되는 멤버변수명을 저장하여 Hashtable<"column_name", "variable"> 로 반환   
+	 * @return
+	 */
+	public HashMap<String, String> getFieldNames(){
+		this.hashFields.put("call_gubun", "callGubun");
+		this.hashFields.put("ibflag", "ibflag");
+		this.hashFields.put("vvd_cd", "vvdCd");
+		this.hashFields.put("cntr_no", "cntrNo");
+		this.hashFields.put("d_type", "dType");
+		this.hashFields.put("msg_type", "msgType");
+		this.hashFields.put("port_cd", "portCd");
+		this.hashFields.put("snd_dt_to", "sndDtTo");
+		this.hashFields.put("bl_no", "blNo");
+		this.hashFields.put("snd_dt_from", "sndDtFrom");
+		this.hashFields.put("pagerows", "pagerows");
+		return this.hashFields;
+	}
+	
+	/**
+	 * Column Info
+	 * @return callGubun
+	 */
+	public String getCallGubun() {
+		return this.callGubun;
+	}
+	
+	/**
+	 * VO Data Value( C:Creation, U:Update, D:Delete )
+	 * @return ibflag
+	 */
+	public String getIbflag() {
+		return this.ibflag;
+	}
+	
+	/**
+	 * Column Info
+	 * @return vvdCd
+	 */
+	public String getVvdCd() {
+		return this.vvdCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @return cntrNo
+	 */
+	public String getCntrNo() {
+		return this.cntrNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @return dType
+	 */
+	public String getDType() {
+		return this.dType;
+	}
+	
+	/**
+	 * Column Info
+	 * @return msgType
+	 */
+	public String getMsgType() {
+		return this.msgType;
+	}
+	
+	/**
+	 * Column Info
+	 * @return portCd
+	 */
+	public String getPortCd() {
+		return this.portCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @return sndDtTo
+	 */
+	public String getSndDtTo() {
+		return this.sndDtTo;
+	}
+	
+	/**
+	 * Column Info
+	 * @return blNo
+	 */
+	public String getBlNo() {
+		return this.blNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @return sndDtFrom
+	 */
+	public String getSndDtFrom() {
+		return this.sndDtFrom;
+	}
+	
+	/**
+	 * Page Number
+	 * @return pagerows
+	 */
+	public String getPagerows() {
+		return this.pagerows;
+	}
+	
+
+	/**
+	 * Column Info
+	 * @param callGubun
+	 */
+	public void setCallGubun(String callGubun) {
+		this.callGubun = callGubun;
+	}
+	
+	/**
+	 * VO Data Value( C:Creation, U:Update, D:Delete )
+	 * @param ibflag
+	 */
+	public void setIbflag(String ibflag) {
+		this.ibflag = ibflag;
+	}
+	
+	/**
+	 * Column Info
+	 * @param vvdCd
+	 */
+	public void setVvdCd(String vvdCd) {
+		this.vvdCd = vvdCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param cntrNo
+	 */
+	public void setCntrNo(String cntrNo) {
+		this.cntrNo = cntrNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @param dType
+	 */
+	public void setDType(String dType) {
+		this.dType = dType;
+	}
+	
+	/**
+	 * Column Info
+	 * @param msgType
+	 */
+	public void setMsgType(String msgType) {
+		this.msgType = msgType;
+	}
+	
+	/**
+	 * Column Info
+	 * @param portCd
+	 */
+	public void setPortCd(String portCd) {
+		this.portCd = portCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param sndDtTo
+	 */
+	public void setSndDtTo(String sndDtTo) {
+		this.sndDtTo = sndDtTo;
+	}
+	
+	/**
+	 * Column Info
+	 * @param blNo
+	 */
+	public void setBlNo(String blNo) {
+		this.blNo = blNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @param sndDtFrom
+	 */
+	public void setSndDtFrom(String sndDtFrom) {
+		this.sndDtFrom = sndDtFrom;
+	}
+	
+	/**
+	 * Page Number
+	 * @param pagerows
+	 */
+	public void setPagerows(String pagerows) {
+		this.pagerows = pagerows;
+	}
+	
+	/**
+	 * Request 의 데이터를 추출하여 VO 의 멤버변수에 설정.
+	 * @param request
+	 */
+	public void fromRequest(HttpServletRequest request) {
+		setCallGubun(JSPUtil.getParameter(request, "call_gubun", ""));
+		setIbflag(JSPUtil.getParameter(request, "ibflag", ""));
+		setVvdCd(JSPUtil.getParameter(request, "vvd_cd", ""));
+		setCntrNo(JSPUtil.getParameter(request, "cntr_no", ""));
+		setDType(JSPUtil.getParameter(request, "d_type", ""));
+		setMsgType(JSPUtil.getParameter(request, "msg_type", ""));
+		setPortCd(JSPUtil.getParameter(request, "port_cd", ""));
+		setSndDtTo(JSPUtil.getParameter(request, "snd_dt_to", ""));
+		setBlNo(JSPUtil.getParameter(request, "bl_no", ""));
+		setSndDtFrom(JSPUtil.getParameter(request, "snd_dt_from", ""));
+		setPagerows(JSPUtil.getParameter(request, "pagerows", ""));
+	}
+
+	/**
+	 * Request 의 데이터를 VO 배열로 변환하여 반환.
+	 * @param request
+	 * @return SendHistoryCondVO[]
+	 */
+	public SendHistoryCondVO[] fromRequestGrid(HttpServletRequest request) {
+		return fromRequestGrid(request, "");
+	}
+
+	/**
+	 * Request 넘어온 여러 건 DATA를 VO Class 에 담는다. 
+	 * @param request
+	 * @param prefix
+	 * @return SendHistoryCondVO[]
+	 */
+	public SendHistoryCondVO[] fromRequestGrid(HttpServletRequest request, String prefix) {
+		SendHistoryCondVO model = null;
+		
+		String[] tmp = request.getParameterValues(prefix + "ibflag");
+  		if(tmp == null)
+   			return null;
+
+  		int length = request.getParameterValues(prefix + "ibflag").length;
+  
+		try {
+			String[] callGubun = (JSPUtil.getParameter(request, prefix	+ "call_gubun", length));
+			String[] ibflag = (JSPUtil.getParameter(request, prefix	+ "ibflag", length));
+			String[] vvdCd = (JSPUtil.getParameter(request, prefix	+ "vvd_cd", length));
+			String[] cntrNo = (JSPUtil.getParameter(request, prefix	+ "cntr_no", length));
+			String[] dType = (JSPUtil.getParameter(request, prefix	+ "d_type", length));
+			String[] msgType = (JSPUtil.getParameter(request, prefix	+ "msg_type", length));
+			String[] portCd = (JSPUtil.getParameter(request, prefix	+ "port_cd", length));
+			String[] sndDtTo = (JSPUtil.getParameter(request, prefix	+ "snd_dt_to", length));
+			String[] blNo = (JSPUtil.getParameter(request, prefix	+ "bl_no", length));
+			String[] sndDtFrom = (JSPUtil.getParameter(request, prefix	+ "snd_dt_from", length));
+			String[] pagerows = (JSPUtil.getParameter(request, prefix	+ "pagerows", length));
+			
+			for (int i = 0; i < length; i++) {
+				model = new SendHistoryCondVO();
+				if (callGubun[i] != null)
+					model.setCallGubun(callGubun[i]);
+				if (ibflag[i] != null)
+					model.setIbflag(ibflag[i]);
+				if (vvdCd[i] != null)
+					model.setVvdCd(vvdCd[i]);
+				if (cntrNo[i] != null)
+					model.setCntrNo(cntrNo[i]);
+				if (dType[i] != null)
+					model.setDType(dType[i]);
+				if (msgType[i] != null)
+					model.setMsgType(msgType[i]);
+				if (portCd[i] != null)
+					model.setPortCd(portCd[i]);
+				if (sndDtTo[i] != null)
+					model.setSndDtTo(sndDtTo[i]);
+				if (blNo[i] != null)
+					model.setBlNo(blNo[i]);
+				if (sndDtFrom[i] != null)
+					model.setSndDtFrom(sndDtFrom[i]);
+				if (pagerows[i] != null)
+					model.setPagerows(pagerows[i]);
+				models.add(model);
+			}
+
+		} catch (Exception e) {
+			return null;
+		}
+		return getSendHistoryCondVOs();
+	}
+
+	/**
+	 * VO 배열을 반환
+	 * @return SendHistoryCondVO[]
+	 */
+	public SendHistoryCondVO[] getSendHistoryCondVOs(){
+		SendHistoryCondVO[] vos = (SendHistoryCondVO[])models.toArray(new SendHistoryCondVO[models.size()]);
+		return vos;
+	}
+	
+	/**
+	 * VO Class의 내용을 String으로 변환
+	 */
+	public String toString() {
+		   return ToStringBuilder.reflectionToString(this, ToStringStyle.MULTI_LINE_STYLE );
+	   }
+
+	/**
+	* 포맷팅된 문자열에서 특수문자 제거("-","/",",",":")
+	*/
+	public void unDataFormat(){
+		this.callGubun = this.callGubun .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.ibflag = this.ibflag .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.vvdCd = this.vvdCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.cntrNo = this.cntrNo .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.dType = this.dType .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.msgType = this.msgType .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.portCd = this.portCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.sndDtTo = this.sndDtTo .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.blNo = this.blNo .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.sndDtFrom = this.sndDtFrom .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.pagerows = this.pagerows .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+	}
+}

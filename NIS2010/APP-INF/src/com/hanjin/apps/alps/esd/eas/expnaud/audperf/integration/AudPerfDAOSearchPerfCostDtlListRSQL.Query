@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AudPerfDAOSearchPerfCostDtlListRSQL">
+			<desc><![CDATA[AudPerfDAOSearchPerfCostDtlListRSQL DESC ]]></desc>
+			<sql><![CDATA[
+WITH M1 AS (
+   SELECT  A.TJ_OFC_CD AS OFC_CD
+          ,@[s_ym] AS STND_YM
+          ,SUBSTR(A.GL_DT, 1, 6) AS GL_YM
+          ,CASE WHEN A.SRC_CTNT = 'SO_TRANS' THEN 'TRS'
+                WHEN A.SRC_CTNT = 'SO_TERMINAL' THEN 'TES'
+                WHEN A.SRC_CTNT = 'SO_PORT' THEN 'PSO'
+                WHEN A.SRC_CTNT = 'SO_M&R' THEN 'M&R'
+           END AS MDL_CD
+          ,A.VNDR_NO
+          ,B.FTU_USE_CTNT1 AS LGS_COST_CD
+          ,B.ATTR_CATE_NM  AS ACCT_CD
+          ,COUNT(DISTINCT A.VNDR_NO||B.ATTR_CTNT1) INV_CNT
+          ,A.CSR_CURR_CD AS CURR_CD
+          ,SUM(B.INV_AMT) AS CURR_AMT
+          ,SUM((SELECT ROUND((B.INV_AMT / X.USD_LOCL_XCH_RT), 2)
+                  FROM GL_MON_XCH_RT X
+                 WHERE X.CURR_CD = A.CSR_CURR_CD
+                   AND X.ACCT_XCH_RT_LVL = '1'
+                   AND X.ACCT_XCH_RT_YRMON = SUBSTR(A.GL_DT, 1, 6)))  AS USD_AMT
+          ,CASE WHEN SUBSTR(A.GL_DT, 1, 6) = @[s_ym] THEN '1'
+                WHEN SUBSTR(A.GL_DT, 1, 6) = (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(@[s_ym]||'01', 'YYYYMMDD'), -1), 'YYYYMM') FROM DUAL) THEN '2'
+                WHEN SUBSTR(A.GL_DT, 1, 6) = (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(@[s_ym]||'01', 'YYYYMMDD'), -12), 'YYYYMM') FROM DUAL) THEN '3'
+           END AS YM_TP_CD
+      FROM AP_INV_HDR  A
+          ,AP_INV_DTRB B
+          ,MDM_ORGANIZATION O
+     WHERE A.CSR_NO = B.CSR_NO
+       AND O.OFC_CD = A.TJ_OFC_CD
+       AND A.IF_FLG IS NOT NULL 
+       AND (A.PAY_DT IS NOT NULL OR (O.SO_IF_CD = 'O' AND A.ATTR_CTNT2 IS NOT NULL ) )
+
+	#if (${s_compare_mon} == '1')
+       -- 당월로 조회 (s_compare_mon : 1)
+       AND A.GL_DT BETWEEN @[s_ym]||'01' AND TO_CHAR(LAST_DAY(TO_DATE(@[s_ym]||'01', 'YYYYMMDD')), 'YYYYMMDD')
+	#end
+	#if (${s_compare_mon} == '3')
+       -- Show Comparison Month로 조회 (s_compare_mon : 3)
+       AND (  (A.GL_DT BETWEEN (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(@[s_ym]||'01', 'YYYYMMDD'), -1), 'YYYYMMDD') FROM DUAL) AND (SELECT TO_CHAR(LAST_DAY(TO_DATE(@[s_ym]||'01', 'YYYYMMDD')), 'YYYYMMDD') FROM DUAL)
+         OR(A.GL_DT BETWEEN (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(@[s_ym]||'01', 'YYYYMMDD'), -12), 'YYYYMMDD') FROM DUAL) AND (SELECT TO_CHAR(LAST_DAY(ADD_MONTHS(TO_DATE(@[s_ym]||'01', 'YYYYMMDD'), -12)), 'YYYYMMDD') FROM DUAL) )))
+	#end
+       AND A.SRC_CTNT IN ('SO_TRANS', 'SO_TERMINAL', 'SO_PORT', 'SO_M&R')
+       AND B.FTU_USE_CTNT1 IS NOT NULL
+       #if ( ${s_rhq_yn} == 'Y' )
+          AND A.TJ_OFC_CD IN (SELECT OFC_CD
+                                FROM MDM_ORGANIZATION
+                               WHERE DELT_FLG = 'N'
+                             CONNECT BY NOCYCLE PRIOR OFC_CD = PRNT_OFC_CD
+                               START WITH OFC_CD = @[s_ofc_cd]
+                             )
+       #else
+           AND A.TJ_OFC_CD = @[s_ofc_cd]
+       #end
+       AND A.VNDR_NO   = @[s_vndr_seq]
+    #if (${s_mdl_cd} != '')
+       AND A.SRC_CTNT  = @[s_mdl_cd]
+	#end
+	#if (${s_lgs_cost_cd} != '')
+       AND B.FTU_USE_CTNT1 = @[s_lgs_cost_cd]
+	#end       
+    GROUP BY A.TJ_OFC_CD
+           , A.SRC_CTNT, A.VNDR_NO, A.CSR_CURR_CD, B.FTU_USE_CTNT1, B.ATTR_CATE_NM, SUBSTR(A.GL_DT, 1, 6)
+)
+
+SELECT MM.OFC_CD
+      ,CASE WHEN MM.YM_TP_CD = '1' THEN TO_CHAR(TO_DATE(@[s_ym]||'01', 'YYYYMMDD'), 'YYYY-MM')
+            WHEN MM.YM_TP_CD = '2' THEN (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(@[s_ym]||'01', 'YYYYMMDD'), -1), 'YYYY-MM') FROM DUAL)
+            WHEN MM.YM_TP_CD = '3' THEN (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(@[s_ym]||'01', 'YYYYMMDD'), -12), 'YYYY-MM') FROM DUAL)
+       END AS GL_MON
+      ,MM.MDL_CD
+      ,MM.VNDR_NO
+      ,MM.LGS_COST_CD
+      ,(SELECT LGS_COST_NM FROM TABLE(EAS_EXPN_AUD_PKG.GET_LGS_COST_DIV_FNC(MM.LGS_COST_CD))) LGS_COST_NM		
+      ,MM.ACCT_CD
+      ,M1.INV_CNT
+      ,MM.CURR_CD
+      ,M1.CURR_AMT
+      ,M1.USD_AMT
+      ,MM.YM_TP_CD
+      ,1 ORD
+      ,'' AS S_YM
+      ,'' AS S_COMPARE_MON
+      ,'' AS S_MDL_CD
+      ,'' AS S_OFC_CD
+      ,'' AS S_VNDR_SEQ
+      ,'' AS S_LGS_COST_CD
+      ,'' as S_RHQ_YN
+  FROM (
+        SELECT M.OFC_CD, M.STND_YM, M.MDL_CD, M.VNDR_NO, M.LGS_COST_CD, M.ACCT_CD, N.YM_TP_CD, M.CURR_CD
+          FROM (
+                SELECT OFC_CD, STND_YM, MDL_CD, VNDR_NO, LGS_COST_CD, ACCT_CD, CURR_CD
+                  FROM M1
+                 GROUP BY OFC_CD, STND_YM, MDL_CD, VNDR_NO, LGS_COST_CD, ACCT_CD, CURR_CD
+               ) M
+              ,(SELECT ROWNUM AS YM_TP_CD
+                  FROM DUAL
+               CONNECT BY LEVEL <= @[s_compare_mon]
+               ) N
+       ) MM
+      ,M1
+ WHERE MM.OFC_CD  = M1.OFC_CD(+)
+   AND MM.STND_YM = M1.STND_YM(+)
+   AND MM.MDL_CD  = M1.MDL_CD(+)
+   AND MM.VNDR_NO = M1.VNDR_NO(+)
+   AND MM.LGS_COST_CD = M1.LGS_COST_CD(+)
+   AND MM.ACCT_CD     = M1.ACCT_CD(+)
+   AND MM.CURR_CD     = M1.CURR_CD(+)
+   AND MM.YM_TP_CD = M1.YM_TP_CD(+)
+UNION ALL
+SELECT 'TOTAL' OFC_CD
+      ,CASE WHEN MM.YM_TP_CD = '1' THEN TO_CHAR(TO_DATE(@[s_ym]||'01', 'YYYYMMDD'), ' YYYY-MM ')
+            WHEN MM.YM_TP_CD = '2' THEN (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(@[s_ym]||'01', 'YYYYMMDD'), -1), ' YYYY-MM ') FROM DUAL)
+            WHEN MM.YM_TP_CD = '3' THEN (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(@[s_ym]||'01', 'YYYYMMDD'), -12), ' YYYY-MM ') FROM DUAL)
+       END AS GL_MON
+      ,MM.MDL_CD
+      ,MM.VNDR_NO
+      ,NULL LGS_COST_CD
+      ,NULL LGS_COST_NM		
+      ,NULL ACCT_CD
+      ,SUM(M1.INV_CNT) INV_CNT
+      ,MM.CURR_CD
+      ,SUM(M1.CURR_AMT) CURR_AMT
+      ,SUM(M1.USD_AMT) USD_AMT
+      ,MM.YM_TP_CD
+      ,2 ORD
+      ,'' AS S_YM
+      ,'' AS S_COMPARE_MON
+      ,'' AS S_MDL_CD
+      ,'' AS S_OFC_CD
+      ,'' AS S_VNDR_SEQ
+      ,'' AS S_LGS_COST_CD
+      ,'' as S_RHQ_YN
+  FROM (
+        SELECT M.OFC_CD, M.STND_YM, M.MDL_CD, M.VNDR_NO, M.LGS_COST_CD, M.ACCT_CD, N.YM_TP_CD, M.CURR_CD
+          FROM (
+                SELECT OFC_CD, STND_YM, MDL_CD, VNDR_NO, LGS_COST_CD, ACCT_CD, CURR_CD
+                  FROM M1
+                 GROUP BY OFC_CD, STND_YM, MDL_CD, VNDR_NO, LGS_COST_CD, ACCT_CD, CURR_CD
+               ) M
+              ,(SELECT ROWNUM AS YM_TP_CD
+                  FROM DUAL
+               CONNECT BY LEVEL <= @[s_compare_mon]
+               ) N
+       ) MM
+      ,M1
+ WHERE MM.OFC_CD  = M1.OFC_CD(+)
+   AND MM.STND_YM = M1.STND_YM(+)
+   AND MM.MDL_CD  = M1.MDL_CD(+)
+   AND MM.VNDR_NO = M1.VNDR_NO(+)
+   AND MM.LGS_COST_CD = M1.LGS_COST_CD(+)
+   AND MM.ACCT_CD     = M1.ACCT_CD(+)
+   AND MM.CURR_CD     = M1.CURR_CD(+)
+   AND MM.YM_TP_CD = M1.YM_TP_CD(+)
+GROUP BY MM.MDL_CD, MM.VNDR_NO, MM.CURR_CD, MM.YM_TP_CD
+ORDER BY ORD, MDL_CD, OFC_CD, VNDR_NO, LGS_COST_CD, ACCT_CD, CURR_CD ASC, GL_MON DESC			]]></sql>
+			<params>
+				<param name="s_ym" type="12" value="" out="N"/>
+				<param name="s_ofc_cd" type="12" value="" out="N"/>
+				<param name="s_vndr_seq" type="12" value="" out="N"/>
+				<param name="s_mdl_cd" type="12" value="" out="N"/>
+				<param name="s_lgs_cost_cd" type="12" value="" out="N"/>
+				<param name="s_compare_mon" type="12" value="3" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

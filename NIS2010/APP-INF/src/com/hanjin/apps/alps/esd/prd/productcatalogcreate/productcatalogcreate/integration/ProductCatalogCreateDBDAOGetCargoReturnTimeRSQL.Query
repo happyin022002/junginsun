@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ProductCatalogCreateDBDAOGetCargoReturnTimeRSQL">
+			<desc><![CDATA[Rail Export Cargo Available Return Time 개발
+[[[ 하기는 계산 수식입니다. ]]]
+VVD ETA(시간만 버림) 
+– ROUND((RD 시작 Node의 D.well Time의 1/2 +  RD 시작 Node의 ~ Hub Node까지의 T.Time + Hub Node의 D.well Time + Hub Node ~ POL 까지의 T.Time) 
+             - (마지막 구간이 TD이면, 그 구간 시작 Node의 D.well Time : 마지막 구간이 TD일때만 적용),0) 
+- 1 day(Buffer Time) 입니다
+]]></desc>
+			<sql><![CDATA[
+SELECT   TO_CHAR(POL_ETA - ROUND((SUM_HRS - LAST_DWELL + START_DWELL)/24), 'YYYYMMDD') RTN_TIME, -- RTN_TIME계산 기준일자
+         --TO_CHAR(POL_ETA - ROUND((SUM_HRS - LAST_DWELL + START_DWELL)/24) - 1, 'YYYYMMDD') RTN_TIME, -- 계산된 DWELL은 반올림 ROUND 처리한다.
+	     TO_CHAR(TRUNC(CCT) - ROUND((SUM_HRS - LAST_DWELL + START_DWELL)/24) , 'YYYYMMDD') CUT_OFF -- to-be 요건 (buffer day 빠짐.)
+	     ,TO_CHAR(TRUNC(CCT) - ROUND((SUM_HRS - LAST_DWELL + START_DWELL)/24)   
+        	      - (SELECT RCV_ITVAL_DYS
+                          FROM PRD_USA_CCT_ITVAL_MGMT CCTI
+                         WHERE LTST_RCV_DY_CD = TO_CHAR(TRUNC(CCT) - ROUND((SUM_HRS - LAST_DWELL + START_DWELL)/24),'DY','NLS_DATE_LANGUAGE=ENGLISH')  )
+                   ,'YYYYMMDDHH24MI')
+	      ERD 
+	     ,TO_CHAR(TRUNC(CCT) - ROUND((SUM_HRS - LAST_DWELL + START_DWELL)/24),'DY','NLS_DATE_LANGUAGE=ENGLISH') LRD_DY
+	     ,(SELECT RCV_ITVAL_DYS
+                  FROM PRD_USA_CCT_ITVAL_MGMT CCTI
+                 WHERE LTST_RCV_DY_CD = TO_CHAR(TRUNC(CCT) - ROUND((SUM_HRS - LAST_DWELL + START_DWELL)/24),'DY','NLS_DATE_LANGUAGE=ENGLISH')  ) RCV_ITVAL_DYS
+
+FROM   
+(   
+    SELECT   
+    M.PCTL_NO,   
+    M.POL_CD,   
+    NVL((SELECT 'Y'   
+         FROM PRD_PROD_CTL_QTY Q   
+         WHERE Q.PCTL_NO = M.PCTL_NO   
+           AND Q.CNTR_TPSZ_CD LIKE 'R%'   
+           AND ROWNUM =1),'N') RF_FLG, 
+
+    (
+        SELECT DISTINCT TO_DATE(TO_CHAR(PRD_GET_CCT_FNC(PRDD.ORG_NOD_CD,PRDD.VSL_SLAN_CD,PRDD.SKD_DIR_CD,DECODE(PRDM.RF_SPCL_FLG,'Y','RF',DECODE(DG_SPCL_FLG,'Y','DG','DR')),
+                                                        NVL(VSLS.VPS_ETB_DT,PRDD.ARR_ST_DT),NVL(VSLS.VPS_ETD_DT,PRDD.ARR_ST_DT),  PRDD.VSL_CD||PRDD.SKD_VOY_NO||PRDD.SKD_DIR_CD),
+                                        'YYYY/mm/dd HH24:MI'),
+                                'YYYY/mm/dd HH24:MI') CCT
+          FROM PRD_PROD_CTL_MST PRDM,PRD_PROD_CTL_ROUT_DTL PRDD,VSK_VSL_PORT_SKD VSLS
+         WHERE PRDM.PCTL_NO = M.PCTL_NO --'B120608031019252'
+    	   AND PRDM.PCTL_NO = PRDD.PCTL_NO
+    	   AND PRDD.PCTL_IO_BND_CD = 'T'
+    	   AND PRDD.TRSP_MOD_CD IN ('WD','VD')
+    	   AND SUBSTR(PRDD.ORG_NOD_CD,1,5) = PRDM.POL_CD
+    	   AND VSLS.VSL_CD(+) = PRDD.VSL_CD
+    	   AND VSLS.SKD_VOY_NO(+) = PRDD.SKD_VOY_NO
+    	   AND VSLS.SKD_DIR_CD(+) = PRDD.SKD_DIR_CD
+    	   AND VSLS.CLPT_IND_SEQ(+) = PRDD.ORG_CLPT_IND_SEQ
+    	   AND VSLS.YD_CD(+) = PRDD.ORG_NOD_CD	
+    ) CCT,     
+    (SELECT MIN(TRUNC(NVL(PF_ETA_DT,VPS_ETA_DT))) --ETA 날짜는 제외하고, 그 전날을 기준으로 산출 (전날은 하루로 포함되어야 하므로, ETA에서 TRIM만 처리한다) -- 20120308
+     FROM PRD_PROD_CTL_ROUT_DTL E, VSK_VSL_PORT_SKD V
+     WHERE E.PCTL_NO = M.PCTL_NO
+     AND E.ORG_NOD_CD LIKE M.POL_CD||'%'
+     AND E.NOD_LNK_DIV_CD = 'L'
+     AND E.TRSP_MOD_CD = 'VD' -- 미주는 Feeder 없음
+     AND E.VSL_CD = V.VSL_CD
+     AND E.SKD_VOY_NO = V.SKD_VOY_NO
+     AND E.SKD_DIR_CD = V.SKD_DIR_CD
+     AND E.ORG_NOD_CD = V.YD_CD
+     AND E.ORG_CLPT_IND_SEQ = V.CLPT_IND_SEQ
+     AND NVL(V.PORT_SKD_STS_CD,'X') <> 'S'
+     ) POL_ETA,  
+    MAX((CASE WHEN D.PCTL_SEQ = (SELECT MIN(PCTL_SEQ) FROM PRD_PROD_CTL_ROUT_DTL D2   
+                                  WHERE D2.PCTL_IO_BND_CD = 'O'   
+                                  AND D2.TRSP_MOD_CD ='RD'   
+                                  AND D2.PCTL_NO = M.PCTL_NO)   
+              THEN (  SELECT DECODE(NVL(M.PRM_CUST_FLG, 'N'), 'Y',   
+                                    DECODE(   (SELECT 'Y'   
+                                               FROM PRD_PROD_CTL_QTY Q   
+                                               WHERE Q.PCTL_NO = M.PCTL_NO   
+                                                 AND Q.CNTR_TPSZ_CD LIKE 'R%'   
+                                                 AND ROWNUM =1),    'Y', NVL(OB_RF_MIN_DWLL_HRS, 24), NVL(OB_DRY_MIN_DWLL_HRS, 24)),   
+                                      DECODE(   (SELECT 'Y'   
+                                                 FROM PRD_PROD_CTL_QTY Q   
+                                                 WHERE Q.PCTL_NO = M.PCTL_NO   
+                                                   AND Q.CNTR_TPSZ_CD LIKE 'R%'   
+                                                   AND ROWNUM =1),  'Y', NVL(OB_RF_AVG_DWLL_HRS, 24), NVL(OB_DRY_AVG_DWLL_HRS, 24)))   
+                        FROM MDM_YARD   
+                       WHERE YD_CD = D.ORG_NOD_CD                             )   
+              ELSE 0   
+         END))* 0.5 START_DWELL,   --RD 시작 Node의 D.well Time의 1/2
+        														  --//	포함 되어 있는 Rail Ramp Dwell Range 만큼 조기 반입 결과 초래 ,Inland Rail Ramp Dwell 의 1/2 값 반영
+    MAX((CASE WHEN D.PCTL_SEQ = (SELECT max(PCTL_SEQ) FROM PRD_PROD_CTL_ROUT_DTL D2   
+                                  WHERE D2.PCTL_IO_BND_CD = 'O'   
+                                    AND D2.NOD_LNK_DIV_CD = 'L'   
+                                    AND D2.PCTL_NO = M.PCTL_NO   
+                                  )   
+               AND D.TRSP_MOD_CD ='TD'   
+              THEN (  SELECT DECODE(NVL(M.PRM_CUST_FLG, 'N'), 'Y',   
+                                    DECODE(   (SELECT 'Y'   
+                                               FROM PRD_PROD_CTL_QTY Q   
+                                               WHERE Q.PCTL_NO = M.PCTL_NO   
+                                                 AND Q.CNTR_TPSZ_CD LIKE 'R%'   
+                                                 AND ROWNUM =1),    'Y', NVL(OB_RF_MIN_DWLL_HRS, 24), NVL(OB_DRY_MIN_DWLL_HRS, 24)),   
+                                      DECODE(   (SELECT 'Y'   
+                                                 FROM PRD_PROD_CTL_QTY Q   
+                                                 WHERE Q.PCTL_NO = M.PCTL_NO   
+                                                   AND Q.CNTR_TPSZ_CD LIKE 'R%'   
+                                                   AND ROWNUM =1),  'Y', NVL(OB_RF_AVG_DWLL_HRS, 24), NVL(OB_DRY_AVG_DWLL_HRS, 24)))   
+                        FROM MDM_YARD   
+                       WHERE YD_CD = D.ORG_NOD_CD )   
+              ELSE 0   
+       END)) LAST_DWELL,   --마지막 구간이 TD이면, 그 구간 시작 Node의 D.well Time : 마지막 구간이 TD일때만 적용
+    SUM (   
+        (CASE WHEN D.NOD_LNK_DIV_CD = 'N'   
+              THEN  (   
+                    SELECT DECODE(NVL(M.PRM_CUST_FLG, 'N'), 'Y',   
+                            DECODE(   (SELECT 'Y'   
+                                       FROM PRD_PROD_CTL_QTY Q   
+                                       WHERE Q.PCTL_NO = M.PCTL_NO   
+                                         AND Q.CNTR_TPSZ_CD LIKE 'R%'   
+                                         AND ROWNUM =1),    'Y', NVL(OB_RF_MIN_DWLL_HRS, 24), NVL(OB_DRY_MIN_DWLL_HRS, 24)),   
+                              DECODE(   (SELECT 'Y'   
+                                         FROM PRD_PROD_CTL_QTY Q   
+                                         WHERE Q.PCTL_NO = M.PCTL_NO   
+                                           AND Q.CNTR_TPSZ_CD LIKE 'R%'   
+                                           AND ROWNUM =1),  'Y', NVL(OB_RF_AVG_DWLL_HRS, 24), NVL(OB_DRY_AVG_DWLL_HRS, 24)))   
+                    FROM MDM_YARD   
+                    WHERE YD_CD = D.ORG_NOD_CD )   
+              ELSE TZ_DWLL_TM_HRS   
+          END)   
+    ) SUM_HRS   --RD 시작 Node의 ~ Hub Node까지의 T.Time + Hub Node의 D.well Time + Hub Node ~ POL 까지의 T.Time
+    FROM PRD_PROD_CTL_ROUT_DTL D, PRD_PROD_CTL_MST M   
+    WHERE M.PCTL_NO = @[pctl_no]   
+      AND M.PCTL_NO = D.PCTL_NO   
+      AND D.PCTL_IO_BND_CD ='O'   
+      AND ( M.POL_CD LIKE 'US%'   
+         OR M.POL_CD LIKE 'CA%' )   
+      AND D.PCTL_SEQ BETWEEN   
+                     (SELECT MIN(PCTL_SEQ) FROM PRD_PROD_CTL_ROUT_DTL D2   
+                      WHERE D2.PCTL_IO_BND_CD = 'O'   
+                      AND D2.TRSP_MOD_CD ='RD'   
+                      AND D2.PCTL_NO = M.PCTL_NO)   
+                     AND   
+                     (SELECT MAX(PCTL_SEQ) FROM PRD_PROD_CTL_ROUT_DTL D2   
+                      WHERE D2.PCTL_IO_BND_CD = 'O'   
+                      AND D2.NOD_LNK_DIV_CD = 'L'   
+                      AND D2.PCTL_NO = M.PCTL_NO)   
+    GROUP BY M.PCTL_NO,M.POL_CD   
+)			]]></sql>
+			<params>
+				<param name="pctl_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

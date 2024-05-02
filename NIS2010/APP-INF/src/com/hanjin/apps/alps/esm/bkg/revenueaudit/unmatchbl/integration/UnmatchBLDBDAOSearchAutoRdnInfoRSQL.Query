@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="UnmatchBLDBDAOSearchAutoRdnInfoRSQL">
+			<desc><![CDATA[checkTaaSurchargeDiscrepancyDetail
+
+Non-Charged RDN의 Resp. OFC 지정 로직을 보완
+- OFT Rating 가능한 운임이 존재하는경우 : BKG or Rating OFC(DPCS 대상인 경우)
+- OFT Rating 가능한 운임이 없는경우 : Contract OFC
+]]></desc>
+			<sql><![CDATA[
+SELECT BL_NO, BKG_NO, ISS_OFC_CD, RCT_RHQ_CD, RCT_OFC_CD, RESPB_OFC_CD,
+       (SELECT AR_HD_QTR_OFC_CD FROM MDM_ORGANIZATION WHERE OFC_CD = RESPB_OFC_CD) AS RESPB_RHQ_CD,
+       UMCH_TP_CD, UMCH_SUB_TP_CD, RDN_ISS_RSN_CD, SC_RFA_NO,
+       REV_AUD_TOOL_CD, RDN_RMK, RDN_ISS_DT, RDN_ISS_DT_WK, RDN_KND_CD
+FROM (   
+        SELECT B.BL_NO
+              ,B.BKG_NO
+              ,'PKGSA' AS ISS_OFC_CD
+              ,O.AR_HD_QTR_OFC_CD AS RCT_RHQ_CD
+              ,B.BKG_OFC_CD AS RCT_OFC_CD
+              ,DECODE(R.OFT_MSS_FLG, 'Y', B.CTRT_OFC_CD, 
+                                          NVL((SELECT DPCS_OFC_CD 
+                                               FROM BKG_SR_CRNT_RQST 
+                                               WHERE BKG_NO = B.BKG_NO 
+                                               AND ROWNUM = 1),B.BKG_OFC_CD)) AS RESPB_OFC_CD
+              ,'D' AS UMCH_TP_CD
+              ,'' AS UMCH_SUB_TP_CD
+              ,'8' AS RDN_ISS_RSN_CD
+              ,DECODE(R.BKG_CTRT_TP_CD, 'S', B.SC_NO
+                                      , 'R', B.RFA_NO
+                                      , 'T', B.TAA_NO) AS SC_RFA_NO
+              ,'1' AS REV_AUD_TOOL_CD
+              ,'' AS RDN_RMK
+              ,TO_CHAR(SYSDATE, 'YYYYMMDD') AS RDN_ISS_DT
+              ,TO_CHAR(SYSDATE, 'IW') AS RDN_ISS_DT_WK
+              ,'C' RDN_KND_CD  -- BDR_FLG 가 Y인 BKG만 대상이기 때문에 RDN Kind는 C로 고정
+          FROM BKG_BOOKING B
+              ,BKG_BL_DOC D
+              ,BKG_REV_UMCH_ITM UMCH
+              ,BKG_RATE R
+              ,MDM_ORGANIZATION O
+         WHERE B.BKG_NO = @[bkg_no]
+           AND B.BKG_NO = D.BKG_NO
+           AND D.BDR_FLG = 'Y'
+           AND B.BKG_NO = UMCH.BKG_NO
+           AND UMCH.UMCH_TP_CD = 'D'
+           AND UMCH.UMCH_BKG_SEQ = (SELECT MAX(UMCH_BKG_SEQ) FROM BKG_REV_UMCH_ITM WHERE BKG_NO=UMCH.BKG_NO)
+           AND B.BKG_NO = R.BKG_NO
+           AND O.OFC_CD = B.BKG_OFC_CD
+           AND NOT EXISTS (
+                           SELECT RDN_NO
+                             FROM (
+                                   SELECT RDN_NO    
+                                         ,RDN_STS_CD
+                                     FROM BKG_REV_DR_NOTE A
+                                    WHERE BKG_NO    = @[bkg_no]
+                                      AND NOT EXISTS  (
+                                                       SELECT 'X'
+                                                         FROM BKG_REV_DR_NOTE B
+                                                        WHERE B.RDN_NO    = A.RDN_NO
+                                                          AND B.RVIS_SEQ  > A.RVIS_SEQ
+                                                      )
+                                  )
+                            WHERE RDN_STS_CD  NOT IN ( 'ST', 'CL' )
+                           )
+           --AND D.BDR_DT + 2 < GLOBALDATE_PKG.TIME_LOCAL_OFC_FNC(B.BKG_OFC_CD)
+           AND DECODE(B.SPLIT_FLG, 'Y', B.PORT_CLZ_DT + 2, B.PORT_CLZ_DT) < GLOBALDATE_PKG.TIME_LOCAL_OFC_FNC(B.BKG_OFC_CD)
+
+	)			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

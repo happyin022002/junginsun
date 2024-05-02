@@ -1,0 +1,386 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="RFAExceptionTariffMgtDBDAOSearchBeforeBookingListByDateUserOfficeRCVRSQL">
+			<desc><![CDATA[DEM/DET Adjustment Request & Approval Status 조회(BeforeBooking, DATE-Office, Received)용 쿼리]]></desc>
+			<sql><![CDATA[
+#if((${to_cc} == '' && ${usr_ofc_only} == "N") || (${to_cc} == 'cc' && ${usr_ofc_only} == "N"))
+(
+	SELECT  /*+ INDEX(RFA_TRF JIN_DMT_RFA_EXPT_TRF) */ 
+			DISTINCT 'CC' AS TO_CC
+		,	RFA_TRF.RFA_EXPT_DAR_NO AS DAR_NO
+		,	LPAD(RFA_TRF.RFA_EXPT_VER_SEQ, 3, '0') AS VER_NO
+		,	RFA_TRF.RFA_EXPT_APRO_NO AS APVL_NO
+		,	CD_DTL.INTG_CD_VAL_DP_DESC AS STATUS
+
+		#if(${group_by} == 'CVRG')
+		,	RFA_TRF_DTL.RFA_RQST_DTL_SEQ AS DTL_SEQ
+	    ,   RFA_TRF_DTL.DMDT_TRF_CD
+		,	RFA_CVRG.CVRG_CMB_SEQ AS CVRG_SEQ
+		,	RFA_CVRG.CVRG_CNT_CD AS CNT_CD
+		,	RFA_CVRG.RGN_CD
+		,	RFA_CVRG.CVRG_LOC_CD AS LOC_CD
+		#end
+
+		,	(
+				SELECT  /*+ INDEX_DESC(DMT_RFA_EXPT_TRF_PROG XPKDMT_RFA_EXPT_TRF_PROG) */ PROG_OFC_CD
+				FROM    DMT_RFA_EXPT_TRF_PROG
+				WHERE   RFA_EXPT_DAR_NO 		= RFA_TRF.RFA_EXPT_DAR_NO
+					AND RFA_EXPT_MAPG_SEQ 		= RFA_TRF.RFA_EXPT_MAPG_SEQ
+					AND RFA_EXPT_VER_SEQ 		= RFA_TRF.RFA_EXPT_VER_SEQ
+					AND DMDT_EXPT_RQST_STS_CD 	= 'R'
+					AND	ROWNUM 					= 1						
+			) AS REQ_OFC_CD
+		,	(
+				SELECT  /*+ INDEX_DESC(DMT_RFA_EXPT_TRF_PROG XPKDMT_RFA_EXPT_TRF_PROG) */ DECODE(RFA_TRF.DMDT_EXPT_RQST_STS_CD, 'C', '', PROG_OFC_CD)
+				FROM    DMT_RFA_EXPT_TRF_PROG
+				WHERE   RFA_EXPT_DAR_NO 		= RFA_TRF.RFA_EXPT_DAR_NO
+					AND RFA_EXPT_MAPG_SEQ 		= RFA_TRF.RFA_EXPT_MAPG_SEQ
+					AND RFA_EXPT_VER_SEQ 		= RFA_TRF.RFA_EXPT_VER_SEQ
+					AND DMDT_EXPT_RQST_STS_CD 	IN ('A', 'C', 'J', 'O')
+					AND	ROWNUM 					= 1						
+			) AS APRO_OFC_CD
+	    ,   TO_CHAR(RFA_TRF.UPD_DT, 'YYYY-MM-DD') AS UPD_DT
+	    ,   RP_HDR.RFA_NO
+	    ,   RP_HDR.PROP_NO
+	    ,   RP_MN.CTRT_CUST_CNT_CD || LPAD(RP_MN.CTRT_CUST_SEQ, 6, '0') CUST_CD
+	    ,   CUST.CUST_LGL_ENG_NM CUST_NM         
+
+	FROM    DMT_RFA_EXPT_TRF RFA_TRF
+		,	PRI_RP_HDR RP_HDR
+		,	PRI_RP_MN RP_MN
+		,	DMT_RFA_EXPT_TRF_DTL RFA_TRF_DTL
+		,	COM_INTG_CD_DTL CD_DTL
+	    ,   MDM_CUSTOMER CUST
+		,	(
+				SELECT  CVRG.CVRG_CMB_SEQ
+					,	CVRG.CVRG_CNT_CD
+                    ,	CASE WHEN CVRG.CVRG_CNT_CD IN ('CA', 'US') THEN CVRG.CVRG_STE_CD ELSE CVRG.CVRG_RGN_CD END RGN_CD
+                    ,	CVRG.CVRG_LOC_CD
+                    ,	CVRG.ORG_DEST_CONTI_CD
+                    ,	CVRG.ORG_DEST_CNT_CD
+                    ,	CASE WHEN CVRG.ORG_DEST_CNT_CD IN ('CA', 'US') THEN CVRG.ORG_DEST_STE_CD ELSE CVRG.ORG_DEST_RGN_CD END ORG_DEST_RGN_CD
+                    ,	CVRG.ORG_DEST_LOC_CD
+                    ,	CVRG.RFA_EXPT_DAR_NO
+                    ,	CVRG.RFA_EXPT_MAPG_SEQ
+                    ,	CVRG.RFA_EXPT_VER_SEQ
+                    ,	CVRG.RFA_RQST_DTL_SEQ
+	                ,   ROWNUM        
+				FROM   (
+							SELECT 	DISTINCT CVRG.ROWID  RID
+                    		FROM    DMT_RFA_EXPT_CVRG_CMB CVRG
+								,	(
+										SELECT  LCT.CNT_CD
+				                            ,   DECODE(LCT.CNT_CD, 'CA', ' ', 'US', ' ', LCT.RGN_CD) RGN_CD
+				                            ,   DECODE(LCT.CNT_CD, 'CA', LCT.CNT_CD, 'US', LCT.STE_CD, ' ')  STE_CD
+                            				,   LCT.LOC_CD
+			                            FROM    MDM_YARD YARD
+            				                ,   MDM_LOCATION LCT
+			                            WHERE   YARD.DMDT_OFC_CD IN (
+													#foreach( $ofc_cd in ${ofc_cd_list} )
+														#if($velocityCount < $ofc_cd_list.size()) '$ofc_cd', #else '$ofc_cd' #end
+													#end
+												)
+                            				AND YARD.DELT_FLG = 'N'
+				                            AND YARD.LOC_CD = LCT.LOC_CD
+			                        ) B
+		                    WHERE   CVRG.CVRG_CNT_CD = B.CNT_CD
+                    			AND CVRG.CVRG_RGN_CD = DECODE(CVRG.CVRG_RGN_CD, ' ', ' ', B.RGN_CD)
+                    			AND CVRG.CVRG_STE_CD = DECODE(CVRG.CVRG_STE_CD, ' ', ' ', B.STE_CD)
+                    			AND CVRG.CVRG_LOC_CD = DECODE(CVRG.CVRG_LOC_CD, ' ', ' ', B.LOC_CD)      
+                   		) A
+					,	DMT_RFA_EXPT_CVRG_CMB CVRG
+				WHERE   A.RID = CVRG.ROWID
+					AND CVRG.CVRG_CMB_SEQ = 
+						(
+							SELECT  /*+ INDEX_ASC(DMT_RFA_EXPT_CVRG_CMB XPKDMT_RFA_EXPT_CVRG_CMB) */ CVRG_CMB_SEQ
+							FROM    DMT_RFA_EXPT_CVRG_CMB
+							WHERE   RFA_EXPT_DAR_NO 	= CVRG.RFA_EXPT_DAR_NO
+								AND RFA_EXPT_MAPG_SEQ 	= CVRG.RFA_EXPT_MAPG_SEQ
+								AND RFA_EXPT_VER_SEQ 	= CVRG.RFA_EXPT_VER_SEQ
+								AND RFA_RQST_DTL_SEQ 	= CVRG.RFA_RQST_DTL_SEQ
+								AND ROWNUM 				= 1
+						)               
+           )  RFA_CVRG 
+
+	WHERE	RFA_TRF.UPD_DT BETWEEN TO_DATE(@[fm_dt], 'YYYY-MM-DD') AND TO_DATE(@[to_dt], 'YYYY-MM-DD') + 0.99999
+		AND RFA_TRF.DMDT_EXPT_RQST_STS_CD <> 'T'
+		AND	RFA_TRF.PROP_NO 			= RP_HDR.PROP_NO
+		AND RP_HDR.PROP_NO 				= RP_MN.PROP_NO
+		AND RP_MN.AMDT_SEQ 				=
+			(
+				SELECT	/*+ INDEX_DESC(PRI_RP_MN XPKPRI_RP_MN) */ AMDT_SEQ
+				FROM	PRI_RP_MN
+				WHERE	PROP_NO = RP_MN.PROP_NO
+					AND ROWNUM 	= 1
+			)
+
+		#if(${cust_cd} != '')
+	    AND RP_MN.CTRT_CUST_CNT_CD 		= SUBSTR(@[cust_cd], 0, 2) AND RP_MN.CTRT_CUST_SEQ = SUBSTR(@[cust_cd], 3)
+		#end
+
+	    AND RP_MN.CTRT_CUST_CNT_CD 		= CUST.CUST_CNT_CD
+	    AND RP_MN.CTRT_CUST_SEQ 		= CUST.CUST_SEQ
+		AND RFA_TRF.RFA_EXPT_DAR_NO 	= RFA_TRF_DTL.RFA_EXPT_DAR_NO
+		AND RFA_TRF.RFA_EXPT_MAPG_SEQ 	= RFA_TRF_DTL.RFA_EXPT_MAPG_SEQ
+		AND RFA_TRF.RFA_EXPT_VER_SEQ 	= RFA_TRF_DTL.RFA_EXPT_VER_SEQ
+		AND RFA_TRF_DTL.DMDT_TRF_CD IN (
+			#foreach( $trf_cd in ${trf_cd_list} )
+				#if($velocityCount < $trf_cd_list.size()) '$trf_cd', #else '$trf_cd' #end
+			#end
+			)
+		AND RFA_TRF_DTL.RFA_EXPT_DAR_NO 	= RFA_CVRG.RFA_EXPT_DAR_NO
+		AND RFA_TRF_DTL.RFA_EXPT_MAPG_SEQ 	= RFA_CVRG.RFA_EXPT_MAPG_SEQ
+		AND RFA_TRF_DTL.RFA_EXPT_VER_SEQ 	= RFA_CVRG.RFA_EXPT_VER_SEQ
+    	AND RFA_TRF_DTL.RFA_RQST_DTL_SEQ 	= RFA_CVRG.RFA_RQST_DTL_SEQ
+    	AND RFA_TRF.DMDT_EXPT_RQST_STS_CD 	= CD_DTL.INTG_CD_VAL_CTNT
+	    AND CD_DTL.INTG_CD_ID 				= 'CD02069'
+)
+#end
+
+#if(${to_cc} == '' && ${usr_ofc_only} == "N")
+UNION ALL
+#end
+
+#if(${to_cc} == '' || ${to_cc} == 'to')
+(
+	SELECT  /*+ LEADING(RFA_TRF_PROG) */ 
+			DISTINCT 'TO' AS TO_CC
+		,	RFA_TRF.RFA_EXPT_DAR_NO AS DAR_NO
+		,	LPAD(RFA_TRF.RFA_EXPT_VER_SEQ, 3, '0') AS VER_NO
+		,	RFA_TRF.RFA_EXPT_APRO_NO AS APVL_NO
+		,	CD_DTL.INTG_CD_VAL_DP_DESC AS STATUS
+
+		#if(${group_by} == 'CVRG')
+		,	RFA_TRF_DTL.RFA_RQST_DTL_SEQ AS DTL_SEQ
+	    ,   RFA_TRF_DTL.DMDT_TRF_CD
+		,	RFA_CVRG.CVRG_CMB_SEQ AS CVRG_SEQ
+		,	RFA_CVRG.CVRG_CNT_CD AS CNT_CD
+		,	CASE 
+				WHEN SUBSTR(RFA_CVRG.CVRG_CNT_CD, 1, 2) IN ('CA', 'US') 
+					THEN RFA_CVRG.CVRG_STE_CD
+					ELSE RFA_CVRG.CVRG_RGN_CD
+			END AS RGN_CD
+		,	RFA_CVRG.CVRG_LOC_CD AS LOC_CD
+		#end
+
+		,   RFA_TRF_PROG.PROG_OFC_CD AS REQ_OFC_CD
+		,	DECODE(RFA_TRF.DMDT_EXPT_RQST_STS_CD, 'C', '', RFA_TRF_PROG2.PROG_OFC_CD) AS APRO_OFC_CD
+	    ,   TO_CHAR(RFA_TRF.UPD_DT, 'YYYY-MM-DD') AS UPD_DT
+	    ,   RP_HDR.RFA_NO
+	    ,   RP_HDR.PROP_NO
+	    ,   RP_MN.CTRT_CUST_CNT_CD || LPAD(RP_MN.CTRT_CUST_SEQ, 6, '0') CUST_CD
+	    ,   CUST.CUST_LGL_ENG_NM CUST_NM         
+
+	FROM    DMT_RFA_EXPT_TRF RFA_TRF
+    	,   DMT_RFA_EXPT_TRF_PROG RFA_TRF_PROG
+		,   DMT_RFA_EXPT_TRF_PROG RFA_TRF_PROG2
+		,	PRI_RP_HDR RP_HDR
+		,	PRI_RP_MN RP_MN
+		,	DMT_RFA_EXPT_TRF_DTL RFA_TRF_DTL
+		#if(${group_by} == 'CVRG')
+		,	DMT_RFA_EXPT_CVRG_CMB RFA_CVRG
+		#end
+		,	COM_INTG_CD_DTL CD_DTL
+	    ,   MDM_CUSTOMER CUST
+
+	WHERE   RFA_TRF.RFA_EXPT_DAR_NO 		= RFA_TRF_PROG.RFA_EXPT_DAR_NO
+	    AND RFA_TRF.RFA_EXPT_MAPG_SEQ 		= RFA_TRF_PROG.RFA_EXPT_MAPG_SEQ
+	    AND RFA_TRF.RFA_EXPT_VER_SEQ 		= RFA_TRF_PROG.RFA_EXPT_VER_SEQ
+		AND	RFA_TRF.RFA_EXPT_DAR_NO 		= RFA_TRF_PROG2.RFA_EXPT_DAR_NO
+	    AND RFA_TRF.RFA_EXPT_MAPG_SEQ 		= RFA_TRF_PROG2.RFA_EXPT_MAPG_SEQ
+	    AND RFA_TRF.RFA_EXPT_VER_SEQ 		= RFA_TRF_PROG2.RFA_EXPT_VER_SEQ
+	    AND RFA_TRF.DMDT_EXPT_RQST_STS_CD 	IN ('A', 'C', 'J', 'O')
+	    AND RFA_TRF.UPD_DT BETWEEN TO_DATE(@[fm_dt], 'YYYY-MM-DD') AND TO_DATE(@[to_dt], 'YYYY-MM-DD') + 0.99999
+		AND RFA_TRF_PROG.PROG_SEQ 			=
+			(
+				SELECT  /*+ INDEX_DESC(DMT_RFA_EXPT_TRF_PROG XPKDMT_RFA_EXPT_TRF_PROG) */ PROG_SEQ
+				FROM    DMT_RFA_EXPT_TRF_PROG
+				WHERE   RFA_EXPT_DAR_NO 		= RFA_TRF_PROG.RFA_EXPT_DAR_NO
+					AND RFA_EXPT_MAPG_SEQ 		= RFA_TRF_PROG.RFA_EXPT_MAPG_SEQ
+					AND RFA_EXPT_VER_SEQ 		= RFA_TRF_PROG.RFA_EXPT_VER_SEQ
+					AND DMDT_EXPT_RQST_STS_CD 	= 'R'
+					AND	ROWNUM 					= 1						
+			)
+		AND RFA_TRF_PROG.PROG_OFC_CD IN 
+			(
+				#foreach( $ofc_cd in ${ofc_cd_list} )
+					#if($velocityCount < $ofc_cd_list.size()) '$ofc_cd', #else '$ofc_cd' #end
+				#end
+			)
+		AND RFA_TRF_PROG2.PROG_SEQ =
+			(
+				SELECT  /*+ INDEX_DESC(DMT_RFA_EXPT_TRF_PROG XPKDMT_RFA_EXPT_TRF_PROG) */ PROG_SEQ
+				FROM    DMT_RFA_EXPT_TRF_PROG
+				WHERE   RFA_EXPT_DAR_NO 		= RFA_TRF_PROG2.RFA_EXPT_DAR_NO
+					AND RFA_EXPT_MAPG_SEQ 		= RFA_TRF_PROG2.RFA_EXPT_MAPG_SEQ
+					AND RFA_EXPT_VER_SEQ 		= RFA_TRF_PROG2.RFA_EXPT_VER_SEQ
+					AND DMDT_EXPT_RQST_STS_CD 	IN ('A', 'C', 'J', 'O')
+					AND	ROWNUM 					= 1						
+			)
+
+		AND	RFA_TRF.PROP_NO = RP_HDR.PROP_NO
+		AND RP_HDR.PROP_NO = RP_MN.PROP_NO
+		AND RP_MN.AMDT_SEQ =
+			(
+				SELECT	/*+ INDEX_DESC(PRI_RP_MN XPKPRI_RP_MN) */ AMDT_SEQ
+				FROM	PRI_RP_MN
+				WHERE	PROP_NO = RP_MN.PROP_NO
+					AND ROWNUM 	= 1
+			)
+
+		#if(${cust_cd} != '')
+	    AND RP_MN.CTRT_CUST_CNT_CD = SUBSTR(@[cust_cd], 0, 2) AND RP_MN.CTRT_CUST_SEQ = SUBSTR(@[cust_cd], 3)
+		#end
+
+	    AND RP_MN.CTRT_CUST_CNT_CD 		= CUST.CUST_CNT_CD
+	    AND RP_MN.CTRT_CUST_SEQ 		= CUST.CUST_SEQ
+		AND RFA_TRF.RFA_EXPT_DAR_NO 	= RFA_TRF_DTL.RFA_EXPT_DAR_NO
+		AND RFA_TRF.RFA_EXPT_MAPG_SEQ 	= RFA_TRF_DTL.RFA_EXPT_MAPG_SEQ
+		AND RFA_TRF.RFA_EXPT_VER_SEQ 	= RFA_TRF_DTL.RFA_EXPT_VER_SEQ
+		AND RFA_TRF_DTL.DMDT_TRF_CD 	IN (
+			#foreach( $trf_cd in ${trf_cd_list} )
+				#if($velocityCount < $trf_cd_list.size()) '$trf_cd', #else '$trf_cd' #end
+			#end
+		)
+
+		#if(${group_by} == 'CVRG')
+		AND RFA_TRF_DTL.RFA_EXPT_DAR_NO 	= RFA_CVRG.RFA_EXPT_DAR_NO
+		AND RFA_TRF_DTL.RFA_EXPT_MAPG_SEQ 	= RFA_CVRG.RFA_EXPT_MAPG_SEQ
+		AND RFA_TRF_DTL.RFA_EXPT_VER_SEQ 	= RFA_CVRG.RFA_EXPT_VER_SEQ
+    	AND RFA_TRF_DTL.RFA_RQST_DTL_SEQ 	= RFA_CVRG.RFA_RQST_DTL_SEQ
+		AND RFA_CVRG.CVRG_CMB_SEQ 			= 
+			(
+				SELECT	/*+ INDEX_ASC(DMT_RFA_EXPT_CVRG_CMB XPKDMT_RFA_EXPT_CVRG_CMB) */ CVRG_CMB_SEQ
+				FROM	DMT_RFA_EXPT_CVRG_CMB
+				WHERE	RFA_EXPT_DAR_NO 	= RFA_CVRG.RFA_EXPT_DAR_NO
+					AND	RFA_EXPT_MAPG_SEQ 	= RFA_CVRG.RFA_EXPT_MAPG_SEQ
+					AND RFA_EXPT_VER_SEQ 	= RFA_CVRG.RFA_EXPT_VER_SEQ
+					AND RFA_RQST_DTL_SEQ 	= RFA_CVRG.RFA_RQST_DTL_SEQ
+					AND ROWNUM 				= 1
+			)
+		#end
+
+    	AND RFA_TRF.DMDT_EXPT_RQST_STS_CD 	= CD_DTL.INTG_CD_VAL_CTNT
+	    AND CD_DTL.INTG_CD_ID 				= 'CD02069'
+
+	UNION
+
+	SELECT  DISTINCT 'TO' AS TO_CC
+		,	RFA_TRF.RFA_EXPT_DAR_NO AS DAR_NO
+		,	LPAD(RFA_TRF.RFA_EXPT_VER_SEQ, 3, '0') AS VER_NO
+		,	RFA_TRF.RFA_EXPT_APRO_NO AS APVL_NO
+		,	CD_DTL.INTG_CD_VAL_DP_DESC AS STATUS
+
+		#if(${group_by} == 'CVRG')
+		,	RFA_TRF_DTL.RFA_RQST_DTL_SEQ AS DTL_SEQ
+	    ,   RFA_TRF_DTL.DMDT_TRF_CD
+		,	RFA_CVRG.CVRG_CMB_SEQ AS CVRG_SEQ
+		,	RFA_CVRG.CVRG_CNT_CD AS CNT_CD
+		,	CASE 
+				WHEN SUBSTR(RFA_CVRG.CVRG_CNT_CD, 1, 2) IN ('CA', 'US') 
+					THEN RFA_CVRG.CVRG_STE_CD
+					ELSE RFA_CVRG.CVRG_RGN_CD
+			END AS RGN_CD
+		,	RFA_CVRG.CVRG_LOC_CD AS LOC_CD
+
+		#end
+
+		,   RFA_TRF_PROG.PROG_OFC_CD AS REQ_OFC_CD
+		,	'' AS APRO_OFC_CD
+	    ,   TO_CHAR(RFA_TRF.UPD_DT, 'YYYY-MM-DD') AS UPD_DT
+	    ,   RP_HDR.RFA_NO
+	    ,   RP_HDR.PROP_NO
+	    ,   RP_MN.CTRT_CUST_CNT_CD || LPAD(RP_MN.CTRT_CUST_SEQ, 6, '0') CUST_CD
+	    ,   CUST.CUST_LGL_ENG_NM CUST_NM         
+
+	FROM    DMT_RFA_EXPT_TRF RFA_TRF
+    	,   DMT_RFA_EXPT_TRF_PROG RFA_TRF_PROG
+		,	PRI_RP_HDR RP_HDR
+		,	PRI_RP_MN RP_MN
+		,	DMT_RFA_EXPT_TRF_DTL RFA_TRF_DTL
+		#if(${group_by} == 'CVRG')
+		,	DMT_RFA_EXPT_CVRG_CMB RFA_CVRG
+		#end
+		,	COM_INTG_CD_DTL CD_DTL
+	    ,   MDM_CUSTOMER CUST
+
+	WHERE   RFA_TRF.RFA_EXPT_DAR_NO 		= RFA_TRF_PROG.RFA_EXPT_DAR_NO
+	    AND RFA_TRF.RFA_EXPT_MAPG_SEQ 		= RFA_TRF_PROG.RFA_EXPT_MAPG_SEQ
+	    AND RFA_TRF.RFA_EXPT_VER_SEQ 		= RFA_TRF_PROG.RFA_EXPT_VER_SEQ
+	    AND RFA_TRF.DMDT_EXPT_RQST_STS_CD 	IN ('R', 'C', 'B', 'P', 'Q')
+	    AND RFA_TRF.UPD_DT BETWEEN TO_DATE(@[fm_dt], 'YYYY-MM-DD') AND TO_DATE(@[to_dt], 'YYYY-MM-DD') + 0.99999
+
+		AND RFA_TRF_PROG.PROG_SEQ 			=
+			(
+				SELECT  /*+ INDEX_DESC(DMT_RFA_EXPT_TRF_PROG XPKDMT_RFA_EXPT_TRF_PROG) */ PROG_SEQ
+				FROM    DMT_RFA_EXPT_TRF_PROG
+				WHERE   RFA_EXPT_DAR_NO 		= RFA_TRF_PROG.RFA_EXPT_DAR_NO
+					AND RFA_EXPT_MAPG_SEQ 		= RFA_TRF_PROG.RFA_EXPT_MAPG_SEQ
+					AND RFA_EXPT_VER_SEQ 		= RFA_TRF_PROG.RFA_EXPT_VER_SEQ
+					AND DMDT_EXPT_RQST_STS_CD 	= 'R'
+					AND	ROWNUM 					= 1						
+			)
+		AND	( RFA_TRF.APRO_OFC_CD IN 
+		(
+			#foreach( $ofc_cd in ${ofc_cd_list} )
+				#if($velocityCount < $ofc_cd_list.size()) '$ofc_cd', #else '$ofc_cd' #end
+			#end
+		) OR RFA_TRF.RQST_OFC_CD = DECODE(@[login_ofc_cd], 'SELCON', RFA_TRF.RQST_OFC_CD, @[login_ofc_cd]) )
+		AND	RFA_TRF.PROP_NO = RP_HDR.PROP_NO
+		AND RP_HDR.PROP_NO 	= RP_MN.PROP_NO
+		AND RP_MN.AMDT_SEQ 	=
+			(
+				SELECT	/*+ INDEX_DESC(PRI_RP_MN XPKPRI_RP_MN) */ AMDT_SEQ
+				FROM	PRI_RP_MN
+				WHERE	PROP_NO = RP_MN.PROP_NO
+					AND ROWNUM 	= 1
+			)
+
+		#if(${cust_cd} != '')
+	    AND RP_MN.CTRT_CUST_CNT_CD 		= SUBSTR(@[cust_cd], 0, 2) AND RP_MN.CTRT_CUST_SEQ = SUBSTR(@[cust_cd], 3)
+		#end
+
+	    AND RP_MN.CTRT_CUST_CNT_CD 		= CUST.CUST_CNT_CD
+	    AND RP_MN.CTRT_CUST_SEQ 		= CUST.CUST_SEQ
+		AND RFA_TRF.RFA_EXPT_DAR_NO 	= RFA_TRF_DTL.RFA_EXPT_DAR_NO
+		AND RFA_TRF.RFA_EXPT_MAPG_SEQ 	= RFA_TRF_DTL.RFA_EXPT_MAPG_SEQ
+		AND RFA_TRF.RFA_EXPT_VER_SEQ 	= RFA_TRF_DTL.RFA_EXPT_VER_SEQ
+		AND RFA_TRF_DTL.DMDT_TRF_CD 	IN (
+			#foreach( $trf_cd in ${trf_cd_list} )
+				#if($velocityCount < $trf_cd_list.size()) '$trf_cd', #else '$trf_cd' #end
+			#end
+		)
+
+		#if(${group_by} == 'CVRG')
+		AND RFA_TRF_DTL.RFA_EXPT_DAR_NO 	= RFA_CVRG.RFA_EXPT_DAR_NO
+		AND RFA_TRF_DTL.RFA_EXPT_MAPG_SEQ 	= RFA_CVRG.RFA_EXPT_MAPG_SEQ
+		AND RFA_TRF_DTL.RFA_EXPT_VER_SEQ 	= RFA_CVRG.RFA_EXPT_VER_SEQ
+    	AND RFA_TRF_DTL.RFA_RQST_DTL_SEQ 	= RFA_CVRG.RFA_RQST_DTL_SEQ
+		AND RFA_CVRG.CVRG_CMB_SEQ 			= 
+			(
+				SELECT	/*+ INDEX_ASC(DMT_RFA_EXPT_CVRG_CMB XPKDMT_RFA_EXPT_CVRG_CMB) */ CVRG_CMB_SEQ
+				FROM	DMT_RFA_EXPT_CVRG_CMB
+				WHERE	RFA_EXPT_DAR_NO 	= RFA_CVRG.RFA_EXPT_DAR_NO
+					AND	RFA_EXPT_MAPG_SEQ 	= RFA_CVRG.RFA_EXPT_MAPG_SEQ
+					AND RFA_EXPT_VER_SEQ 	= RFA_CVRG.RFA_EXPT_VER_SEQ
+					AND RFA_RQST_DTL_SEQ 	= RFA_CVRG.RFA_RQST_DTL_SEQ
+					AND ROWNUM 				= 1
+			)
+		#end
+
+    	AND RFA_TRF.DMDT_EXPT_RQST_STS_CD 	= CD_DTL.INTG_CD_VAL_CTNT
+	    AND CD_DTL.INTG_CD_ID 				= 'CD01971'
+)
+#end
+
+ORDER BY TO_CC, UPD_DT, DAR_NO #if(${group_by} == 'CVRG'),	DTL_SEQ, CVRG_SEQ#end			]]></sql>
+			<params>
+				<param name="fm_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+				<param name="cust_cd" type="12" value="" out="N"/>
+				<param name="login_ofc_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

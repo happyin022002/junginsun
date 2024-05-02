@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CODCorrectionDBDAOSearchCodRsoRouteRSQL">
+			<desc><![CDATA[route 변경건에 대한 RSO와 OPF 요청 대상인지 조회한다.]]></desc>
+			<sql><![CDATA[
+--현재 운송 중인 VVD가 의 discharging port가 바뀌는 요청인지 확인
+--조회가 되면 opf 승인 요청 대상임
+with cod as 
+(select new_route.vsl_cd            new_vsl_cd
+         , new_route.skd_voy_no     new_skd_voy_no
+         , new_route.skd_dir_cd     new_skd_dir_cd
+         , new_route.org_nod_cd     new_pol_yd_cd
+         , new_route.dest_nod_cd    new_pod_yd_cd
+         , old_route.vsl_cd         old_vsl_cd
+         , old_route.skd_voy_no     old_skd_voy_no
+         , old_route.skd_dir_cd     old_skd_dir_cd
+         , old_route.pol_yd_cd      old_pol_yd_cd
+         , old_route.pod_yd_cd      old_pod_yd_cd
+         , svc_tp.VSL_SVC_TP_CD     vsl_svc_tp_cd
+         , (select to_char(max(pol_act_skd.ACT_DEP_DT), 'yyyymmdd') 
+              from VSK_ACT_PORT_SKD pol_act_skd
+             where new_route.vsl_cd     = pol_act_skd.vsl_cd
+               and new_route.skd_voy_no = pol_act_skd.skd_voy_no 
+               and new_route.skd_dir_cd = pol_act_skd.skd_dir_cd
+               and new_route.org_nod_cd like pol_act_skd.VPS_PORT_CD||'%') pol_act_dep_dt
+         , (select to_char(min(rhnd_port_act_skd.ACT_ARR_DT), 'yyyymmdd') 
+              from VSK_ACT_PORT_SKD rhnd_port_act_skd, vsk_vsl_port_skd est_skd
+             where est_skd.vsl_cd      = new_route.vsl_cd
+               and est_skd.skd_voy_no  = new_route.skd_voy_no 
+               and est_skd.skd_dir_cd  = new_route.skd_dir_cd
+			   and est_skd.yd_cd 	   = @[cod_rhnd_port_cd]
+               and est_skd.vsl_cd	   = rhnd_port_act_skd.vsl_cd      (+)
+               and est_skd.skd_voy_no  = rhnd_port_act_skd.skd_voy_no  (+) 
+               and est_skd.skd_dir_cd  = rhnd_port_act_skd.skd_dir_cd  (+)
+			   and est_skd.vps_port_cd = rhnd_port_act_skd.vps_port_cd (+)
+			   and est_skd.clpt_ind_seq= rhnd_port_act_skd.clpt_ind_seq(+)) rhnd_port_act_arr_dt
+         , (select to_char(min(rhnd_port_act_skd.ACT_DEP_DT), 'yyyymmdd') 
+              from VSK_ACT_PORT_SKD rhnd_port_act_skd, vsk_vsl_port_skd est_skd
+             where est_skd.vsl_cd      = new_route.vsl_cd
+               and est_skd.skd_voy_no  = new_route.skd_voy_no 
+               and est_skd.skd_dir_cd  = new_route.skd_dir_cd
+			   and est_skd.yd_cd 	   = @[cod_rhnd_port_cd]
+               and est_skd.vsl_cd	   = rhnd_port_act_skd.vsl_cd      (+)
+               and est_skd.skd_voy_no  = rhnd_port_act_skd.skd_voy_no  (+) 
+               and est_skd.skd_dir_cd  = rhnd_port_act_skd.skd_dir_cd  (+)
+			   and est_skd.vps_port_cd = rhnd_port_act_skd.vps_port_cd (+)
+			   and est_skd.clpt_ind_seq= rhnd_port_act_skd.clpt_ind_seq(+)) rhnd_port_act_dep_dt
+      from  (select PCTL_SEQ,ORG_NOD_CD,DEST_NOD_CD,TRSP_MOD_CD,VSL_SLAN_CD,CRR_CD,VSL_CD,SKD_VOY_NO,SKD_DIR_CD
+               from prd_prod_ctl_rout_dtl 
+              where pctl_no = @[pctl_no]
+                and TRSP_MOD_CD in ('VD', 'WD')
+                and PCTL_IO_BND_CD ='T') new_route
+            , (select bkg_no, VSL_CD,SKD_VOY_NO,SKD_DIR_CD, pol_cd, pol_yd_cd, pod_cd, pod_yd_cd
+                 from bkg_vvd 
+                where bkg_no = @[bkg_no]
+ 			      and 'N' = NVL((select auto_cod_flg from bkg_cod where bkg_no = @[bkg_no] and cod_rqst_seq = @[cod_rqst_seq]), 'N')
+			   union all
+			   select bkg_no, vsl_cd,SKD_VOY_NO,SKD_DIR_CD, substr(pol_yd_cd,1,5), pol_yd_cd, substr(pod_yd_cd,1,5), pod_yd_cd
+				 from bkg_cod_vvd
+				where bkg_no = @[bkg_no]
+				  and cod_rqst_seq = @[cod_rqst_seq]
+				  and vvd_op_cd = 'O'
+ 			      and 'Y' = NVL((select auto_cod_flg from bkg_cod where bkg_no = @[bkg_no] and cod_rqst_seq = @[cod_rqst_seq]), 'N')
+				) old_route
+            , MDM_VSL_SVC_LANE svc_tp, PRD_PROD_CTL_MST PRD
+			, (SELECT BKG_NO, POD_CD
+                 FROM BKG_BOOKING 
+                WHERE BKG_NO = @[bkg_no]
+ 			      AND 'N' = NVL((SELECT AUTO_COD_FLG FROM BKG_COD WHERE BKG_NO = @[bkg_no] AND COD_RQST_SEQ = @[cod_rqst_seq]), 'N')
+			   UNION ALL
+			   SELECT BKG_NO, SUBSTR(NEW_POL_YD_CD, 1, 5)
+			     FROM BKG_COD
+				where bkg_no = @[bkg_no]
+				  and cod_rqst_seq = @[cod_rqst_seq]
+				  AND 'Y' = NVL((SELECT AUTO_COD_FLG FROM BKG_COD WHERE BKG_NO = @[bkg_no] AND COD_RQST_SEQ = @[cod_rqst_seq]), 'N')
+				) BK
+     where BK.BKG_NO            = @[bkg_no]
+	   AND PRD.PCTL_NO          = @[pctl_no]
+       and old_route.vsl_cd     = new_route.vsl_cd
+       and old_route.skd_voy_no = new_route.skd_voy_no 
+       and old_route.skd_dir_cd = new_route.skd_dir_cd
+       and old_route.pol_cd     = substr(new_route.org_nod_cd,  1, 5) --출발지가 같을 것
+       AND SUBSTR(@[cod_rhnd_port_cd], 1, 5) IN (old_route.pod_cd, substr(new_route.dest_nod_cd, 1, 5)) --REHANDLING PORT에 가는 VVD
+	   and (
+		     (old_route.pod_cd <> substr(new_route.dest_nod_cd, 1, 5) AND OLD_ROUTE.POD_CD <> BK.POD_CD)--t/S PORT 변경
+    	    OR
+	    	 (BK.POD_CD <> PRD.POD_CD)-- AND OLD_ROUTE.POD_CD = BK.POD_CD)--최종 POD 변경
+            OR
+             (@[rob_flag]  = 'Y')
+			)
+       and new_route.VSL_SLAN_CD= svc_tp.VSL_SLAN_CD
+    )       
+select new_vsl_cd
+         , new_skd_voy_no
+         , new_skd_dir_cd
+         , new_pol_yd_cd
+         , new_pod_yd_cd
+         , old_vsl_cd
+         , old_skd_voy_no
+         , old_skd_dir_cd
+         , old_pol_yd_cd
+         , old_pod_yd_cd
+         , pol_act_dep_dt
+         , rhnd_port_act_arr_dt
+		 , rhnd_port_act_dep_dt
+         , vsl_svc_tp_cd
+  from cod			]]></sql>
+			<params>
+				<param name="cod_rhnd_port_cd" type="12" value="NLRTMEM" out="N"/>
+				<param name="pctl_no" type="12" value="R1311190426928500001" out="N"/>
+				<param name="bkg_no" type="12" value="DLDU31804700" out="N"/>
+				<param name="cod_rqst_seq" type="12" value="19" out="N"/>
+				<param name="rob_flag" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

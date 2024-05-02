@@ -1,0 +1,3462 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="DailyForecastManageDBDAOSearchDailyForecastManageListForKorRSQL">
+			<desc><![CDATA[2015.03.03 소스공백등 정리(쿼리가 너무 길어 콘솔로그에서 hint등이 빠져서)
+2015.03.03 CHM-201534435 SQM QTA주가 변경 관련 적용 요청
+2015.03.09 [CHM-201534504]SMP IAS 보완에 따른 FCST 추가 개발 요청
+2015.03.10 [CHM-201534747]Forecast Input(Loading) 화면 정보 추가-Weight, US Control아닐경우 SUM제외
+2015.03.13 [CHM-201534835]Forecast Input POL별 Summary 데이터 추가 요청
+2015.08.12 이혜민 [CHM-201537257] BKG_ORG CUST_CTRL_CD 기준 변경. 
+						(1. RFA_NO IS NULL, SC IS NULL 조건 삭제(DUMMY RFA뿐만 아니라 모든 RFA 비교) 
+						2. SPC_MDL_CUST_RFA에 CMDT_CD 조인 조건 추가.)
+2015.10.21 이혜민 [CHM-201538339] 사직 S.REP의 FCST Input의 데이터 삭제관련 보완 요청]]></desc>
+			<sql><![CDATA[
+WITH PARAMS_ORG AS (
+    SELECT @[year]        AS COST_YR     ,
+           @[week]        AS COST_WK     ,
+           @[duration]    AS DUR         ,
+           @[trade]       AS TRD_CD      ,
+           @[subtrade]    AS SUB_TRD_CD  ,
+           @[bound]       AS DIR_CD      ,
+           @[ioc]         AS IOC_TS_CD   ,
+           @[salesoffice] AS RGN_OFC_CD  ,
+           @[suboffice]   AS SUB_OFC_CD  ,
+           @[salesrep]    AS SALES_REP_CD,
+           @[vvd]         AS VVD
+      FROM DUAL
+)
+, PARAMS AS (
+    SELECT COST_YR       ,
+           COST_WK       ,
+           DUR           ,
+           TRD_CD        ,
+           SUB_TRD_CD    ,
+           RLANE_CD      ,
+           DIR_CD        ,
+           IOC_TS_CD     ,
+           RGN_OFC_CD    ,
+           SUB_OFC_CD    ,
+           SALES_REP_CD  ,
+           VVD           ,
+           REP_TRD_CD    ,
+           REP_SUB_TRD_CD,
+           VSL_SLAN_CD
+      FROM (  SELECT PO.COST_YR     ,
+                     PO.COST_WK     ,
+                     PO.DUR         ,
+                     PO.TRD_CD      ,
+                     PO.SUB_TRD_CD  ,
+                     RL.RLANE_CD    ,
+                     PO.DIR_CD      ,
+                     PO.IOC_TS_CD   ,
+                     PO.RGN_OFC_CD  ,
+                     PO.SUB_OFC_CD  ,
+                     PO.SALES_REP_CD,
+                     PO.VVD         ,
+                     RL.REP_TRD_CD  ,
+                     SPC_GET_REP_SUB_TRD_FNC(RL.RLANE_CD) AS REP_SUB_TRD_CD,
+                     RL.VSL_SLAN_CD
+                FROM MDM_REV_LANE RL,
+                     PARAMS_ORG   PO
+               WHERE PO.VVD IS NULL
+				 AND RL.DELT_FLG = 'N'
+#if (${lane} != '')
+                 AND RL.RLANE_CD IN ( ${lane} )
+#end
+              UNION ALL
+              SELECT DISTINCT
+                     ''   AS COST_YR     ,
+                     ''   AS COST_WK     ,
+                     NULL AS DUR         ,
+                     ''   AS TRD_CD      ,
+                     ''   AS SUB_TRD_CD  ,
+                     ''   AS RLANE_CD    ,
+                     SUBSTR(PO.VVD, 9, 1) AS DIR_CD,
+                     PO.IOC_TS_CD        ,
+                     PO.RGN_OFC_CD       ,
+                     PO.SUB_OFC_CD       ,
+                     PO.SALES_REP_CD     ,
+                     PO.VVD              ,
+                     '' AS REP_TRD_CD    ,
+                     '' AS REP_SUB_TRD_CD,
+                     RL.VSL_SLAN_CD
+                FROM VSK_VSL_SKD  VS,
+                     MDM_REV_LANE RL,
+                     PARAMS_ORG   PO
+               WHERE VS.VSL_CD      = SUBSTR(PO.VVD, 1, 4)
+                 AND VS.SKD_VOY_NO  = SUBSTR(PO.VVD, 5, 4)
+                 AND VS.SKD_DIR_CD  = SUBSTR(PO.VVD, 9, 1)
+                 AND VS.VSL_SLAN_CD = RL.VSL_SLAN_CD
+                 AND PO.VVD IS NOT NULL
+           )
+)
+, VVDLS AS (
+    SELECT DISTINCT
+           SEASON        ,
+           SLS_YRMON     ,
+           COST_YRMON    ,
+           COST_WK       ,
+           REP_TRD_CD    ,
+           REP_SUB_TRD_CD,
+           TRD_CD        ,
+           SUB_TRD_CD    ,
+           RLANE_CD      ,
+           DIR_CD        ,
+           RGN_OFC_CD    ,
+           VSL_CD        ,
+           SKD_VOY_NO    ,
+           SKD_DIR_CD    ,
+           IOC_CD        ,
+           ETD_DT        ,
+           CTRL_LVL      ,
+           CTRL_HC       ,
+           CTRL_45       ,
+           CTRL_53       ,
+           CTRL_RF       ,
+           CTRL_WT       ,
+           DECODE(NVL(( SELECT COUNT(*)
+                          FROM SPC_MDL_CUST_CTRL
+                         WHERE TRD_CD    = A.TRD_CD
+                           AND COST_YRWK = SUBSTR(A.SEASON, 1, 6)
+                           AND VER_SEQ   = SUBSTR(A.SEASON, 8)
+                           AND DELT_FLG  = 'N'), 0), 0, 'N', 'Y') AS CTRL_ACCT,
+           HH_FLG
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+           , BSE_QTR_CD
+      FROM (SELECT DISTINCT
+                   (SELECT /*+ INDEX_DESC (M XPKSPC_MDL_VER_MST) */ DECODE(HH_FLG, 'Y', COST_YRWK||'-'||VER_SEQ, '200001-1')
+                      FROM SPC_MDL_VER_MST M
+                     WHERE SUBSTR(COST_YRMON, 1, 4)||COST_WK BETWEEN M.VER_ST_YRWK AND M.VER_END_YRWK
+                       AND M.TRD_CD  = A.TRD_CD
+                       AND M.CFM_FLG = 'Y'
+                       AND ROWNUM = 1) AS SEASON,
+                   SLS_YRMON     ,
+                   COST_YRMON    ,
+                   COST_WK       ,
+                   REP_TRD_CD    ,
+                   REP_SUB_TRD_CD,
+                   TRD_CD        ,
+                   SUB_TRD_CD    ,
+                   RLANE_CD      ,
+                   DIR_CD        ,
+                   RGN_OFC_CD    ,
+                   VSL_CD        ,
+                   SKD_VOY_NO    ,
+                   SKD_DIR_CD    ,
+                   IOC_CD        ,
+                   ETD_DT        ,
+                   CTRL_LVL      ,
+                   CTRL_HC       ,
+                   CTRL_45       ,
+                   CTRL_53       ,
+                   CTRL_RF       ,
+                   CTRL_WT       ,
+                   CTRL_ACCT     ,
+                   HH_FLG
+                   , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                   , BSE_QTR_CD
+              FROM (SELECT MV.SLS_YRMON    ,
+                             MV.COST_YRMON   ,
+                             MV.COST_WK      ,
+                             P.REP_TRD_CD    ,
+                             P.REP_SUB_TRD_CD,
+                             MV.TRD_CD       ,
+                             MV.SUB_TRD_CD   ,
+                             MV.RLANE_CD     ,
+                             MV.DIR_CD       ,
+                             P.RGN_OFC_CD    ,
+                             MV.VSL_CD       ,
+                             MV.SKD_VOY_NO   ,
+                             MV.DIR_CD     AS SKD_DIR_CD,
+                             DECODE(Q.DIR_CD, NULL, 'N', 'Y') AS HH_FLG,
+                             MV.IOC_CD       ,
+                             MV.LST_LODG_PORT_ETD_DT       AS ETD_DT  ,
+                             NVL(CO.CTRL_LVL_CD     , 'L') AS CTRL_LVL,
+                             NVL(CO.CTRL_40FT_HC_FLG, 'N') AS CTRL_HC ,
+                             NVL(CO.CTRL_45FT_HC_FLG, 'N') AS CTRL_45 ,
+                             NVL(CO.CTRL_53FT_FLG   , 'N') AS CTRL_53 ,
+                             NVL(CO.CTRL_RF_FLG     , 'N') AS CTRL_RF ,
+                             NVL(CO.CTRL_WGT_FLG    , 'N') AS CTRL_WT ,
+                             NVL(CO.ACCT_GRP_CTRL_FLG, 'N') AS CTRL_ACCT
+                             , NVL(CTRL_D2_FLG, 'N') CTRL_D2_FLG
+                             , NVL(CTRL_D4_FLG, 'N') CTRL_D4_FLG
+                             , NVL(CTRL_RD_FLG, 'N') CTRL_RD_FLG
+                             , NVL(CTRL_ECC_FLG, 'N') CTRL_ECC_FLG
+                             , NVL(CTRL_LOC_FLG , 'N') CTRL_LOC_FLG
+                             , NVL(CTRL_USA_SVC_MOD_FLG , 'N') CTRL_USA_SVC_MOD_FLG
+                             , NVL(CTRL_ACCT_FLG, 'N') CTRL_ACCT_FLG
+                             , CASE WHEN MV.COST_YRMON >= '201501' 
+                                  THEN CEIL(TO_NUMBER(SUBSTR(MV.COST_YRMON, -2))/3)||'Q' 
+                                  ELSE CEIL(TO_NUMBER(DECODE(MV.COST_WK,'00','01','53','52',MV.COST_WK))/13)||'Q'
+                               END BSE_QTR_CD 
+                        FROM SPC_ALOC_CTRL_OPT CO,
+                             MAS_MON_VVD       MV,
+                             PARAMS            P ,
+                             SPC_HD_HUL_MST    Q
+                       WHERE SUBSTR(MV.SLS_YRMON, 1, 4)||MV.COST_WK IN ( SELECT /*+ INDEX(P XPKMAS_WK_PRD)*/ PRD.COST_YR||PRD.COST_WK COST_YRWK
+                                                                           FROM MAS_WK_PRD PRD
+                                                                          WHERE PRD.COST_YR||PRD.COST_WK >= P.COST_YR||P.COST_WK
+                                                                            AND ROWNUM <= P.DUR )
+                         AND MV.TRD_CD        = P.TRD_CD
+                         AND MV.SUB_TRD_CD LIKE P.SUB_TRD_CD||'%'
+                         AND MV.RLANE_CD   LIKE P.RLANE_CD||'%'
+                         AND MV.DIR_CD     LIKE P.DIR_CD||'%'
+                         AND (MV.DELT_FLG IS NULL OR MV.DELT_FLG = 'N')
+                         AND MV.RLANE_CD     <> 'RBCCO'
+                         AND CO.RLANE_CD  (+) = MV.RLANE_CD
+                         AND CO.DIR_CD    (+) = MV.DIR_CD
+                         AND CO.VSL_CD    (+) = MV.VSL_CD
+                         AND CO.SKD_VOY_NO(+) = MV.SKD_VOY_NO
+                         AND CO.SKD_DIR_CD(+) = MV.DIR_CD
+                         AND P.VVD IS NULL
+                         AND Q.TRD_CD     (+) = MV.TRD_CD
+                         AND Q.RLANE_CD   (+) = MV.RLANE_CD
+                         AND Q.DIR_CD     (+) = MV.DIR_CD
+                      UNION ALL
+                      SELECT MV.SLS_YRMON,
+                             MV.COST_YRMON ,
+                             MV.COST_WK  ,
+                             SPC_GET_REP_TRD_FNC(MV.RLANE_CD)     AS REP_TRD_CD    ,
+                             SPC_GET_REP_SUB_TRD_FNC(MV.RLANE_CD) AS REP_SUB_TRD_CD,
+                             MV.TRD_CD                  ,
+                             MV.SUB_TRD_CD              ,
+                             MV.RLANE_CD                ,
+                             MV.DIR_CD                  ,
+                             P.RGN_OFC_CD               ,
+                             MV.VSL_CD                  ,
+                             MV.SKD_VOY_NO              ,
+                             MV.DIR_CD     AS SKD_DIR_CD,
+                             DECODE(Q.DIR_CD, NULL, 'N', 'Y') AS HH_FLG,
+                             MV.IOC_CD                  ,
+                             MV.LST_LODG_PORT_ETD_DT       AS ETD_DT  ,
+                             NVL(CO.CTRL_LVL_CD     , 'L') AS CTRL_LVL,
+                             NVL(CO.CTRL_40FT_HC_FLG, 'N') AS CTRL_HC ,
+                             NVL(CO.CTRL_45FT_HC_FLG, 'N') AS CTRL_45 ,
+                             NVL(CO.CTRL_53FT_FLG   , 'N') AS CTRL_53 ,
+                             NVL(CO.CTRL_RF_FLG     , 'N') AS CTRL_RF ,
+                             NVL(CO.CTRL_WGT_FLG    , 'N') AS CTRL_WT ,
+                             NVL(CO.ACCT_GRP_CTRL_FLG, 'N') AS CTRL_ACCT
+                             , NVL(CTRL_D2_FLG, 'N') CTRL_D2_FLG
+                             , NVL(CTRL_D4_FLG, 'N') CTRL_D4_FLG
+                             , NVL(CTRL_RD_FLG, 'N') CTRL_RD_FLG
+                             , NVL(CTRL_ECC_FLG, 'N') CTRL_ECC_FLG
+                             , NVL(CTRL_LOC_FLG , 'N') CTRL_LOC_FLG
+                             , NVL(CTRL_USA_SVC_MOD_FLG , 'N') CTRL_USA_SVC_MOD_FLG
+                             , NVL(CTRL_ACCT_FLG, 'N') CTRL_ACCT_FLG
+                             , CASE WHEN MV.COST_YRMON >= '201501' 
+                                  THEN CEIL(TO_NUMBER(SUBSTR(MV.COST_YRMON, -2))/3)||'Q' 
+                                  ELSE CEIL(TO_NUMBER(DECODE(MV.COST_WK,'00','01','53','52',MV.COST_WK))/13)||'Q'
+                               END BSE_QTR_CD 
+                        FROM SPC_ALOC_CTRL_OPT CO,
+                             MAS_MON_VVD       MV,
+                             PARAMS            P ,
+                             SPC_HD_HUL_MST    Q
+                       WHERE MV.VSL_CD     = SUBSTR(P.VVD, 1, 4)
+                         AND MV.SKD_VOY_NO = SUBSTR(P.VVD, 5, 4)
+                         AND MV.DIR_CD     = SUBSTR(P.VVD, 9, 1)
+                         AND MV.IOC_CD     = DECODE(P.IOC_TS_CD, 'O', 'O', 'I')
+                         AND (MV.DELT_FLG IS NULL OR MV.DELT_FLG = 'N')
+                         AND CO.RLANE_CD  (+) = MV.RLANE_CD
+                         AND CO.DIR_CD    (+) = MV.DIR_CD
+                         AND CO.VSL_CD    (+) = MV.VSL_CD
+                         AND CO.SKD_VOY_NO(+) = MV.SKD_VOY_NO
+                         AND CO.SKD_DIR_CD(+) = MV.DIR_CD
+                         AND P.VVD IS NOT NULL
+                         AND Q.TRD_CD     (+) = MV.TRD_CD
+                         AND Q.RLANE_CD   (+) = MV.RLANE_CD
+                         AND Q.DIR_CD     (+) = MV.DIR_CD
+                   ) A
+        ) A
+)
+, VVD_POL AS (
+    SELECT SEASON        ,
+           SLS_YRMON     ,
+           COST_YRMON    ,
+           COST_WK       ,
+           REP_TRD_CD    ,
+           REP_SUB_TRD_CD,
+           TRD_CD        ,
+           SUB_TRD_CD    ,
+           RLANE_CD      ,
+           M.VSL_CD      ,
+           M.SKD_VOY_NO  ,
+           M.SKD_DIR_CD  ,
+           NVL(V.YD_CD, M.POL_CD) AS POL_CD,
+           ( SELECT DECODE(MAX(S.SKD_CNG_STS_CD), 'S', 0, NVL(DECODE(IOC_TS_CD, 'O', MAX(S.CLPT_SEQ), MIN(S.CLPT_SEQ)), -1))
+                   FROM VSK_VSL_PORT_SKD S
+                  WHERE S.VSL_CD      = M.VSL_CD
+                    AND S.SKD_VOY_NO  = M.SKD_VOY_NO
+                    AND S.SKD_DIR_CD  = M.SKD_DIR_CD
+                    AND S.VPS_PORT_CD = M.POL_CD
+                    AND (S.SKD_CNG_STS_CD IS NULL OR S.SKD_CNG_STS_CD <> 'S')
+           ) AS POL_SEQ,
+           ( SELECT SPC_CONTI_CONV_FNC(MLOC.CONTI_CD, M.RLANE_CD,M.SKD_DIR_CD)
+                   FROM MDM_LOCATION MLOC
+                  WHERE M.POL_CD = MLOC.LOC_CD
+           ) AS POL_CONTI,
+           ETD_DT    ,
+           MIN(CD_DP_SEQ) OVER (PARTITION BY SLS_YRMON, COST_WK, REP_TRD_CD, REP_SUB_TRD_CD, RLANE_CD, M.VSL_CD, M.SKD_VOY_NO, M.SKD_DIR_CD, NVL(V.YD_CD, M.POL_CD), ETD_DT, SUB_OFC_CD, RGN_OFC_CD, IOC_TS_CD) AS CD_DP_SEQ,
+           SUB_OFC_CD,
+           RGN_OFC_CD,
+           IOC_TS_CD ,
+           CTRL_LVL  ,
+           CTRL_HC   ,
+           CTRL_45   ,
+           CTRL_53   ,
+           CTRL_RF   ,
+           CTRL_WT   ,
+           CTRL_ACCT ,
+           HH_FLG
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+           , BSE_QTR_CD
+      FROM (  SELECT 1 AS FLG        ,
+                     V.SEASON        ,
+                     V.SLS_YRMON     ,
+                     V.COST_YRMON    ,
+                     V.COST_WK       ,
+                     V.REP_TRD_CD    ,
+                     V.REP_SUB_TRD_CD,
+                     V.TRD_CD        ,
+                     V.SUB_TRD_CD    ,
+                     V.RLANE_CD      ,
+                     V.VSL_CD        ,
+                     V.SKD_VOY_NO    ,
+                     V.SKD_DIR_CD    ,
+                     M.POL_CD        ,
+                     V.ETD_DT        ,
+                     M.CD_DP_SEQ     ,
+                     M.SLS_OFC_CD     AS SUB_OFC_CD,
+                     M.SLS_RGN_OFC_CD AS RGN_OFC_CD,
+                     M.IOC_TS_CD     ,
+                     V.CTRL_LVL      ,
+                     V.CTRL_HC       ,
+                     V.CTRL_45       ,
+                     V.CTRL_53       ,
+                     V.CTRL_RF       ,
+                     V.CTRL_WT       ,
+                     V.CTRL_ACCT     ,
+                     V.HH_FLG
+                     , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                     , V.BSE_QTR_CD
+                FROM VVDLS                  V,
+                     SPC_FCAST_OFC_POL_MAPG M,
+                     PARAMS                 P
+               WHERE M.REP_TRD_CD     = V.REP_TRD_CD
+                 AND M.REP_SUB_TRD_CD = V.REP_SUB_TRD_CD
+                 AND M.TRD_CD         = V.TRD_CD
+                 AND M.SUB_TRD_CD     = V.SUB_TRD_CD
+                 AND M.RLANE_CD       = V.RLANE_CD
+                 AND M.DIR_CD         = V.DIR_CD
+                 AND M.IOC_TS_CD      = P.IOC_TS_CD
+                 AND M.SLS_OFC_CD     = P.RGN_OFC_CD
+                 AND M.BSE_YRWK       = ( SELECT /*+ INDEX_DESC(MI XPKSPC_FCAST_OFC_POL_MAPG) */MI.BSE_YRWK
+                                            FROM SPC_FCAST_OFC_POL_MAPG MI
+                                           WHERE MI.REP_TRD_CD     = M.REP_TRD_CD
+                                             AND MI.REP_SUB_TRD_CD = M.REP_SUB_TRD_CD
+                                             AND MI.RLANE_CD       = M.RLANE_CD
+                                             AND MI.DIR_CD         = M.DIR_CD
+                                             AND MI.IOC_TS_CD      = M.IOC_TS_CD
+                                             AND MI.SLS_OFC_CD     = M.SLS_OFC_CD
+                                             AND MI.BSE_YRWK      <= SUBSTR(V.SLS_YRMON, 1, 4)||V.COST_WK
+                                             AND ROWNUM = 1 )
+              UNION ALL
+              SELECT 2 AS FLG        ,
+                     V.SEASON        ,
+                     V.SLS_YRMON     ,
+                     V.COST_YRMON    ,
+                     V.COST_WK       ,
+                     V.REP_TRD_CD    ,
+                     V.REP_SUB_TRD_CD,
+                     V.TRD_CD        ,
+                     V.SUB_TRD_CD    ,
+                     V.RLANE_CD      ,
+                     V.VSL_CD        ,
+                     V.SKD_VOY_NO    ,
+                     V.SKD_DIR_CD    ,
+                     M.POL_CD        ,
+                     V.ETD_DT        ,
+                     M.CD_DP_SEQ + 100 AS CD_DP_SEQ ,
+                     M.SLS_OFC_CD      AS SUB_OFC_CD,
+                     M.SLS_RGN_OFC_CD  AS RGN_OFC_CD,
+                     M.IOC_TS_CD     ,
+                     V.CTRL_LVL      ,
+                     V.CTRL_HC       ,
+                     V.CTRL_45       ,
+                     V.CTRL_53       ,
+                     V.CTRL_RF       ,
+                     V.CTRL_WT       ,
+                     V.CTRL_ACCT     ,
+                     V.HH_FLG
+                     , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                     , V.BSE_QTR_CD
+                FROM VVDLS                      V,
+                     SPC_IRR_FCAST_OFC_POL_MAPG M,
+                     PARAMS                     P
+               WHERE M.REP_TRD_CD     = V.REP_TRD_CD
+                 AND M.REP_SUB_TRD_CD = V.REP_SUB_TRD_CD
+                 AND M.TRD_CD         = V.TRD_CD
+                 AND M.SUB_TRD_CD     = V.SUB_TRD_CD
+                 AND M.RLANE_CD       = V.RLANE_CD
+                 AND M.DIR_CD         = V.DIR_CD
+                 AND M.IOC_TS_CD      = P.IOC_TS_CD
+                 AND M.VSL_CD         = V.VSL_CD
+                 AND M.SKD_VOY_NO     = V.SKD_VOY_NO
+                 AND M.SKD_DIR_CD     = V.SKD_DIR_CD
+                 AND M.SLS_OFC_CD     = P.RGN_OFC_CD
+           ) M,
+           VSK_VSL_PORT_SKD V
+     WHERE M.VSL_CD     = V.VSL_CD
+       AND M.SKD_VOY_NO = V.SKD_VOY_NO
+       AND M.SKD_DIR_CD = V.SKD_DIR_CD
+       AND M.POL_CD     = V.VPS_PORT_CD
+)
+, VVD_POL_POD AS (
+    SELECT SEASON    ,
+           SLS_YRMON ,
+           COST_WK   ,
+           TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           POL_CD    ,
+           POL_SEQ   ,
+           CD_DP_SEQ ,
+           POL_CONTI ,
+           ETD_DT    ,
+           POD_CD    ,
+           MIN(POD_SEQ) AS POD_SEQ,
+           RGN_OFC_CD,
+           SUB_OFC_CD,
+           IOC_TS_CD ,
+           POD_CONTI ,
+           POL_SKIP  ,
+           CTRL_LVL  ,
+           CTRL_HC   ,
+           CTRL_45   ,
+           CTRL_53   ,
+           CTRL_RF   ,
+           CTRL_WT   ,
+           CTRL_ACCT ,
+           HH_FLG
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM (  SELECT SL.SEASON    ,
+                     SL.SLS_YRMON ,
+                     SL.COST_WK   ,
+                     RL.TRD_CD    ,
+                     RL.SUB_TRD_CD,
+                     RL.RLANE_CD  ,
+                     SL.VSL_CD    ,
+                     SL.SKD_VOY_NO,
+                     SL.SKD_DIR_CD,
+                     SL.POL_CD    ,
+                     SL.POL_SEQ   ,
+                     SL.CD_DP_SEQ ,
+                     SL.POL_CONTI ,
+                     SL.ETD_DT    ,
+                     SD.YD_CD AS POD_CD,
+                     TO_NUMBER(DECODE(SD.SKD_CNG_STS_CD, 'S', NULL, SD.CLPT_SEQ)) AS POD_SEQ,
+                     SL.RGN_OFC_CD,
+                     SL.SUB_OFC_CD,
+                     SL.IOC_TS_CD ,
+                     SPC_CONTI_CONV_FNC(MLOC.CONTI_CD,SL.RLANE_CD,SL.SKD_DIR_CD) AS POD_CONTI,
+                     DECODE(SL.POL_SEQ, NULL, 'Y', 'N')            AS POL_SKIP ,
+                     SL.CTRL_LVL  ,
+                     SL.CTRL_HC   ,
+                     SL.CTRL_45   ,
+                     SL.CTRL_53   ,
+                     SL.CTRL_RF   ,
+                     SL.CTRL_WT   ,
+                     SL.CTRL_ACCT ,
+                     RL.IOC_CD    ,
+                     SL.HH_FLG
+                     , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                FROM VSK_VSL_PORT_SKD SD  ,
+                     VVD_POL          SL  ,
+                     MDM_DTL_REV_LANE RL  ,
+                     MDM_LOCATION     MLOC,
+                     PARAMS           P
+               WHERE SUBSTR(sl.pol_cd, 1, 5) NOT IN ('EGSUZ', 'PAPAC')
+                 AND SD.VPS_PORT_CD NOT IN ('EGSUZ', 'PAPAC')
+                 AND SL.POL_SEQ        >= 0
+                 AND SD.VSL_CD          = SL.VSL_CD
+                 AND SD.SKD_VOY_NO      = SL.SKD_VOY_NO
+                 AND SD.SKD_DIR_CD      = SL.SKD_DIR_CD
+                 AND (SD.SKD_CNG_STS_CD IS NULL OR SD.SKD_CNG_STS_CD <> 'S')
+                 AND SD.CLPT_SEQ        > SL.POL_SEQ
+                 AND SD.SLAN_CD         = P.VSL_SLAN_CD
+                 AND RL.RLANE_CD        = SL.RLANE_CD
+                 AND RL.VSL_SLAN_DIR_CD = SL.SKD_DIR_CD
+                 AND RL.FM_CONTI_CD     = SL.POL_CONTI
+                 AND SD.VPS_PORT_CD     = MLOC.LOC_CD
+                 AND RL.TO_CONTI_CD     = SPC_CONTI_CONV_FNC(MLOC.CONTI_CD, SL.RLANE_CD,SL.SKD_DIR_CD)
+                 AND RL.DELT_FLG        = 'N'
+                 AND DECODE(RL.FM_CONTI_CD,RL.TO_CONTI_CD, 'I', 'O') = DECODE(P.IOC_TS_CD, 'O', 'O', 'I')
+                 AND SL.POL_CD <> SD.YD_CD
+           )
+  GROUP BY SEASON    ,
+           SLS_YRMON ,
+           COST_WK   ,
+           TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           POL_CD    ,
+           POL_SEQ   ,
+           CD_DP_SEQ ,
+           POL_CONTI ,
+           ETD_DT    ,
+           POD_CD    ,
+           RGN_OFC_CD,
+           SUB_OFC_CD,
+           IOC_TS_CD ,
+           POD_CONTI ,
+           POL_SKIP  ,
+           CTRL_LVL  ,
+           CTRL_HC   ,
+           CTRL_45   ,
+           CTRL_53   ,
+           CTRL_RF   ,
+           CTRL_WT   ,
+           CTRL_ACCT ,
+           HH_FLG
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+)
+, PARAM_OFC AS (
+    SELECT DISTINCT RGN_OFC_CD, SUB_OFC_CD, SALES_REP_CD FROM PARAMS
+)
+, OFFICES AS (
+#if (${salesoffice} != 'SELSC')
+    SELECT DISTINCT
+           1 AS FLG    ,
+           O.OFC_CD    ,
+           P.RGN_OFC_CD,
+           SUBSTR(SYS_CONNECT_BY_PATH(OFC_CD, '/'), DECODE(LEVEL, 1, 2, 8), 5) AS SUB_OFC_CD,
+           P.SALES_REP_CD
+      FROM SPC_OFC_LVL O,
+           PARAM_OFC           P
+CONNECT BY PRIOR O.OFC_CD      = O.PRNT_OFC_CD
+             AND O.DELT_FLG    = 'N'
+             AND O.OFC_TP_CD  IN ('BB', 'BA', 'BS')
+             AND TO_CHAR(SYSDATE,'YYYYWW') BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+      START WITH O.OFC_CD      = P.RGN_OFC_CD
+             AND P.SUB_OFC_CD IS NULL
+    UNION ALL
+    SELECT DISTINCT
+           2 AS FLG    ,
+           O.OFC_CD    ,
+           P.RGN_OFC_CD,
+           SUBSTR(SYS_CONNECT_BY_PATH(OFC_CD, '/'), 2, 5) AS SUB_OFC_CD,
+           P.SALES_REP_CD
+      FROM SPC_OFC_LVL O,
+           PARAM_OFC           P
+CONNECT BY PRIOR O.OFC_CD       = O.PRNT_OFC_CD
+             AND O.DELT_FLG     = 'N'
+             AND O.OFC_TP_CD   IN ('BB', 'BA', 'BS')
+             AND TO_CHAR(SYSDATE,'YYYYWW') BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+             AND (P.RGN_OFC_CD <> P.SUB_OFC_CD OR LEVEL = 1)
+      START WITH O.OFC_CD       = P.SUB_OFC_CD
+             AND P.SUB_OFC_CD  IS NOT NULL
+#else
+    SELECT DISTINCT
+           1 AS FLG,
+           O.SLS_OFC_CD AS OFC_CD,
+           P.RGN_OFC_CD,
+           DECODE(P.RGN_OFC_CD, 'SELSC', DECODE(O.SLS_REP_OFC_TEAM_CD, NULL, O.SLS_OFC_CD, O.SLS_REP_OFC_TEAM_CD), O.SLS_REP_OFC_TEAM_CD) AS SUB_OFC_CD,
+           O.SREP_USR_ID AS SALES_REP_CD
+      FROM SPC_SLS_REP_TEAM_IF O,
+           PARAM_OFC              P
+     WHERE O.SLS_RGN_OFC_CD = P.RGN_OFC_CD
+       AND O.SREP_USR_ID LIKE P.SALES_REP_CD||'%'
+       AND P.SUB_OFC_CD IS NULL
+    UNION ALL
+    SELECT DISTINCT
+           2 AS FLG,
+           O.SLS_OFC_CD AS OFC_CD,
+           P.RGN_OFC_CD,
+           DECODE(P.RGN_OFC_CD, 'SELSC', DECODE(O.SLS_REP_OFC_TEAM_CD, NULL, O.SLS_OFC_CD, O.SLS_REP_OFC_TEAM_CD), O.SLS_REP_OFC_TEAM_CD) AS SUB_OFC_CD,
+           O.SREP_USR_ID AS SALES_REP_CD
+      FROM SPC_SLS_REP_TEAM_IF O,
+           PARAM_OFC              P
+     WHERE DECODE(O.SLS_REP_OFC_TEAM_CD, NULL, O.SLS_OFC_CD, O.SLS_REP_OFC_TEAM_CD) LIKE P.SUB_OFC_CD||'%'
+       AND O.SREP_USR_ID LIKE P.SALES_REP_CD||'%'
+       AND P.SUB_OFC_CD IS NOT NULL
+#end
+)
+, SREPS AS (
+    SELECT /*+ USE_NL(O SR) */SR.SREP_CD  ,
+           SR.SREP_NM  ,
+           O.RGN_OFC_CD,
+           O.SUB_OFC_CD,
+           O.OFC_CD
+      FROM MDM_SLS_REP SR,
+           OFFICES O
+     WHERE 1=1 
+       AND SPC_SCR_OFC_CONV_FNC(SR.OFC_CD) = O.OFC_CD
+       AND O.RGN_OFC_CD   = O.RGN_OFC_CD
+       AND SR.SREP_CD LIKE O.SALES_REP_CD||'%'
+)
+, VVD_PORT_SREP AS (
+    SELECT SUBSTR(V.SEASON,1,6) AS SEASON ,
+           SUBSTR(V.SEASON,8)   AS VER_SEQ,
+           V.SLS_YRMON           ,
+           V.COST_WK             ,
+           V.TRD_CD              ,
+           V.SUB_TRD_CD          ,
+           V.RLANE_CD            ,
+           V.SKD_DIR_CD AS DIR_CD,
+           V.IOC_TS_CD           ,
+           SR.RGN_OFC_CD         ,
+           SR.SUB_OFC_CD         ,
+           SR.OFC_CD             ,
+           SR.SREP_CD            ,
+           SR.SREP_NM            ,
+           V.POL_CD              ,
+           V.POD_CD              ,
+           V.POL_SKIP            ,
+           V.ETD_DT              ,
+           V.VSL_CD              ,
+           V.SKD_VOY_NO          ,
+           V.SKD_DIR_CD          ,
+           V.CTRL_LVL            ,
+           V.CTRL_HC             ,
+           V.CTRL_45             ,
+           V.CTRL_53             ,
+           V.CTRL_RF             ,
+           V.CTRL_WT             ,
+           V.CTRL_ACCT           ,
+           V.HH_FLG
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM SREPS       SR,
+           VVD_POL_POD V
+)
+, VVD_PORT_SREP_CUST AS (
+    SELECT DISTINCT
+           VPS.COST_YR   ,
+           VPS.COST_WK   ,
+           VPS.TRD_CD    ,
+           VPS.SUB_TRD_CD,
+           VPS.RLANE_CD  ,
+           VPS.DIR_CD    ,
+           VPS.IOC_TS_CD ,
+           VPS.RGN_OFC_CD,
+           VPS.SUB_OFC_CD,
+           VPS.OFC_CD    ,
+           VPS.SREP_CD   ,
+           VPS.SREP_NM   ,
+           VPS.CUST_TP_CD,
+           NVL(C.CUST_CTRL_CD, 'C') AS CUST_CTRL_CD,
+           NVL(C.DTL_SEQ, 1)        AS DTL_SEQ     ,
+           DECODE(VPS.HH_FLG, 'Y', C.SC_NO)  AS SC_NO,
+           DECODE(VPS.HH_FLG, 'Y', C.RFA_NO) AS RFA_NO,
+           NVL(( SELECT SUM(M.RLANE_ADJ_QTY)
+                       FROM SPC_MDL_CUST_REV_LANE M
+                      WHERE M.COST_YRWK      = VPS.SEASON
+                        AND M.VER_SEQ        = VPS.VER_SEQ
+                        AND M.TRD_CD         = VPS.TRD_CD
+                        AND M.SUB_TRD_CD     = VPS.SUB_TRD_CD
+                        AND M.RLANE_CD       = VPS.RLANE_CD
+                        AND M.SLS_RGN_OFC_CD = VPS.RGN_OFC_CD
+                        AND M.CUST_CNT_CD    = VPS.CUST_CNT_CD
+                        AND M.CUST_SEQ       = VPS.CUST_SEQ
+                        AND NVL(M.SC_NO,NVL(M.RFA_NO,'X')) = NVL(C.SC_NO,NVL(C.RFA_NO,'X'))
+                        AND M.DELT_FLG       = 'N'
+                   ),0) AS RLANE_ADJ_QTY,
+           VPS.CUST_CNT_CD,
+           VPS.CUST_SEQ  ,
+           VPS.POL_CD    ,
+           VPS.POD_CD    ,
+           VPS.VSL_CD    ,
+           VPS.SKD_VOY_NO,
+           VPS.SKD_DIR_CD,
+           VPS.CTRL_LVL  ,
+           VPS.CTRL_HC   ,
+           VPS.CTRL_45   ,
+           VPS.CTRL_53   ,
+           VPS.CTRL_RF   ,
+           VPS.CTRL_WT   ,
+           VPS.CTRL_ACCT
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM (
+            SELECT SUBSTR(VPS.SLS_YRMON, 1, 4) AS COST_YR,
+                   VPS.COST_WK   ,
+                   VPS.SEASON    ,
+                   VPS.VER_SEQ   ,
+                   VPS.TRD_CD    ,
+                   VPS.SUB_TRD_CD,
+                   VPS.RLANE_CD  ,
+                   VPS.SKD_DIR_CD AS DIR_CD,
+                   VPS.IOC_TS_CD ,
+                   VPS.RGN_OFC_CD,
+                   VPS.SUB_OFC_CD,
+                   VPS.OFC_CD    ,
+                   VPS.SREP_CD   ,
+                   VPS.SREP_NM   ,
+                   CM.RVIS_CNTR_CUST_TP_CD AS CUST_TP_CD,
+                   VPS.HH_FLG,
+                   CM.CUST_CNT_CD,
+                   CM.CUST_SEQ   ,
+                   VPS.POL_CD    ,
+                   VPS.POD_CD    ,
+                   VPS.VSL_CD    ,
+                   VPS.SKD_VOY_NO,
+                   VPS.SKD_DIR_CD,
+                   VPS.CTRL_LVL  ,
+                   VPS.CTRL_HC   ,
+                   VPS.CTRL_45   ,
+                   VPS.CTRL_53   ,
+                   VPS.CTRL_RF   ,
+                   VPS.CTRL_WT   ,
+                   VPS.CTRL_ACCT
+                   , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+              FROM SPC_SLS_REP_CUST CM ,
+                   VVD_PORT_SREP    VPS
+             WHERE CM.SREP_CD   (+) = VPS.SREP_CD
+               AND NVL(CM.DELT_FLG, 'N') = 'N'
+               AND NVL(CM.INDIV_CUST_USE_FLG, 'Y') = 'Y'
+               AND CM.TRD_CD     (+) = VPS.TRD_CD
+               AND CM.SUB_TRD_CD (+) = VPS.SUB_TRD_CD
+            ) VPS,
+            SPC_MDL_CUST_CTRL C
+      WHERE VPS.SEASON      = C.COST_YRWK(+)
+        AND VPS.VER_SEQ     = C.VER_SEQ(+)
+        AND VPS.CUST_CNT_CD = C.CUST_CNT_CD(+)
+        AND VPS.CUST_SEQ    = C.CUST_SEQ(+)
+        AND VPS.TRD_CD      = C.TRD_CD(+)
+        AND NVL(C.DELT_FLG(+),'N') = 'N'
+)
+, USMODE AS (
+SELECT INTG_CD_VAL_CTNT USA_BKG_MOD_CD FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00777' AND INTG_CD_VAL_CTNT NOT IN('MLB', 'PORT')
+)
+, MASTER_DATA AS (
+    SELECT 2 AS LVL1            ,
+           3 - (GROUPING_ID(USA_BKG_MOD_CD) + GROUPING_ID(T.POL_CD) + GROUPING_ID(T.POD_CD)) AS LVL2,
+           T.TRD_CD             ,
+           T.SUB_TRD_CD         ,
+           T.RLANE_CD           ,
+           T.DIR_CD             ,
+           T.IOC_TS_CD          ,
+           T.RGN_OFC_CD         ,
+           NULL AS OFC_CD       ,
+           NULL AS SUB_OFC_CD   ,
+           NULL AS SREP_CD      ,
+           NULL AS SREP_NM      ,
+           NULL AS CUST_TP_CD   ,
+           NULL AS CUST_CTRL_CD ,
+           NULL AS DTL_SEQ      ,
+           NULL AS SC_NO        ,
+           NULL AS RFA_NO       ,
+           NULL AS RLANE_ADJ_QTY,
+           NULL AS CUST_CNT_CD  ,
+           NULL AS CUST_SEQ     ,
+           T.COST_YR            ,
+           T.COST_WK            ,
+           USA_BKG_MOD_CD       ,
+           T.POL_CD             ,
+           T.POD_CD             ,
+           T.VSL_CD             ,
+           T.SKD_VOY_NO         ,
+           T.SKD_DIR_CD         ,
+           0 AS CHL             ,
+           T.CTRL_LVL           ,
+           T.CTRL_HC            ,
+           T.CTRL_45            ,
+           T.CTRL_53            ,
+           T.CTRL_RF            ,
+           T.CTRL_WT            ,
+           T.CTRL_ACCT
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM VVD_PORT_SREP_CUST T
+     , USMODE US
+     WHERE US.USA_BKG_MOD_CD = CASE WHEN NVL(CTRL_USA_SVC_MOD_FLG, 'N') = 'N' THEN 'OTH' ELSE US.USA_BKG_MOD_CD END
+  GROUP BY GROUPING SETS (( T.TRD_CD    , T.SUB_TRD_CD, T.RLANE_CD  , T.DIR_CD    , T.IOC_TS_CD ,
+                             T.RGN_OFC_CD, T.POL_CD    , T.POD_CD    , T.VSL_CD    , T.SKD_VOY_NO,
+                             T.SKD_DIR_CD, T.COST_YR   , T.COST_WK   , T.CTRL_LVL  , T.CTRL_HC   ,
+                             T.CTRL_45   , T.CTRL_53   , T.CTRL_RF   , T.CTRL_WT   , T.CTRL_ACCT  
+                             , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG, USA_BKG_MOD_CD), 
+                             --Office, USMode, POL, POD
+                           ( T.TRD_CD    , T.SUB_TRD_CD, T.RLANE_CD  , T.DIR_CD    , T.IOC_TS_CD ,
+                             T.RGN_OFC_CD, T.POL_CD    , T.VSL_CD    , T.SKD_VOY_NO, T.SKD_DIR_CD,
+                             T.COST_YR   , T.COST_WK   , T.CTRL_LVL  , T.CTRL_HC   , T.CTRL_45   ,
+                             T.CTRL_53   , T.CTRL_RF   , T.CTRL_WT , T.CTRL_ACCT 
+                             , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG, USA_BKG_MOD_CD), 
+                             --Office, USMode, POL
+                           ( T.TRD_CD    , T.SUB_TRD_CD, T.RLANE_CD  , T.DIR_CD    , T.IOC_TS_CD ,
+                             T.RGN_OFC_CD, T.POL_CD    , T.VSL_CD    , T.SKD_VOY_NO, T.SKD_DIR_CD,
+                             T.COST_YR   , T.COST_WK   , T.CTRL_LVL  , T.CTRL_HC   , T.CTRL_45   ,
+                             T.CTRL_53   , T.CTRL_RF   , T.CTRL_WT , T.CTRL_ACCT 
+                             , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG),
+                             --Office, POL
+                           ( T.TRD_CD    , T.SUB_TRD_CD, T.RLANE_CD  , T.DIR_CD    , T.IOC_TS_CD ,
+                             T.RGN_OFC_CD, T.VSL_CD    , T.SKD_VOY_NO, T.SKD_DIR_CD, T.COST_YR   ,
+                             T.COST_WK   , T.CTRL_LVL  , T.CTRL_HC   , T.CTRL_45   , T.CTRL_53   ,
+                             T.CTRL_RF   , T.CTRL_WT , T.CTRL_ACCT      
+                             , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG, USA_BKG_MOD_CD), 
+                             --Office, USMode
+                           ( T.TRD_CD    , T.SUB_TRD_CD, T.RLANE_CD  , T.DIR_CD    , T.IOC_TS_CD ,
+                             T.RGN_OFC_CD, T.VSL_CD    , T.SKD_VOY_NO, T.SKD_DIR_CD, T.COST_YR   ,
+                             T.COST_WK   , T.CTRL_LVL  , T.CTRL_HC   , T.CTRL_45   , T.CTRL_53   ,
+                             T.CTRL_RF   , T.CTRL_WT , T.CTRL_ACCT      
+                             , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG) 
+                             --Office
+                         )
+    UNION ALL
+    SELECT 4 AS LVL1      ,
+           4-(GROUPING_ID(USA_BKG_MOD_CD) +  GROUPING_ID(T.CUST_CNT_CD) + GROUPING_ID(T.POL_CD) + GROUPING_ID(T.POD_CD)) AS LVL2,
+           T.TRD_CD       ,
+           T.SUB_TRD_CD   ,
+           T.RLANE_CD     ,
+           T.DIR_CD       ,
+           T.IOC_TS_CD    ,
+           T.RGN_OFC_CD   ,
+           T.OFC_CD       ,
+           T.SUB_OFC_CD   ,
+           T.SREP_CD      ,
+           T.SREP_NM      ,
+           T.CUST_TP_CD   ,
+           T.CUST_CTRL_CD ,
+           T.DTL_SEQ      ,
+           T.SC_NO        ,
+           T.RFA_NO       ,
+           T.RLANE_ADJ_QTY,
+           T.CUST_CNT_CD  ,
+           T.CUST_SEQ     ,
+           T.COST_YR      ,
+           T.COST_WK      ,
+           USA_BKG_MOD_CD ,
+           T.POL_CD       ,
+           T.POD_CD       ,
+           T.VSL_CD       ,
+           T.SKD_VOY_NO   ,
+           T.SKD_DIR_CD   ,
+           COUNT(DISTINCT T.CUST_CNT_CD) AS CHL,
+           T.CTRL_LVL     ,
+           T.CTRL_HC      ,
+           T.CTRL_45      ,
+           T.CTRL_53      ,
+           T.CTRL_RF      ,
+           T.CTRL_WT      ,
+           T.CTRL_ACCT
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM VVD_PORT_SREP_CUST T
+     , USMODE US
+      WHERE US.USA_BKG_MOD_CD = CASE WHEN NVL(CTRL_USA_SVC_MOD_FLG, 'N') = 'N' THEN 'OTH' ELSE US.USA_BKG_MOD_CD END
+  GROUP BY GROUPING SETS (( T.TRD_CD    , T.SUB_TRD_CD  , T.RLANE_CD     , T.DIR_CD     , T.IOC_TS_CD,
+                             T.RGN_OFC_CD, T.OFC_CD      , T.SUB_OFC_CD   , T.SREP_CD    , T.SREP_NM  ,
+                             T.CUST_TP_CD, T.CUST_CTRL_CD, T.RLANE_ADJ_QTY, T.CUST_CNT_CD, T.CUST_SEQ ,
+                             T.DTL_SEQ   , T.SC_NO       , T.RFA_NO       , T.POL_CD     , T.POD_CD   ,
+                             T.VSL_CD    , T.SKD_VOY_NO  , T.SKD_DIR_CD   , T.COST_YR    , T.COST_WK  ,
+                             T.CTRL_LVL  , T.CTRL_HC     , T.CTRL_45      , T.CTRL_53    , T.CTRL_RF  ,
+                             T.CTRL_45   , T.CTRL_53   , T.CTRL_RF   , T.CTRL_WT   , T.CTRL_ACCT 
+                             , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                             , US.USA_BKG_MOD_CD), --Office, SalesRep, USmode, Customer, POL, POD
+                           ( T.TRD_CD    , T.SUB_TRD_CD  , T.RLANE_CD     , T.DIR_CD     , T.IOC_TS_CD ,
+                             T.RGN_OFC_CD, T.OFC_CD      , T.SUB_OFC_CD   , T.SREP_CD    , T.SREP_NM   ,
+                             T.CUST_TP_CD, T.CUST_CTRL_CD, T.RLANE_ADJ_QTY, T.CUST_CNT_CD, T.CUST_SEQ  ,
+                             T.DTL_SEQ   , T.SC_NO       , T.RFA_NO       , T.POL_CD     , T.VSL_CD    ,
+                             T.SKD_VOY_NO, T.SKD_DIR_CD  , T.COST_YR      , T.COST_WK    , T.CTRL_LVL  ,
+                             T.CTRL_HC   , T.CTRL_45     , T.CTRL_53      , T.CTRL_RF    , T.CTRL_WT   ,
+                             T.CTRL_ACCT
+                             , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                             , US.USA_BKG_MOD_CD), --Office, SalesRep, USmode, Customer, POL
+                           ( T.TRD_CD    , T.SUB_TRD_CD  , T.RLANE_CD     , T.DIR_CD     , T.IOC_TS_CD ,
+                             T.RGN_OFC_CD, T.OFC_CD      , T.SUB_OFC_CD   , T.SREP_CD    , T.SREP_NM   ,
+                             T.CUST_TP_CD, T.CUST_CTRL_CD, T.RLANE_ADJ_QTY, T.CUST_CNT_CD, T.CUST_SEQ  ,
+                             T.DTL_SEQ   , T.SC_NO       , T.RFA_NO       , T.VSL_CD     , T.SKD_VOY_NO,
+                             T.SKD_DIR_CD, T.COST_YR     , T.COST_WK      , T.CTRL_LVL   , T.CTRL_HC   ,
+                             T.CTRL_45   , T.CTRL_53     , T.CTRL_RF      , T.CTRL_WT    , T.CTRL_ACCT  
+                             , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                             , US.USA_BKG_MOD_CD), --Office, SalesRep, USmode, Customer
+                           ( T.TRD_CD    , T.SUB_TRD_CD  , T.RLANE_CD     , T.DIR_CD     , T.IOC_TS_CD,
+                             T.RGN_OFC_CD, T.OFC_CD      , T.SUB_OFC_CD   , T.SREP_CD    , T.SREP_NM  ,
+                             T.VSL_CD    , T.SKD_VOY_NO  , T.SKD_DIR_CD   , T.COST_YR    , T.COST_WK  ,
+                             T.CTRL_LVL  , T.CTRL_HC     , T.CTRL_45      , T.CTRL_53    , T.CTRL_RF  ,
+                             T.CTRL_WT , T.CTRL_ACCT          
+                             , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                             , US.USA_BKG_MOD_CD), --Office, SalesRep, USmode
+                           ( T.TRD_CD    , T.SUB_TRD_CD  , T.RLANE_CD     , T.DIR_CD     , T.IOC_TS_CD,
+                             T.RGN_OFC_CD, T.OFC_CD      , T.SUB_OFC_CD   , T.SREP_CD    , T.SREP_NM  ,
+                             T.VSL_CD    , T.SKD_VOY_NO  , T.SKD_DIR_CD   , T.COST_YR    , T.COST_WK  ,
+                             T.CTRL_LVL  , T.CTRL_HC     , T.CTRL_45      , T.CTRL_53    , T.CTRL_RF  ,
+                             T.CTRL_WT , T.CTRL_ACCT      
+                             , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG)--Office, SalesRep
+                         )
+)
+, CTRT_FCAST AS (
+    SELECT LVL1           ,
+           LVL2           ,
+           TRD_CD         ,
+           SUB_TRD_CD     ,
+           RLANE_CD       ,
+           IOC_TS_CD      ,
+           RGN_OFC_CD     ,
+           OFC_CD         ,
+           SUB_OFC_CD     ,
+           SREP_CD        ,
+           CUST_TP_CD     ,
+           CUST_CTRL_CD   ,
+           DTL_SEQ        ,
+           SC_NO          ,
+           RFA_NO         ,
+           RLANE_ADJ_QTY  ,
+           CUST_CNT_CD    ,
+           CUST_SEQ       ,
+           BKG_CUST_CNT_CD,
+           BKG_CUST_SEQ   ,
+           VSL_CD         ,
+           SKD_VOY_NO     ,
+           SKD_DIR_CD     ,
+           1 CHL          ,
+           CTRL_LVL       ,
+           CTRL_HC        ,
+           CTRL_45        ,
+           CTRL_53        ,
+           CTRL_RF        ,
+           CTRL_WT        ,
+           CTRL_ACCT      ,
+           COST_YR        ,
+           COST_WK        ,
+           SUM(FCAST_TTL_QTY)     AS FCAST_TTL_QTY    ,
+           SUM(FCAST_20FT_QTY)    AS FCAST_20FT_QTY   ,
+           SUM(FCAST_40FT_QTY)    AS FCAST_40FT_QTY   ,
+           SUM(FCAST_40FT_HC_QTY) AS FCAST_40FT_HC_QTY,
+           SUM(FCAST_45FT_HC_QTY) AS FCAST_45FT_HC_QTY,
+           SUM(FCAST_53FT_QTY)    AS FCAST_53FT_QTY   ,
+           SUM(FCAST_RF_QTY)      AS FCAST_RF_QTY     ,
+           SUM(FCAST_TTL_WGT)     AS FCAST_TTL_WGT    ,
+           DECODE(MAX(FCAST_RMK), NULL, '', SUBSTR(MAX(SYS_CONNECT_BY_PATH('['||CSREP_NM||']'||FCAST_RMK, '|')), 2)) AS FCAST_RMK
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM (
+              SELECT DISTINCT
+                     4 AS LVL1                     ,
+                     1 AS LVL2                     ,
+                     F.TRD_CD                      ,
+                     F.SUB_TRD_CD                  ,
+                     F.RLANE_CD                    ,
+                     F.IOC_TS_CD                   ,
+                     F.SLS_RGN_OFC_CD AS RGN_OFC_CD,
+                     SR.OFC_CD        AS OFC_CD    ,
+                     SR.SUB_OFC_CD                 ,
+                     R.SREP_CD                     ,
+                     NVL(SC.CUST_TP_CD, 'N')   AS CUST_TP_CD   ,
+                     NVL(SC.CUST_CTRL_CD, 'C') AS CUST_CTRL_CD ,
+                     NVL(SC.DTL_SEQ, 1) AS DTL_SEQ ,
+                     SC.SC_NO                      ,
+                     SC.RFA_NO                     ,
+                     NVL(SC.RLANE_ADJ_QTY, 0)  AS RLANE_ADJ_QTY,
+                     NVL(SC.CUST_CNT_CD, NVL((SELECT S.CUST_CNT_CD
+                                                FROM SPC_SLS_REP_CUST S
+                                               WHERE S.TRD_CD      = F.TRD_CD
+                                                 AND S.SUB_TRD_CD  = F.SUB_TRD_CD
+                                                 AND S.SREP_CD     = R.SREP_CD
+                                                 AND S.CUST_CNT_CD = F.CUST_CNT_CD
+                                                 AND S.CUST_SEQ    = F.CUST_SEQ
+                                                 AND S.DELT_FLG    ='N'
+                                                 AND NVL(S.INDIV_CUST_USE_FLG, 'N') = 'Y'), 'XX')) AS CUST_CNT_CD,
+                     NVL(SC.CUST_SEQ, NVL((SELECT S.CUST_SEQ
+                                             FROM SPC_SLS_REP_CUST S
+                                            WHERE S.TRD_CD      = F.TRD_CD
+                                              AND S.SUB_TRD_CD  = F.SUB_TRD_CD
+                                              AND S.SREP_CD     = R.SREP_CD
+                                              AND S.CUST_CNT_CD = F.CUST_CNT_CD
+                                              AND S.CUST_SEQ    = F.CUST_SEQ
+                                              AND S.DELT_FLG    ='N'
+                                              AND NVL(S.INDIV_CUST_USE_FLG, 'N') = 'Y' ), 999999)) AS CUST_SEQ,
+                     F.CUST_CNT_CD AS BKG_CUST_CNT_CD,
+                     F.CUST_SEQ    AS BKG_CUST_SEQ   ,
+                     F.VSL_CD       ,
+                     F.SKD_VOY_NO   ,
+                     F.SKD_DIR_CD   ,
+                     1 AS CHL       ,
+                     V.CTRL_LVL     ,
+                     V.CTRL_HC      ,
+                     V.CTRL_45      ,
+                     V.CTRL_53      ,
+                     V.CTRL_RF      ,
+                     V.CTRL_WT      ,
+                     V.CTRL_ACCT    ,
+                     SUBSTR(V.SLS_YRMON, 1, 4) AS COST_YR ,
+                     V.COST_WK      ,
+                     F.FCAST_TTL_QTY,
+                     NVL(F.FCAST_20FT_QTY, 0) AS FCAST_20FT_QTY,
+                     NVL(F.FCAST_40FT_QTY ,0) AS FCAST_40FT_QTY,
+                     F.FCAST_40FT_HC_QTY,
+                     F.FCAST_45FT_HC_QTY,
+                     F.FCAST_53FT_QTY   ,
+                     F.FCAST_RF_QTY     ,
+                     F.FCAST_TTL_WGT    ,
+                     F.FCAST_RMK        ,
+                     (SELECT SREP_NM
+                        FROM MDM_SLS_REP
+                       WHERE SREP_CD = F.SREP_USR_ID) AS CSREP_NM,
+                     DENSE_RANK() OVER (PARTITION BY F.TRD_CD, F.SUB_TRD_CD, F.RLANE_CD, F.IOC_TS_CD, F.VSL_CD, F.SKD_VOY_NO, F.SKD_DIR_CD, F.CUST_CNT_CD, F.CUST_SEQ, F.FCAST_SEQ, F.SLS_RGN_OFC_CD ORDER BY F.SREP_USR_ID) AS RNUM
+                     , V.CTRL_D2_FLG, V.CTRL_D4_FLG, V.CTRL_RD_FLG, V.CTRL_ECC_FLG, V.CTRL_LOC_FLG , V.CTRL_USA_SVC_MOD_FLG , V.CTRL_ACCT_FLG
+                FROM SPC_CTRT_FCAST_CUST F ,
+                     VVD_PORT_SREP_CUST  SC,
+                     SPC_SLS_REP_CUST    R ,
+                     VVDLS               V ,
+                     PARAMS              P ,
+                     SREPS               SR
+               WHERE F.TRD_CD         = V.TRD_CD
+                 AND F.SUB_TRD_CD     = V.SUB_TRD_CD
+                 AND F.RLANE_CD       = V.RLANE_CD
+                 AND F.VSL_CD         = V.VSL_CD
+                 AND F.SKD_VOY_NO     = V.SKD_VOY_NO
+                 AND F.SKD_DIR_CD     = V.SKD_DIR_CD
+                 AND F.IOC_TS_CD      = P.IOC_TS_CD
+                 AND F.SLS_RGN_OFC_CD = P.RGN_OFC_CD
+                 AND F.RLANE_CD       = DECODE(P.VVD, NULL, P.RLANE_CD, F.RLANE_CD)
+                 AND F.CUST_CNT_CD    = R.CUST_CNT_CD
+                 AND F.CUST_SEQ       = R.CUST_SEQ
+                 AND F.TRD_CD         = R.TRD_CD
+                 AND F.SUB_TRD_CD     = R.SUB_TRD_CD
+                 AND R.SREP_CD        = NVL(SC.SREP_CD, R.SREP_CD)
+                 AND F.TRD_CD         = SC.TRD_CD      (+)
+                 AND F.CUST_CNT_CD    = SC.CUST_CNT_CD (+)
+                 AND F.CUST_SEQ       = SC.CUST_SEQ    (+)
+                 AND F.VSL_CD         = SC.VSL_CD      (+)
+                 AND F.SKD_VOY_NO     = SC.SKD_VOY_NO  (+)
+                 AND F.SKD_DIR_CD     = SC.SKD_DIR_CD  (+)
+                 AND NVL(F.SC_NO,NVL(F.RFA_NO, 'X')) = NVL(SC.SC_NO(+),NVL(SC.RFA_NO(+), 'X'))
+                 AND R.DELT_FLG       = 'N'
+                 AND R.SREP_CD        = SR.SREP_CD
+                 AND R.SREP_CD        LIKE DECODE(P.RGN_OFC_CD, 'SELSC', DECODE(P.SALES_REP_CD, NULL, SC.SREP_CD, P.SALES_REP_CD), P.SALES_REP_CD)||'%'
+           )
+  GROUP BY GROUPING SETS ((LVL1      , LVL2        , TRD_CD       , SUB_TRD_CD , RLANE_CD, IOC_TS_CD, RGN_OFC_CD, OFC_CD , SUB_OFC_CD, SREP_CD   ,
+                           CUST_TP_CD, CUST_CTRL_CD, RLANE_ADJ_QTY, CUST_CNT_CD, CUST_SEQ, DTL_SEQ  , SC_NO     , RFA_NO , VSL_CD    , SKD_VOY_NO,
+                           SKD_DIR_CD, COST_YR     , COST_WK      , CTRL_LVL   , CTRL_HC , CTRL_45  , CTRL_53   , CTRL_RF, CTRL_WT   , CTRL_ACCT               
+						   , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG),
+                          (LVL1      , LVL2        , TRD_CD       , SUB_TRD_CD , RLANE_CD, IOC_TS_CD, RGN_OFC_CD, OFC_CD , SUB_OFC_CD     , SREP_CD     ,
+                           CUST_TP_CD, CUST_CTRL_CD, RLANE_ADJ_QTY, CUST_CNT_CD, CUST_SEQ, DTL_SEQ  , SC_NO     , RFA_NO , BKG_CUST_CNT_CD, BKG_CUST_SEQ,
+                           VSL_CD    , SKD_VOY_NO  , SKD_DIR_CD   , COST_YR    , COST_WK , CTRL_LVL , CTRL_HC   , CTRL_45, CTRL_53        , CTRL_RF     ,
+                           CTRL_WT   , CTRL_ACCT    
+                           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG)
+                         )
+  START WITH RNUM = 1
+          CONNECT BY PRIOR TRD_CD      = TRD_CD
+                 AND PRIOR SUB_TRD_CD  = SUB_TRD_CD
+                 AND PRIOR RLANE_CD    = RLANE_CD
+                 AND PRIOR IOC_TS_CD   = IOC_TS_CD
+                 AND PRIOR RGN_OFC_CD  = RGN_OFC_cD
+                 AND PRIOR OFC_cD      = OFC_CD
+                 AND PRIOR SUB_OFC_CD  = SUB_OFC_CD
+                 AND PRIOR SREP_CD     = SREP_CD
+                 AND PRIOR CUST_CNT_CD = CUST_CNT_CD
+                 AND PRIOR CUST_SEQ    = CUST_SEQ
+                 AND PRIOR DTL_SEQ     = DTL_SEQ
+                 AND PRIOR RNUM        = RNUM - 1
+    HAVING NOT (     BKG_CUST_CNT_CD IS NOT NULL
+                 AND CUST_CNT_CD = NVL(BKG_CUST_CNT_CD, 'X')
+                 AND CUST_SEQ    = NVL(BKG_CUST_SEQ, 1))
+)
+, VVDS AS (
+    SELECT DISTINCT
+           SUBSTR(SEASON, 1, 6) AS SEASON,
+           SUBSTR(SEASON, 8)    AS VER_SEQ,
+           SLS_YRMON           ,
+           COST_YRMON          ,
+           COST_WK             ,
+           REP_TRD_CD          ,
+           REP_SUB_TRD_CD      ,
+           TRD_CD              ,
+           SUB_TRD_CD          ,
+           RLANE_CD            ,
+           VSL_CD              ,
+           SKD_VOY_NO          ,
+           SKD_DIR_CD          ,
+           SKD_DIR_CD AS DIR_CD,
+           SUB_OFC_CD          ,
+           RGN_OFC_CD          ,
+           IOC_TS_CD           ,
+           CTRL_LVL            ,
+           CTRL_HC             ,
+           CTRL_45             ,
+           CTRL_53             ,
+           CTRL_RF             ,
+           CTRL_WT             ,
+           CTRL_ACCT           ,
+           ETD_DT              ,
+           HH_FLG
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+           , BSE_QTR_CD
+      FROM VVD_POL
+)
+, FCAST_DATA AS (
+    SELECT 4 - GROUPING_ID(SREP_CD) * 2 AS LVL1,
+           4 - (GROUPING_ID(USA_BKG_MOD_CD) + GROUPING_ID(CUST_CNT_CD) + GROUPING_ID(POL_CD) + GROUPING_ID(POD_CD)) AS LVL2,
+           TRD_CD          ,
+           SUB_TRD_CD      ,
+           RLANE_CD        ,
+           DIR_CD          ,
+           IOC_TS_CD       ,
+           RGN_OFC_CD      ,
+           OFC_CD          ,
+           SUB_OFC_CD      ,
+           SREP_CD         ,
+           NULL AS SREP_NM ,
+           CUST_TP_CD      ,
+           CUST_CTRL_CD    ,
+           DTL_SEQ         ,
+           SC_NO           ,
+           RFA_NO          ,
+           RLANE_ADJ_QTY   ,
+           CUST_CNT_CD     ,
+           CUST_SEQ        ,
+           BKG_CUST_CNT_CD ,
+           BKG_CUST_SEQ    ,
+           POL_CD          ,
+           POD_CD          ,
+           VSL_CD          ,
+           SKD_VOY_NO      ,
+           SKD_DIR_CD      ,
+           1 CHL           ,
+           CTRL_LVL        ,
+           CTRL_HC         ,
+           CTRL_45         ,
+           CTRL_53         ,
+           CTRL_RF         ,
+           CTRL_WT         ,
+           CTRL_ACCT       ,
+           MAX(COST_YR) AS COST_YR ,
+           MAX(COST_WK) AS COST_WK ,
+           SUM(FCAST_TTL_QTY)     AS FCAST_TTL_QTY ,
+           SUM(FCAST_20FT_QTY)    AS FCAST_20FT_QTY   ,
+           SUM(FCAST_40FT_QTY)    AS FCAST_40FT_QTY   ,
+           SUM(FCAST_40FT_HC_QTY) AS FCAST_40FT_HC_QTY,
+           SUM(FCAST_45FT_HC_QTY) AS FCAST_45FT_HC_QTY,
+           SUM(FCAST_53FT_QTY)    AS FCAST_53FT_QTY   ,
+           SUM(FCAST_RF_QTY)      AS FCAST_RF_QTY     ,
+           SUM(FCAST_TTL_WGT)     AS FCAST_TTL_WGT
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+           , USA_BKG_MOD_CD
+           , SUM(FCAST_20FT_DRY_QTY)     AS FCAST_20FT_DRY_QTY
+           , SUM(FCAST_40FT_DRY_QTY)     AS FCAST_40FT_DRY_QTY
+           , SUM(FCAST_RD_QTY)           AS FCAST_RD_QTY
+           , SUM(CFM_20FT_DRY_QTY)       AS CFM_20FT_DRY_QTY
+           , SUM(CFM_40FT_DRY_QTY)       AS CFM_40FT_DRY_QTY
+           , SUM(CFM_RD_QTY)             AS CFM_RD_QTY
+           , SUM(USD_BKG_20FT_DRY_QTY)   AS USD_BKG_20FT_DRY_QTY
+           , SUM(USD_BKG_40FT_DRY_QTY)   AS USD_BKG_40FT_DRY_QTY
+           , SUM(USD_BKG_RD_QTY)         AS USD_BKG_RD_QTY     
+      FROM (    SELECT F.TRD_CD    ,
+                     F.SUB_TRD_CD,
+                     F.RLANE_CD  ,
+                     F.DIR_CD    ,
+                     F.IOC_TS_CD ,
+                     F.SLS_RGN_OFC_CD AS RGN_OFC_CD,
+                     F.FCAST_OFC_CD AS OFC_CD ,
+                     NVL(SC.SUB_OFC_CD, (SELECT SUB_OFC_CD
+                                           FROM SREPS
+                                          WHERE SREP_CD = F.SREP_USR_ID))  AS SUB_OFC_CD,
+                     P.SUB_OFC_CD AS P_SUB_OFC_CD,
+                     F.SREP_USR_ID  AS SREP_CD ,
+                     NVL(SC.CUST_TP_CD, 'N') AS CUST_TP_CD,
+                     NVL(SC.CUST_CTRL_CD, 'C') AS CUST_CTRL_CD,
+                     NVL(SC.DTL_SEQ, 1) AS DTL_SEQ,
+                     SC.SC_NO ,
+                     SC.RFA_NO,
+                     NVL(SC.RLANE_ADJ_QTY, 0) AS RLANE_ADJ_QTY,
+                     NVL(SC.CUST_CNT_CD, NVL((SELECT S.CUST_CNT_CD
+                                                FROM SPC_SLS_REP_CUST S
+                                               WHERE S.TRD_CD      = F.TRD_CD
+                                                 AND S.SUB_TRD_CD  = F.SUB_TRD_CD
+                                                 AND S.SREP_CD     = F.SREP_USR_ID
+                                                 AND S.CUST_CNT_CD = F.CUST_CNT_CD
+                                                 AND S.CUST_SEQ    = F.CUST_SEQ
+                                                 AND S.DELT_FLG    ='N'
+                                                 AND NVL(S.INDIV_CUST_USE_FLG, 'N') = 'Y'), 'XX')) AS CUST_CNT_CD,
+                     NVL(SC.CUST_SEQ, NVL((SELECT S.CUST_SEQ
+                                             FROM SPC_SLS_REP_CUST S
+                                            WHERE S.TRD_CD      = F.TRD_CD
+                                              AND S.SUB_TRD_CD  = F.SUB_TRD_CD
+                                              AND S.SREP_CD     = F.SREP_USR_ID
+                                              AND S.CUST_CNT_CD = F.CUST_CNT_CD
+                                              AND S.CUST_SEQ    = F.CUST_SEQ
+                                              AND S.DELT_FLG    ='N'
+                                              AND NVL(S.INDIV_CUST_USE_FLG, 'N') = 'Y' ), 999999)) AS CUST_SEQ,
+                     F.CUST_CNT_CD AS BKG_CUST_CNT_CD,
+                     F.CUST_SEQ    AS BKG_CUST_SEQ   ,
+                     F.POL_YD_CD   AS POL_CD         ,
+                     F.POD_YD_CD   AS POD_CD         ,
+                     F.VSL_CD    ,
+                     F.SKD_VOY_NO,
+                     F.SKD_DIR_CD,
+                     1 AS CHL    ,
+                     V.CTRL_LVL  ,
+                     V.CTRL_HC   ,
+                     V.CTRL_45   ,
+                     V.CTRL_53   ,
+                     V.CTRL_RF   ,
+                     V.CTRL_WT   ,
+                     V.CTRL_ACCT ,
+                     SUBSTR(V.SLS_YRMON, 1, 4) AS COST_YR ,
+                     V.COST_WK      ,
+                     F.FCAST_TTL_QTY,
+                     CASE WHEN F.FCAST_20FT_QTY IS NOT NULL AND F.FCAST_40FT_QTY IS NOT NULL THEN F.FCAST_20FT_QTY
+                                                                                             ELSE F.FCAST_TTL_QTY
+                      END AS FCAST_20FT_QTY,
+                     NVL(F.FCAST_40FT_QTY, 0) AS FCAST_40FT_QTY ,
+                     F.FCAST_40FT_HC_QTY,
+                     F.FCAST_45FT_HC_QTY,
+                     F.FCAST_53FT_QTY   ,
+                     F.FCAST_RF_QTY     ,
+                     F.FCAST_TTL_WGT
+                     , V.CTRL_D2_FLG, V.CTRL_D4_FLG, V.CTRL_RD_FLG, V.CTRL_ECC_FLG, V.CTRL_LOC_FLG , V.CTRL_USA_SVC_MOD_FLG , V.CTRL_ACCT_FLG
+                     , NVL(F.FCAST_20FT_DRY_QTY, 0) FCAST_20FT_DRY_QTY
+                     , NVL(F.FCAST_40FT_DRY_QTY, 0) FCAST_40FT_DRY_QTY
+                     , NVL(F.FCAST_RD_QTY, 0) FCAST_RD_QTY
+                     , NVL(F.CFM_20FT_DRY_QTY, 0) CFM_20FT_DRY_QTY
+                     , NVL(F.CFM_40FT_DRY_QTY, 0) CFM_40FT_DRY_QTY
+                     , NVL(F.CFM_RD_QTY, 0) CFM_RD_QTY
+                     , NVL(F.USD_BKG_20FT_DRY_QTY, 0) USD_BKG_20FT_DRY_QTY
+                     , NVL(F.USD_BKG_40FT_DRY_QTY, 0) USD_BKG_40FT_DRY_QTY
+                     , NVL(F.USD_BKG_RD_QTY, 0) USD_BKG_RD_QTY
+                       , F.USA_BKG_MOD_CD
+                FROM VVD_PORT_SREP_CUST SC,
+                     SPC_DLY_FCAST_CUST F ,
+                     VVDS               V ,
+                     PARAMS             P ,
+                     MDM_CUSTOMER       M
+                WHERE SC.TRD_CD     (+) = F.TRD_CD
+                  AND SC.SUB_TRD_CD (+) = F.SUB_TRD_CD
+                  AND SC.RLANE_CD   (+) = F.RLANE_CD
+                  AND SC.DIR_CD     (+) = F.DIR_CD
+                  AND SC.IOC_TS_CD  (+) = F.IOC_TS_CD
+                  AND SC.VSL_CD     (+) = F.VSL_CD
+                  AND SC.SKD_VOY_NO (+) = F.SKD_VOY_NO
+                  AND SC.SKD_DIR_CD (+) = F.SKD_DIR_CD
+                  AND SC.POL_CD     (+) = F.POL_YD_CD
+                  AND SC.POD_CD     (+) = F.POD_YD_CD
+                  AND SC.SREP_CD    (+) = F.SREP_USR_ID
+                  AND SC.CUST_CNT_CD(+) = F.CUST_CNT_CD
+                  AND SC.CUST_SEQ   (+) = F.CUST_SEQ
+                  AND NVL(SC.SC_NO(+),NVL(SC.RFA_NO(+), 'XX')) = NVL(F.SC_NO, NVL(F.RFA_NO, 'XX'))
+#if (${salesoffice} == 'SELSC' && ${suboffice_size} > 0)
+#end
+                  AND (    SC.TRD_CD IS NOT NULL
+                        OR F.FCAST_TTL_QTY     > 0
+                        OR F.FCAST_20FT_QTY    > 0
+                        OR F.FCAST_40FT_QTY    > 0
+                        OR F.FCAST_40FT_HC_QTY > 0
+                        OR F.FCAST_45FT_HC_QTY > 0
+                        OR F.FCAST_53FT_QTY    > 0
+                        OR F.FCAST_RF_QTY      > 0
+                        OR F.FCAST_TTL_WGT     > 0
+	                    OR F.FCAST_TTL_WGT     > 0
+                        OR NVL(F.FCAST_20FT_DRY_QTY, 0)> 0
+                        OR NVL(F.FCAST_40FT_DRY_QTY, 0)> 0
+                        OR NVL(F.FCAST_RD_QTY, 0)      > 0)
+                  AND F.TRD_CD         = V.TRD_CD
+                  AND F.SUB_TRD_CD     = V.SUB_TRD_CD
+                  AND F.RLANE_CD       = V.RLANE_CD
+                  AND F.DIR_CD         = V.SKD_DIR_CD
+                  AND F.VSL_CD         = V.VSL_CD
+                  AND F.SKD_VOY_NO     = V.SKD_VOY_NO
+                  AND F.SKD_DIR_CD     = V.SKD_DIR_CD
+                  AND F.IOC_TS_CD      = P.IOC_TS_CD
+                  AND F.SLS_RGN_OFC_CD = P.RGN_OFC_CD
+                  AND F.RLANE_CD       = DECODE(P.VVD, NULL, P.RLANE_CD, F.RLANE_CD)
+                  AND F.CUST_CNT_CD    = M.CUST_CNT_CD
+                  AND F.CUST_SEQ       = M.CUST_SEQ
+#if (${salesoffice} == 'SELSC' && ${suboffice_size} > 0)
+
+#else
+                  AND F.SLS_OFC_CD  LIKE P.SUB_OFC_CD||'%'
+#end
+                  AND F.SREP_USR_ID    LIKE DECODE(P.RGN_OFC_CD, 'SELSC', DECODE(P.SALES_REP_CD, NULL, SC.SREP_CD, P.SALES_REP_CD), P.SALES_REP_CD)||'%'
+           )
+  WHERE SUB_OFC_CD LIKE P_SUB_OFC_CD||'%'
+  GROUP BY GROUPING SETS (( TRD_CD , SUB_TRD_CD, RLANE_CD    , DIR_CD       , IOC_TS_CD  , RGN_OFC_CD, OFC_CD  , SUB_OFC_CD,
+                              SREP_CD, CUST_TP_CD, CUST_CTRL_CD, RLANE_ADJ_QTY, CUST_CNT_CD, CUST_SEQ  , DTL_SEQ , SC_NO     ,
+                              RFA_NO , POL_CD    , POD_CD      , VSL_CD       , SKD_VOY_NO , SKD_DIR_CD, CTRL_LVL, CTRL_HC   ,
+                              CTRL_45, CTRL_53   , CTRL_RF     , CTRL_WT      , CTRL_ACCT  
+                              , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG, USA_BKG_MOD_CD),
+                              
+                            ( TRD_CD , SUB_TRD_CD     , RLANE_CD    , DIR_CD       , IOC_TS_CD  , RGN_OFC_CD, OFC_CD    , SUB_OFC_CD,
+                              SREP_CD, CUST_TP_CD     , CUST_CTRL_CD, RLANE_ADJ_QTY, CUST_CNT_CD, CUST_SEQ  , DTL_SEQ   , SC_NO     ,
+                              RFA_NO , BKG_CUST_CNT_CD, BKG_CUST_SEQ, POL_CD       , VSL_CD     , SKD_VOY_NO, SKD_DIR_CD, CTRL_LVL  ,
+                              CTRL_HC, CTRL_45        , CTRL_53     , CTRL_RF      , CTRL_WT    , CTRL_ACCT   
+                              , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG, USA_BKG_MOD_CD) ,  
+                              
+                            ( TRD_CD , SUB_TRD_CD     , RLANE_CD    , DIR_CD       , IOC_TS_CD  , RGN_OFC_CD, OFC_CD  , SUB_OFC_CD,
+                              SREP_CD, CUST_TP_CD     , CUST_CTRL_CD, RLANE_ADJ_QTY, CUST_CNT_CD, CUST_SEQ  , DTL_SEQ , SC_NO     ,
+                              RFA_NO , BKG_CUST_CNT_CD, BKG_CUST_SEQ, VSL_CD       , SKD_VOY_NO , SKD_DIR_CD, CTRL_LVL, CTRL_HC   ,
+                              CTRL_45, CTRL_53        , CTRL_RF     , CTRL_WT      , CTRL_ACCT   
+                              , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG, USA_BKG_MOD_CD) ,                            
+
+                            ( TRD_CD  , SUB_TRD_CD     , RLANE_CD    , DIR_CD       , IOC_TS_CD  , RGN_OFC_CD, OFC_CD    , SUB_OFC_CD,
+                              SREP_CD , CUST_TP_CD     , CUST_CTRL_CD, RLANE_ADJ_QTY, CUST_CNT_CD, CUST_SEQ  , DTL_SEQ   , SC_NO     ,
+                              RFA_NO  , BKG_CUST_CNT_CD, BKG_CUST_SEQ, POL_CD       , POD_CD     , VSL_CD    , SKD_VOY_NO, SKD_DIR_CD,
+                              CTRL_LVL, CTRL_HC        , CTRL_45     , CTRL_53      , CTRL_RF    , CTRL_WT   , CTRL_ACCT  
+                              , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG, USA_BKG_MOD_CD),
+                              
+                            ( TRD_CD , SUB_TRD_CD, RLANE_CD    , DIR_CD       , IOC_TS_CD  , RGN_OFC_CD, OFC_CD , SUB_OFC_CD,
+                              SREP_CD, CUST_TP_CD, CUST_CTRL_CD, RLANE_ADJ_QTY, CUST_CNT_CD, CUST_SEQ  , DTL_SEQ, SC_NO     ,
+                              RFA_NO , POL_CD    , VSL_CD      , SKD_VOY_NO   , SKD_DIR_CD , CTRL_LVL  , CTRL_HC, CTRL_45   ,
+                              CTRL_53, CTRL_RF   , CTRL_WT     , CTRL_ACCT
+                              , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG, USA_BKG_MOD_CD),
+                              
+                            ( TRD_CD , SUB_TRD_CD, RLANE_CD    , DIR_CD       , IOC_TS_CD  , RGN_OFC_CD, OFC_CD , SUB_OFC_CD,
+                              SREP_CD, CUST_TP_CD, CUST_CTRL_CD, RLANE_ADJ_QTY, CUST_CNT_CD, CUST_SEQ  , DTL_SEQ, SC_NO     ,
+                              RFA_NO , VSL_CD    , SKD_VOY_NO  , SKD_DIR_CD   , CTRL_LVL   , CTRL_HC   , CTRL_45, CTRL_53   ,
+                              CTRL_RF, CTRL_WT   , CTRL_ACCT
+                              , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG, USA_BKG_MOD_CD),
+
+                            ( TRD_CD , SUB_TRD_CD, RLANE_CD  , DIR_CD    , IOC_TS_CD, RGN_OFC_CD, OFC_CD , SUB_OFC_CD,
+                              SREP_CD, VSL_CD    , SKD_VOY_NO, SKD_DIR_CD, CTRL_LVL , CTRL_HC   , CTRL_45, CTRL_53   ,
+                              CTRL_RF, CTRL_WT   , CTRL_ACCT
+                              , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG, USA_BKG_MOD_CD), 
+                              
+                            ( TRD_CD , SUB_TRD_CD, RLANE_CD  , DIR_CD    , IOC_TS_CD, RGN_OFC_CD, OFC_CD , SUB_OFC_CD,
+                              SREP_CD, VSL_CD    , SKD_VOY_NO, SKD_DIR_CD, CTRL_LVL , CTRL_HC   , CTRL_45, CTRL_53   ,
+                              CTRL_RF, CTRL_WT   , CTRL_ACCT
+                              , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG), 
+                            
+                            ( TRD_CD , SUB_TRD_CD, RLANE_CD  , DIR_CD  , IOC_TS_CD, RGN_OFC_CD, POL_CD , POD_CD ,
+                              VSL_CD , SKD_VOY_NO, SKD_DIR_CD, CTRL_LVL, CTRL_HC  , CTRL_45   , CTRL_53, CTRL_RF,
+                              CTRL_WT , CTRL_ACCT 
+                              , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG),  
+                              
+                            ( TRD_CD    , SUB_TRD_CD, RLANE_CD, DIR_CD , IOC_TS_CD, RGN_OFC_CD, VSL_CD , SKD_VOY_NO,
+                              SKD_DIR_CD, CTRL_LVL  , CTRL_HC , CTRL_45, CTRL_53  , CTRL_RF   , CTRL_WT , CTRL_ACCT 
+                              , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG, USA_BKG_MOD_CD), 
+                            --us                              
+                            ( TRD_CD    , SUB_TRD_CD, RLANE_CD, DIR_CD , IOC_TS_CD, RGN_OFC_CD, VSL_CD , SKD_VOY_NO,
+                              SKD_DIR_CD, POL_CD    , CTRL_LVL  , CTRL_HC , CTRL_45, CTRL_53  , CTRL_RF   , CTRL_WT , CTRL_ACCT 
+                              , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG),
+                              
+                            --POL 추가
+                            ( TRD_CD    , SUB_TRD_CD, RLANE_CD, DIR_CD , IOC_TS_CD, RGN_OFC_CD, VSL_CD , SKD_VOY_NO,
+                              SKD_DIR_CD, CTRL_LVL  , CTRL_HC , CTRL_45, CTRL_53  , CTRL_RF   , CTRL_WT , CTRL_ACCT 
+                              , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG)
+                         )
+)
+, BKG_ORG AS (
+    SELECT TRD_CD              ,
+           SUB_TRD_CD          ,
+           RLANE_CD            ,
+           DIR_CD               ,
+           IOC_TS_CD            ,
+           RGN_OFC_CD           ,
+           OFC_CD,
+           SUB_OFC_CD ,
+           SREP_CD    ,
+           NULL                   AS SREP_NM    ,
+           CUST_TP_CD ,          
+			--SPC_MDL_CUST_CTRL에 CUST_CTRL_CD가 존재하면 먼저 적용. 존재하지 않으면서 AES_RFA_CUST_FLG != 'X'일때 SPC_MDL_CUST_RFA 테이블에 있는  CUST_CTRL_CD적용.
+           NVL(
+               (SELECT DISTINCT CUST_CTRL_CD                    
+                  FROM SPC_MDL_CUST_CTRL
+                 WHERE COST_YRWK       = B.SEASON
+                   AND VER_SEQ         = B.VER_SEQ
+                   AND TRD_CD          = B.TRD_CD
+                   AND CUST_CNT_CD     = B.CUST_CNT_CD
+                   AND CUST_SEQ        = B.CUST_SEQ
+                   AND NVL(SC_NO, NVL(RFA_NO, 'X')) = NVL(B.SC_NO,NVL(B.RFA_NO,'X'))
+                   AND DELT_FLG        = 'N')
+               , CASE WHEN AES_RFA_CUST_FLG != 'X' 
+                      THEN AES_RFA_CUST_FLG           
+                      ELSE 'C'
+						END)
+                  AS CUST_CTRL_CD,
+
+
+           NVL((SELECT DISTINCT DTL_SEQ                    
+                  FROM SPC_MDL_CUST_CTRL
+                 WHERE COST_YRWK       = B.SEASON
+                   AND VER_SEQ         = B.VER_SEQ
+                   AND TRD_CD          = B.TRD_CD
+                   AND CUST_CNT_CD     = B.CUST_CNT_CD
+                   AND CUST_SEQ        = B.CUST_SEQ
+                   AND NVL(SC_NO, NVL(RFA_NO, 'X')) = NVL(B.SC_NO, NVL(B.RFA_NO,'X'))
+                   AND DELT_FLG        = 'N'), 1) AS DTL_SEQ,
+                   
+           NVL((SELECT SUM(RLANE_ADJ_QTY)
+                  FROM SPC_MDL_CUST_REV_LANE
+                 WHERE COST_YRWK       = B.SEASON
+                   AND VER_SEQ         = B.VER_SEQ
+                   AND TRD_CD          = B.TRD_CD
+                   AND SUB_TRD_CD      = B.SUB_TRD_CD
+                   AND RLANE_CD        = B.RLANE_CD
+                   AND SLS_RGN_OFC_CD  = B.RGN_OFC_CD
+                   AND CUST_CNT_CD     = B.CUST_CNT_CD
+                   AND CUST_SEQ        = B.CUST_SEQ
+                   AND NVL(SC_NO, NVL(RFA_NO, 'X')) = NVL(B.SC_NO, NVL(B.RFA_NO,'X'))
+                   AND DELT_FLG        = 'N'), 0) AS RLANE_ADJ_QTY,
+
+
+           CUST_CNT_CD,
+           CUST_SEQ   ,
+           SC_NO,
+           RFA_NO,
+           POL_CD,
+           POD_CD,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           COST_YR,
+           COST_WK   ,
+           VAL,
+           CTRL_LVL,
+           CTRL_HC ,
+           CTRL_45 ,
+           CTRL_53 ,
+           CTRL_RF ,
+           CTRL_WT ,
+           CTRL_ACCT,
+           CIF,
+           FOB
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+           , USA_BKG_MOD_CD
+  FROM (
+            SELECT /*+ USE_NL(BV B H C) */VP.TRD_CD,
+                   VP.SUB_TRD_CD          ,
+                   VP.RLANE_CD            ,
+                   VP.SKD_DIR_CD AS DIR_CD,
+                   P.IOC_TS_CD            ,
+                   P.RGN_OFC_CD           ,
+                   SPC_SCR_OFC_CONV_FNC(B.OB_SLS_OFC_CD) AS OFC_CD,
+                   O.SUB_OFC_CD           AS SUB_OFC_CD ,
+                   B.OB_SREP_CD           AS SREP_CD    ,
+                   M.RVIS_CNTR_CUST_TP_CD AS CUST_TP_CD ,
+                   VP.SEASON,
+                   VP.VER_SEQ,
+                   B.CTRT_CUST_CNT_CD AS CUST_CNT_CD,
+                   B.CTRT_CUST_SEQ    AS CUST_SEQ   ,
+                   SPC_GET_SMP_AMEND_FNC(VP.TRD_CD, VP.SEASON, VP.VER_SEQ, B.SC_NO) AS SC_NO,
+                   CASE WHEN (VP.TRD_CD IN ('AES', 'IAS')) 
+                               AND BC.CUST_CNT_CD = 'CN' 
+                        THEN
+                            RFA.RFA_NO
+                        ELSE   
+                            SPC_GET_SMP_AMEND_FNC(VP.TRD_CD, VP.SEASON, VP.VER_SEQ, DECODE(SUBSTR(B.RFA_NO, 1, 3), 'DUM', '', B.RFA_NO))
+                   END AS RFA_NO,
+                   
+                   CASE WHEN (VP.TRD_CD IN ('AES', 'IAS')) 
+                              AND BC.CUST_CNT_CD = 'CN' 
+                        THEN 
+                            NVL(RFA.CUST_CTRL_CD,'X')
+                        ELSE 'X' 
+                   END AS AES_RFA_CUST_FLG, 
+
+                   NVL(BV.POL_YD_CD, BV.POL_CD) AS POL_CD,
+                   NVL(BV.POD_YD_CD, BV.POD_CD) AS POD_CD,
+                   BV.VSL_CD    ,
+                   BV.SKD_VOY_NO,
+                   BV.SKD_DIR_CD,
+                   SUBSTR(VP.SLS_YRMON, 1, 4) AS COST_YR,
+                   VP.COST_WK   ,
+                   (
+                      SELECT    TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '2', 1, 2) * Q.OP_CNTR_QTY), 'FM0000000000.000')
+                             || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '2', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')
+                             || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '4', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')
+                             || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '5', Q.OP_CNTR_QTY, '9', Q.OP_CNTR_QTY, '8', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')                         || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '7', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')
+                             || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), 'W', Q.OP_CNTR_QTY, 0) + DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), 'X', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')
+                             || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_TP_FNC(Q.CNTR_TPSZ_CD), 'R', Q.OP_CNTR_QTY - Q.EQ_SUBST_CGO_QTY, 0)), 'FM0000000000.000')
+                             || TO_CHAR((BL.ACT_WGT * DECODE(BL.WGT_UT_CD, 'LBS', 0.00045, 0.001)) + SUM(Q.OP_CNTR_QTY * ( SELECT TS.CNTR_TPSZ_TARE_WGT
+                                                                                                                             FROM MDM_CNTR_TP_SZ TS
+                                                                                                                            WHERE TS.CNTR_TPSZ_CD = Q.CNTR_TPSZ_CD)) * 0.001, 'FM0000000000.000')
+                             
+							 || TO_CHAR(SUM(DECODE(Q.CNTR_TPSZ_CD, 'D2', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')
+                             || TO_CHAR(SUM(DECODE(Q.CNTR_TPSZ_CD, 'D4', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')
+                             || TO_CHAR(SUM(CASE WHEN Q.CNTR_TPSZ_CD LIKE 'R%' AND Q.EQ_SUBST_CNTR_TPSZ_CD LIKE 'D%' THEN Q.EQ_SUBST_CGO_QTY ELSE 0 END), 'FM0000000000.000')                         
+                        FROM BKG_QUANTITY Q
+                       WHERE B.BKG_NO      = Q.BKG_NO
+                         AND Q.OP_CNTR_QTY > 0
+                   ) AS VAL,
+                   VP.CTRL_LVL,
+                   VP.CTRL_HC ,
+                   VP.CTRL_45 ,
+                   VP.CTRL_53 ,
+                   VP.CTRL_RF ,
+                   VP.CTRL_WT ,
+                   VP.CTRL_ACCT,
+                   0 AS CIF,
+                   0 AS FOB
+                   , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                   , CASE 
+                        WHEN VP.CTRL_USA_SVC_MOD_FLG = 'Y' AND (SUBSTR(B.POR_CD, 1, 2) IN ('CA', 'US') OR SUBSTR(B.DEL_CD, 1, 2) IN ('CA', 'US'))
+                        THEN SPC_USA_MODE_FNC(B.RCV_TERM_CD, B.DE_TERM_CD, B.POR_CD, B.POL_CD, B.POD_CD,B.DEL_CD)
+                     ELSE 'OTH' END USA_BKG_MOD_CD
+                    , B.CMDT_CD
+                  FROM BKG_BOOKING      B ,
+                       BKG_VVD          BV,
+                       VVDS             VP,
+                       OFFICES          O ,
+                       PARAMS           P ,
+                       MDM_DTL_REV_LANE RB,
+                       BKG_BL_DOC       BL,
+                       MDM_CUSTOMER     M,
+                       BKG_CUSTOMER     BC,  
+					   SPC_MDL_CUST_RFA RFA 
+                 WHERE 1=1
+                   AND B.BKG_STS_CD       IN ('W', 'F')
+                   AND B.BKG_CGO_TP_CD    IN ('F', 'B', 'R')
+                   AND B.BKG_NO            = BV.BKG_NO
+                   AND B.BKG_NO            = BL.BKG_NO
+                   AND P.VSL_SLAN_CD       = BV.SLAN_CD
+                   AND RB.RLANE_CD         = VP.RLANE_CD
+                   AND RB.VSL_SLAN_DIR_CD  = VP.SKD_DIR_CD
+                   AND RB.IOC_CD           = DECODE(P.IOC_TS_CD, 'T', 'I',P.IOC_TS_CD)
+                   AND RB.FM_CONTI_CD      = ( SELECT SPC_CONTI_CONV_FNC(MLOC.CONTI_CD, RB.RLANE_CD,RB.VSL_SLAN_DIR_CD)
+                                                 FROM MDM_LOCATION MLOC
+                                                WHERE MLOC.LOC_CD = BV.POL_CD )
+                   AND RB.TO_CONTI_CD      = ( SELECT SPC_CONTI_CONV_FNC(MLOC.CONTI_CD, RB.RLANE_CD,RB.VSL_SLAN_DIR_CD)
+                                                 FROM MDM_LOCATION MLOC
+                                                WHERE MLOC.LOC_CD = BV.POD_CD )
+                   AND RB.TRD_CD           = VP.TRD_CD
+                   AND RB.SUB_TRD_CD       = VP.SUB_TRD_CD
+                   AND RB.DELT_FLG         = 'N'
+                   AND BV.VSL_CD           = VP.VSL_CD
+                   AND BV.SKD_VOY_NO       = VP.SKD_VOY_NO
+                   AND BV.SKD_DIR_CD       = VP.SKD_DIR_CD
+                   AND BV.VSL_PRE_PST_CD  IN ( DECODE(P.IOC_TS_CD, 'T', NULL, 'T'),
+                                               DECODE(P.IOC_TS_CD, 'T', 'S'),
+                                               DECODE(P.IOC_TS_CD, 'T', 'U')       )
+                   AND SPC_SCR_OFC_CONV_FNC(B.OB_SLS_OFC_CD) = O.OFC_CD
+                   AND B.OB_SREP_CD LIKE O.SALES_REP_CD||'%'
+                   AND B.CTRT_CUST_CNT_CD  = M.CUST_CNT_CD
+                   AND B.CTRT_CUST_SEQ     = M.CUST_SEQ
+                   AND B.BKG_NO            = BC.BKG_NO  
+                   AND BC.BKG_CUST_TP_CD   = 'S'       
+                   AND RFA.CUST_CNT_CD(+)  = B.CTRT_CUST_CNT_CD 
+                   AND RFA.CUST_SEQ(+)     = B.CTRT_CUST_SEQ 
+                   AND RFA.POL_CD(+)       = B.POL_CD 
+                   AND RFA.POD_CD(+)       = B.POD_CD 
+                   AND RFA.CMDT_CD(+)      = B.CMDT_CD
+             ) B
+)
+, BKG_DIV AS (
+    SELECT B.TRD_CD    ,
+           B.SUB_TRD_CD,
+           B.RLANE_CD  ,
+           B.DIR_CD    ,
+           B.IOC_TS_CD ,
+           B.RGN_OFC_CD,
+           B.OFC_CD    ,
+           B.SUB_OFC_CD,
+           B.SREP_CD   ,
+           B.SREP_NM   ,
+           NVL(SC.CUST_TP_CD, B.CUST_TP_CD) AS CUST_TP_CD  ,
+--BKG을 가지고 있는 S.Rep이 FCST하지 않는 경우, 해당 S.Rep에는 A의 others로 따로 나와야 하므로 BKG 데이터를 가져감
+           NVL(SC.CUST_CTRL_CD, B.CUST_CTRL_CD) AS CUST_CTRL_CD,
+           DECODE(NVL(SC.CUST_CTRL_CD, B.CUST_CTRL_CD), 'C', NVL(SC.DTL_SEQ, 1), NVL(SC.DTL_SEQ, B.DTL_SEQ)) AS DTL_SEQ,
+           DECODE(NVL(SC.CUST_CTRL_CD, B.CUST_CTRL_CD), 'C', SC.SC_NO, NVL(SC.SC_NO, B.SC_NO))               AS SC_NO  ,
+           DECODE(NVL(SC.CUST_CTRL_CD, B.CUST_CTRL_CD), 'C', SC.RFA_NO, NVL(SC.RFA_NO, B.RFA_NO))            AS RFA_NO ,
+           DECODE(NVL(SC.CUST_CTRL_CD, B.CUST_CTRL_CD), 'C', NVL(SC.RLANE_ADJ_QTY, 0), NVL(SC.RLANE_ADJ_QTY, B.RLANE_ADJ_QTY)) AS RLANE_ADJ_QTY,
+           NVL(SC.CUST_CNT_CD, NVL((SELECT S.CUST_CNT_CD
+                                      FROM SPC_SLS_REP_CUST S
+                                     WHERE S.TRD_CD      = B.TRD_CD
+                                       AND S.SUB_TRD_CD  = B.SUB_TRD_CD
+                                       AND S.SREP_CD     = B.SREP_CD
+                                       AND S.CUST_CNT_CD = B.CUST_CNT_CD
+                                       AND S.CUST_SEQ    = B.CUST_SEQ
+                                       AND S.DELT_FLG    = 'N'
+                                       AND NVL(S.INDIV_CUST_USE_FLG, 'N') = 'Y' ), 'XX')) AS CUST_CNT_CD,
+           NVL(SC.CUST_SEQ, NVL((SELECT S.CUST_SEQ
+                                   FROM SPC_SLS_REP_CUST S
+                                  WHERE S.TRD_CD      = B.TRD_CD
+                                    AND S.SUB_TRD_CD  = B.SUB_TRD_CD
+                                    AND S.SREP_CD     = B.SREP_CD
+                                    AND S.CUST_CNT_CD = B.CUST_CNT_CD
+                                    AND S.CUST_SEQ    = B.CUST_SEQ
+                                    AND S.DELT_FLG    = 'N'
+                                    AND NVL(S.INDIV_CUST_USE_FLG, 'N') = 'Y' ), 999999)) AS CUST_SEQ,
+           B.CUST_CNT_CD AS BKG_CUST_CNT_CD,
+           B.CUST_SEQ    AS BKG_CUST_SEQ   ,
+           B.POL_CD    ,
+           B.POD_CD    ,
+           B.VSL_CD    ,
+           B.SKD_VOY_NO,
+           B.SKD_DIR_CD,
+           B.COST_YR   ,
+           B.COST_WK   ,
+           (TO_NUMBER(NVL(SUBSTR(B.VAL,  1, 14), 0))) AS BKG_TTL_QTY    ,
+           (TO_NUMBER(NVL(SUBSTR(B.VAL, 15, 14), 0))) AS BKG_20FT_QTY   ,
+           (TO_NUMBER(NVL(SUBSTR(B.VAL, 29, 14), 0))) AS BKG_40FT_QTY   ,
+           (TO_NUMBER(NVL(SUBSTR(B.VAL, 43, 14), 0))) AS BKG_40FT_HC_QTY,
+           (TO_NUMBER(NVL(SUBSTR(B.VAL, 57, 14), 0))) AS BKG_45FT_HC_QTY,
+           (TO_NUMBER(NVL(SUBSTR(B.VAL, 71, 14), 0))) AS BKG_53FT_QTY   ,
+           (TO_NUMBER(NVL(SUBSTR(B.VAL, 85, 14), 0))) AS BKG_RF_QTY     ,
+           (TO_NUMBER(NVL(SUBSTR(B.VAL, 99, 14), 0))) AS BKG_TTL_WGT    ,
+           (TO_NUMBER(NVL(SUBSTR(B.VAL, 113,14), 0))) AS BKG_20FT_DRY_QTY,
+           (TO_NUMBER(NVL(SUBSTR(B.VAL, 127,14), 0))) AS BKG_40FT_DRY_QTY,
+           (TO_NUMBER(NVL(SUBSTR(B.VAL, 141,14), 0))) AS BKG_RD_QTY     ,
+           B.CTRL_LVL,
+           B.CTRL_HC ,
+           B.CTRL_45 ,
+           B.CTRL_53 ,
+           B.CTRL_RF ,
+           B.CTRL_WT ,
+           B.CTRL_ACCT,
+           B.CIF,
+           B.FOB,
+           0 AS OTH
+           , B.CTRL_D2_FLG, B.CTRL_D4_FLG, B.CTRL_RD_FLG, B.CTRL_ECC_FLG, B.CTRL_LOC_FLG , B.CTRL_USA_SVC_MOD_FLG , B.CTRL_ACCT_FLG
+           , USA_BKG_MOD_CD
+      FROM BKG_ORG            B ,
+           VVD_PORT_SREP_CUST SC
+     WHERE SC.TRD_CD     (+) = B.TRD_CD
+       AND SC.SUB_TRD_CD (+) = B.SUB_TRD_CD
+       AND SC.RLANE_CD   (+) = B.RLANE_CD
+       AND SC.DIR_CD     (+) = B.DIR_CD
+       AND SC.IOC_TS_CD  (+) = B.IOC_TS_CD
+       AND SC.VSL_CD     (+) = B.VSL_CD
+       AND SC.SKD_VOY_NO (+) = B.SKD_VOY_NO
+       AND SC.SKD_DIR_CD (+) = B.SKD_DIR_CD
+       AND SC.POL_CD     (+) = B.POL_CD
+       AND SC.POD_CD     (+) = B.POD_CD
+       AND SC.SREP_CD    (+) = B.SREP_CD
+       AND SC.CUST_TP_CD (+) = B.CUST_TP_CD
+       AND SC.CUST_CNT_CD(+) = B.CUST_CNT_CD
+       AND SC.CUST_SEQ   (+) = B.CUST_SEQ
+       AND NVL(SC.SC_NO (+), NVL(SC.RFA_NO (+), 'X')) = NVL(B.SC_NO, NVL(B.RFA_NO, 'X'))
+)
+, BKG_DATA AS (
+    SELECT LVL1           ,
+           LVL2           ,
+           TRD_CD         ,
+           SUB_TRD_CD     ,
+           RLANE_CD       ,
+           DIR_CD         ,
+           IOC_TS_CD      ,
+           RGN_OFC_CD     ,
+           OFC_CD         ,
+           SUB_OFC_CD     ,
+           SREP_CD        ,
+           SREP_NM        ,
+           CUST_TP_CD     ,
+           CUST_CTRL_CD   ,
+           DTL_SEQ        ,
+           SC_NO          ,
+           RFA_NO         ,
+           SUM(RLANE_ADJ_QTY) AS RLANE_ADJ_QTY,
+           CUST_CNT_CD    ,
+           CUST_SEQ       ,
+           BKG_CUST_CNT_CD,
+           BKG_CUST_SEQ   ,
+           POL_CD         ,
+           POD_CD         ,
+           VSL_CD         ,
+           SKD_VOY_NO     ,
+           SKD_DIR_CD     ,
+           CHL            ,
+           COST_YR        ,
+           COST_WK        ,
+           CTRL_LVL       ,
+           CTRL_HC        ,
+           CTRL_45        ,
+           CTRL_53        ,
+           CTRL_RF        ,
+           CTRL_WT        ,
+           CTRL_ACCT      ,
+           SUM(BKG_TTL_QTY)     AS BKG_TTL_QTY    ,
+           SUM(BKG_20FT_QTY)    AS BKG_20FT_QTY   ,
+           SUM(BKG_40FT_QTY)    AS BKG_40FT_QTY   ,
+           SUM(BKG_40FT_HC_QTY) AS BKG_40FT_HC_QTY,
+           SUM(BKG_45FT_HC_QTY) AS BKG_45FT_HC_QTY,
+           SUM(BKG_53FT_QTY)    AS BKG_53FT_QTY   ,
+           SUM(BKG_RF_QTY)      AS BKG_RF_QTY     ,
+           SUM(BKG_TTL_WGT)     AS BKG_TTL_WGT    ,
+           SUM(BKG_20FT_DRY_QTY)AS BKG_20FT_DRY_QTY,
+           SUM(BKG_40FT_DRY_QTY)AS BKG_40FT_DRY_QTY,
+           SUM(BKG_RD_QTY)      AS BKG_RD_QTY     , 
+           SUM(CIF) AS CIF,
+           SUM(FOB) AS FOB,
+           SUM(OTH) AS OTH
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+           , USA_BKG_MOD_CD
+      FROM (
+           SELECT 4 - GROUPING_ID(F.SREP_CD) * 2 AS LVL1,
+                   4 - (GROUPING_ID(USA_BKG_MOD_CD) + GROUPING_ID(CUST_CNT_CD) + GROUPING_ID(POL_CD) + GROUPING_ID(POD_CD)) AS LVL2,
+                   F.TRD_CD         ,
+                   F.SUB_TRD_CD     ,
+                   F.RLANE_CD       ,
+                   F.DIR_CD         ,
+                   F.IOC_TS_CD      ,
+                   F.RGN_OFC_CD     ,
+                   F.OFC_CD         ,
+                   F.SUB_OFC_CD     ,
+                   F.SREP_CD        ,
+                   NULL AS SREP_NM  ,
+                   F.CUST_TP_CD     ,
+                   F.CUST_CTRL_CD   ,
+                   CASE WHEN F.CUST_CNT_CD = 'XX' AND F.BKG_CUST_CNT_CD IS NULL THEN 1 ELSE F.DTL_SEQ END AS DTL_SEQ,
+                   CASE WHEN F.CUST_CNT_CD = 'XX' AND F.BKG_CUST_CNT_CD IS NULL THEN '' ELSE F.SC_NO  END AS SC_NO,
+                   CASE WHEN F.CUST_CNT_CD = 'XX' AND F.BKG_CUST_CNT_CD IS NULL THEN '' ELSE F.RFA_NO END AS RFA_NO,
+                   CASE WHEN F.CUST_CNT_CD = 'XX' AND F.BKG_CUST_CNT_CD IS NULL THEN 0  ELSE F.RLANE_ADJ_QTY END AS RLANE_ADJ_QTY  ,
+                   F.CUST_CNT_CD    ,
+                   F.CUST_SEQ       ,
+                   F.BKG_CUST_CNT_CD,
+                   F.BKG_CUST_SEQ   ,
+                   F.POL_CD         ,
+                   F.POD_CD         ,
+                   F.VSL_CD         ,
+                   F.SKD_VOY_NO     ,
+                   F.SKD_DIR_CD     ,
+                   0 AS CHL         ,
+                   MAX(F.COST_YR) AS COST_YR,
+                   MAX(F.COST_WK) AS COST_WK,
+                   F.CTRL_LVL,
+                   F.CTRL_HC ,
+                   F.CTRL_45 ,
+                   F.CTRL_53 ,
+                   F.CTRL_RF ,
+                   F.CTRL_WT ,
+                   F.CTRL_ACCT ,
+                   SUM(F.BKG_TTL_QTY)     AS BKG_TTL_QTY    ,
+                   SUM(F.BKG_20FT_QTY)    AS BKG_20FT_QTY   ,
+                   SUM(F.BKG_40FT_QTY)    AS BKG_40FT_QTY   ,
+                   SUM(F.BKG_40FT_HC_QTY) AS BKG_40FT_HC_QTY,
+                   SUM(F.BKG_45FT_HC_QTY) AS BKG_45FT_HC_QTY,
+                   SUM(F.BKG_53FT_QTY)    AS BKG_53FT_QTY   ,
+                   SUM(F.BKG_RF_QTY)      AS BKG_RF_QTY     ,
+                   SUM(F.BKG_TTL_WGT)     AS BKG_TTL_WGT    ,
+                   SUM(F.BKG_20FT_DRY_QTY)AS BKG_20FT_DRY_QTY,
+                   SUM(F.BKG_40FT_DRY_QTY)AS BKG_40FT_DRY_QTY,
+                   SUM(F.BKG_RD_QTY)      AS BKG_RD_QTY     ,
+                   SUM(CIF) AS CIF,
+                   SUM(FOB) AS FOB,
+                   SUM(OTH) AS OTH
+                   , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                   , USA_BKG_MOD_CD
+              FROM BKG_DIV F
+          GROUP BY GROUPING SETS (( F.TRD_CD      , F.SUB_TRD_CD     , F.RLANE_CD       , F.DIR_CD      , F.IOC_TS_CD ,
+                                      F.RGN_OFC_CD  , F.OFC_CD         , F.SUB_OFC_CD     , F.SREP_CD     , F.CUST_TP_CD,
+                                      F.CUST_CTRL_CD, F.RLANE_ADJ_QTY  , F.CUST_CNT_CD    , F.CUST_SEQ    , F.DTL_SEQ   ,
+                                      F.SC_NO       , F.RFA_NO         , F.BKG_CUST_CNT_CD, F.BKG_CUST_SEQ, F.POL_CD    ,
+                                      F.POD_CD      , F.VSL_CD         , F.SKD_VOY_NO     , F.SKD_DIR_CD  , F.CTRL_LVL  ,
+                                      F.CTRL_HC     , F.CTRL_45        , F.CTRL_53        , F.CTRL_RF     , F.CTRL_WT   ,
+                                      F.CTRL_ACCT        
+                                      , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                                      , USA_BKG_MOD_CD
+									  ),
+                                    ( F.TRD_CD      , F.SUB_TRD_CD     , F.RLANE_CD       , F.DIR_CD      , F.IOC_TS_CD ,
+                                      F.RGN_OFC_CD  , F.OFC_CD         , F.SUB_OFC_CD     , F.SREP_CD     , F.CUST_TP_CD,
+                                      F.CUST_CTRL_CD, F.RLANE_ADJ_QTY  , F.CUST_CNT_CD    , F.CUST_SEQ    , F.DTL_SEQ   ,
+                                      F.SC_NO       , F.RFA_NO         , F.BKG_CUST_CNT_CD, F.BKG_CUST_SEQ, F.POL_CD    ,
+                                      F.VSL_CD      , F.SKD_VOY_NO     , F.SKD_DIR_CD     , F.CTRL_LVL    , F.CTRL_HC   ,
+                                      F.CTRL_45     , F.CTRL_53        , F.CTRL_RF        , F.CTRL_WT     , F.CTRL_ACCT             
+                                      , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                                      , USA_BKG_MOD_CD
+									  ),                                     
+                                     ( F.TRD_CD      , F.SUB_TRD_CD     , F.RLANE_CD       , F.DIR_CD      , F.IOC_TS_CD ,
+                                      F.RGN_OFC_CD  , F.OFC_CD         , F.SUB_OFC_CD     , F.SREP_CD     , F.CUST_TP_CD,
+                                      F.CUST_CTRL_CD, F.RLANE_ADJ_QTY  , F.CUST_CNT_CD    , F.CUST_SEQ    , F.DTL_SEQ   ,
+                                      F.SC_NO       , F.RFA_NO         , F.BKG_CUST_CNT_CD, F.BKG_CUST_SEQ, F.VSL_CD    ,
+                                      F.SKD_VOY_NO  , F.SKD_DIR_CD     , F.CTRL_LVL       , F.CTRL_HC     , F.CTRL_45   ,
+                                      F.CTRL_53     , F.CTRL_RF        , F.CTRL_WT        , F.CTRL_ACCT                              
+                                      , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                                      , USA_BKG_MOD_CD
+                                      ),
+                                    ( F.TRD_CD      , F.SUB_TRD_CD     , F.RLANE_CD    , F.DIR_CD    , F.IOC_TS_CD ,
+                                      F.RGN_OFC_CD  , F.OFC_CD         , F.SUB_OFC_CD  , F.SREP_CD   , F.CUST_TP_CD,
+                                      F.CUST_CTRL_CD, F.RLANE_ADJ_QTY  , F.CUST_CNT_CD , F.CUST_SEQ  , F.DTL_SEQ   ,
+                                      F.SC_NO       , F.RFA_NO         , F.POL_CD      , F.POD_CD    , F.VSL_CD    ,
+                                      F.SKD_VOY_NO  , F.SKD_DIR_CD     , F.CTRL_LVL    , F.CTRL_HC   , F.CTRL_45   ,
+                                      F.CTRL_53     , F.CTRL_RF        , F.CTRL_WT     , F.CTRL_ACCT                                
+                                      , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                                      , USA_BKG_MOD_CD
+                                      ),
+                                    ( F.TRD_CD      , F.SUB_TRD_CD     , F.RLANE_CD    , F.DIR_CD    , F.IOC_TS_CD ,
+                                      F.RGN_OFC_CD  , F.OFC_CD         , F.SUB_OFC_CD  , F.SREP_CD   , F.CUST_TP_CD,
+                                      F.CUST_CTRL_CD, F.RLANE_ADJ_QTY  , F.CUST_CNT_CD , F.CUST_SEQ  , F.DTL_SEQ   ,
+                                      F.SC_NO       , F.RFA_NO         , F.POL_CD      , F.VSL_CD    , F.SKD_VOY_NO,
+                                      F.SKD_DIR_CD  , F.CTRL_LVL       , F.CTRL_HC     , F.CTRL_45   , F.CTRL_53   ,
+                                      F.CTRL_RF     , F.CTRL_WT        , F.CTRL_ACCT                                               
+                                      , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                                      , USA_BKG_MOD_CD
+                                      ),
+                                    ( F.TRD_CD      , F.SUB_TRD_CD     , F.RLANE_CD    , F.DIR_CD    , F.IOC_TS_CD ,
+                                      F.RGN_OFC_CD  , F.OFC_CD         , F.SUB_OFC_CD  , F.SREP_CD   , F.CUST_TP_CD,
+                                      F.CUST_CTRL_CD, F.RLANE_ADJ_QTY  , F.CUST_CNT_CD , F.CUST_SEQ  , F.DTL_SEQ   ,
+                                      F.SC_NO       , F.RFA_NO         , F.VSL_CD      , F.SKD_VOY_NO, F.SKD_DIR_CD,
+                                      F.CTRL_LVL    , F.CTRL_HC        , F.CTRL_45     , F.CTRL_53   , F.CTRL_RF   ,
+                                      F.CTRL_WT     , F.CTRL_ACCT                                                                   
+                                      , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                                      , USA_BKG_MOD_CD
+                                      ),
+                                    ( F.TRD_CD      , F.SUB_TRD_CD     , F.RLANE_CD    , F.DIR_CD    , F.IOC_TS_CD ,
+                                      F.RGN_OFC_CD  , F.OFC_CD         , F.SUB_OFC_CD  , F.SREP_CD   , F.VSL_CD    ,
+                                      F.SKD_VOY_NO  , F.SKD_DIR_CD     , F.CTRL_LVL    , F.CTRL_HC   , F.CTRL_45   ,
+                                      F.CTRL_53     , F.CTRL_RF        , F.CTRL_WT     , F.CTRL_ACCT    
+                                      , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                                      , USA_BKG_MOD_CD
+                                      ),                                 
+                                    ( F.TRD_CD      , F.SUB_TRD_CD     , F.RLANE_CD    , F.DIR_CD    , F.IOC_TS_CD ,
+                                      F.RGN_OFC_CD  , F.OFC_CD         , F.SUB_OFC_CD  , F.SREP_CD   , F.VSL_CD    ,
+                                      F.SKD_VOY_NO  , F.SKD_DIR_CD     , F.CTRL_LVL    , F.CTRL_HC   , F.CTRL_45   ,
+                                      F.CTRL_53     , F.CTRL_RF        , F.CTRL_WT     , F.CTRL_ACCT 
+                                      , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+                                      ),
+                                    ( F.TRD_CD      , F.SUB_TRD_CD     , F.RLANE_CD    , F.DIR_CD    , F.IOC_TS_CD ,
+                                      F.RGN_OFC_CD  , F.POL_CD         , F.POD_CD      , F.VSL_CD    , F.SKD_VOY_NO,
+                                      F.SKD_DIR_CD  , F.CTRL_LVL       , F.CTRL_HC     , F.CTRL_45   , F.CTRL_53   ,
+                                      F.CTRL_RF     , F.CTRL_WT        , F.CTRL_ACCT                                                
+                                      , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG),
+                                    ( F.TRD_CD      , F.SUB_TRD_CD     , F.RLANE_CD    , F.DIR_CD    , F.IOC_TS_CD ,
+                                      F.RGN_OFC_CD  , F.POL_CD         , F.VSL_CD      , F.SKD_VOY_NO, F.SKD_DIR_CD,
+                                      F.CTRL_LVL    , F.CTRL_HC        , F.CTRL_45     , F.CTRL_53   , F.CTRL_RF   ,
+                                      F.CTRL_WT     , F.CTRL_ACCT                                                                   
+                                      , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG),
+                                    ( F.TRD_CD      , F.SUB_TRD_CD     , F.RLANE_CD    , F.DIR_CD    , F.IOC_TS_CD ,
+                                      F.RGN_OFC_CD  , F.VSL_CD         , F.SKD_VOY_NO  , F.SKD_DIR_CD, F.CTRL_LVL  ,
+                                      F.CTRL_HC     , F.CTRL_45        , F.CTRL_53     , F.CTRL_RF   , F.CTRL_WT   ,
+                                      F.CTRL_ACCT  
+                                      , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG, USA_BKG_MOD_CD),
+                                   ( F.TRD_CD      , F.SUB_TRD_CD     , F.RLANE_CD    , F.DIR_CD    , F.IOC_TS_CD ,
+                                      F.RGN_OFC_CD  , F.VSL_CD         , F.SKD_VOY_NO  , F.SKD_DIR_CD, F.CTRL_LVL  ,
+                                      F.CTRL_HC     , F.CTRL_45        , F.CTRL_53     , F.CTRL_RF   , F.CTRL_WT   ,
+                                      F.CTRL_ACCT                                                                                   
+                                      , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG)
+                                 )
+            HAVING    SREP_CD     IS NULL
+                   OR POL_CD      IS NULL
+                   OR CUST_CNT_CD IS NOT NULL 
+          )
+  GROUP BY LVL1           ,
+           LVL2           ,
+           TRD_CD         ,
+           SUB_TRD_CD     ,
+           RLANE_CD       ,
+           DIR_CD         ,
+           IOC_TS_CD      ,
+           RGN_OFC_CD     ,
+           OFC_CD         ,
+           SUB_OFC_CD     ,
+           SREP_CD        ,
+           SREP_NM        ,
+           CUST_TP_CD     ,
+           CUST_CTRL_CD   ,
+           DTL_SEQ        ,
+           SC_NO          ,
+           RFA_NO         ,
+           CUST_CNT_CD    ,
+           CUST_SEQ       ,
+           BKG_CUST_CNT_CD,
+           BKG_CUST_SEQ   ,
+           POL_CD         ,
+           POD_CD         ,
+           VSL_CD         ,
+           SKD_VOY_NO     ,
+           SKD_DIR_CD     ,
+           CHL            ,
+           COST_YR        ,
+           COST_WK        ,
+           CTRL_LVL       ,
+           CTRL_HC        ,
+           CTRL_45        ,
+           CTRL_53        ,
+           CTRL_RF        ,
+           CTRL_WT        ,
+           CTRL_ACCT
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+           , USA_BKG_MOD_CD
+)
+, ALL_DATA AS (
+    SELECT 'M' AS FLG             ,
+           LVL1                   ,
+           DECODE(LVL1, 2, DECODE(SIGN(LVL2), 0, LVL2, LVL2+1), LVL2) AS LVL2,
+           TRD_CD                 ,
+           SUB_TRD_CD             ,
+           RLANE_CD               ,
+           DIR_CD                 ,
+           IOC_TS_CD              ,
+           RGN_OFC_CD             ,
+           OFC_CD                 ,
+           SUB_OFC_CD             ,
+           SREP_CD                ,
+           SREP_NM                ,
+           USA_BKG_MOD_CD         ,
+           CUST_TP_CD             ,
+           CUST_CTRL_CD           ,
+           DTL_SEQ                ,
+           SC_NO                  ,
+           RFA_NO                 ,
+           RLANE_ADJ_QTY          ,
+           CUST_CNT_CD            ,
+           CUST_SEQ               ,
+           NULL AS BKG_CUST_CNT_CD,
+           NULL AS BKG_CUST_SEQ   ,
+           POL_CD                 ,
+           POD_CD                 ,
+           VSL_CD                 ,
+           SKD_VOY_NO             ,
+           SKD_DIR_CD             ,
+           COST_YR                ,
+           COST_WK                ,
+           CHL                    ,
+           CTRL_LVL               ,
+           CTRL_HC                ,
+           CTRL_45                ,
+           CTRL_53                ,
+           CTRL_RF                ,
+           CTRL_WT                ,
+           CTRL_ACCT              ,
+           0 AS FCAST_TTL_QTY     ,
+           0 AS FCAST_20FT_QTY    ,
+           0 AS FCAST_40FT_QTY    ,
+           0 AS FCAST_40FT_HC_QTY ,
+           0 AS FCAST_45FT_HC_QTY ,
+           0 AS FCAST_53FT_QTY    ,
+           0 AS FCAST_RF_QTY      ,
+           0 AS FCAST_TTL_WGT     ,
+           0 AS FCAST_20FT_DRY_QTY,
+           0 AS FCAST_40FT_DRY_QTY,
+           0 AS FCAST_RD_QTY      , 
+           0 AS BKG_TTL_QTY       ,
+           0 AS BKG_20FT_QTY      ,
+           0 AS BKG_40FT_QTY      ,
+           0 AS BKG_40FT_HC_QTY   ,
+           0 AS BKG_45FT_HC_QTY   ,
+           0 AS BKG_53FT_QTY      ,
+           0 AS BKG_RF_QTY        ,
+           0 AS BKG_TTL_WGT       ,
+           0 AS BKG_20FT_DRY_QTY  ,
+           0 AS BKG_40FT_DRY_QTY  ,
+           0 AS BKG_RD_QTY        ,  
+           0 AS CIF               ,
+           0 AS FOB               ,
+           0 AS OTH               ,
+           NULL AS FCAST_RMK
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM MASTER_DATA
+    UNION ALL
+    SELECT 'F' AS FLG          ,
+           LVL1                ,
+           DECODE(LVL1, 2, DECODE(SIGN(LVL2), 0, LVL2, LVL2+1), LVL2) AS LVL2,
+           TRD_CD              ,
+           SUB_TRD_CD          ,
+           RLANE_CD            ,
+           DIR_CD              ,
+           IOC_TS_CD           ,
+           RGN_OFC_CD          ,
+           OFC_CD              ,
+           SUB_OFC_CD          ,
+           SREP_CD             ,
+           SREP_NM             ,
+           USA_BKG_MOD_CD      ,
+           CUST_TP_CD          ,
+           CUST_CTRL_CD        ,
+           DTL_SEQ             ,
+           SC_NO               ,
+           RFA_NO              ,
+           RLANE_ADJ_QTY       ,
+           CUST_CNT_CD         ,
+           CUST_SEQ            ,
+           BKG_CUST_CNT_CD     ,
+           BKG_CUST_SEQ        ,
+           POL_CD              ,
+           POD_CD              ,
+           VSL_CD              ,
+           SKD_VOY_NO          ,
+           SKD_DIR_CD          ,
+           COST_YR             ,
+           COST_WK             ,
+           CHL                 ,
+           CTRL_LVL            ,
+           CTRL_HC             ,
+           CTRL_45             ,
+           CTRL_53             ,
+           CTRL_RF             ,
+           CTRL_WT             ,
+           CTRL_ACCT           ,
+           DECODE(LVL1||LVL2, '41', 0, FCAST_TTL_QTY)     AS FCAST_TTL_QTY    ,
+           DECODE(LVL1||LVL2, '41', 0, FCAST_20FT_QTY)    AS FCAST_20FT_QTY   ,
+           DECODE(LVL1||LVL2, '41', 0, FCAST_40FT_QTY)    AS FCAST_40FT_QTY   ,
+           DECODE(LVL1||LVL2, '41', 0, FCAST_40FT_HC_QTY) AS FCAST_40FT_HC_QTY,
+           DECODE(LVL1||LVL2, '41', 0, FCAST_45FT_HC_QTY) AS FCAST_45FT_HC_QTY,
+           DECODE(LVL1||LVL2, '41', 0, FCAST_53FT_QTY)    AS FCAST_53FT_QTY   ,
+           DECODE(LVL1||LVL2, '41', 0, FCAST_RF_QTY)      AS FCAST_RF_QTY     ,
+           DECODE(LVL1||LVL2, '41', 0, FCAST_TTL_WGT)     AS FCAST_TTL_WGT    ,
+           DECODE(LVL1||LVL2, '41', 0, FCAST_20FT_DRY_QTY)AS FCAST_20FT_DRY_QTY,
+           DECODE(LVL1||LVL2, '41', 0, FCAST_40FT_DRY_QTY)AS FCAST_40FT_DRY_QTY,
+           DECODE(LVL1||LVL2, '41', 0, FCAST_RD_QTY)      AS FCAST_RD_QTY      ,
+           0 AS BKG_TTL_QTY    ,
+           0 AS BKG_20FT_QTY   ,
+           0 AS BKG_40FT_QTY   ,
+           0 AS BKG_40FT_HC_QTY,
+           0 AS BKG_45FT_HC_QTY,
+           0 AS BKG_53FT_QTY   ,
+           0 AS BKG_RF_QTY     ,
+           0 AS BKG_TTL_WGT    ,
+           0 AS BKG_20FT_DRY_QTY  ,
+           0 AS BKG_40FT_DRY_QTY  ,
+           0 AS BKG_RD_QTY        , 
+           0 AS CIF            ,
+           0 AS FOB            ,
+           0 AS OTH            ,
+           NULL AS FCAST_RMK
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM FCAST_DATA
+    UNION ALL
+    SELECT 'B' AS FLG            ,
+           LVL1                  ,
+           DECODE(LVL1, 2, DECODE(SIGN(LVL2), 0, LVL2, LVL2+1), LVL2) AS LVL2,
+           TRD_CD                ,
+           SUB_TRD_CD            ,
+           RLANE_CD              ,
+           DIR_CD                ,
+           IOC_TS_CD             ,
+           RGN_OFC_CD            ,
+           OFC_CD                ,
+           SUB_OFC_CD            ,
+           SREP_CD               ,
+           SREP_NM               ,
+           USA_BKG_MOD_CD        ,
+           CUST_TP_CD            ,
+           CUST_CTRL_CD          ,
+           DTL_SEQ               ,
+           SC_NO                 ,
+           RFA_NO                ,
+           RLANE_ADJ_QTY         ,
+           CUST_CNT_CD           ,
+           CUST_SEQ              ,
+           BKG_CUST_CNT_CD       ,
+           BKG_CUST_SEQ          ,
+           POL_CD                ,
+           POD_CD                ,
+           VSL_CD                ,
+           SKD_VOY_NO            ,
+           SKD_DIR_CD            ,
+           COST_YR               ,
+           COST_WK               ,
+           CHL                   ,
+           CTRL_LVL              ,
+           CTRL_HC               ,
+           CTRL_45               ,
+           CTRL_53               ,
+           CTRL_RF               ,
+           CTRL_WT               ,
+           CTRL_ACCT             ,
+           0 AS FCAST_TTL_QTY    ,
+           0 AS FCAST_20FT_QTY   ,
+           0 AS FCAST_40FT_QTY   ,
+           0 AS FCAST_40FT_HC_QTY,
+           0 AS FCAST_45FT_HC_QTY,
+           0 AS FCAST_53FT_QTY   ,
+           0 AS FCAST_RF_QTY     ,
+           0 AS FCAST_TTL_WGT    ,
+           0 AS FCAST_20FT_DRY_QTY  ,
+           0 AS FCAST_40FT_DRY_QTY  ,
+           0 AS FCAST_RD_QTY        , 
+           DECODE(LVL1||LVL2, '41', 0, BKG_TTL_QTY)     AS BKG_TTL_QTY    ,
+           DECODE(LVL1||LVL2, '41', 0, BKG_20FT_QTY)    AS BKG_20FT_QTY   ,
+           DECODE(LVL1||LVL2, '41', 0, BKG_40FT_QTY)    AS BKG_40FT_QTY   ,
+           DECODE(LVL1||LVL2, '41', 0, BKG_40FT_HC_QTY) AS BKG_40FT_HC_QTY,
+           DECODE(LVL1||LVL2, '41', 0, BKG_45FT_HC_QTY) AS BKG_45FT_HC_QTY,
+           DECODE(LVL1||LVL2, '41', 0, BKG_53FT_QTY)    AS BKG_53FT_QTY   ,
+           DECODE(LVL1||LVL2, '41', 0, BKG_RF_QTY)      AS BKG_RF_QTY     ,
+           DECODE(LVL1||LVL2, '41', 0, BKG_TTL_WGT)     AS BKG_TTL_WGT    ,
+           DECODE(LVL1||LVL2, '41', 0, BKG_20FT_DRY_QTY)AS BKG_20FT_DRY_QTY,
+           DECODE(LVL1||LVL2, '41', 0, BKG_40FT_DRY_QTY)AS BKG_40FT_DRY_QTY,
+           DECODE(LVL1||LVL2, '41', 0, BKG_RD_QTY)      AS BKG_RD_QTY      ,
+           DECODE(LVL1||LVL2, '41', 0, CIF)             AS CIF            ,
+           DECODE(LVL1||LVL2, '41', 0, FOB)             AS FOB            ,
+           DECODE(LVL1||LVL2, '41', 0, OTH)             AS OTH            ,
+           NULL AS FCAST_RMK
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM BKG_DATA
+    UNION ALL
+    SELECT 'C' AS FLG            ,
+           LVL1                  ,
+           LVL2                  ,
+           TRD_CD                ,
+           SUB_TRD_CD            ,
+           RLANE_CD              ,
+           SKD_DIR_CD AS DIR_CD  ,
+           IOC_TS_CD             ,
+           RGN_OFC_CD            ,
+           OFC_CD                ,
+           SUB_OFC_CD            ,
+           SREP_CD               ,
+           NULL SREP_NM          ,
+           NULL USA_BKG_MOD_CD   ,
+           CUST_TP_CD            ,
+           CUST_CTRL_CD          ,
+           DTL_SEQ               ,
+           SC_NO                 ,
+           RFA_NO                ,
+           RLANE_ADJ_QTY         ,
+           CUST_CNT_CD           ,
+           CUST_SEQ              ,
+           BKG_CUST_CNT_CD       ,
+           BKG_CUST_SEQ          ,
+           NULL POL_CD           ,
+           NULL POD_CD           ,
+           VSL_CD                ,
+           SKD_VOY_NO            ,
+           SKD_DIR_CD            ,
+           COST_YR               ,
+           COST_WK               ,
+           CHL                   ,
+           CTRL_LVL              ,
+           CTRL_HC               ,
+           CTRL_45               ,
+           CTRL_53               ,
+           CTRL_RF               ,
+           CTRL_WT               ,
+           CTRL_ACCT             ,
+           FCAST_TTL_QTY         ,
+           FCAST_20FT_QTY        ,
+           FCAST_40FT_QTY        ,
+           FCAST_40FT_HC_QTY     ,
+           FCAST_45FT_HC_QTY     ,
+           FCAST_53FT_QTY        ,
+           FCAST_RF_QTY          ,
+           FCAST_TTL_WGT         ,
+           0 AS FCAST_20FT_DRY_QTY,
+           0 AS FCAST_40FT_DRY_QTY,
+           0 AS FCAST_RD_QTY      , 
+           0 AS BKG_TTL_QTY      ,
+           0 AS BKG_20FT_QTY     ,
+           0 AS BKG_40FT_QTY     ,
+           0 AS BKG_40FT_HC_QTY  ,
+           0 AS BKG_45FT_HC_QTY  ,
+           0 AS BKG_53FT_QTY     ,
+           0 AS BKG_RF_QTY       ,
+           0 AS BKG_TTL_WGT      ,
+           0 AS BKG_20FT_DRY_QTY  ,
+           0 AS BKG_40FT_DRY_QTY  ,
+           0 AS BKG_RD_QTY        , 
+           0 AS CIF              ,
+           0 AS FOB              ,
+           0 AS OTH              ,
+           FCAST_RMK
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM CTRT_FCAST
+)
+, GROUP_TOT AS (
+    SELECT 'GT' AS FLG,
+           3 LVL1,
+           3 - (GROUPING_ID(POL_CD) + GROUPING_ID(POD_CD)) AS LVL2,
+           TRD_CD      ,
+           SUB_TRD_CD  ,
+           RLANE_CD    ,
+           DIR_CD      ,
+           IOC_TS_CD   ,
+           RGN_OFC_CD  ,
+           CUST_CTRL_CD,
+           POL_CD      ,
+           POD_CD      ,
+           NVL(VSL_CD    , 'TTL')  AS VSL_CD           ,
+           NVL(SKD_VOY_NO, ' '  )  AS SKD_VOY_NO       ,
+           NVL(SKD_DIR_CD, ' '  )  AS SKD_DIR_CD       ,
+           NVL(COST_YR   , 'TTL')  AS COST_YR          ,
+           NVL(COST_WK   , ' '  )  AS COST_WK          ,
+           SUM(FCAST_TTL_QTY)      AS FCAST_TTL_QTY    ,
+           SUM(FCAST_20FT_QTY)     AS FCAST_20FT_QTY   ,
+           SUM(FCAST_40FT_QTY)     AS FCAST_40FT_QTY   ,
+           SUM(FCAST_40FT_HC_QTY)  AS FCAST_40FT_HC_QTY,
+           SUM(FCAST_45FT_HC_QTY)  AS FCAST_45FT_HC_QTY,
+           SUM(FCAST_53FT_QTY)     AS FCAST_53FT_QTY   ,
+           SUM(FCAST_RF_QTY)       AS FCAST_RF_QTY     ,
+           SUM(FCAST_TTL_WGT)      AS FCAST_TTL_WGT    ,
+           SUM(FCAST_20FT_DRY_QTY) AS FCAST_20FT_DRY_QTY,
+           SUM(FCAST_40FT_DRY_QTY) AS FCAST_40FT_DRY_QTY,
+           SUM(FCAST_RD_QTY)       AS FCAST_RD_QTY    ,
+           SUM(BKG_TTL_QTY)        AS BKG_TTL_QTY      ,
+           SUM(BKG_20FT_QTY)       AS BKG_20FT_QTY     ,
+           SUM(BKG_40FT_QTY)       AS BKG_40FT_QTY     ,
+           SUM(BKG_40FT_HC_QTY)    AS BKG_40FT_HC_QTY  ,
+           SUM(BKG_45FT_HC_QTY)    AS BKG_45FT_HC_QTY  ,
+           SUM(BKG_53FT_QTY)       AS BKG_53FT_QTY     ,
+           SUM(BKG_RF_QTY)         AS BKG_RF_QTY       ,
+          SUM(BKG_TTL_WGT)        AS BKG_TTL_WGT      ,
+           SUM(BKG_20FT_DRY_QTY)   AS BKG_20FT_DRY_QTY ,
+           SUM(BKG_40FT_DRY_QTY)   AS BKG_40FT_DRY_QTY ,
+           SUM(BKG_RD_QTY)         AS BKG_RD_QTY
+      FROM ALL_DATA
+     WHERE LVL1 = 4
+       AND LVL2 = 4 
+       AND CTRL_ACCT = 'Y'
+       AND BKG_CUST_CNT_CD IS NULL
+       AND BKG_CUST_SEQ    IS NULL
+  GROUP BY GROUPING SETS (( TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, IOC_TS_CD, RGN_OFC_CD, CUST_CTRL_CD),
+                           ( TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, IOC_TS_CD, RGN_OFC_CD, CUST_CTRL_CD, POL_CD),
+                           ( TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, IOC_TS_CD, RGN_OFC_CD, CUST_CTRL_CD, POL_CD, POD_CD),
+
+                           ( TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, IOC_TS_CD, RGN_OFC_CD, CUST_CTRL_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, COST_YR, COST_WK ),
+                           ( TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, IOC_TS_CD, RGN_OFC_CD, CUST_CTRL_CD, POL_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, COST_YR, COST_WK ),
+                           ( TRD_CD, SUB_TRD_CD, RLANE_CD, DIR_CD, IOC_TS_CD, RGN_OFC_CD, CUST_CTRL_CD, POL_CD, POD_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, COST_YR, COST_WK )
+                         )
+  HAVING POL_CD IS NULL AND POD_CD IS NULL 
+)
+, ALL_DATA_VVD AS (
+    SELECT DISTINCT
+           TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           IOC_TS_CD ,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           COST_YR   ,
+           COST_WK
+      FROM ALL_DATA A
+)
+, LANE_VVDS AS (
+    SELECT DISTINCT
+           V.TRD_CD    ,
+           V.SUB_TRD_CD,
+           V.RLANE_CD  ,
+           V.SKD_DIR_CD AS DIR_CD,
+           D.IOC_TS_CD ,
+           V.VSL_CD    ,
+           V.SKD_VOY_NO,
+           V.SKD_DIR_CD,
+           SUBSTR(V.SLS_YRMON, 1, 4) AS COST_YR,
+           V.COST_WK   ,
+           V.ETD_DT    ,
+           V.HH_FLG
+      FROM ALL_DATA_VVD D,
+           VVDS         V
+     WHERE D.TRD_CD     = V.TRD_CD
+       AND D.SUB_TRD_CD = V.SUB_TRD_CD
+       AND D.RLANE_CD   = V.RLANE_CD
+       AND D.DIR_CD     = V.SKD_DIR_CD
+       AND D.VSL_CD     = V.VSL_CD
+       AND D.SKD_VOY_NO = V.SKD_VOY_NO
+       AND D.SKD_DIR_CD = V.SKD_DIR_CD
+)
+, LANE_WK AS (
+    SELECT TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           IOC_TS_CD ,
+           COST_YR   ,
+           COST_WK   ,
+           COUNT(1) AS VVD_CNT
+      FROM LANE_VVDS
+  GROUP BY TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           IOC_TS_CD ,
+           COST_YR   ,
+           COST_WK
+)
+, LANES AS (
+    SELECT TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           IOC_TS_CD
+      FROM LANE_WK
+  GROUP BY TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           IOC_TS_CD
+)
+, WEEKS AS (
+    SELECT COST_YR,
+           COST_WK,
+           LVL IDX,
+           VVD_CNT,
+           ROWNUM AS RNUM
+      FROM (SELECT COST_YR,
+                     COST_WK,
+                     MAX(VVD_CNT) AS VVD_CNT
+                FROM LANE_WK
+            GROUP BY COST_YR,
+                     COST_WK
+            ORDER BY COST_YR,
+                     COST_WK),
+           (SELECT LEVEL LVL FROM DUAL CONNECT BY LEVEL <= 10 ) L
+     WHERE VVD_CNT >= LVL
+)
+, LANE_WEEK AS (
+    SELECT L.TRD_CD,
+           L.SUB_TRD_CD,
+           L.RLANE_CD  ,
+           L.DIR_CD    ,
+           L.IOC_TS_CD ,
+           W.COST_YR   ,
+           W.COST_WK   ,
+           W.IDX       ,
+           W.RNUM
+      FROM WEEKS W,
+           LANES L
+)
+, VVD_RANKS AS (
+    SELECT V.TRD_CD    ,
+           V.SUB_TRD_CD,
+           V.RLANE_CD  ,
+           V.SKD_DIR_CD AS DIR_CD,
+           V.IOC_TS_CD ,
+           V.VSL_CD    ,
+           V.SKD_VOY_NO,
+           V.SKD_DIR_CD,
+           V.COST_YR   ,
+           V.COST_WK   ,
+           V.HH_FLG    ,
+           ROW_NUMBER() OVER (PARTITION BY V.TRD_CD, V.SUB_TRD_CD, V.RLANE_CD, V.SKD_DIR_CD, V.COST_YR, V.COST_WK
+                                  ORDER BY V.ETD_DT) AS RNK
+      FROM ALL_DATA_VVD D,
+           LANE_VVDS    V
+     WHERE D.TRD_CD     = V.TRD_CD
+       AND D.SUB_TRD_CD = V.SUB_TRD_CD
+       AND D.RLANE_CD   = V.RLANE_CD
+       AND D.DIR_CD     = V.DIR_CD
+       AND D.IOC_TS_CD  = V.IOC_TS_CD
+       AND D.VSL_CD     = V.VSL_CD
+       AND D.SKD_VOY_NO = V.SKD_VOY_NO
+       AND D.SKD_DIR_CD = V.SKD_DIR_CD
+)
+, VVD_SEQ AS (
+    SELECT DISTINCT
+           VR.TRD_CD    ,
+           VR.SUB_TRD_CD,
+           VR.RLANE_CD  ,
+           VR.DIR_CD    ,
+           VR.IOC_TS_CD ,
+           VR.VSL_CD    ,
+           VR.SKD_VOY_NO,
+           VR.SKD_DIR_CD,
+           VR.COST_YR   ,
+           VR.COST_WK   ,
+           LW.RNUM      ,
+           VR.HH_FLG
+      FROM LANE_WEEK LW,
+           VVD_RANKS VR
+     WHERE VR.TRD_CD     = LW.TRD_CD
+       AND VR.SUB_TRD_CD = LW.SUB_TRD_CD
+       AND VR.RLANE_CD   = LW.RLANE_CD
+       AND VR.DIR_CD     = LW.DIR_CD
+       AND VR.IOC_TS_CD  = LW.IOC_TS_CD
+       AND VR.COST_YR    = LW.COST_YR
+       AND VR.COST_WK    = LW.COST_WK
+       AND VR.RNK        = LW.IDX
+)
+, VVD_POS AS (
+    SELECT DISTINCT
+           TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           IOC_TS_CD ,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           COST_YR   ,
+           COST_WK   ,
+           RNUM      ,
+           HH_FLG
+      FROM VVD_SEQ
+    UNION ALL
+    SELECT DISTINCT
+           TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           IOC_TS_CD ,
+           'TTL' AS VSL_CD    ,
+           ' '   AS SKD_VOY_NO,
+           ' '   AS SKD_DIR_CD,
+           'TTL' AS COST_YR   ,
+           NULL  AS COST_WK   ,
+           (SELECT MAX(RNUM) + 1 FROM VVD_SEQ) AS RNUM  ,
+           HH_FLG
+      FROM VVD_SEQ
+)
+, POL_SEQ AS (
+    SELECT TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           SKD_DIR_CD     AS DIR_CD ,
+           IOC_TS_CD ,
+           POL_CD    ,
+           MIN(CD_DP_SEQ) AS POL_SEQ
+      FROM VVD_POL
+  GROUP BY TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           SKD_DIR_CD,
+           IOC_TS_CD ,
+           POL_CD
+)
+, POL_POD_SEQ AS (
+    SELECT TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           SKD_DIR_CD     AS DIR_CD ,
+           IOC_TS_CD ,
+           POL_CD    ,
+           MIN(CD_DP_SEQ) AS POL_SEQ,
+           POD_CD                   ,
+           MIN(POD_SEQ)   AS POD_SEQ
+      FROM VVD_POL_POD
+  GROUP BY TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           SKD_DIR_CD,
+           IOC_TS_CD ,
+           POL_CD    ,
+           POD_CD
+)
+, QTA_DATA AS (
+    SELECT V.TRD_CD    ,
+           V.SUB_TRD_CD,
+           V.RLANE_CD  ,
+           V.DIR_CD    ,
+           P.IOC_TS_CD ,
+           MQ.RGN_OFC_CD        AS RGN_OFC_CD,
+           NVL(V.VSL_CD, 'TTL') AS VSL_CD    ,
+           V.SKD_VOY_NO,
+           V.SKD_DIR_CD,
+           NVL(SUBSTR(V.SLS_YRMON, 1, 4), 'TTL') AS COST_YR,
+           V.COST_WK ,
+           V.CTRL_LVL,
+           V.CTRL_HC ,
+           V.CTRL_45 ,
+           V.CTRL_53 ,
+           V.CTRL_RF ,
+           V.CTRL_WT ,
+           V.CTRL_ACCT,
+           SUM(MQ.LOD_QTY) AS LOD_QTY
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM SQM_QTA_RLSE_VER MQR,
+           SQM_CFM_QTA      MQ ,
+           VVDS             V  ,
+           PARAMS           P
+     WHERE 1=1 
+       AND MQR.BSE_YR          = SUBSTR(V.COST_YRMON, 1, 4)
+       AND MQR.BSE_QTR_CD      = V.BSE_QTR_CD
+       AND MQR.SQM_VER_STS_CD  = 'R'
+       AND MQR.BSE_TP_CD       = 'Q' 
+       AND MQ.QTA_RLSE_VER_NO  = MQR.QTA_RLSE_VER_NO
+       AND MQ.BSE_TP_CD        = MQR.BSE_TP_CD 
+       AND MQ.BSE_YR           = MQR.BSE_YR
+       AND MQ.BSE_QTR_CD       = MQR.BSE_QTR_CD
+       AND MQ.QTA_TGT_CD       = 'D'  
+       AND MQ.OFC_VW_CD        = 'L'  
+       AND MQ.TRD_CD           = V.TRD_CD
+       AND MQ.RLANE_CD         = V.RLANE_CD
+       AND MQ.DIR_CD           = V.DIR_CD
+       AND MQ.VSL_CD           = V.VSL_CD
+       AND MQ.SKD_VOY_NO       = V.SKD_VOY_NO
+       AND MQ.SKD_DIR_CD       = V.SKD_DIR_CD
+       AND SPC_SCR_OFC_CONV_FNC(MQ.RGN_OFC_CD,'EsmSpc0102') = P.RGN_OFC_CD
+       AND MQ.RLANE_CD         = NVL(P.RLANE_CD, MQ.RLANE_CD)
+  GROUP BY V.TRD_CD     ,
+           V.SUB_TRD_CD ,
+           V.RLANE_CD   ,
+           V.DIR_CD     ,
+           P.IOC_TS_CD  ,
+           MQ.RGN_OFC_CD,
+           SUBSTR(V.SLS_YRMON, 1, 4),
+           V.COST_WK    ,
+           V.VSL_CD     ,
+           V.SKD_VOY_NO ,
+           V.SKD_DIR_CD ,
+           V.CTRL_LVL   ,
+           V.CTRL_HC    ,
+           V.CTRL_45    ,
+           V.CTRL_53    ,
+           V.CTRL_RF    ,
+           V.CTRL_WT    ,
+           V.CTRL_ACCT
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+)
+, ALOC_DATA AS (
+    SELECT V.TRD_CD    ,
+           V.SUB_TRD_CD,
+           V.RLANE_CD  ,
+           A.DIR_CD    ,
+           P.IOC_TS_CD ,
+           P.RGN_OFC_CD,
+           NVL(V.VSL_CD, 'TTL') AS VSL_CD,
+           V.SKD_VOY_NO,
+           V.SKD_DIR_CD,
+           NVL(SUBSTR(V.SLS_YRMON, 1, 4), 'TTL') AS COST_YR,
+           V.COST_WK ,
+           V.CTRL_LVL,
+           V.CTRL_HC ,
+           V.CTRL_45 ,
+           V.CTRL_53 ,
+           V.CTRL_RF ,
+           V.CTRL_WT ,
+           V.CTRL_ACCT,
+#if(${suboffice} !='')
+           DECODE(SUM(A.BKG_AVAL_TTL_QTY), 0, SUM(A.ASGN_TTL_QTY), SUM(A.BKG_AVAL_TTL_QTY)) AS LOD_QTY
+           ,DECODE(SUM(A.BKG_AVAL_TTL_WGT), 0, SUM(A.ASGN_TTL_WGT), SUM(A.BKG_AVAL_TTL_WGT)) AS LOD_WT 
+#else
+           SUM(A.ASGN_TTL_QTY) AS LOD_QTY
+           , SUM(A.ASGN_TTL_WGT) AS LOD_WT 
+#end
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM SPC_ALOC_POL_POD A,
+           VVD_POL_POD             V,
+           PARAMS           P
+     WHERE 1=1 
+       AND A.RLANE_CD        = V.RLANE_CD
+       AND A.DIR_CD          = V.SKD_DIR_CD
+       AND A.VSL_CD          = V.VSL_CD
+       AND A.SKD_VOY_NO      = V.SKD_VOY_NO
+       AND A.SKD_DIR_CD      = V.SKD_DIR_CD
+       AND A.SLS_RGN_OFC_CD  = P.RGN_OFC_CD
+       AND A.TS_FLG          = DECODE(P.IOC_TS_CD, 'T', 'Y', 'N')
+       AND A.IOC_CD          = DECODE(P.IOC_TS_CD, 'O', 'O', 'I')
+       AND A.RLANE_CD        = NVL(P.RLANE_CD, A.RLANE_CD)
+       -- MSSONG 추가 Ve
+	 AND A.POL_YD_CD      = V.POL_CD
+	 AND A.POD_YD_CD      = V.POD_CD
+#if(${suboffice} !='')
+       AND A.SLS_OFC_CD      = @[suboffice]
+#end
+  GROUP BY V.TRD_CD    ,
+           V.SUB_TRD_CD,
+           V.RLANE_CD  ,
+           A.DIR_CD    ,
+           P.IOC_TS_CD ,
+           P.RGN_OFC_CD,
+           V.VSL_CD    ,
+           V.SKD_VOY_NO,
+           V.SKD_DIR_CD,
+           SUBSTR(V.SLS_YRMON, 1, 4),
+           V.COST_WK   ,
+           V.CTRL_LVL  ,
+           V.CTRL_HC   ,
+           V.CTRL_45   ,
+           V.CTRL_53   ,
+           V.CTRL_RF   ,
+           V.CTRL_WT   ,
+           V.CTRL_ACCT
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+)
+, QTA_ALOC_DATA AS (
+    SELECT 1 AS LVL1 ,
+           0 AS LVL2 ,
+           TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           IOC_TS_CD ,
+           RGN_OFC_CD,
+           NULL AS CUST_CTRL_CD,
+           NVL(VSL_CD    , 'TTL') AS VSL_CD    ,
+           NVL(SKD_VOY_NO, ' ')   AS SKD_VOY_NO,
+           NVL(SKD_DIR_CD, ' ')   AS SKD_DIR_CD,
+           NVL(COST_YR   , 'TTL') AS COST_YR   ,
+           COST_WK,
+#if(${view_type} == 'FEU')
+           ROUND(SUM(QTA_LOD_QTY) / 2, 1) || ' / ' || ROUND(SUM(ALOC_LOD_QTA / 2), 1) || ' / ' || ROUND(SUM(ALOC_LOD_WT)) AS LOD_QTY
+#else
+           ROUND(SUM(QTA_LOD_QTY)) || ' / ' || SUM(ALOC_LOD_QTA)|| ' / ' || ROUND(SUM(ALOC_LOD_WT)) AS LOD_QTY
+#end
+      FROM (
+              SELECT 1 AS FLG    ,
+                     V.TRD_CD    ,
+                     V.SUB_TRD_CD,
+                     V.RLANE_CD  ,
+                     V.DIR_CD    ,
+                     V.IOC_TS_CD ,
+                     P.RGN_OFC_CD,
+                     V.VSL_CD    ,
+                     V.SKD_VOY_NO,
+                     V.SKD_DIR_CD,
+                     V.COST_YR   ,
+                     V.COST_WK   ,
+                     A.LOD_QTY AS QTA_LOD_QTY ,
+                     0         AS ALOC_LOD_QTA , 0 AS ALOC_LOD_WT
+                FROM QTA_DATA  A,
+                     VVD_RANKS V,
+                     PARAMS    P
+               WHERE 1=1 
+                 AND A.TRD_CD    (+) = V.TRD_CD
+                 AND A.SUB_TRD_CD(+) = V.SUB_TRD_CD
+                 AND A.RLANE_CD  (+) = V.RLANE_CD
+                 AND A.DIR_CD    (+) = V.DIR_CD
+                 AND A.VSL_CD    (+) = V.VSL_CD
+                 AND NVL(A.SKD_VOY_NO(+), ' ') = NVL(V.SKD_VOY_NO, ' ')
+                 AND NVL(A.SKD_DIR_CD(+), ' ') = NVL(V.SKD_DIR_CD, ' ')
+                 AND V.RLANE_CD  = NVL(P.RLANE_CD, V.RLANE_CD)
+              UNION ALL
+              SELECT 2 AS FLG    ,
+                     V.TRD_CD    ,
+                     V.SUB_TRD_CD,
+                     V.RLANE_CD  ,
+                     V.DIR_CD    ,
+                     V.IOC_TS_CD ,
+                     P.RGN_OFC_CD,
+                     V.VSL_CD    ,
+                     V.SKD_VOY_NO,
+                     V.SKD_DIR_CD,
+                     V.COST_YR   ,
+                     V.COST_WK   ,
+                     0         AS QTA_LOD_QTY ,
+                     A.LOD_QTY AS ALOC_LOD_QTA, A.LOD_WT AS ALOC_LOD_WT
+                FROM ALOC_DATA A,
+                     VVD_RANKS V,
+                     PARAMS    P
+               WHERE 1=1 
+                 AND A.TRD_CD    (+) = V.TRD_CD
+                 AND A.SUB_TRD_CD(+) = V.SUB_TRD_CD
+                 AND A.RLANE_CD  (+) = V.RLANE_CD
+                 AND A.DIR_CD    (+) = V.DIR_CD
+                 AND A.VSL_CD    (+) = V.VSL_CD
+                 AND NVL(A.SKD_VOY_NO(+), ' ') = NVL(V.SKD_VOY_NO, ' ')
+                 AND NVL(A.SKD_DIR_CD(+), ' ') = NVL(V.SKD_DIR_CD, ' ')
+                 AND V.RLANE_CD  = NVL(P.RLANE_CD, V.RLANE_CD)
+           )
+  GROUP BY GROUPING SETS (( TRD_CD    , SUB_TRD_CD, RLANE_CD, DIR_CD    ,
+                             IOC_TS_CD , RGN_OFC_CD, VSL_CD  , SKD_VOY_NO,
+                             SKD_DIR_CD, COST_YR   , COST_WK               ),
+                           ( TRD_CD    , SUB_TRD_CD, RLANE_CD, DIR_CD    ,
+                             IOC_TS_CD , RGN_OFC_CD            ))
+    UNION ALL
+    SELECT 3 AS LVL1     ,
+           0 AS LVL2     ,
+           V.TRD_CD      ,
+           V.SUB_TRD_CD  ,
+           V.RLANE_CD    ,
+           V.DIR_CD      ,
+           V.IOC_TS_CD   ,
+           P.RGN_OFC_CD  ,
+           NVL(V.CUST_CTRL_CD, 'C') AS CUST_CTRL_CD,
+           NVL(V.VSL_CD    , 'TTL') AS VSL_CD      ,
+           NVL(V.SKD_VOY_NO, ' ')   AS SKD_VOY_NO  ,
+           NVL(V.SKD_DIR_CD, ' ')   AS SKD_DIR_CD  ,
+           NVL(V.COST_YR   , 'TTL') AS COST_YR     ,
+           V.COST_WK     ,
+#if(${suboffice} !='')
+#if(${view_type} == 'FEU')
+           TO_CHAR(ROUND(SUM(A.BKG_AVAL_TTL_QTY) / 2, 1)) AS LOD_QTY
+#else
+           TO_CHAR(SUM(A.BKG_AVAL_TTL_QTY)) AS LOD_QTY
+#end
+#else
+#if(${view_type} == 'FEU')
+           TO_CHAR(ROUND(SUM(A.ASGN_TTL_QTY) / 2, 1)) AS LOD_QTY
+#else
+           TO_CHAR(SUM(A.ASGN_TTL_QTY)) AS LOD_QTY
+#end
+#end
+      FROM SPC_ALOC_CUST_POL_POD A,
+           (SELECT TRD_CD    ,
+                     SUB_TRD_CD,
+                     RLANE_CD  ,
+                     SKD_DIR_CD AS DIR_CD,
+                     IOC_TS_CD ,
+                     VSL_CD    ,
+                     SKD_VOY_NO,
+                     SKD_DIR_CD,
+                     COST_YR   ,
+                     COST_WK   ,
+                     RNK       ,
+                     P.CUST_CTRL_CD,
+                     P.RGN_OFC_CD
+                FROM VVD_RANKS  R,
+                     (SELECT DISTINCT CUST_CTRL_CD, RGN_OFC_CD FROM GROUP_TOT ) P
+           )     V,
+           VVDLS P
+     WHERE A.TRD_CD    (+) = V.TRD_CD
+       AND A.SUB_TRD_CD(+) = V.SUB_TRD_CD
+       AND A.RLANE_CD  (+) = V.RLANE_CD
+       AND A.DIR_CD    (+) = V.DIR_CD
+       AND A.VSL_CD    (+) = V.VSL_CD
+       AND NVL(A.SKD_VOY_NO(+), ' ') = NVL(V.SKD_VOY_NO, ' ')
+       AND NVL(A.SKD_DIR_CD(+), ' ') = NVL(V.SKD_DIR_CD, ' ')
+       AND A.SLS_RGN_OFC_CD(+)       = V.RGN_OFC_CD
+       AND A.CUST_CTRL_CD  (+)       = V.CUST_CTRL_CD
+       AND V.TRD_CD     = P.TRD_CD
+       AND V.SUB_TRD_CD = P.SUB_TRD_CD
+       AND V.RLANE_CD   = P.RLANE_CD
+       AND V.DIR_CD     = P.DIR_CD
+       AND DECODE(V.IOC_TS_CD, 'T', 'I', V.IOC_TS_CD)  = P.IOC_CD
+       AND V.VSL_CD     = P.VSL_CD
+       AND V.SKD_VOY_NO = P.SKD_VOY_NO
+       AND V.SKD_DIR_CD = P.SKD_DIR_CD
+       AND P.CTRL_ACCT  = 'Y'
+#if(${suboffice} !='')
+       AND A.SLS_OFC_CD(+) = @[suboffice]
+#end
+  GROUP BY GROUPING SETS (( V.TRD_CD, V.SUB_TRD_CD, V.RLANE_CD, V.DIR_CD, V.IOC_TS_CD, P.RGN_OFC_CD, V.CUST_CTRL_CD ),
+                           ( V.TRD_CD, V.SUB_TRD_CD, V.RLANE_CD, V.IOC_TS_CD, P.RGN_OFC_CD, V.CUST_CTRL_CD, V.VSL_CD, V.SKD_VOY_NO, V.SKD_DIR_CD, V.COST_YR, V.COST_WK ))
+)
+, ALL_SUM_DATA AS (
+    SELECT LVL1           ,
+           LVL2           ,
+           MST_CNT        ,
+           FCAST_CNT      ,
+           BKG_CNT        ,
+           TRD_CD         ,
+           SUB_TRD_CD     ,
+           RLANE_CD       ,
+           DIR_CD         ,
+           IOC_TS_CD      ,
+           RGN_OFC_CD     ,
+           SUB_OFC_CD     ,
+           OFC_CD         ,
+           SREP_CD        ,
+           USA_BKG_MOD_CD ,
+           CUST_CNT       ,
+           CUST_TP_CD     ,
+           CUST_CTRL_CD   ,
+           DTL_SEQ        ,
+           DECODE(SUBSTR(SC_RFA_NO,1,1),'1',SUBSTR(SC_RFA_NO,2),'') AS SC_NO,
+           DECODE(TRD_CD,'AES',SUBSTR(SC_RFA_NO,2),'IAS',SUBSTR(SC_RFA_NO,2),'') AS RFA_NO,
+           DECODE(TRD_CD,'AES',DECODE(SUBSTR(SC_RFA_NO,1,1),'1','S','R'),'IAS',DECODE(SUBSTR(SC_RFA_NO,1,1),'1','S','R'),'S') AS SC_FLG,
+           RLANE_ADJ_QTY  ,
+           CUST_CNT_CD    ,
+           CUST_SEQ       ,
+           BKG_CUST_CNT_CD,
+           BKG_CUST_SEQ   ,
+           POL_CD         ,
+           POD_CD         ,
+           VSL_CD         ,
+           SKD_VOY_NO     ,
+           SKD_DIR_CD     ,
+           SUBSTR(COST_YRWK, 1, 4) AS COST_YR,
+           SUBSTR(COST_YRWK, 5, 2) AS COST_WK,
+           CHL            ,
+           CTRL_LVL       ,
+           CTRL_HC        ,
+           CTRL_45        ,
+           CTRL_53        ,
+           CTRL_RF        ,
+           CTRL_WT        ,
+           CTRL_ACCT      ,
+           FCAST_TTL_QTY    ,
+           FCAST_20FT_QTY   ,
+           FCAST_40FT_QTY   ,
+           FCAST_40FT_HC_QTY,
+           FCAST_45FT_HC_QTY,
+           FCAST_53FT_QTY   ,
+           FCAST_RF_QTY     ,
+           FCAST_20FT_DRY_QTY,
+           FCAST_40FT_DRY_QTY,
+           FCAST_RD_QTY     ,
+           FCAST_TTL_WGT    ,
+           BKG_TTL_QTY      ,
+           BKG_20FT_QTY     ,
+           BKG_40FT_QTY     ,
+           BKG_40FT_HC_QTY  ,
+           BKG_45FT_HC_QTY  ,
+           BKG_53FT_QTY     ,
+           BKG_RF_QTY       ,
+           BKG_TTL_WGT      ,
+           BKG_20FT_DRY_QTY ,
+           BKG_40FT_DRY_QTY ,
+           BKG_RD_QTY       ,
+           CIF              ,
+           FOB              ,
+           OTH              ,
+           TOT_CNT          ,
+           FCAST_RMK        ,
+           SUM(TTL_SUM) OVER (PARTITION BY A.TRD_CD, A.SUB_TRD_CD, A.RLANE_CD, A.DIR_CD, A.IOC_TS_CD, A.RGN_OFC_CD, A.SREP_CD, A.CUST_CNT_CD, A.CUST_SEQ, A.SC_RFA_NO) AS ZERO_CUST,
+           CUST_TTL_CNT
+           , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+      FROM (
+            SELECT NVL(A.LVL1, 0) AS LVL1,
+                   NVL(A.LVL2, 0) AS LVL2,
+                   SUM(DECODE(A.FLG, 'M', 1, 0)) AS MST_CNT  ,
+                   SUM(DECODE(A.FLG, 'F', 1, 0)) AS FCAST_CNT,
+                   SUM(DECODE(A.FLG, 'B', 1, 0)) AS BKG_CNT  ,
+                   A.TRD_CD         ,
+                   A.SUB_TRD_CD     ,
+                   A.RLANE_CD       ,
+                   A.DIR_CD         ,
+                   A.IOC_TS_CD      ,
+                   A.RGN_OFC_CD     ,
+                   NVL(O.SUB_OFC_CD, A.OFC_CD) AS SUB_OFC_CD,
+                   A.OFC_CD         ,
+                   A.SREP_CD        ,
+                   COUNT(A.CUST_TP_CD) AS CUST_CNT,
+                   A.CUST_TP_CD     ,
+                   A.CUST_CTRL_CD   ,
+                   USA_BKG_MOD_CD, 
+                   A.DTL_SEQ        ,
+                   DECODE(A.DTL_SEQ, NULL, NULL, DECODE(NVL(MAX(A.SC_NO),'1'),'1','2'|| MAX(A.RFA_NO), '1'|| MAX(A.SC_NO))) AS SC_RFA_NO,
+#if(${view_type} == 'FEU')
+                   ROUND(A.RLANE_ADJ_QTY / 2, 1) AS RLANE_ADJ_QTY,
+#else
+                   A.RLANE_ADJ_QTY  ,
+#end
+                   A.CUST_CNT_CD    ,
+                   A.CUST_SEQ       ,
+                   A.BKG_CUST_CNT_CD,
+                   A.BKG_CUST_SEQ   ,
+                   A.POL_CD         ,
+                   A.POD_CD         ,
+                   NVL(A.VSL_CD    , 'TTL') AS VSL_CD    ,
+                   NVL(A.SKD_VOY_NO, ' ')   AS SKD_VOY_NO,
+                   NVL(A.SKD_DIR_CD, ' ')   AS SKD_DIR_CD,
+                   MAX(A.COST_YR) AS COST_YR,
+                   MAX(A.COST_WK) AS COST_WK,
+                   MAX(A.COST_YR||A.COST_WK) AS COST_YRWK,
+                   SUM(A.CHL)     AS CHL    ,
+                   A.CTRL_LVL,
+                   A.CTRL_HC ,
+                   A.CTRL_45 ,
+                   A.CTRL_53 ,
+                   A.CTRL_RF ,
+                   A.CTRL_WT ,
+                   A.CTRL_ACCT,
+#if(${view_type} == 'FEU')
+                   TO_CHAR(ROUND(SUM(A.FCAST_TTL_QTY) / 2, 1))     AS FCAST_TTL_QTY    ,
+                   TO_CHAR(ROUND(SUM(A.FCAST_20FT_QTY) / 2, 1))    AS FCAST_20FT_QTY   ,
+                   TO_CHAR(SUM(A.FCAST_40FT_QTY))                  AS FCAST_40FT_QTY   ,
+                   TO_CHAR(SUM(A.FCAST_40FT_HC_QTY))               AS FCAST_40FT_HC_QTY,
+                   TO_CHAR(SUM(A.FCAST_45FT_HC_QTY))               AS FCAST_45FT_HC_QTY,
+                   TO_CHAR(SUM(A.FCAST_53FT_QTY))                  AS FCAST_53FT_QTY   ,
+                   TO_CHAR(SUM(A.FCAST_RF_QTY))                    AS FCAST_RF_QTY     ,
+                   TO_CHAR(SUM(A.FCAST_TTL_WGT))                   AS FCAST_TTL_WGT    ,
+                   TO_CHAR(SUM(A.FCAST_20FT_DRY_QTY))AS FCAST_20FT_DRY_QTY,
+                   TO_CHAR(SUM(A.FCAST_40FT_DRY_QTY))AS FCAST_40FT_DRY_QTY,
+                   TO_CHAR(SUM(A.FCAST_RD_QTY))      AS FCAST_RD_QTY      ,
+                   TO_CHAR(ROUND(SUM(A.BKG_TTL_QTY) / 2, 1))       AS BKG_TTL_QTY      ,
+                   TO_CHAR(ROUND(SUM(A.BKG_20FT_QTY) / 2, 1))      AS BKG_20FT_QTY     ,
+                   TO_CHAR(SUM(A.BKG_40FT_QTY))                    AS BKG_40FT_QTY     ,
+                   TO_CHAR(SUM(A.BKG_40FT_HC_QTY))                 AS BKG_40FT_HC_QTY  ,
+                   TO_CHAR(SUM(A.BKG_45FT_HC_QTY))                 AS BKG_45FT_HC_QTY  ,
+                   TO_CHAR(SUM(A.BKG_53FT_QTY))                    AS BKG_53FT_QTY     ,
+                   TO_CHAR(SUM(A.BKG_RF_QTY))                      AS BKG_RF_QTY       ,
+                   TO_CHAR(SUM(A.BKG_TTL_WGT))                     AS BKG_TTL_WGT      ,
+                   TO_CHAR(ROUND(SUM(A.CIF) / 2, 2), '999,990.99') AS CIF              ,
+                   TO_CHAR(SUM(A.BKG_20FT_DRY_QTY))  AS BKG_20FT_DRY_QTY ,
+                   TO_CHAR(SUM(A.BKG_40FT_DRY_QTY))  AS BKG_40FT_DRY_QTY ,
+                   TO_CHAR(SUM(A.BKG_RD_QTY))        AS BKG_RD_QTY       , 
+                   TO_CHAR(ROUND(SUM(A.FOB) / 2, 2), '999,990.99') AS FOB              ,
+                   TO_CHAR(ROUND(SUM(A.OTH) / 2, 2), '999,990.99') AS OTH              ,
+#else
+                   TO_CHAR(SUM(A.FCAST_TTL_QTY))     AS FCAST_TTL_QTY    ,
+                   TO_CHAR(SUM(A.FCAST_20FT_QTY))    AS FCAST_20FT_QTY   ,
+                   TO_CHAR(SUM(A.FCAST_40FT_QTY))    AS FCAST_40FT_QTY   ,
+                   TO_CHAR(SUM(A.FCAST_40FT_HC_QTY)) AS FCAST_40FT_HC_QTY,
+                   TO_CHAR(SUM(A.FCAST_45FT_HC_QTY)) AS FCAST_45FT_HC_QTY,
+                   TO_CHAR(SUM(A.FCAST_53FT_QTY))    AS FCAST_53FT_QTY   ,
+                   TO_CHAR(SUM(A.FCAST_RF_QTY))      AS FCAST_RF_QTY     ,
+                   TO_CHAR(SUM(A.FCAST_TTL_WGT))     AS FCAST_TTL_WGT    ,
+                   TO_CHAR(SUM(A.FCAST_20FT_DRY_QTY))AS FCAST_20FT_DRY_QTY,
+                   TO_CHAR(SUM(A.FCAST_40FT_DRY_QTY))AS FCAST_40FT_DRY_QTY,
+                   TO_CHAR(SUM(A.FCAST_RD_QTY))      AS FCAST_RD_QTY      ,
+                   TO_CHAR(SUM(A.BKG_TTL_QTY))       AS BKG_TTL_QTY      ,
+                   TO_CHAR(SUM(A.BKG_20FT_QTY))      AS BKG_20FT_QTY     ,
+                   TO_CHAR(SUM(A.BKG_40FT_QTY))      AS BKG_40FT_QTY     ,
+                   TO_CHAR(SUM(A.BKG_40FT_HC_QTY))   AS BKG_40FT_HC_QTY  ,
+                   TO_CHAR(SUM(A.BKG_45FT_HC_QTY))   AS BKG_45FT_HC_QTY  ,
+                   TO_CHAR(SUM(A.BKG_53FT_QTY))      AS BKG_53FT_QTY     ,
+                   TO_CHAR(SUM(A.BKG_RF_QTY))        AS BKG_RF_QTY       ,
+                   TO_CHAR(SUM(A.BKG_TTL_WGT))       AS BKG_TTL_WGT      ,
+                   TO_CHAR(SUM(A.BKG_20FT_DRY_QTY))  AS BKG_20FT_DRY_QTY ,
+                   TO_CHAR(SUM(A.BKG_40FT_DRY_QTY))  AS BKG_40FT_DRY_QTY ,
+                   TO_CHAR(SUM(A.BKG_RD_QTY))        AS BKG_RD_QTY       ,
+                   TO_CHAR(SUM(A.CIF), '999,990.99') AS CIF              ,
+                   TO_CHAR(SUM(A.FOB), '999,990.99') AS FOB              ,
+                   TO_CHAR(SUM(A.OTH), '999,990.99') AS OTH              ,
+#end
+                   (SUM(A.RLANE_ADJ_QTY) + SUM(A.FCAST_TTL_QTY) + SUM(A.FCAST_40FT_HC_QTY) + SUM(A.FCAST_45FT_HC_QTY) + SUM(A.FCAST_53FT_QTY) + SUM(A.FCAST_RF_QTY) + SUM(A.FCAST_TTL_WGT) + SUM(A.BKG_TTL_QTY) + SUM(A.BKG_TTL_WGT) ) AS TTL_SUM,
+                   NVL2(A.VSL_CD, 0, 1)              AS TOT_CNT          ,
+                   MAX(FCAST_RMK)                    AS FCAST_RMK        ,
+                   COUNT(CUST_CNT_CD) OVER (PARTITION BY A.TRD_CD, A.SUB_TRD_CD, A.RLANE_CD, A.DIR_CD, A.IOC_TS_CD, A.RGN_OFC_CD, A.SREP_CD) AS CUST_TTL_CNT
+                   , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+              FROM ALL_DATA A,
+                   OFFICES  O
+             WHERE A.OFC_CD     = O.OFC_CD(+)
+#if (${salesoffice} == 'SELSC')
+               AND A.SUB_OFC_CD = O.SUB_OFC_CD  (+)
+               AND A.RGN_OFC_CD = O.RGN_OFC_CD  (+)
+               AND A.SREP_CD    = O.SALES_REP_CD(+)
+#end
+               AND NOT (A.LVL1 = 4 AND A.LVL2 = 1 AND A.FCAST_TTL_QTY = 0)
+          GROUP BY GROUPING SETS ( ( A.LVL1       , A.LVL2           , A.TRD_CD         , A.SUB_TRD_CD     , A.RLANE_CD     ,
+                                     A.DIR_CD     , A.IOC_TS_CD      , A.CTRL_LVL       , A.CTRL_HC        , A.CTRL_45      ,
+                                     A.CTRL_53    , A.CTRL_RF        , A.CTRL_WT        , A.CTRL_ACCT      , A.RGN_OFC_CD   , NVL(O.SUB_OFC_CD, A.OFC_CD),
+                                     A.OFC_CD     , A.SREP_CD        , A.CUST_TP_CD     , A.CUST_CTRL_CD   , A.RLANE_ADJ_QTY,
+                                     A.CUST_CNT_CD, A.CUST_SEQ       , A.DTL_SEQ        , A.BKG_CUST_CNT_CD, A.BKG_CUST_SEQ ,
+                                     A.POL_CD     , A.POD_CD         , A.VSL_CD         , A.SKD_VOY_NO     , A.SKD_DIR_CD      
+                                     , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG 
+                                     , USA_BKG_MOD_CD
+                                     ),                                     
+                                   ( A.LVL1       , A.LVL2           , A.TRD_CD         , A.SUB_TRD_CD     , A.RLANE_CD     ,
+                                     A.DIR_CD     , A.IOC_TS_CD      , A.RGN_OFC_CD     , NVL(O.SUB_OFC_CD , A.OFC_CD)      , A.OFC_CD,
+                                     A.SREP_CD    , A.CUST_TP_CD     , A.CUST_CTRL_CD   , A.RLANE_ADJ_QTY  , A.CUST_CNT_CD  ,
+                                     A.CUST_SEQ   , A.DTL_SEQ        , A.BKG_CUST_CNT_CD, A.BKG_CUST_SEQ   , A.POL_CD       ,
+                                     A.POD_CD                                                                                  
+                                     , USA_BKG_MOD_CD
+                                     ),                                     
+                                   ( A.TRD_CD     , A.SUB_TRD_CD     , A.RLANE_CD       , A.DIR_CD         , A.IOC_TS_CD    ,
+                                     A.CTRL_LVL   , A.CTRL_HC        , A.CTRL_45        , A.CTRL_53        , A.CTRL_RF      ,
+                                     A.CTRL_WT    , A.CTRL_ACCT      , A.RGN_OFC_CD     , A.VSL_CD         , A.SKD_VOY_NO   ,
+                                     A.SKD_DIR_CD                                                                              
+                                     , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG 
+                                     ),                                     
+                                   ( A.TRD_CD     , A.SUB_TRD_CD     , A.RLANE_CD       , A.DIR_CD         , A.IOC_TS_CD    ,
+                                     A.RGN_OFC_CD  
+                                     )
+                                 )
+            HAVING NOT (     BKG_CUST_CNT_CD IS NOT NULL
+                         AND CUST_CNT_CD = NVL(BKG_CUST_CNT_CD, 'X')
+                         AND CUST_SEQ    = NVL(BKG_CUST_SEQ, 1))
+            UNION ALL
+            SELECT LVL1                        ,
+                   LVL2                        ,
+                   0 AS MST_CNT                ,
+                   0 AS FCAST_CNT              ,
+                   0 AS BKG_CNT                ,
+                   TRD_CD                      ,
+                   SUB_TRD_CD                  ,
+                   RLANE_CD                    ,
+                   DIR_CD                      ,
+                   IOC_TS_CD                   ,
+                   RGN_OFC_CD                  ,
+                   NULL AS SUB_OFC_CD          ,
+                   NULL AS OFC_CD              ,
+                   NULL AS SREP_CD             ,
+                   0    AS CUST_CNT            ,
+                   NULL AS CUST_TP_CD          ,
+                   CUST_CTRL_CD                ,
+                   NULL USA_BKG_MOD_CD, 
+                   NULL AS DTL_SEQ             ,
+                   NULL AS SC_RFA_NO           ,
+                   NULL AS RLANE_ADJ_QTY       ,
+                   NULL AS CUST_CNT_CD         ,
+                   NULL AS CUST_SEQ            ,
+                   NULL AS BKG_CUST_CNT_CD     ,
+                   NULL AS BKG_CUST_SEQ        ,
+                   NULL AS POL_CD              ,
+                   NULL AS POD_CD              ,
+                   VSL_CD                      ,
+                   SKD_VOY_NO                  ,
+                   DECODE(VSL_CD, 'TTL', ' ', SKD_DIR_CD) AS SKD_DIR_CD,
+                   COST_YR                     ,
+                   COST_WK                     ,
+                   COST_YR||COST_WK AS COST_YRWK,
+                   0       AS CHL              ,
+                   NULL    AS CTRL_LVL         ,
+                   NULL    AS CTRL_HC          ,
+                   NULL    AS CTRL_45          ,
+                   NULL    AS CTRL_53          ,
+                   NULL    AS CTRL_RF          ,
+                   NULL    AS CTRL_WT          ,
+                   NULL    AS CTRL_ACCT        ,
+                   LOD_QTY AS FCAST_TTL_QTY    ,
+                   LOD_QTY AS FCAST_20FT_QTY   ,
+                   LOD_QTY AS FCAST_40FT_QTY   ,
+                   LOD_QTY AS FCAST_40FT_HC_QTY,
+                   LOD_QTY AS FCAST_45FT_HC_QTY,
+                   LOD_QTY AS FCAST_53FT_QTY   ,
+                   LOD_QTY AS FCAST_RF_QTY     ,
+                   LOD_QTY AS FCAST_TTL_WGT    ,
+                   LOD_QTY AS FCAST_20FT_DRY_QTY,
+                   LOD_QTY AS FCAST_40FT_DRY_QTY,
+                   LOD_QTY AS FCAST_RD_QTY     ,
+                   LOD_QTY AS BKG_TTL_QTY      ,
+                   LOD_QTY AS BKG_20FT_QTY     ,
+                   LOD_QTY AS BKG_40FT_QTY     ,
+                   LOD_QTY AS BKG_40FT_HC_QTY  ,
+                   LOD_QTY AS BKG_45FT_HC_QTY  ,
+                   LOD_QTY AS BKG_53FT_QTY     ,
+                   LOD_QTY AS BKG_RF_QTY       ,
+                   LOD_QTY AS BKG_TTL_WGT      ,
+                   LOD_QTY AS BKG_20FT_DRY_QTY ,
+                   LOD_QTY AS BKG_40FT_DRY_QTY ,
+                   LOD_QTY AS BKG_RD_QTY       ,
+                   NULL    AS CIF              ,
+                   NULL    AS FOB              ,
+                   NULL    AS OTH              ,
+                   0       AS TTL_SUM          ,
+                   0       AS TOT_CNT          ,
+                   NULL    AS FCAST_RMK        ,
+                   1       AS CUST_TTL_CNT
+                   , NULL AS CTRL_D2_FLG, NULL AS CTRL_D4_FLG, NULL AS CTRL_RD_FLG, NULL AS CTRL_ECC_FLG, NULL AS CTRL_LOC_FLG , NULL AS CTRL_USA_SVC_MOD_FLG , NULL AS CTRL_ACCT_FLG
+              FROM QTA_ALOC_DATA
+            UNION ALL
+            SELECT LVL1                      ,
+                   LVL2                      ,
+                   0 AS MST_CNT              ,
+                   0 AS FCAST_CNT            ,
+                   0 AS BKG_CNT              ,
+                   TRD_CD                    ,
+                   SUB_TRD_CD                ,
+                   RLANE_CD                  ,
+                   DIR_CD                    ,
+                   IOC_TS_CD                 ,
+                   RGN_OFC_CD                ,
+                   NULL AS SUB_OFC_CD        ,
+                   NULL AS OFC_CD            ,
+                   NULL AS SREP_CD           ,
+                   0    AS CUST_CNT          ,
+                   NULL AS CUST_TP_CD        ,
+                   CUST_CTRL_CD              ,
+                   NULL USA_BKG_MOD_CD, 
+                   NULL AS DTL_SEQ           ,
+                   NULL AS SC_RFA_NO         ,
+                   (
+#if(${view_type} == 'FEU')
+                     SELECT ROUND(SUM(RLANE_ADJ_QTY) / 2, 1)
+#else
+                     SELECT SUM(RLANE_ADJ_QTY)
+#end
+                       FROM (  SELECT DISTINCT
+                                      TRD_CD       ,
+                                      SUB_TRD_CD   ,
+                                      RLANE_CD     ,
+                                      DIR_CD       ,
+                                      IOC_TS_CD    ,
+                                      RGN_OFC_CD   ,
+                                      CUST_CTRL_CD ,
+                                      RLANE_ADJ_QTY,
+                                      NVL(SC_NO,RFA_NO)
+                                 FROM ALL_DATA
+                                WHERE LVL1 = 4
+                                  AND LVL2 = 3
+                                  AND RLANE_ADJ_QTY > 0) A
+                      WHERE A.TRD_CD       = T.TRD_CD
+                        AND A.SUB_TRD_CD   = T.SUB_TRD_CD
+                        AND A.RLANE_CD     = T.RLANE_CD
+                        AND A.CUST_CTRL_CD = T.CUST_CTRL_CD
+                   ) AS RLANE_ADJ_QTY,
+                   NULL AS CUST_CNT_CD       ,
+                   NULL AS CUST_SEQ          ,
+                   NULL AS BKG_CUST_CNT_CD   ,
+                   NULL AS BKG_CUST_SEQ      ,
+                   POL_CD                    ,
+                   POD_CD                    ,
+                   VSL_CD                    ,
+                   SKD_VOY_NO                ,
+                   SKD_DIR_CD                ,
+                   COST_YR                   ,
+                   COST_WK                   ,
+                   COST_YR||COST_WK AS COST_YRWK,
+                   0    AS CHL               ,
+                   NULL AS CTRL_LVL          ,
+                   NULL AS CTRL_HC           ,
+                   NULL AS CTRL_45           ,
+                   NULL AS CTRL_53           ,
+                   NULL AS CTRL_RF           ,
+                   NULL AS CTRL_WT           ,
+                   NULL AS CTRL_ACCT         ,
+#if(${view_type} == 'FEU')
+                   TO_CHAR(ROUND(FCAST_TTL_QTY     / 2, 1)),
+                   TO_CHAR(ROUND(FCAST_20FT_QTY    / 2, 1)),
+                   TO_CHAR(FCAST_40FT_QTY)   ,
+                   TO_CHAR(FCAST_40FT_HC_QTY),
+                   TO_CHAR(FCAST_45FT_HC_QTY),
+                   TO_CHAR(FCAST_53FT_QTY)   ,
+                   TO_CHAR(FCAST_RF_QTY)     ,
+                   TO_CHAR(FCAST_TTL_WGT)    ,
+                   TO_CHAR(FCAST_20FT_DRY_QTY)FCAST_20FT_DRY_QTY,
+                   TO_CHAR(FCAST_40FT_DRY_QTY)FCAST_40FT_DRY_QTY,
+                   TO_CHAR(FCAST_RD_QTY)     FCAST_RD_QTY,	
+                   TO_CHAR(ROUND(BKG_TTL_QTY       / 2, 1)),
+                   TO_CHAR(ROUND(BKG_20FT_QTY      / 2, 1)),
+                   TO_CHAR(BKG_40FT_QTY)     ,
+                   TO_CHAR(BKG_40FT_HC_QTY)  ,
+                   TO_CHAR(BKG_45FT_HC_QTY)  ,
+                   TO_CHAR(BKG_53FT_QTY)     ,
+                   TO_CHAR(BKG_RF_QTY)       ,
+                   TO_CHAR(BKG_TTL_WGT)      ,
+                   TO_CHAR(BKG_20FT_DRY_QTY) BKG_20FT_DRY_QTY,
+                   TO_CHAR(BKG_40FT_DRY_QTY) BKG_40FT_DRY_QTY,
+                   TO_CHAR(BKG_RD_QTY)       BKG_RD_QTY,
+#else
+                   TO_CHAR(FCAST_TTL_QTY)    ,
+                   TO_CHAR(FCAST_20FT_QTY)   ,
+                   TO_CHAR(FCAST_40FT_QTY)   ,
+                   TO_CHAR(FCAST_40FT_HC_QTY),
+                   TO_CHAR(FCAST_45FT_HC_QTY),
+                   TO_CHAR(FCAST_53FT_QTY)   ,
+                   TO_CHAR(FCAST_RF_QTY)     ,
+                   TO_CHAR(FCAST_TTL_WGT)    ,
+                   TO_CHAR(FCAST_20FT_DRY_QTY)FCAST_20FT_DRY_QTY,
+                   TO_CHAR(FCAST_40FT_DRY_QTY)FCAST_40FT_DRY_QTY,
+                   TO_CHAR(FCAST_RD_QTY)     FCAST_RD_QTY,
+                   TO_CHAR(BKG_TTL_QTY )     ,
+                   TO_CHAR(BKG_20FT_QTY)     ,
+                   TO_CHAR(BKG_40FT_QTY)     ,
+                   TO_CHAR(BKG_40FT_HC_QTY)  ,
+                   TO_CHAR(BKG_45FT_HC_QTY)  ,
+                   TO_CHAR(BKG_53FT_QTY)     ,
+                   TO_CHAR(BKG_RF_QTY)       ,
+                   TO_CHAR(BKG_TTL_WGT)      ,
+                   TO_CHAR(BKG_20FT_DRY_QTY) BKG_20FT_DRY_QTY,
+                   TO_CHAR(BKG_40FT_DRY_QTY) BKG_40FT_DRY_QTY,
+                   TO_CHAR(BKG_RD_QTY)       BKG_RD_QTY,
+#end
+                   NULL AS CIF               ,
+                   NULL AS FOB               ,
+                   NULL AS OTH               ,
+                   0    AS TTL_SUM          ,
+                   DECODE(VSL_CD, 'TTL', 1, 0) AS TOT_CNT,
+                   NULL AS FCAST_RMK         ,
+                   0    AS CUST_TTL_CNT
+                   , NULL AS CTRL_D2_FLG, NULL AS CTRL_D4_FLG, NULL AS CTRL_RD_FLG, NULL AS CTRL_ECC_FLG, NULL AS CTRL_LOC_FLG , NULL AS CTRL_USA_SVC_MOD_FLG , NULL AS CTRL_ACCT_FLG
+              FROM GROUP_TOT T
+        ) A
+)
+  SELECT TRD_CD           ,
+         SUB_TRD_CD       ,
+         RLANE_CD         ,
+         DIR_CD           ,
+         IOC_TS_CD        ,
+         RGN_OFC_CD       ,
+#if (${salesoffice} == 'SELSC')
+         SUB_OFC_CD       ,
+#else
+         SUB_OFC_CD       ,
+#end
+         OFC_CD           ,
+         SREP_CD          ,
+         SREP_NM          ,
+         CUST_TP_CD       ,
+         ACCT_LVL         ,
+         FCAST_SEQ        ,
+         SC_NO            ,
+         RFA_NO           ,
+         SC_FLG           ,
+         GUIDE            ,
+         DECODE(USA_BKG_MOD_CD2, 'OTH', 'OTHERS', USA_BKG_MOD_CD2) USA_BKG_MOD_CD,
+         CUST_CNT_CD2 CUST_CNT_CD      ,
+         CUST_SEQ2 CUST_SEQ         ,
+         BKG_CUST_CNT_CD  ,
+         BKG_CUST_SEQ     ,
+         BKG_CUST_NM      ,
+         CUST_NM          ,
+         POL_CD           ,
+         POD_CD           ,
+         VSL_CD           ,
+         SKD_VOY_NO       ,
+         SKD_DIR_CD       ,
+         COST_YR          ,
+         COST_WK          ,
+         LVL              ,
+         LVL1             ,
+         LVL2             ,
+         ISEDITABLE       ,
+         COLOR            ,
+         RNUM             ,
+         CHL              ,
+         CTRL_LVL         ,
+         CTRL_HC          ,
+         CTRL_45          ,
+         CTRL_53          ,
+         CTRL_RF          ,
+         CTRL_WT          ,
+         POL_SEQ          ,
+         POD_SEQ          ,
+         MST_CNT          ,
+         FCAST_CNT        ,
+         BKG_CNT          ,
+#if(${view_type} == 'FEU')
+         FCAST_TTL_TEU_QTY,
+#else
+         FCAST_TTL_TEU_QTY,
+#end
+         FCAST_TTL_QTY    ,
+#if(${view_type} == 'FEU')
+         FCAST_20FT_QTY   ,
+         FCAST_40FT_QTY   ,
+#elseif(${view_type} == 'TEU')
+         FCAST_20FT_QTY   ,
+         FCAST_40FT_QTY   ,
+#else
+         FCAST_20FT_QTY   ,
+         FCAST_40FT_QTY   ,
+#end
+         FCAST_40FT_HC_QTY,
+         FCAST_45FT_HC_QTY,
+         FCAST_53FT_QTY   ,
+         FCAST_RF_QTY     ,
+         FCAST_TTL_WGT    ,
+         FCAST_20FT_DRY_QTY,
+         FCAST_40FT_DRY_QTY,
+         FCAST_RD_QTY     ,
+         BKG_TTL_QTY      ,
+         BKG_20FT_QTY     ,
+         BKG_40FT_QTY     ,
+         BKG_40FT_HC_QTY  ,
+         BKG_45FT_HC_QTY  ,
+         BKG_53FT_QTY     ,
+         BKG_RF_QTY       ,
+         BKG_TTL_WGT      ,
+         BKG_20FT_DRY_QTY  ,
+         BKG_40FT_DRY_QTY  ,
+         BKG_RD_QTY       ,	
+         CIF              ,
+         FOB              ,
+         OTH              ,
+         EXIST_FLG        ,
+         NEW_FLG          ,
+         TOT_CNT          ,
+         FCAST_RMK        ,
+         CTRL_ACCT        ,
+         HH_FLG           ,
+         SLS_RHQ_CD       ,
+         ZERO_CUST
+         , CTRL_D2_FLG, CTRL_D4_FLG, CTRL_RD_FLG, CTRL_ECC_FLG, CTRL_LOC_FLG , CTRL_USA_SVC_MOD_FLG , CTRL_ACCT_FLG
+FROM (
+      SELECT A.TRD_CD    ,
+             A.SUB_TRD_CD,
+             A.RLANE_CD  ,
+             A.DIR_CD    ,
+             A.IOC_TS_CD ,
+             A.RGN_OFC_CD,
+#if (${salesoffice} == 'SELSC')
+             NVL(A.SUB_OFC_CD,A.OFC_CD) AS SUB_OFC_CD,
+#else
+             A.SUB_OFC_CD,
+#end
+             A.OFC_CD     ,
+             A.SREP_CD    ,
+             SR.SREP_NM   ,
+             A.CUST_TP_CD ,
+             A.CUST_CTRL_CD  AS ACCT_LVL ,
+             A.DTL_SEQ       AS FCAST_SEQ,
+             A.SC_NO      ,
+             A.RFA_NO     ,
+             A.SC_FLG     ,
+             A.RLANE_ADJ_QTY AS GUIDE    ,
+             A.USA_BKG_MOD_CD USA_BKG_MOD_CD2,
+             A.CUST_CNT_CD CUST_CNT_CD2,
+             TO_CHAR(A.CUST_SEQ, 'FM000000') AS CUST_SEQ2,
+             A.BKG_CUST_CNT_CD,
+             TO_CHAR(A.BKG_CUST_SEQ, 'FM000000') AS BKG_CUST_SEQ,
+             SC.CUST_LGL_ENG_NM AS BKG_CUST_NM,
+             MC.CUST_LGL_ENG_NM AS CUST_NM    ,
+             A.POL_CD     ,
+             A.POD_CD     ,
+             A.VSL_CD     ,
+             A.SKD_VOY_NO ,
+             A.SKD_DIR_CD ,
+             DECODE(A.VSL_CD, 'TTL', 'TTL', A.COST_YR) AS COST_YR,
+             DECODE(A.VSL_CD, 'TTL', ''   , A.COST_WK) AS COST_WK,
+             A.LVL1 * 10 + A.LVL2 AS LVL,
+             A.LVL1,
+             A.LVL2,
+             CASE
+                  WHEN     A.LVL1 = 4
+                       AND A.LVL2 > 1
+                       AND A.VSL_CD <> 'TTL'
+                       AND (A.MST_CNT <> 0 OR A.FCAST_CNT <> 0)
+                       AND (    (A.LVL2 = 4 AND (A.CTRL_LVL IN ('T', 'D') OR A.IOC_TS_CD <> 'O') )
+                             OR (A.IOC_TS_CD = 'O' AND A.CTRL_LVL NOT IN ('D', 'T') AND A.LVL2 = 3) ) THEN 'TRUE'
+                                                                                                      ELSE 'FALSE'                                                                    
+              END ISEDITABLE,
+             CASE
+                  WHEN A.LVL1 = 0                THEN 0
+                  WHEN A.LVL1 = 1                THEN 1
+                  WHEN A.LVL1 = 2 AND A.LVL2 = 0 THEN 3
+                  WHEN A.LVL1 = 3 AND A.LVL2 = 0 THEN 1
+                  WHEN A.LVL2 = 0                THEN 2
+                  WHEN A.LVL1 = 4 AND A.LVL2 = 1 THEN 6
+                                                 ELSE 4
+              END COLOR,
+             NVL(R.RNUM, 0)  AS RNUM,
+             LEAST(A.CHL, 1) AS CHL ,
+             A.CTRL_LVL ,
+             NVL(A.CTRL_HC, MAX(A.CTRL_HC) OVER (PARTITION BY A.TRD_CD)) CTRL_HC,
+             NVL(A.CTRL_45, MAX(A.CTRL_45) OVER (PARTITION BY A.TRD_CD)) CTRL_45,
+             NVL(A.CTRL_53, MAX(A.CTRL_53) OVER (PARTITION BY A.TRD_CD)) CTRL_53,
+             NVL(A.CTRL_RF, MAX(A.CTRL_RF) OVER (PARTITION BY A.TRD_CD)) CTRL_RF,
+             NVL(A.CTRL_WT, MAX(A.CTRL_WT) OVER (PARTITION BY A.TRD_CD)) CTRL_WT,
+             PLS.POL_SEQ,
+             PDS.POD_SEQ,
+             (A.MST_CNT)   AS MST_CNT  ,
+             (A.FCAST_CNT) AS FCAST_CNT,
+             (A.BKG_CNT)   AS BKG_CNT  ,
+             --FCAST_TTL_TEU_QTY 추가(TEU + HC * 2 + 45FT * 2 + 53FT * 2), LVL1이 1이 아닌경우에만 적용(1인경우는 TGT/ALOC이므로 다른컬럼과 동일한 값으로 넣어줌)
+#if(${view_type} == 'FEU')
+             DECODE(A.LVL1, 1, FCAST_TTL_QTY, ROUND(NVL(FCAST_TTL_QTY,0) / 2, 1) + NVL(FCAST_40FT_HC_QTY, 0) + NVL(FCAST_45FT_HC_QTY, 0) + NVL(FCAST_53FT_QTY, 0)) AS FCAST_TTL_TEU_QTY,
+#else
+             DECODE(A.LVL1, 1, FCAST_TTL_QTY, NVL(FCAST_TTL_QTY,0) + NVL(FCAST_40FT_HC_QTY, 0) * 2 + NVL(FCAST_45FT_HC_QTY, 0) * 2 + NVL(FCAST_53FT_QTY, 0) * 2)   AS FCAST_TTL_TEU_QTY,
+#end
+             (FCAST_TTL_QTY)     AS FCAST_TTL_QTY    ,
+
+#if(${view_type} == 'FEU')
+             0                   AS FCAST_20FT_QTY   ,
+             (FCAST_TTL_QTY)     AS FCAST_40FT_QTY   ,
+#elseif(${view_type} == 'TEU')
+             (FCAST_TTL_QTY)     AS FCAST_20FT_QTY   ,
+             0                   AS FCAST_40FT_QTY   ,
+#else
+             (FCAST_20FT_QTY)    AS FCAST_20FT_QTY   ,
+             (FCAST_40FT_QTY)    AS FCAST_40FT_QTY   ,
+#end
+             (FCAST_40FT_HC_QTY) AS FCAST_40FT_HC_QTY,
+             (FCAST_45FT_HC_QTY) AS FCAST_45FT_HC_QTY,
+             (FCAST_53FT_QTY)    AS FCAST_53FT_QTY   ,
+             (FCAST_RF_QTY)      AS FCAST_RF_QTY     ,
+             (FCAST_TTL_WGT)     AS FCAST_TTL_WGT    ,
+             (FCAST_20FT_DRY_QTY)AS FCAST_20FT_DRY_QTY,
+             (FCAST_40FT_DRY_QTY)AS FCAST_40FT_DRY_QTY,
+             (FCAST_RD_QTY)      AS FCAST_RD_QTY     ,
+             (BKG_TTL_QTY)       AS BKG_TTL_QTY      ,
+             (BKG_20FT_QTY)      AS BKG_20FT_QTY     ,
+             (BKG_40FT_QTY)      AS BKG_40FT_QTY     ,
+             (BKG_40FT_HC_QTY)   AS BKG_40FT_HC_QTY  ,
+             (BKG_45FT_HC_QTY)   AS BKG_45FT_HC_QTY  ,
+             (BKG_53FT_QTY)      AS BKG_53FT_QTY     ,
+             (BKG_RF_QTY)        AS BKG_RF_QTY       ,
+             (BKG_TTL_WGT)       AS BKG_TTL_WGT      ,
+             (BKG_20FT_DRY_QTY)  AS BKG_20FT_DRY_QTY  ,
+             (BKG_40FT_DRY_QTY)  AS BKG_40FT_DRY_QTY  ,
+             (BKG_RD_QTY)        AS BKG_RD_QTY        ,
+             (CIF)               AS CIF              ,
+             (FOB)               AS FOB              ,
+             (OTH)               AS OTH              ,
+             NVL((SELECT MAX('Y')
+                    FROM BKG_CUST_SLS_REP
+                   WHERE CUST_CNT_CD = A.CUST_CNT_CD
+                     AND CUST_SEQ    = A.CUST_SEQ
+                     AND DELT_FLG    = 'N'
+                     AND SREP_CD     = A.SREP_CD), 'N') AS EXIST_FLG,
+             NVL((SELECT MAX('Y')
+                  FROM BKG_CUST_SLS_REP B,
+                       SPC_SLS_REP_CUST SR
+                  WHERE B.DELT_FLG    = 'N'
+                    AND B.SREP_CD     = A.SREP_CD
+                    AND B.SREP_CD    <> SR.SREP_CD
+                    AND B.CUST_CNT_CD = SR.CUST_CNT_CD
+                    AND B.CUST_SEQ    = SR.CUST_SEQ
+                    AND SR.DELT_FLG   = 'N'
+                    AND NOT EXISTS (SELECT 'A'
+                                      FROM SPC_SLS_REP_CUST S
+                                     WHERE S.CUST_CNT_CD = B.CUST_CNT_CD
+                                       AND S.CUST_SEQ    = B.CUST_SEQ
+                                       AND S.SREP_CD     = B.SREP_CD
+                                       AND S.DELT_FLG    = 'N'
+                                       AND NVL(S.INDIV_CUST_USE_FLG, 'N') = 'Y')), 'N') AS NEW_FLG,
+             SUM(TOT_CNT) OVER (PARTITION BY A.TRD_CD) AS TOT_CNT,
+             A.FCAST_RMK,
+             A.CTRL_ACCT,
+             NVL(( SELECT /*+ INDEX_DESC (M XPKSPC_MDL_VER_MST) */'Y'
+                    FROM SPC_MDL_VER_MST
+                   WHERE TRD_CD = A.TRD_CD
+                     AND A.COST_YR||A.COST_WK BETWEEN VER_ST_YRWK AND VER_END_YRWK
+                     AND COST_YRWK||'-'||VER_SEQ <> '200001-1'
+                     AND CFM_FLG  = 'Y'
+                     AND R.HH_FLG = 'Y'
+                     AND ROWNUM   = 1), 'N') AS HH_FLG,
+             (SELECT N2ND_PRNT_OFC_CD
+                FROM SPC_OFC_LVL
+               WHERE OFC_CD = A.RGN_OFC_CD
+                 AND A.COST_YR||A.COST_WK BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK) AS SLS_RHQ_CD,
+             ZERO_CUST,
+             COUNT(A.CUST_CNT_CD||A.CUST_SEQ) OVER (PARTITION BY A.TRD_CD, A.SUB_TRD_CD, A.RLANE_CD, A.DIR_CD, A.IOC_TS_CD, A.RGN_OFC_CD, A.SUB_OFC_CD, A.OFC_CD, A.SREP_CD) AS SREP_CUST_CNT
+             , NVL(A.CTRL_D2_FLG, MAX(A.CTRL_D2_FLG) OVER (PARTITION BY A.TRD_CD)) CTRL_D2_FLG
+             , NVL(A.CTRL_D4_FLG, MAX(A.CTRL_D4_FLG) OVER (PARTITION BY A.TRD_CD)) CTRL_D4_FLG
+             , NVL(A.CTRL_RD_FLG, MAX(A.CTRL_RD_FLG) OVER (PARTITION BY A.TRD_CD)) CTRL_RD_FLG
+             , NVL(A.CTRL_ECC_FLG, MAX(A.CTRL_ECC_FLG) OVER (PARTITION BY A.TRD_CD)) CTRL_ECC_FLG
+             , NVL(A.CTRL_LOC_FLG, MAX(A.CTRL_LOC_FLG) OVER (PARTITION BY A.TRD_CD)) CTRL_LOC_FLG
+             , NVL(A.CTRL_USA_SVC_MOD_FLG, MAX(A.CTRL_USA_SVC_MOD_FLG) OVER (PARTITION BY A.TRD_CD)) CTRL_USA_SVC_MOD_FLG
+             , MAX(A.CTRL_USA_SVC_MOD_FLG) OVER (PARTITION BY A.TRD_CD) MAX_US_MOD_FLG
+             , NVL(A.CTRL_ACCT_FLG, MAX(A.CTRL_ACCT_FLG) OVER (PARTITION BY A.TRD_CD)) CTRL_ACCT_FLG             
+        FROM ALL_SUM_DATA A  ,
+             VVD_POS      R  ,
+             POL_SEQ      PLS,
+             POL_POD_SEQ  PDS,
+             MDM_SLS_REP  SR ,
+             MDM_CUSTOMER MC ,
+             MDM_CUSTOMER SC
+       WHERE R.TRD_CD      (+) = A.TRD_CD
+         AND R.SUB_TRD_CD  (+) = A.SUB_TRD_CD
+         AND R.RLANE_CD    (+) = A.RLANE_CD
+         AND R.DIR_CD      (+) = A.DIR_CD
+         AND R.VSL_CD      (+) = A.VSL_CD
+         AND R.SKD_VOY_NO  (+) = A.SKD_VOY_NO
+         AND R.SKD_DIR_CD  (+) = A.SKD_DIR_CD
+         AND PLS.TRD_CD    (+) = A.TRD_CD
+         AND PLS.SUB_TRD_CD(+) = A.SUB_TRD_CD
+         AND PLS.RLANE_CD  (+) = A.RLANE_CD
+         AND PLS.DIR_CD    (+) = A.DIR_CD
+         AND PLS.POL_CD    (+) = A.POL_CD
+         AND PDS.TRD_CD    (+) = A.TRD_CD
+         AND PDS.SUB_TRD_CD(+) = A.SUB_TRD_CD
+         AND PDS.RLANE_CD  (+) = A.RLANE_CD
+         AND PDS.DIR_CD    (+) = A.DIR_CD
+         AND PDS.POL_CD    (+) = A.POL_CD
+         AND PDS.POD_CD    (+) = A.POD_CD
+         AND SR.SREP_CD    (+) = A.SREP_CD
+         AND MC.CUST_CNT_CD(+) = A.CUST_CNT_CD
+         AND MC.CUST_SEQ   (+) = A.CUST_SEQ
+         AND SC.CUST_CNT_CD(+) = A.BKG_CUST_CNT_CD
+         AND SC.CUST_SEQ   (+) = A.BKG_CUST_SEQ
+         AND (A.LVL1 < 4 OR A.LVL2 = 0 OR A.CUST_TP_CD IS NOT NULL)
+         AND NOT (A.LVL1 = 4 AND A.LVL2 = 3 AND A.USA_BKG_MOD_CD IS NULL AND (A.SC_NO IS NOT NULL OR A.CUST_CNT_CD IS NOT NULL))
+         AND NOT (A.LVL1 = 2 AND A.LVL2>2)
+#if(${salesrep} == '')
+         AND NOT (A.SREP_CD IS NOT NULL AND CUST_TTL_CNT = 0)
+         AND NOT (A.LVL1>=4 AND A.CUST_CNT_CD IS NOT NULL AND NVL(A.ZERO_CUST,1) = 0)
+#end
+    ORDER BY
+         A.TRD_CD    ,
+         A.SUB_TRD_CD,
+         A.RLANE_CD  ,
+         A.DIR_CD    ,
+         NVL(A.IOC_TS_CD , '0'),
+         NVL(A.RGN_OFC_CD, '0'),
+         DECODE(A.SUB_OFC_CD, NULL, '0', A.RGN_OFC_CD, '1', A.SUB_OFC_CD),
+         LVL1     ,
+         DECODE(LVL1, '3', ACCT_LVL),
+         DECODE(LVL1, '3', NVL(USA_BKG_MOD_CD2, '1'))      ,
+         DECODE(LVL1, '3', DECODE(A.POL_CD, NULL, 0, NVL(PLS.POL_SEQ, 99))),
+         DECODE(LVL1, '3', LVL2)          ,
+         DECODE(LVL1, '3', DECODE(A.POD_CD, NULL, 0, NVL(PDS.POD_SEQ, 99))),
+         A.SREP_CD,
+         NVL(A.CUST_CTRL_CD, '0'),
+         ACCT_LVL,
+         NVL(USA_BKG_MOD_CD2, '1'),
+         NVL(A.CUST_TP_CD  , '0'),
+         DECODE(MC.CUST_LGL_ENG_NM, 'OTHERS', 'zzz', MC.CUST_LGL_ENG_NM),
+         NVL(A.CUST_CNT_CD, '0'),
+         NVL(A.CUST_SEQ, 0)   ,
+         NVL(SC.CUST_LGL_ENG_NM,'0'),
+         NVL(A.BKG_CUST_CNT_CD, '0'),
+         NVL(A.BKG_CUST_SEQ, 0),
+         A.DTL_SEQ ,
+         GUIDE DESC,
+         DECODE(A.POL_CD, NULL, 0, NVL(PLS.POL_SEQ, 99)),
+         A.POL_CD,
+         DECODE(A.POD_CD, NULL, 0, NVL(PDS.POD_SEQ, 99)),
+         A.POD_CD,
+         NVL(R.RNUM, 99)
+) A
+WHERE NOT (A.LVL1 = 2 AND A.LVL2=2 AND A.USA_BKG_MOD_CD2 IS NOT NULL AND A.POL_CD IS NULL AND MAX_US_MOD_FLG='N')
+#if(${salesrep} == '')
+AND NOT (LVL1=4 AND SREP_CUST_CNT=0)
+#end
+/*
+[CHM-201322502-01] SPC 프로젝트 - 성수기 선복운영 개선을 위한 T/F추진
+[CHM-201324211-01] SELBB 내 팀 소속의 경우, sub office 없이 조회시 2가지로 쪼개져서 조회되는 것 수정
+[CHM-201324211-01] Sub Trade 반영 전 individual로 fcst 넣은 내역이 Others에서 누락됨
+[CHM-201325983-01] BKG의 SC를 가져오지 않도록 수정.(BKG SC로 인해 동일화주에 SC 여러개인 경우로 인해 Guide Total이 잘못 조회됨)
+[CHM-201325983-01] MULTI SC 조회되도록, S.REP, ACCT 데이터 없는 것 보이지 않도록.
+2013-08-05 비수기 sc 조회시 hh_flg 엮지 않도록
+2013-09-10 Contract Forecast S.Rep 의 이름에 , 가 포함되어 있어 에러남. |로 수정
+2013-09-17 [Trouble Shooting] 진마리아 SC Join 오류 수정
+2013.11.26 진마리아 [CHM-201326854] SAQ project로 인한 SPC 변경건_FNC 우선제거
+2013.12.05 김시몬 [CHM-201326854] SAQ project로 인한 SPC 변경건_테이블 변경
+2013.12.27 최윤성 [선반영] 연말 연초 걸쳐서 조회시 COST_YRWK 로직 부분 수정
+2014.01.17 최윤성 [긴급반영] SMP 의 Season-Version 가지고 오는 로직 부분 수정
+2014.02.04 [CHM-201428383-01] RFA 로직 추가
+2014.03.05 김시몬 [선처리] BKG RFA NULL 관련 보완
+2014.03.17 [CHM-20142960] SMP/Allocation control보완 요청 - SPC_GET_SMP_AMEND_FNC 적용
+2014.03.25 김시몬 [선처리] SQM 분기구하는 로직 관련 보완
+2014.05.22 [선반영] AES-SC관련 로직 추가
+2014.08.21 Data쪼개지는 오류 수정
+*/			]]></sql>
+			<params>
+				<param name="year" type="12" value="" out="N"/>
+				<param name="week" type="12" value="" out="N"/>
+				<param name="duration" type="12" value="" out="N"/>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="subtrade" type="12" value="" out="N"/>
+				<param name="bound" type="12" value="" out="N"/>
+				<param name="ioc" type="12" value="" out="N"/>
+				<param name="salesoffice" type="12" value="" out="N"/>
+				<param name="suboffice" type="12" value="" out="N"/>
+				<param name="salesrep" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

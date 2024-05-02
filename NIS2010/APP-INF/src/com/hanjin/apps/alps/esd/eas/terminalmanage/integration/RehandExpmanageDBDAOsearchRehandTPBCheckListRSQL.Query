@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="RehandExpmanageDBDAOsearchRehandTPBCheckListRSQL">
+			<desc><![CDATA[Rehanding Exp. - COD vs. TPB 조회]]></desc>
+			<sql><![CDATA[
+SELECT /*+ OPT_PARAM('_optimizer_push_pred_cost_based','TRUE') PUSH_PRED(BKG) */
+TOR.OFC_CD, 
+TOR.PORT_CD, 
+TOR.VSL_CD||TOR.SKD_VOY_NO||TOR.SKD_DIR_CD VVD,
+TOR.CLPT_IND_SEQ, 
+TOR.LANE_CD, 
+TO_CHAR(TOR.ACT_DEP_DT,'YYYY-MM-DD') ACT_DEP_DT, 
+TOR.CNTR_NO, 
+TOR.RESPB_CNTR_NO, 
+TOR.SZTP, 
+TOR.POL, 
+TOR.OPR_CD, 
+TOR.PRECELL, 
+TOR.POSITION, 
+TOR.SHIFT_RSN, 
+TOR.PARTY, 
+TOR.FILE_ATCH,
+TPB.TPB_NO, 
+TPB.TPB_AMT_USD, 
+TPB.TPB_OFC, 
+TPB.TPB_PTY_3RD, 
+BKG.BKG_NO, 
+(SELECT 
+SUM(ROUND(TRS_COMMON_PKG.GET_CONVERSION_USD_AMT_FNC(IC.CURR_CD, IC.CHG_AMT, TO_CHAR(TOR.ACT_DEP_DT,'YYYYMM')),2)) BL_AMT
+FROM INV_AR_CHG IC
+WHERE 1=1
+AND IC.AR_IF_NO = ( SELECT MAX(IM.AR_IF_NO) AR_IF_NO 
+                    FROM INV_AR_MN IM
+                    WHERE IM.BKG_NO = BKG.BKG_NO
+                    AND NVL(IM.INV_DELT_DIV_CD,'N') <> 'Y')
+AND IC.CHG_CD IN ('DVC', 'DIV', 'ADF', 'FDR', 'OLO', 'RLO', 'DLO', 'SCR')
+) BL_AMT,
+TOR.CNTR_HNDL_KND_CD, 
+MAX(DECODE(NVL(RMK.RMK_CTNT,'N'),'N','N','Y')) AS RMK_CTNT_YN,
+MAX(RMK.RMK_CTNT) AS RMK_CTNT
+FROM (
+    SELECT /*+ LEADING(A) INDEX(A XAK1VSK_ACT_PORT_SKD) */
+		CASE 
+    	WHEN R.CNTR_NO IS NOT NULL AND LENGTH(R.CNTR_NO) >= 10 
+    	THEN C.RESPB_CNTR_NO
+    	WHEN M.CNTR_NO IS NOT NULL AND LENGTH(M.CNTR_NO) >= 10 
+    	THEN C.CNTR_NO
+    	END as tor_cntr_no,
+        M.CNTR_NO MST_M_CNTR_NO, R.CNTR_NO MST_R_CNTR_NO,   
+        L.EQ_CTRL_OFC_CD OFC_CD,
+        --H.TDR_DATE, H.COMMENCE, H.COMPLETE, H.TDR_USER,
+        H.PORT_CD,
+        V.VSL_CD, V.SKD_VOY_NO, V.SKD_DIR_CD,
+        V.CLPT_IND_SEQ,
+        S.VSL_SLAN_CD LANE_CD, 
+        A.ACT_DEP_DT,
+        C.CNTR_NO,          
+        C.RESPB_CNTR_NO,
+        C.SZTP,          
+        C.POL,              
+        C.OPR_CD,         
+        C.PRECELL,      
+        C.POSITION,  
+        C.STATUS CNTR_HNDL_KND_CD,    
+        NVL(C.SHIFT_TYPE,'')||NVL(C.SHIFT_RSN,'') AS SHIFT_RSN,           
+        C.PARTY,
+        (   SELECT  DECODE(SIGN(COUNT(1)),1,'File Attached',NULL)
+            FROM    OPF_TDR_ATCH_FILE F
+            WHERE   C.VSL_CD   = F.VSL_CD
+            AND     C.VOY_NO   = F.SKD_VOY_NO
+            AND     C.DIR_CD   = F.SKD_DIR_CD
+            AND     C.PORT_CD  = F.VPS_PORT_CD
+            AND     C.CALL_IND = F.CLPT_IND_SEQ
+            AND     C.STATUS   = F.CNTR_HNDL_KND_CD
+            AND     C.CNTR_NO  = F.CNTR_NO
+        ) AS FILE_ATCH 
+    FROM   VSK_VSL_SKD S, VSK_VSL_PORT_SKD V, VSK_ACT_PORT_SKD A
+           , TDR_HEADER H, TDR_CNTR_DETAIL C
+           , MDM_LOCATION L, MST_CONTAINER M, MST_CONTAINER R
+    WHERE  1=1
+    AND    S.VSL_CD       = V.VSL_CD
+    AND    S.SKD_VOY_NO   = V.SKD_VOY_NO
+    AND    S.SKD_DIR_CD   = V.SKD_DIR_CD
+    AND    V.VSL_CD       = A.VSL_CD
+    AND    V.SKD_VOY_NO   = A.SKD_VOY_NO
+    AND    V.SKD_DIR_CD   = A.SKD_DIR_CD
+    AND    V.VPS_PORT_CD  = A.VPS_PORT_CD
+    AND    V.CLPT_IND_SEQ = A.CLPT_IND_SEQ
+
+------------------------------------------------------------------- 201301 jsy    
+#if (${input_vvd} != '')
+    AND    V.VSL_CD||V.SKD_VOY_NO||V.SKD_DIR_CD      	IN  (
+		#foreach( $vvd in ${vvd_list} )
+			#if($velocityCount < $vvd_list.size()) '$vvd', #else '$vvd' #end
+		#end
+		)
+#end
+------------------------------------------------------------------- 
+
+    #if(${input_port}!='')
+    AND    V.VPS_PORT_CD  = @[input_port] --// REHANDLING PORT 조건
+    #end
+    #if(${input_fmMonth}!='' && ${input_toMonth}!='' && ${input_fmMonth}!='YYYYMMDD' && ${input_toMonth}!='YYYYMMDD')
+    AND    A.ACT_DEP_DT BETWEEN TO_DATE(@[input_fmMonth],'YYYYMMDD') AND TO_DATE(@[input_toMonth],'YYYYMMDD') + 0.99998 --// MONTHS 조건 - 20120701 ~ '20121101'
+    #end
+    AND    V.VSL_CD        = H.VSL_CD
+    AND    V.SKD_VOY_NO    = H.VOY_NO
+    AND    V.SKD_DIR_CD    = H.DIR_CD
+    AND    V.VPS_PORT_CD   = H.PORT_CD
+    AND    V.CLPT_IND_SEQ  = H.CALL_IND
+    AND    H.VSL_CD        = C.VSL_CD
+    AND    H.VOY_NO        = C.VOY_NO
+    AND    H.DIR_CD        = C.DIR_CD
+    AND    H.PORT_CD       = C.PORT_CD
+    AND    H.CALL_IND      = C.CALL_IND
+    AND    C.STATUS         = 'ST'
+    AND    TRIM(C.PRECELL) IS NOT NULL
+    AND    NVL(C.SHIFT_TYPE,'')||NVL(C.SHIFT_RSN,'') IN ('QIC','BIC','QIT','BIT')
+    AND    L.LOC_CD         = H.PORT_CD
+    AND    NVL(L.DELT_FLG, 'N') <> 'Y'
+    #if( ${input_office} != '' )
+    AND    L.EQ_CTRL_OFC_CD IN (${input_office})  --// REHANDLING OFFICE 조건
+    #end
+    AND    C.CNTR_NO = M.CNTR_NO(+)
+    AND    C.RESPB_CNTR_NO = R.CNTR_NO(+)
+) TOR,
+(
+    SELECT /*+ INDEX(BC XAK1BKG_CONTAINER) INDEX(BV XAK1BKG_VVD) */
+        BB.BKG_NO,
+        BV.VSL_CD VSL_CD,
+        BV.SKD_VOY_NO SKD_VOY_NO,
+        BV.SKD_DIR_CD SKD_DIR_CD,
+        BV.POL_CD, 
+        BV.POL_CLPT_IND_SEQ,
+        BV.POD_CD,
+        BV.POD_CLPT_IND_SEQ,
+        BV.VSL_PRE_PST_CD,
+        BV.SLAN_CD,
+        BC.CNTR_NO
+    FROM BKG_BOOKING BB, BKG_VVD BV, BKG_CONTAINER BC
+    WHERE 1=1
+    AND    BB.BKG_STS_CD IN ('F','W')
+    AND    BB.BKG_NO = BC.BKG_NO
+    AND    BB.BKG_NO = BV.BKG_NO 
+    AND    BC.BKG_NO = BV.BKG_NO 
+    AND    BV.VSL_PRE_PST_CD IN ('S','T','U')
+------------------------------------------------------------------- 201301 jsy    
+#if (${cntr_no} != '')
+    AND    BC.cntr_no     	IN  (
+		#foreach( $cntr_cd in ${cntr_no_list} )
+			#if($velocityCount < $cntr_no_list.size()) '$cntr_cd', #else '$cntr_cd' #end
+		#end
+		)
+#end
+------------------------------------------------------------------- 
+) BKG,
+(
+    SELECT 
+        BKG_NO TPB_BKG_NO, 
+        EQ_NO TPB_CNTR_NO,
+        MAX(NVL(FM_CLT_CNG_OFC_N3PTY_NO, N3PTY_NO)) TPB_NO,          --TPB_TPB NBR TPB Billing Case : RH / CNTR nbr + BKG nbr 가 일치하는 TPB nbr
+        SUM(ROUND(TRS_COMMON_PKG.GET_CONVERSION_USD_AMT_FNC(CFM_CURR_CD, CFM_AMT, TO_CHAR(CFM_DT,'YYYYMM')),2)) TPB_AMT_USD,    --TPB_TPB AMT 해당 TPB의 USD AMT
+        MAX(OFC_CD) TPB_OFC,                                            --TPB_TPB OFC 현재 Responsible OFC          
+        MAX(DECODE(VNDR_CUST_DIV_CD,'V',VNDR_CNT_CD||VNDR_SEQ,'C',CUST_CNT_CD||CUST_SEQ,N3PTY_OFC_CD)) TPB_PTY_3RD          --TPB_3rd Party 해당 TPB의 3rd Party Name
+    FROM    TPB_OTS_DTL                                                                                                                     
+    WHERE   N3PTY_BIL_TP_CD = 'RH'                                                                                                              
+    AND     N3PTY_EXPN_TP_CD = 'TES'                                                                                                            
+    AND     N3PTY_DELT_TP_CD IN ('N','S')                                                                                                              
+    AND     BKG_NO IS NOT NULL
+    AND     EQ_NO IS NOT NULL   
+    GROUP BY BKG_NO, EQ_NO
+) TPB, 
+TRS_EXPN_AUD_RMK RMK
+--(
+--    SELECT TR.*
+--    FROM TRS_EXPN_AUD_RMK TR
+--    WHERE 1=1
+--    AND TR.EAS_EXPN_TP_CD = 'RH'
+--) RMK
+WHERE 1=1
+AND TOR_CNTR_NO   = BKG.CNTR_NO(+)
+--AND CASE 
+--    WHEN TOR.MST_R_CNTR_NO IS NOT NULL AND LENGTH(TOR.MST_R_CNTR_NO) >= 10 
+--    THEN TOR.RESPB_CNTR_NO
+--    WHEN TOR.MST_M_CNTR_NO IS NOT NULL AND LENGTH(TOR.MST_M_CNTR_NO) >= 10 
+--    THEN TOR.CNTR_NO
+--    END 
+--    = BKG.CNTR_NO(+)
+------------------------------------------------------------------- 201301 jsy    
+#if (${cntr_no} != '')
+AND CASE 
+    WHEN TOR.MST_R_CNTR_NO IS NOT NULL AND LENGTH(TOR.MST_R_CNTR_NO) >= 10 
+    THEN TOR.RESPB_CNTR_NO
+    WHEN TOR.MST_M_CNTR_NO IS NOT NULL AND LENGTH(TOR.MST_M_CNTR_NO) >= 10 
+    THEN TOR.CNTR_NO
+    END 
+    	IN  (
+		#foreach( $cntr_cd in ${cntr_no_list} )
+			#if($velocityCount < $cntr_no_list.size()) '$cntr_cd', #else '$cntr_cd' #end
+		#end
+		)
+#end
+-----------------------------------------------------------------   
+AND TOR.VSL_CD = BKG.VSL_CD(+)
+AND TOR.SKD_VOY_NO = BKG.SKD_VOY_NO(+)
+AND TOR.SKD_DIR_CD = BKG.SKD_DIR_CD(+)
+AND TOR.LANE_CD = BKG.SLAN_CD(+)
+AND BKG.BKG_NO = TPB.TPB_BKG_NO(+)
+AND BKG.CNTR_NO = TPB.TPB_CNTR_NO(+)
+AND BKG.BKG_NO = RMK.BKG_NO(+)
+AND RMK.EAS_EXPN_TP_CD(+) = 'RH'
+GROUP BY 
+TOR.OFC_CD, 
+TOR.PORT_CD, 
+TOR.VSL_CD||TOR.SKD_VOY_NO||TOR.SKD_DIR_CD,
+TOR.CLPT_IND_SEQ, 
+TOR.LANE_CD, 
+TOR.ACT_DEP_DT, 
+TOR.CNTR_NO, 
+TOR.RESPB_CNTR_NO, 
+TOR.SZTP, 
+TOR.POL, 
+TOR.OPR_CD, 
+TOR.PRECELL, 
+TOR.POSITION, 
+TOR.SHIFT_RSN, 
+TOR.PARTY, 
+TOR.FILE_ATCH,
+TPB.TPB_NO, 
+TPB.TPB_AMT_USD, 
+TPB.TPB_OFC, 
+TPB.TPB_PTY_3RD, 
+BKG.BKG_NO, 
+TOR.CNTR_HNDL_KND_CD
+ORDER BY 
+TOR.OFC_CD, TOR.PORT_CD, TOR.VSL_CD||TOR.SKD_VOY_NO||TOR.SKD_DIR_CD, TO_CHAR(TOR.ACT_DEP_DT,'YYYY-MM-DD')			]]></sql>
+			<params>
+				<param name="input_port" type="12" value="input_port" out="N"/>
+				<param name="input_fmMonth" type="12" value="input_fmMonth" out="N"/>
+				<param name="input_toMonth" type="12" value="input_toMonth" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

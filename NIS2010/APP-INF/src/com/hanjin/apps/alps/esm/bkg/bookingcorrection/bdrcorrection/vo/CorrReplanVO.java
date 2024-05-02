@@ -1,0 +1,354 @@
+/*=========================================================
+*Copyright(c) 2010 CyberLogitec
+*@FileName : CorrReplanVO.java
+*@FileTitle : CorrReplanVO
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2010.04.28
+*@LastModifier : 류대영
+*@LastVersion : 1.0
+* 2010.04.28 류대영 
+* 1.0 Creation
+=========================================================*/
+
+package com.hanjin.apps.alps.esm.bkg.bookingcorrection.bdrcorrection.vo;
+
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+
+import javax.servlet.http.HttpServletRequest;
+
+import org.apache.commons.lang.builder.ToStringBuilder;
+import org.apache.commons.lang.builder.ToStringStyle;
+
+import com.hanjin.framework.component.common.AbstractValueObject;
+import com.hanjin.framework.component.util.JSPUtil;
+
+/**
+ * Table Value Ojbect<br>
+ * 관련 Event 에서 생성, 서버실행요청시 Data 전달역할을 수행하는 Value Object
+ *
+ * @author 류대영
+ * @since J2EE 1.6
+ * @see AbstractValueObject
+ */
+
+public class CorrReplanVO extends AbstractValueObject {
+
+	private static final long serialVersionUID = 1L;
+	
+	private Collection<CorrReplanVO> models = new ArrayList<CorrReplanVO>();
+	
+	/* Column Info */
+	private String cntrPrtFlg = null;
+	/* Column Info */
+	private String operation = null;
+	/* Column Info */
+	private String bkgNo = null;
+	/* VO Data Value( C:Creation, U:Update, D:Delete ) */
+	private String ibflag = null;
+	/* Column Info */
+	private String ocnSeq = null;
+	/* Column Info */
+	private String cntrNo = null;
+	/* Column Info */
+	private String ord = null;
+	/* Page Number */
+	private String pagerows = null;
+
+	/*	테이블 컬럼의 값을 저장하는 Hashtable */
+	private HashMap<String, String> hashColumns = new HashMap<String, String>();
+
+	/*	테이블 컬럼에 대응되는 멤버변수를 저장하는 Hashtable */
+	private HashMap<String, String> hashFields = new HashMap<String, String>();
+	
+	public CorrReplanVO() {}
+
+	public CorrReplanVO(String ibflag, String pagerows, String ord, String operation, String bkgNo, String cntrNo, String cntrPrtFlg, String ocnSeq) {
+		this.cntrPrtFlg = cntrPrtFlg;
+		this.operation = operation;
+		this.bkgNo = bkgNo;
+		this.ibflag = ibflag;
+		this.ocnSeq = ocnSeq;
+		this.cntrNo = cntrNo;
+		this.ord = ord;
+		this.pagerows = pagerows;
+	}
+	
+	/**
+	 * 테이블 컬럼에 저장할 값을 Hashtable<"column_name", "value"> 로 반환
+	 * @return HashMap
+	 */
+	public HashMap<String, String> getColumnValues(){
+		this.hashColumns.put("cntr_prt_flg", getCntrPrtFlg());
+		this.hashColumns.put("operation", getOperation());
+		this.hashColumns.put("bkg_no", getBkgNo());
+		this.hashColumns.put("ibflag", getIbflag());
+		this.hashColumns.put("ocn_seq", getOcnSeq());
+		this.hashColumns.put("cntr_no", getCntrNo());
+		this.hashColumns.put("ord", getOrd());
+		this.hashColumns.put("pagerows", getPagerows());
+		return this.hashColumns;
+	}
+	
+	/**
+	 * 컬럼명에 대응되는 멤버변수명을 저장하여 Hashtable<"column_name", "variable"> 로 반환   
+	 * @return
+	 */
+	public HashMap<String, String> getFieldNames(){
+		this.hashFields.put("cntr_prt_flg", "cntrPrtFlg");
+		this.hashFields.put("operation", "operation");
+		this.hashFields.put("bkg_no", "bkgNo");
+		this.hashFields.put("ibflag", "ibflag");
+		this.hashFields.put("ocn_seq", "ocnSeq");
+		this.hashFields.put("cntr_no", "cntrNo");
+		this.hashFields.put("ord", "ord");
+		this.hashFields.put("pagerows", "pagerows");
+		return this.hashFields;
+	}
+	
+	/**
+	 * Column Info
+	 * @return cntrPrtFlg
+	 */
+	public String getCntrPrtFlg() {
+		return this.cntrPrtFlg;
+	}
+	
+	/**
+	 * Column Info
+	 * @return operation
+	 */
+	public String getOperation() {
+		return this.operation;
+	}
+	
+	/**
+	 * Column Info
+	 * @return bkgNo
+	 */
+	public String getBkgNo() {
+		return this.bkgNo;
+	}
+	
+	/**
+	 * VO Data Value( C:Creation, U:Update, D:Delete )
+	 * @return ibflag
+	 */
+	public String getIbflag() {
+		return this.ibflag;
+	}
+	
+	/**
+	 * Column Info
+	 * @return ocnSeq
+	 */
+	public String getOcnSeq() {
+		return this.ocnSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @return cntrNo
+	 */
+	public String getCntrNo() {
+		return this.cntrNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @return ord
+	 */
+	public String getOrd() {
+		return this.ord;
+	}
+	
+	/**
+	 * Page Number
+	 * @return pagerows
+	 */
+	public String getPagerows() {
+		return this.pagerows;
+	}
+	
+
+	/**
+	 * Column Info
+	 * @param cntrPrtFlg
+	 */
+	public void setCntrPrtFlg(String cntrPrtFlg) {
+		this.cntrPrtFlg = cntrPrtFlg;
+	}
+	
+	/**
+	 * Column Info
+	 * @param operation
+	 */
+	public void setOperation(String operation) {
+		this.operation = operation;
+	}
+	
+	/**
+	 * Column Info
+	 * @param bkgNo
+	 */
+	public void setBkgNo(String bkgNo) {
+		this.bkgNo = bkgNo;
+	}
+	
+	/**
+	 * VO Data Value( C:Creation, U:Update, D:Delete )
+	 * @param ibflag
+	 */
+	public void setIbflag(String ibflag) {
+		this.ibflag = ibflag;
+	}
+	
+	/**
+	 * Column Info
+	 * @param ocnSeq
+	 */
+	public void setOcnSeq(String ocnSeq) {
+		this.ocnSeq = ocnSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @param cntrNo
+	 */
+	public void setCntrNo(String cntrNo) {
+		this.cntrNo = cntrNo;
+	}
+	
+	/**
+	 * Column Info
+	 * @param ord
+	 */
+	public void setOrd(String ord) {
+		this.ord = ord;
+	}
+	
+	/**
+	 * Page Number
+	 * @param pagerows
+	 */
+	public void setPagerows(String pagerows) {
+		this.pagerows = pagerows;
+	}
+	
+/**
+	 * Request 의 데이터를 추출하여 VO 의 멤버변수에 설정.
+	 * @param request
+	 */
+	public void fromRequest(HttpServletRequest request) {
+		fromRequest(request,"");
+	}
+
+	/**
+	 * Request 의 데이터를 추출하여 VO 의 멤버변수에 설정.
+	 * @param request
+	 */
+	public void fromRequest(HttpServletRequest request, String prefix) {
+		setCntrPrtFlg(JSPUtil.getParameter(request, prefix + "cntr_prt_flg", ""));
+		setOperation(JSPUtil.getParameter(request, prefix + "operation", ""));
+		setBkgNo(JSPUtil.getParameter(request, prefix + "bkg_no", ""));
+		setIbflag(JSPUtil.getParameter(request, prefix + "ibflag", ""));
+		setOcnSeq(JSPUtil.getParameter(request, prefix + "ocn_seq", ""));
+		setCntrNo(JSPUtil.getParameter(request, prefix + "cntr_no", ""));
+		setOrd(JSPUtil.getParameter(request, prefix + "ord", ""));
+		setPagerows(JSPUtil.getParameter(request, prefix + "pagerows", ""));
+	}
+
+	/**
+	 * Request 의 데이터를 VO 배열로 변환하여 반환.
+	 * @param request
+	 * @return CorrReplanVO[]
+	 */
+	public CorrReplanVO[] fromRequestGrid(HttpServletRequest request) {
+		return fromRequestGrid(request, "");
+	}
+
+	/**
+	 * Request 넘어온 여러 건 DATA를 VO Class 에 담는다. 
+	 * @param request
+	 * @param prefix
+	 * @return CorrReplanVO[]
+	 */
+	public CorrReplanVO[] fromRequestGrid(HttpServletRequest request, String prefix) {
+		CorrReplanVO model = null;
+		
+		String[] tmp = request.getParameterValues(prefix + "ibflag");
+  		if(tmp == null)
+   			return null;
+
+  		int length = request.getParameterValues(prefix + "ibflag").length;
+  
+		try {
+			String[] cntrPrtFlg = (JSPUtil.getParameter(request, prefix	+ "cntr_prt_flg", length));
+			String[] operation = (JSPUtil.getParameter(request, prefix	+ "operation", length));
+			String[] bkgNo = (JSPUtil.getParameter(request, prefix	+ "bkg_no", length));
+			String[] ibflag = (JSPUtil.getParameter(request, prefix	+ "ibflag", length));
+			String[] ocnSeq = (JSPUtil.getParameter(request, prefix	+ "ocn_seq", length));
+			String[] cntrNo = (JSPUtil.getParameter(request, prefix	+ "cntr_no", length));
+			String[] ord = (JSPUtil.getParameter(request, prefix	+ "ord", length));
+			String[] pagerows = (JSPUtil.getParameter(request, prefix	+ "pagerows", length));
+			
+			for (int i = 0; i < length; i++) {
+				model = new CorrReplanVO();
+				if (cntrPrtFlg[i] != null)
+					model.setCntrPrtFlg(cntrPrtFlg[i]);
+				if (operation[i] != null)
+					model.setOperation(operation[i]);
+				if (bkgNo[i] != null)
+					model.setBkgNo(bkgNo[i]);
+				if (ibflag[i] != null)
+					model.setIbflag(ibflag[i]);
+				if (ocnSeq[i] != null)
+					model.setOcnSeq(ocnSeq[i]);
+				if (cntrNo[i] != null)
+					model.setCntrNo(cntrNo[i]);
+				if (ord[i] != null)
+					model.setOrd(ord[i]);
+				if (pagerows[i] != null)
+					model.setPagerows(pagerows[i]);
+				models.add(model);
+			}
+
+		} catch (Exception e) {
+			return null;
+		}
+		return getCorrReplanVOs();
+	}
+
+	/**
+	 * VO 배열을 반환
+	 * @return CorrReplanVO[]
+	 */
+	public CorrReplanVO[] getCorrReplanVOs(){
+		CorrReplanVO[] vos = (CorrReplanVO[])models.toArray(new CorrReplanVO[models.size()]);
+		return vos;
+	}
+	
+	/**
+	 * VO Class의 내용을 String으로 변환
+	 */
+	public String toString() {
+		   return ToStringBuilder.reflectionToString(this, ToStringStyle.MULTI_LINE_STYLE );
+	   }
+
+	/**
+	* 포맷팅된 문자열에서 특수문자 제거("-","/",",",":")
+	*/
+	public void unDataFormat(){
+		this.cntrPrtFlg = this.cntrPrtFlg .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.operation = this.operation .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.bkgNo = this.bkgNo .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.ibflag = this.ibflag .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.ocnSeq = this.ocnSeq .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.cntrNo = this.cntrNo .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.ord = this.ord .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.pagerows = this.pagerows .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+	}
+}

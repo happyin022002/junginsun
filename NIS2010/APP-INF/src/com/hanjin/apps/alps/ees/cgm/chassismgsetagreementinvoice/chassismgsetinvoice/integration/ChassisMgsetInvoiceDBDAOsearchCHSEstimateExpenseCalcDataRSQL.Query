@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ChassisMgsetInvoiceDBDAOsearchCHSEstimateExpenseCalcDataRSQL">
+			<desc><![CDATA[chungpa 20091007 1107 start
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+2014-06-16 BY JUSTIN HAN CSR ID : CHM-201430737, TITLE : ALPS-CHSS-Invoice에서 chassis estimated Expense 로직 수정 요청
+                  CHANGED CP, NP ESTIMATED EXPENSE G/L DATE CONDITIONAL CLAUSE, TO BETWEEN
+2015-03-24 BY Chang Young Kim CSR ID : CHM-201534562, Title : 미주샷시 임차료(사용료) 추정 비용 로직 검토 의뢰
+                  기준일중 From을 전년도 1월로 변경
+2015-03-30 Query Tunning TIS 
+2015-07-30 [CHM-201536860] 샤시 월별 추정 실적 입력 로직 변경.
+                 ZP Estimate 금액을 CGM_CHSS_POOL_EXPN_ESTM으로 변경함
+2015-09-22 [CHM-201537907] 샤시 추정실적 입력 로직 변경.
+                 Estimate 금액 로직 삭제
+2015-11-06 [CHM-201538798] 샤시 추정실적 "ACCRUAL COST" 계산 로직 변경
+                 Accrual Cost 계산로직에서 ABS 삭제
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------]]></desc>
+			<sql><![CDATA[
+SELECT   @[period_eddt] AS EXE_YRMON
+       , 'CHS' AS SYS_SRC_ID
+       , T1.COST_YRMON AS REV_YRMON
+       , T1.ACCT_CD AS ACCT_CD
+       , T1.AGMT_NO AS AGMT_NO
+       , T1.AGMT_LSTM_CD AS AGMT_LSTM_CD
+       , T1.CHSS_POOL_CD AS CHSS_POOL_CD
+       , T1.INV_NO AS INVO_NO
+       , 1 AS ESTM_SEQ_NO
+       , 'CNTC' AS VSL_CD
+       , SUBSTR(T1.COST_YRMON, 3, 4) AS SKD_VOY_NO
+       , 'M' AS SKD_DIR_CD
+       , 'M' AS REV_DIR_CD
+       , 'CNTC'||SUBSTR(T1.COST_YRMON, 3, 4)||'MM' AS REV_VVD
+       , NVL(T1.ESTIMATE_AMT, 0) AS ESTM_AMT
+       , NVL(T1.ACTUAL_AMT,0) AS ACT_AMT
+       , CASE WHEN NVL(T1.ESTIMATE_AMT, 0) - NVL(T1.ACTUAL_AMT, 0) < 0 THEN 0
+              ELSE NVL(T1.ESTIMATE_AMT, 0) - NVL(T1.ACTUAL_AMT, 0)
+         END AS ACCL_AMT
+       , T1.CRE_USR_ID AS CRE_USR_ID
+       , TO_CHAR(T1.CRE_DT,'YYYY-MM-DD') AS CRE_DT
+       , 1 AS SORT
+FROM     (
+           SELECT   A.AGMT_OFC_CTY_CD||A.AGMT_SEQ AS AGMT_NO
+                  , COST_YRMON
+                  , ACCT_CD
+                  , MAX(AGMT_LSTM_CD) AGMT_LSTM_CD
+	              , MAX(E.CHSS_POOL_CD) CHSS_POOL_CD
+                  , INV_NO
+                  , MAX(CHG_AMT) ESTIMATE_AMT
+                  , MAX(INV_AMT) ACTUAL_AMT
+                  , MAX(CHG_CRE_DT) CRE_DT
+                  , MAX(A.CRE_USR_ID) CRE_USR_ID
+           FROM     (
+                      SELECT   A.AGMT_OFC_CTY_CD
+                             , A.AGMT_SEQ
+                             , NULL AS AGMT_VER_NO
+                             , A.ESTM_YRMON AS COST_YRMON
+                             , '510851' AS  ACCT_CD -- CGM_LSE_CHG_DTL의 ZP 데이터의 유일 계정코드
+                             , NULL AS INV_NO
+                             , A.ESTM_AMT AS CHG_AMT -- CGM_CHSS_POOL_EXPN_ESTM는 CURR_CD가 USD로 고정
+                             , NULL AS INV_AMT
+                             , A.CRE_DT AS CHG_CRE_DT
+                             , A.CRE_USR_ID
+                      FROM     CGM_CHSS_POOL_EXPN_ESTM A
+                      WHERE    1 = 1
+                      AND      A.ESTM_YRMON BETWEEN @[exe_yrmon] ||'01' AND @[period_eddt]
+                      AND      CHSS_POOL_TP_CD = 'ZP'
+                      UNION ALL      
+                      SELECT   C.AGMT_OFC_CTY_CD
+                             , C.AGMT_SEQ
+                             , C.AGMT_VER_NO
+                             , '20'||C.REV_SKD_VOY_NO COST_YRMON
+                             , D1.ACCT_CD
+                             , C.INV_NO
+                             , NULL      		
+                             , SUM(MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC('20'||C.REV_SKD_VOY_NO, C.CURR_CD, 'USD', D1.INV_AMT, 3)) INV_AMT
+                             , MAX(C.CRE_DT)
+                             , MAX(C.CRE_USR_ID)
+                      FROM     CGM_PAY_INV C
+                             , AP_PAY_INV D
+                             , AP_PAY_INV_DTL D1
+                             , AP_INV_HDR E
+                      WHERE    1 = 1
+                      AND      C.INV_RGST_NO = D.INV_RGST_NO
+                      AND      D.INV_RGST_NO = D1.INV_RGST_NO        
+                      AND      C.CHSS_MGST_INV_KND_CD IN ('LS', 'ZP')
+                      AND      C.EQ_KND_CD = 'Z'        
+                      AND      D.INV_STS_CD IN ( 'D','P')
+                      AND      D.CSR_NO = E.CSR_NO
+#if(${rev_yrmon} != '')
+                      AND      SUBSTR(E.GL_DT,1,6) BETWEEN @[exe_yrmon] ||'01' AND @[rev_yrmon]
+#else
+                      AND      SUBSTR(E.GL_DT,1,6) BETWEEN @[exe_yrmon] ||'01' AND @[period_eddt]
+#end
+                      AND      C.REV_SKD_VOY_NO BETWEEN SUBSTR(@[exe_yrmon], 3, 2) ||'01' AND SUBSTR(@[period_eddt], 3, 4)
+                      AND      D1.ACCT_CD IN ('510831', '510851')
+                      GROUP BY C.AGMT_OFC_CTY_CD
+                             , C.AGMT_SEQ
+                             , C.AGMT_VER_NO
+                             , C.REV_SKD_VOY_NO
+                             , D1.ACCT_CD
+                             , C.INV_NO 
+                    ) A
+                  , CGM_AGREEMENT E
+           WHERE    1 = 1
+           AND      A.AGMT_OFC_CTY_CD = E.AGMT_OFC_cTY_CD(+)
+           AND      A.AGMT_SEQ = E.AGMT_SEQ(+)
+           AND      E.LST_VER_FLG(+) = 'Y'   
+           GROUP BY A.AGMT_OFC_CTY_CD
+                  , A.AGMT_SEQ
+                  , A.AGMT_VER_NO
+                  , COST_YRMON
+                  , ACCT_CD
+                  , INV_NO
+         ) T1
+WHERE    1 = 1
+AND      TO_NUMBER(SUBSTR(T1.COST_YRMON, 3, 4)) <= TO_NUMBER(SUBSTR( @[period_eddt] , 3, 4))
+AND      ( NVL(T1.ESTIMATE_AMT ,0) <> 0 OR NVL(T1.ACTUAL_AMT,0) <>0  )
+UNION ALL
+SELECT   @[period_eddt] AS EXE_YRMON
+       , 'CHS' AS SYS_SRC_ID
+       , A.REV_YRMON AS REV_YRMON
+       , A.ACCT_CD AS ACCT_CD
+       , A.AGMT_OFC_CTY_CD||A.AGMT_SEQ AS AGMT_NO
+       , A.AGMT_LSTM_CD
+       , A.CHSS_POOL_CD
+       , '' AS INVO_NO
+       , 1 AS ESTM_SEQ_NO
+       , 'CNTC' AS VSL_CD
+       , SUBSTR(A.REV_YRMON, 3, 4) AS SKD_VOY_NO
+       , 'M' AS SKD_DIR_CD
+       , 'M' AS REV_DIR_CD
+       , 'CNTC'||SUBSTR(A.REV_YRMON, 3, 4)||'MM' AS REV_VVD
+       , NVL(A.ESTM_AMT, 0) AS ESTM_AMT
+       , NVL(A.INV_AMT,0) AS ACT_AMT
+       , CASE WHEN NVL(A.ESTM_AMT, 0) - NVL(A.INV_AMT, 0) < 0 THEN 0
+              ELSE NVL(A.ESTM_AMT, 0) - NVL(A.INV_AMT, 0)
+         END AS ACCL_AMT
+       , A.CRE_USR_ID AS CRE_USR_ID
+       , TO_CHAR(A.CRE_DT,'YYYY-MM-DD') AS CRE_DT
+       , 2 AS SORT
+FROM     (
+           SELECT   REV_YRMON
+                  , AGMT_OFC_CTY_CD
+                  , AGMT_SEQ
+                  , MAX(CHSS_POOL_CD) CHSS_POOL_CD
+                  , MAX(INV_AMT) INV_AMT
+                  , MAX(ESTM_AMT) ESTM_AMT
+                  , MAX(ACCT_CD) ACCT_CD
+                  , MAX(AGMT_LSTM_CD) AGMT_LSTM_CD
+                  , MAX(CRE_USR_ID) CRE_USR_ID
+                  , MAX(CRE_DT) CRE_DT
+           FROM     ( 
+                      SELECT   '20'||B.REV_SKD_VOY_NO AS REV_YRMON
+                             , B.AGMT_OFC_CTY_CD
+                             , B.AGMT_SEQ 
+                             , MAX(B.CHSS_POOL_CD) CHSS_POOL_CD        		
+		                     , SUM(MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC('20'||B.REV_SKD_VOY_NO, B.CURR_CD, 'USD', D.INV_AMT, 3)) INV_AMT
+                             , NULL ESTM_AMT
+                             , MAX(ACCT_CD) ACCT_CD
+                             , MAX(B.CHSS_MGST_INV_KND_CD )  AGMT_LSTM_CD
+                             , MAX(B.CRE_USR_ID)	AS CRE_USR_ID
+                             , MAX( GLOBALDATE_PKG.TIME_CONV_OFC_FNC( 'SELHO' , B.CRE_DT, B.COST_OFC_CD) ) AS CRE_DT
+                      FROM     CGM_PAY_INV B , AP_PAY_INV C , AP_PAY_INV_DTL D , AP_INV_HDR E  
+                      WHERE    1 = 1
+                      AND      B.INV_RGST_NO = C.INV_RGST_NO
+                      AND      C.INV_RGST_NO = D.INV_RGST_NO
+                      AND      C.INV_STS_CD IN ('D','P')
+                      AND      B.CHSS_MGST_INV_KND_CD IN ('CP','NP')
+                      AND      C.CSR_NO = E.CSR_NO
+#if(${rev_yrmon} != '')
+                      AND      SUBSTR(E.GL_DT,1,6) BETWEEN @[exe_yrmon] ||'01' AND @[rev_yrmon]
+#else
+                      AND      SUBSTR(E.GL_DT,1,6) BETWEEN @[exe_yrmon] ||'01' AND @[period_eddt]
+#end
+                      AND      B.REV_SKD_VOY_NO BETWEEN SUBSTR(@[exe_yrmon], 3, 2) ||'01' AND SUBSTR(@[period_eddt], 3, 4)
+                      GROUP BY B.REV_SKD_VOY_NO
+                             , B.AGMT_OFC_CTY_CD
+                             , B.AGMT_SEQ
+                      UNION ALL
+                      SELECT   A.ESTM_YRMON
+                             , A.AGMT_OFC_CTY_CD
+                             , A.AGMT_SEQ
+                             , A.CHSS_POOL_CD
+                             , NULL INV_AMT		
+		                     , MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC(A.ESTM_YRMON, A.CURR_CD, 'USD', A.ESTM_AMT, 3) ESTM_AMT
+                             , DECODE(CHSS_POOL_TP_CD ,'CP','510852','NP','510851')  ACCT_CD
+                             , A.CHSS_POOL_TP_CD
+                             , A.CRE_USR_ID
+                             , A.CRE_DT
+                      FROM     CGM_CHSS_POOL_EXPN_ESTM A
+                      WHERE    1 = 1
+                      AND      A.ESTM_YRMON BETWEEN @[exe_yrmon] ||'01' AND @[period_eddt]
+                      AND      CHSS_POOL_TP_CD IN ('CP','NP')
+                    ) 
+           WHERE    1 = 1
+           AND      NVL(ESTM_AMT,0) <>0  OR NVL(INV_AMT,0) <>0
+           GROUP BY REV_YRMON
+                  , AGMT_OFC_CTY_CD
+                  , AGMT_SEQ
+         ) A
+WHERE    1 = 1
+AND      TO_NUMBER(SUBSTR(  SUBSTR(A.REV_YRMON,1,6) , 3, 4)) <= TO_NUMBER(SUBSTR(  @[period_eddt] , 3, 4))
+ORDER BY REV_YRMON DESC
+       , SORT
+       , AGMT_LSTM_CD
+       , AGMT_NO			]]></sql>
+			<params>
+				<param name="period_eddt" type="12" value="" out="N"/>
+				<param name="exe_yrmon" type="12" value="" out="N"/>
+				<param name="rev_yrmon" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,1186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SpacecontrolinquiryDBDAOSearchSpaceControlInquirySalesOrgSMPListRSQL">
+			<desc><![CDATA[성수기(control option에 의한)시 Inquiry by Trade의 Office별 data를 조회합니다.
+[CHM-201322502-01] SPC 프로젝트 - 성수기 선복운영 개선을 위한 T/F추진
+[Trouble Shooting] 진마리아 SC Join 오류 수정
+[Trouble Shooting] 진마리아 Guide가 AQ_CD 없이 조회하고 있어, SZPDC 같은 경우의 가이드가 SHARC로 몰려서 나오는 것 수정
+2013.11.26 진마리아 [CHM-201326854] SAQ project로 인한 SPC 변경건_FNC 우선제거
+2013.12.05 김시몬 [CHM-201326854] SAQ project로 인한 SPC 변경건_테이블 변경
+2014.01.13 김시몬 [선처리] SELSC/TYOSC RHQ변경에 따른 SQM SPC_OFC_LVL추가
+2014.02.04 [CHM-201428383-01] RFA 로직 추가
+2014.03.14 김시몬 [선처리] BKG RFA NULL 관련 보완
+2014.03.17 [CHM-20142960] SMP/Allocation control보완 요청 - SPC_GET_SMP_AMEND_FNC 적용
+2014.03.25 김시몬 [선처리] SQM 분기 구하는 로직 관련 보완
+2014.05.22 [선반영] AES-SC관련 로직 추가
+2014.08.18 CHM-201431081 SPC Allocation Control Option 추가 보완 요청
+2015.03.03 CHM-201534458 SQM QTA주가 변경 관련 적용 요청
+2015.07.16 Arie [CHM-201537094] MAS CMB 산출 로직 변경 적용 - dem/det 추가 CM = REV+DEM/DET-COST TTL
+2015.09.16 이혜민 선반영 SPC_CONTI_CONV_FNC 태울때 SLAN_CD를 인자로 가져가던것 RLANE_CD로 수정 (RLANE_CD로 가져가야 제대로 펑션을 탐)]]></desc>
+			<sql><![CDATA[
+WITH PARAMS AS ( 
+    SELECT T.OFC_CD,
+           T.TRD_CD,
+           T.SUB_TRD_CD,
+           T.RLANE_CD,
+           T.DIR_CD,
+           T.IOC_CD,
+           T.VSL_CD,
+           T.SKD_VOY_NO,
+           T.SKD_DIR_CD,
+           T.COST_YR,
+           T.COST_MON,
+           T.COST_WK,
+           T.DIV,
+           T.HH_FLG,
+           (
+              SELECT /*+INDEX_DESC (M XPKSPC_MDL_VER_MST) */
+                     DECODE(T.HH_FLG, 'Y', COST_YRWK||'-'||VER_SEQ, '200001-1')
+                FROM SPC_MDL_VER_MST M
+               WHERE M.TRD_CD = T.TRD_CD
+                 AND T.COST_YR||T.COST_WK BETWEEN M.VER_ST_YRWK AND M.VER_END_YRWK
+                 AND M.CFM_FLG  = 'Y'
+                 AND ROWNUM = 1
+           ) SEASON,
+           -- 20140728 추가(S)
+           NVL(CO.CTRL_USA_SVC_MOD_FLG, 'N') AS CTRL_USA,
+           NVL(CO.CTRL_ACCT_FLG   , 'N')     AS CTRL_ACCT  
+           -- 20140728 추가(E)
+		   ,BSE_QTR_CD
+		   ,BSE_YR
+    FROM (
+            SELECT P.OFC_CD    ,
+                   V.TRD_CD    ,
+                   V.SUB_TRD_CD,
+                   V.RLANE_CD  ,
+                   V.DIR_CD    , 
+                   V.IOC_CD    ,
+                   V.VSL_CD    ,
+                   V.SKD_VOY_NO,
+                   V.DIR_CD AS SKD_DIR_CD,
+                   SUBSTR(V.SLS_YRMON, 1, 4) AS COST_YR,
+                   SUBSTR(V.SLS_YRMON, 5, 2) AS COST_MON,
+                   V.COST_WK   ,
+                   P.DIV,
+                   DECODE(H.DIR_CD, NULL, 'N', 'Y') AS HH_FLG
+                   , CASE WHEN V.COST_YRMON >= '201501' 
+                          THEN CEIL(TO_NUMBER(SUBSTR(V.COST_YRMON, -2))/3)||'Q' 
+                          ELSE CEIL(TO_NUMBER(DECODE(V.COST_WK,'00','01','53','52',V.COST_WK))/13)||'Q'
+                     END BSE_QTR_CD --2015.03.04 CHM-201534435 SQM QTA주가 변경 관련 적용 요청
+                   , SUBSTR(V.COST_YRMON, 1,4) AS BSE_YR
+              FROM (
+                  SELECT SUBSTR(@[rhq_txt],1,5)  AS OFC_CD ,
+                         @[trade]    AS TRD_CD    ,
+                         @[subtrade] AS SUB_TRD_CD,
+                         @[lane]     AS RLANE_CD  ,
+                         @[bound]    AS DIR_CD    ,
+                         @[onc_ipc]  AS IOC_CD    ,
+                         @[vvd]      AS VVD       ,
+                         @[rhq_gso]  AS DIV
+                    FROM DUAL
+#if (${rhq_txt} == 'SHARC,SINRS') 
+    			   UNION ALL
+                  SELECT SUBSTR(@[rhq_txt],7,5)  AS OFC_CD  ,
+                         @[trade]    AS TRD_CD    ,
+                         @[subtrade] AS SUB_TRD_CD,
+                         @[lane]     AS RLANE_CD  ,
+                         @[bound]    AS DIR_CD    ,
+                         @[onc_ipc]  AS IOC_CD    ,
+                         @[vvd]      AS VVD       ,
+                         @[rhq_gso]  AS DIV
+                    FROM DUAL
+#end
+    
+                   ) P,
+                   MAS_MON_VVD V,
+                   SPC_HD_HUL_MST H
+             WHERE V.TRD_CD     = P.TRD_CD
+               AND V.RLANE_CD   = P.RLANE_CD
+               AND V.IOC_CD     = P.IOC_CD
+               AND V.VSL_CD     = SUBSTR(P.VVD, 1, 4)
+               AND V.SKD_VOY_NO = SUBSTR(P.VVD, 5, 4)
+               AND V.DIR_CD     = SUBSTR(P.VVD, 9)
+               AND V.TRD_CD     = H.TRD_CD(+)
+               AND V.RLANE_CD   = H.RLANE_CD(+)
+               AND V.DIR_CD     = H.DIR_CD(+)
+         ) T, SPC_ALOC_CTRL_OPT CO  -- 20140728 추가
+     WHERE T.RLANE_CD   = CO.RLANE_CD  (+)
+       AND T.SKD_DIR_CD = CO.DIR_CD    (+)
+       AND T.VSL_CD     = CO.VSL_CD    (+)
+       AND T.SKD_VOY_NO = CO.SKD_VOY_NO(+)
+       AND T.SKD_DIR_CD = CO.SKD_DIR_CD(+)
+)
+, QTA_DATA AS (
+    SELECT DECODE(SUBSTR(D.TRD_CD, 1, 1), 'I', 'I', 'O') AS IOC_TS_CD,
+           DECODE(P.DIV, 'RHQ', NVL(D.AQ_CD,  O.N2ND_PRNT_OFC_CD), ( SELECT O.SAQ_RGN_OFC_CD
+                                                             FROM SPC_OFC_LVL O
+                                                            WHERE O.OFC_CD = SPC_SCR_OFC_CONV_FNC(D.RGN_OFC_CD, 'EsmSpc0022')
+                                                              AND P.COST_YR || P.COST_WK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+                                                              AND O.DELT_FLG = 'N')) AS OFC_CD,
+           (D.LOD_QTY) AS VOL,
+           ((D.GRS_RPB_REV - D.PA_CM_UC_AMT) * D.LOD_QTY) AS CM
+      FROM PARAMS           P,
+           SQM_CFM_QTA      D,
+           SQM_QTA_RLSE_VER B,
+           SPC_OFC_LVL      O
+     WHERE B.BSE_YR           = P.BSE_YR
+       --AND B.BSE_QTR_CD       = CEIL(TO_NUMBER(DECODE(P.COST_WK,'00','01','53','52',P.COST_WK))/13)||'Q' --CEIL(TO_NUMBER(P.COST_MON) / 3)||'Q'
+	   -- CHM-201534458 SQM QTA주가 변경 관련 적용 요청
+	   AND B.BSE_QTR_CD      = P.BSE_QTR_CD
+       AND B.SQM_VER_STS_CD   = 'R'
+       AND B.BSE_TP_CD        = 'Q' -- 분기 20131205추가
+       AND D.QTA_RLSE_VER_NO  = B.QTA_RLSE_VER_NO
+       AND D.BSE_TP_CD        = B.BSE_TP_CD -- 분기 20131205추가 
+       AND D.BSE_YR           = B.BSE_YR
+       AND D.BSE_QTR_CD       = B.BSE_QTR_CD
+       AND D.QTA_TGT_CD       = 'D'
+       AND D.OFC_VW_CD        = 'L'  -- 20131205추가
+       AND D.TRD_CD           = P.TRD_CD
+       AND D.RLANE_CD         = P.RLANE_CD
+       AND D.DIR_CD           = P.DIR_CD
+       AND D.VSL_CD           = P.VSL_CD
+       AND D.SKD_VOY_NO       = P.SKD_VOY_NO
+       AND D.SKD_DIR_CD       = P.SKD_DIR_CD
+       AND (P.OFC_CD IS NULL OR O.N2ND_PRNT_OFC_CD = P.OFC_CD OR D.AQ_CD = P.OFC_CD)
+       AND P.COST_YR || P.COST_WK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+       --AND D.RGN_OFC_CD        = O.OFC_CD
+       AND (
+             SELECT NVL(MAX(ROC.CONV_RGN_OFC_CD), D.RGN_OFC_CD)
+               FROM SPC_RGN_OFC_CONV ROC
+              WHERE ROC.SLS_RGN_OFC_CD = D.RGN_OFC_CD
+           ) = O.OFC_CD
+)
+, FCST_DATA AS (
+    SELECT IOC_TS_CD,
+           OFC_CD,
+
+           -- 20140728 추가(S)
+           USA_BKG_MOD_CD,
+           --CUST_ACCT,
+           
+           -- 20140728 추가(E)
+
+           NVL(CUST_CTRL_CD,'C') CUST_CTRL_CD,
+           SUM(CFM_TTL_QTY) AS VOL_TTL,
+           SUM(CFM_40FT_HC_QTY) AS VOL_HC ,
+           SUM(CFM_45FT_HC_QTY) AS VOL_45 ,
+           SUM(CFM_53FT_QTY)    AS VOL_53 ,
+           SUM(CFM_RF_QTY)      AS VOL_RF ,
+           SUM(CFM_TTL_WGT)     AS WGT_TTL,
+
+           -- 20140728 추가(S)
+           SUM(CFM_20FT_DRY_QTY) AS VOL_D2, -- SPC_DLY_FCAST_CUST.D2
+           SUM(CFM_40FT_DRY_QTY) AS VOL_D4, -- SPC_DLY_FCAST_CUST.D4
+           SUM(CFM_RD_QTY)       AS VOL_RD  -- SPC_DLY_FCAST_CUST.RD
+           -- 20140728 추가(E)
+      FROM (
+            SELECT D.IOC_TS_CD AS IOC_TS_CD,
+                   DECODE(P.DIV, 'RHQ', NVL(D.SLS_AQ_CD, D.SLS_RHQ_CD), D.SLS_RGN_OFC_CD) AS OFC_CD,
+
+                   -- 20140728 추가(S)
+                   D.USA_BKG_MOD_CD, -- SPC_DLY_FCAST_CUST.LOCAL/IPI
+                   
+                   --CASE WHEN P.CTRL_ACCT = 'Y' THEN
+                   --     D.CUST_CNT_CD||LPAD(D.CUST_SEQ,6,'0') -- SPC_DLY_FCAST_CUST.ACCT
+                   --ELSE
+                   --     'XX999999'
+                   --END AS CUST_ACCT,
+                   
+                   -- 20140728 추가(E)
+
+                   NVL((SELECT CUST_CTRL_CD FROM SPC_MDL_CUST_CTRL C 
+                                                WHERE P.TRD_CD = C.TRD_CD
+                                                  AND SUBSTR(P.SEASON,1,6) = C.COST_YRWK
+                                                  AND SUBSTR(P.SEASON,8)   = C.VER_SEQ
+                                                  AND D.CUST_CNT_CD        = C.CUST_CNT_CD
+                                                  AND D.CUST_SEQ           = C.CUST_SEQ
+                                                  AND NVL(D.SC_NO, NVL(D.RFA_NO,' ')) = NVL(C.SC_NO, NVL(C.RFA_NO,' '))
+                                                  --AND DECODE(P.TRD_CD, 'AES', NVL(D.RFA_NO,' '), NVL(D.SC_NO,' ')) = DECODE(P.TRD_CD, 'AES', NVL(C.RFA_NO,' '), NVL(C.SC_NO,NVL(D.SC_NO,' ')))
+                   ),'C') AS CUST_CTRL_CD,
+                   D.CFM_TTL_QTY,
+                   D.CFM_40FT_HC_QTY,
+                   D.CFM_45FT_HC_QTY,
+                   D.CFM_53FT_QTY,
+                   D.CFM_RF_QTY,
+                   D.CFM_TTL_WGT,
+
+                   -- 20140728 추가(S)
+                   D.CFM_20FT_DRY_QTY, -- SPC_DLY_FCAST_CUST.D2
+                   D.CFM_40FT_DRY_QTY, -- SPC_DLY_FCAST_CUST.D4
+                   D.CFM_RD_QTY        -- SPC_DLY_FCAST_CUST.RD
+                   -- 20140728 추가(E)
+
+              FROM PARAMS             P,
+                   SPC_DLY_FCAST_CUST D
+             WHERE D.TRD_CD      = P.TRD_CD
+               AND D.SUB_TRD_CD  = P.SUB_TRD_CD
+               AND D.RLANE_CD    = P.RLANE_CD
+               AND D.DIR_CD      = P.DIR_CD
+               AND D.VSL_CD      = P.VSL_CD
+               AND D.SKD_VOY_NO  = P.SKD_VOY_NO
+               AND D.SKD_DIR_CD  = P.SKD_DIR_CD
+               AND D.IOC_CD      = P.IOC_CD
+               AND (P.OFC_CD IS NULL OR D.SLS_RHQ_CD = P.OFC_CD OR D.SLS_AQ_CD = P.OFC_CD)
+          ) T
+     GROUP BY OFC_CD, 
+              IOC_TS_CD, 
+              USA_BKG_MOD_CD, 
+              --CUST_ACCT, 
+              CUST_CTRL_CD
+)
+, ALOC_DATA AS (
+    SELECT  IOC_TS_CD,
+            OFC_CD,
+            USA_BKG_MOD_CD,
+            --CUST_ACCT,
+            CUST_CTRL_CD,
+            SUM(ASGN_TTL_QTY)     AS VOL_TTL,
+            SUM(ASGN_40FT_HC_QTY) AS VOL_HC ,
+            SUM(ASGN_45FT_HC_QTY) AS VOL_45 ,
+            SUM(ASGN_53FT_QTY)    AS VOL_53 ,
+            SUM(ASGN_RF_QTY)      AS VOL_RF ,
+            SUM(ASGN_TTL_WGT)     AS WGT_TTL,
+          
+            -- 20140728 추가(S)
+            SUM(ASGN_20FT_DRY_QTY) AS VOL_D2, -- SPC_ALOC_POL_POD.D2
+            SUM(ASGN_40FT_DRY_QTY) AS VOL_D4, -- SPC_ALOC_POL_POD.D4
+            SUM(ASGN_RD_QTY)       AS VOL_RD  -- SPC_ALOC_POL_POD.RD
+            -- 20140728 추가(E)
+      FROM  (
+              SELECT DECODE(D.TS_FLG, 'Y', 'T', D.IOC_CD) AS IOC_TS_CD,
+                     DECODE(M.DIV, 'RHQ', NVL(D.SLS_AQ_CD, D.SLS_RHQ_CD), D.SLS_RGN_OFC_CD) AS OFC_CD,
+          
+                     -- 20140728 추가(S)
+                     D.USA_BKG_MOD_CD,-- SPC_ALOC_CUST_POL_POD.LOCAL/IPI
+                     --D.CUST_CNT_CD||LPAD(D.CUST_SEQ,6,'0') AS CUST_ACCT, -- SPC_DLY_FCAST_CUST.ACCT
+                     
+                     -- 20140728 추가(E)
+          
+                     D.CUST_CTRL_CD,
+                     D.ASGN_TTL_QTY,
+                     D.ASGN_40FT_HC_QTY,
+                     D.ASGN_45FT_HC_QTY,
+                     D.ASGN_53FT_QTY,
+                     D.ASGN_RF_QTY,
+                     D.ASGN_TTL_WGT,
+          
+                     -- 20140728 추가(S)
+                     D.ASGN_20FT_DRY_QTY, -- SPC_ALOC_POL_POD.D2
+                     D.ASGN_40FT_DRY_QTY, -- SPC_ALOC_POL_POD.D4
+                     D.ASGN_RD_QTY        -- SPC_ALOC_POL_POD.RD
+                     -- 20140728 추가(E)
+          
+                FROM PARAMS           M,
+                     SPC_ALOC_CUST_POL_POD D
+               WHERE D.TRD_CD     = M.TRD_CD
+                 AND D.SUB_TRD_CD = M.SUB_TRD_CD
+                 AND D.RLANE_CD   = M.RLANE_CD
+                 AND D.DIR_CD     = M.DIR_CD
+                 AND D.VSL_CD     = M.VSL_CD
+                 AND D.SKD_VOY_NO = M.SKD_VOY_NO
+                 AND D.SKD_DIR_CD = M.SKD_DIR_CD
+                 AND DECODE(TS_FLG, 'Y', DECODE(D.RLANE_CD, 'IMUAE', 'O', D.IOC_CD), D.IOC_CD) = M.IOC_CD
+                 AND D.SLS_RGN_OFC_CD IS NOT NULL
+                 AND (M.OFC_CD IS NULL OR D.SLS_RHQ_CD = M.OFC_CD OR D.SLS_AQ_CD = M.OFC_CD) 
+            )
+  GROUP BY OFC_CD,
+           IOC_TS_CD, 
+           USA_BKG_MOD_CD, 
+           --CUST_ACCT, 
+           CUST_CTRL_CD
+)
+, BKG_DATA AS (
+    SELECT IOC_TS_CD              ,
+           OFC_CD                 ,
+           -- 20140728 추가(S)
+           USA_BKG_MOD_CD, -- LOCAL/IPI
+           --CUST_ACCT, 
+           
+           -- 20140728 추가(E)
+           CUST_CTRL_CD    ,
+           SUM(BKG_TTL) AS BKG_TTL,
+           SUM(BKG_20)  AS BKG_20 ,
+           SUM(BKG_40)  AS BKG_40 ,
+           SUM(BKG_HC)  AS BKG_HC ,
+           SUM(BKG_45)  AS BKG_45 ,
+           SUM(BKG_53)  AS BKG_53 ,
+           SUM(BKG_RF)  AS BKG_RF ,
+           SUM(BKG_WGT) AS BKG_WGT,
+           -- 20140728 추가
+           SUM(BKG_D2)  AS BKG_D2 ,
+           SUM(BKG_D4)  AS BKG_D4 ,
+           SUM(BKG_RD)  AS BKG_RD 
+   	  FROM (
+            SELECT DECODE(DIV, 'RHQ', NVL(N3RD_PRNT_OFC_CD, N2ND_PRNT_OFC_CD), N4TH_PRNT_OFC_CD) AS OFC_CD,
+                   
+                   -- 20140728 추가(S)
+                   USA_BKG_MOD_CD, -- LOCAL/IPI
+                   --CUST_ACCT,   
+                   
+                   -- 20140728 추가(E)
+                   
+                   CUST_CTRL_CD    ,
+                   DECODE(VSL_PRE_PST_CD, 'T', IOC_CD, 'T') AS IOC_TS_CD,
+                   TO_NUMBER(NVL(SUBSTR(VAL,  1, 14), 0))                              AS BKG_TTL,
+                   TO_NUMBER(NVL(SUBSTR(VAL, 15, 14), 0))                              AS BKG_20 ,
+                   TO_NUMBER(NVL(SUBSTR(VAL, 29, 14), 0))                              AS BKG_40 ,
+                   
+                   TO_NUMBER(NVL(SUBSTR(VAL, 43, 14), 0))                              AS BKG_D2,   -- D2
+				           TO_NUMBER(NVL(SUBSTR(VAL, 57, 14), 0))                              AS BKG_D4,   -- D4
+				
+                   TO_NUMBER(NVL(SUBSTR(VAL, 71, 14), 0))                              AS BKG_HC,
+          			   TO_NUMBER(NVL(SUBSTR(VAL, 85, 14), 0))                              AS BKG_45,
+          			   TO_NUMBER(NVL(SUBSTR(VAL, 99, 14), 0))                              AS BKG_53,
+          			   TO_NUMBER(NVL(SUBSTR(VAL,113, 14), 0))                              AS BKG_RF,
+          			   TO_NUMBER(NVL(SUBSTR(VAL,127, 14), 0))                              AS BKG_RD,   -- RD
+          			   TO_NUMBER(NVL(SUBSTR(VAL,141, 14), 0))                              AS BKG_WGT
+       		    FROM (
+                    SELECT B.BKG_STS_CD      ,
+                           O.N2ND_PRNT_OFC_CD,
+                           O.N3RD_PRNT_OFC_CD,
+                           O.N4TH_PRNT_OFC_CD,
+                           
+                           -- 20140728 추가(S)
+                           CASE WHEN M.CTRL_USA = 'Y' AND (SUBSTR(B.POL_CD,1,2) IN ('US','CA') OR SUBSTR(B.POD_CD,1,2) IN ('US','CA')) THEN
+                                NVL(SPC_USA_MODE_FNC(B.RCV_TERM_CD, B.DE_TERM_CD, B.POR_CD, B.POL_CD, B.POD_CD, B.DEL_CD),'OTH') -- SPC_DLY_FCAST_CUST.LOCAL/IPI -- SPC_DLY_FCAST_CUST.LOCAL/IPI
+                           ELSE
+                                'OTH'
+                           END AS USA_BKG_MOD_CD,
+                           
+                           --CASE WHEN M.CTRL_ACCT = 'Y' THEN
+                           --      NVL((SELECT D.CTRL_LOC_ACCT_CD
+                           --         FROM SPC_ALOC_LANE_CTRL_OPT_DTL D
+                           --        WHERE M.RLANE_CD                           = D.RLANE_CD
+                           --          AND SPC_GET_REP_TRD_FNC(M.RLANE_CD)      = D.TRD_CD
+                           --          AND SPC_GET_REP_SUB_TRD_FNC(M.RLANE_CD)  = D.SUB_TRD_CD
+                           --          AND M.SKD_DIR_CD                         = D.DIR_CD 
+                           --          AND D.ALOC_CTRL_TP_CD                    = 'A'  
+                           --          AND D.CTRL_LOC_ACCT_CD  = B.CTRT_CUST_CNT_CD ||LPAD(B.CTRT_CUST_SEQ,6,'0')                                        
+                           --      ), 'XX999999') 
+                           --ELSE
+                           --     'XX999999'
+                           --END AS CUST_ACCT,
+                                                     
+                          -- 20140728 추가(E)
+                          
+                           --20140304 추가
+                           CASE WHEN M.TRD_CD = 'AES' AND DECODE(SUBSTR(B.RFA_NO, 1, 3), 'DUM', '', B.RFA_NO) IS NULL AND BC.CUST_CNT_CD = 'CN' AND B.SC_NO IS NULL THEN
+                                  NVL(SPC_GET_SMP_RFA_FNC('C',M.SEASON,  BC.CUST_CNT_CD||LPAD(BC.CUST_SEQ,6,'0'), B.POL_CD,B.POD_CD),'C')
+                                  
+                           ELSE   
+                                  NVL((SELECT CUST_CTRL_CD 
+                                         FROM SPC_MDL_CUST_CTRL C 
+                                        WHERE M.TRD_CD = C.TRD_CD
+                                          AND SUBSTR(M.SEASON,1,6) = C.COST_YRWK
+                                          AND SUBSTR(M.SEASON,8)   = C.VER_SEQ
+                                          AND B.CTRT_CUST_CNT_CD   = C.CUST_CNT_CD
+                                          AND B.CTRT_CUST_SEQ      = C.CUST_SEQ
+                                          AND NVL(SPC_GET_SMP_AMEND_FNC(M.TRD_CD, SUBSTR(M.SEASON, 1, 6), SUBSTR(M.SEASON, 8), B.SC_NO), NVL(SPC_GET_SMP_AMEND_FNC(M.TRD_CD, SUBSTR(M.SEASON, 1, 6), SUBSTR(M.SEASON, 8), DECODE(SUBSTR(B.RFA_NO, 1, 3), 'DUM', '', B.RFA_NO)),' ')) = NVL(C.SC_NO, NVL(C.RFA_NO,' '))
+                                          --AND DECODE(M.TRD_CD, 'AES', NVL(SPC_GET_SMP_AMEND_FNC(M.TRD_CD, SUBSTR(M.SEASON, 1, 6), SUBSTR(M.SEASON, 8), DECODE(SUBSTR(B.RFA_NO, 1, 3), 'DUM', '', B.RFA_NO)),' '), NVL(SPC_GET_SMP_AMEND_FNC(M.TRD_CD, SUBSTR(M.SEASON, 1, 6), SUBSTR(M.SEASON, 8), B.SC_NO),' ')) = DECODE(M.TRD_CD, 'AES', NVL(C.RFA_NO,' '), NVL(C.SC_NO,NVL(SPC_GET_SMP_AMEND_FNC(M.TRD_CD, SUBSTR(M.SEASON, 1, 6), SUBSTR(M.SEASON, 8), B.SC_NO),' ')))
+                                     ),'C')
+                           END AS CUST_CTRL_CD,
+                           
+                           M.DIV             ,
+                           M.RLANE_CD        ,
+                           M.IOC_CD          ,
+                           BV.POL_YD_CD      ,
+                           BV.POL_CD         ,
+                           BV.POD_YD_CD      ,
+                           BV.POD_CD         ,
+                           B.DEL_NOD_CD      ,
+                           B.DEL_CD          ,
+                           BV.VSL_PRE_PST_CD ,
+                           (
+							SELECT  TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '2', 1, 2) * Q.OP_CNTR_QTY), 'FM0000000000.000') 
+                                 || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '2', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000') 
+                                 || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '4', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000') 
+                                 
+                                 -- 20140728 추가(S)
+                                 || TO_CHAR(SUM(DECODE(SUBSTR(Q.CNTR_TPSZ_CD,1,2), 'D2', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000') -- D2
+                                 || TO_CHAR(SUM(DECODE(SUBSTR(Q.CNTR_TPSZ_CD,1,2), 'D4', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000') -- D4
+                                 -- 20140728 추가(E)
+                                 
+                                 || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '5', Q.OP_CNTR_QTY, '9', Q.OP_CNTR_QTY, '8', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')	--R9,R8에 대해서 R5과 동일하게 HC으로 처리되도록 추가
+                                 || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '7', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')  
+                                 || TO_CHAR(SUM(DECODE(Q.CNTR_TPSZ_CD, 'DW', Q.OP_CNTR_QTY, 'DX', Q.OP_CNTR_QTY, 0)) , 'FM0000000000.000')  
+                                 || TO_CHAR(SUM(DECODE(SUBSTR(Q.CNTR_TPSZ_CD, 1, 1), 'R', Q.OP_CNTR_QTY - Q.EQ_SUBST_CGO_QTY, 0)), 'FM0000000000.000') 
+                                 -- 20140728 추가
+                                 || TO_CHAR(SUM(CASE WHEN Q.CNTR_TPSZ_CD LIKE 'R%' AND Q.EQ_SUBST_CNTR_TPSZ_CD LIKE 'D%' THEN Q.EQ_SUBST_CGO_QTY ELSE 0 END), 'FM0000000000.000')--RD
+                                 || TO_CHAR((R.ACT_WGT * DECODE(R.ACT_WGT,'LBS', 0.00045, 0.001)) 
+                                 		+ SUM(Q.OP_CNTR_QTY * (SELECT TS.CNTR_TPSZ_TARE_WGT
+                                 							 	 FROM MDM_CNTR_TP_SZ TS
+                                   								WHERE TS.CNTR_TPSZ_CD = Q.CNTR_TPSZ_CD)) * 0.001, 'FM0000000000.000')
+                              FROM BKG_QUANTITY Q
+                             WHERE B.BKG_NO = Q.BKG_NO
+							) VAL
+           		     FROM  BKG_VVD            BV
+                         , BKG_BOOKING        B
+                         , PARAMS             M
+                         , BKG_BL_DOC         R
+                         , MDM_DTL_REV_LANE   DRL
+                         , MDM_REV_LANE       RL
+                         , SPC_OFC_LVL        O
+                         , BKG_CUSTOMER       BC  --20140304 추가 
+           		     WHERE B.BKG_NO         = BV.BKG_NO
+                       AND B.BKG_NO         = R.BKG_NO
+                       AND B.BKG_STS_CD    IN ('W','F')
+                       AND B.BKG_CGO_TP_CD IN ('F', 'B', 'R')
+                       AND M.VSL_CD         = BV.VSL_CD
+                       AND M.SKD_VOY_NO     = BV.SKD_VOY_NO
+                       AND M.SKD_DIR_CD     = BV.SKD_DIR_CD
+                       
+                       AND RL.VSL_SLAN_CD   = BV.SLAN_CD
+                       AND (M.OFC_CD IS NULL 
+                         OR M.OFC_CD = (SELECT N2ND_PRNT_OFC_CD
+                                          FROM SPC_OFC_LVL
+                                         WHERE OFC_CD = SPC_SCR_OFC_CONV_FNC(B.OB_SLS_OFC_CD, '')
+                                           AND M.COST_YR || M.COST_WK BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK )
+                         OR M.OFC_CD = (SELECT N3RD_PRNT_OFC_CD
+                                          FROM SPC_OFC_LVL
+                                         WHERE OFC_CD = SPC_SCR_OFC_CONV_FNC(B.OB_SLS_OFC_CD, '')
+                                           AND M.COST_YR || M.COST_WK BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK ))
+                       AND O.OFC_CD = SPC_SCR_OFC_CONV_FNC(B.OB_SLS_OFC_CD)
+                       AND M.COST_YR || M.COST_WK BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK
+                       AND DRL.RLANE_CD        = M.RLANE_CD
+                       AND DRL.VSL_SLAN_DIR_CD = M.DIR_CD
+                       AND DRL.IOC_CD          = M.IOC_CD
+                       AND DRL.TRD_CD          = M.TRD_CD
+                       AND DRL.SUB_TRD_CD      = M.SUB_TRD_CD
+                       AND DRL.DELT_FLG        = 'N'
+                       AND DRL.RLANE_CD        = RL.RLANE_CD
+                       AND DRL.FM_CONTI_CD     = (SELECT SPC_CONTI_CONV_FNC(L.CONTI_CD, M.RLANE_CD, M.DIR_CD)
+                                                    FROM MDM_LOCATION L
+                                                   WHERE L.LOC_CD = BV.POL_CD )
+                       AND DRL.TO_CONTI_CD 	  = (SELECT SPC_CONTI_CONV_FNC(L.CONTI_CD, M.RLANE_CD, M.DIR_CD)
+                                                   FROM MDM_LOCATION L
+                                                  WHERE L.LOC_CD =  BV.POD_CD )
+                       AND RL.RLANE_CD  = M.RLANE_CD
+                       AND RL.VSL_TP_CD = 'C'
+                       AND RL.DELT_FLG  = 'N'
+                       AND B.BKG_NO            = BC.BKG_NO  --20140304 추가
+                       AND BC.BKG_CUST_TP_CD   = 'S'        --20140304 추가
+                  ) M
+           )A
+     GROUP BY IOC_TS_CD
+            , OFC_CD
+            , USA_BKG_MOD_CD
+            --, CUST_ACCT
+            , CUST_CTRL_CD
+)
+
+, SMP_DATA AS (
+    SELECT DECODE(SUBSTR(M.TRD_CD, 1, 1), 'I', 'I', 'O') AS IOC_TS_CD,
+           DECODE(P.DIV, 'RHQ', NVL(O.N3RD_PRNT_OFC_CD, M.SLS_RHQ_CD), M.SLS_RGN_OFC_CD) AS OFC_CD,
+           M.CUST_CNT_CD, 
+           M.CUST_SEQ, 
+           M.CUST_CTRL_CD,
+           SUM(RLANE_ADJ_QTY) ADJ_QTY
+      FROM SPC_MDL_CUST_REV_LANE M,
+           PARAMS P,
+           SPC_OFC_LVL O
+     WHERE P.TRD_CD     = M.TRD_CD
+       AND P.SUB_TRD_CD = M.SUB_TRD_CD
+       AND P.RLANE_CD   = M.RLANE_CD
+       AND SUBSTR(P.SEASON,1,6) = M.COST_YRWK
+       AND SUBSTR(P.SEASON,8)   = M.VER_SEQ
+       AND (P.OFC_CD IS NULL OR M.SLS_RHQ_CD = P.OFC_CD)
+       AND M.SLS_RGN_OFC_CD = O.OFC_CD
+       AND P.COST_YR || P.COST_WK BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK
+     GROUP BY DECODE(SUBSTR(M.TRD_CD, 1, 1), 'I', 'I', 'O'), DECODE(P.DIV, 'RHQ', NVL(O.N3RD_PRNT_OFC_CD, M.SLS_RHQ_CD), M.SLS_RGN_OFC_CD), CUST_CNT_CD, CUST_SEQ, CUST_CTRL_CD
+)
+
+, WK_CMB AS (
+    SELECT T.RNUM,
+           T.COST_YRWK,
+           T.OFC_CD,
+           T.TS_FLG,
+           T.IOC_CD,
+           DECODE(T.CUST_CNT_CD, '00', ' ', NVL(C.CUST_CTRL_CD,'C')) AS CUST_CTRL_CD,
+           --20140728
+           NVL(T.USA_BKG_MOD_CD,' ') AS USA_BKG_MOD_CD,
+           --NVL(T.CUST_ACCT,' ')      AS CUST_ACCT,
+           
+           SUM(T.BKG_REV)          AS BKG_REV, NVL(SUM(T.DMDT_COM_AMT),0) AS DMDT_COM_AMT,
+           SUM(T.ESTM_CM_COST_AMT) AS ESTM_CM_COST_AMT,
+           SUM(T.BKG_TTL_QTY)      AS BKG_TTL_QTY,
+           SUM(T.USD_BKG_TTL_WGT)  AS BKG_TTL_WGT           
+    FROM (
+            SELECT 
+                   T.RNUM,
+                   BAR.COST_YRWK,
+                   DECODE(P.DIV, 'RHQ', DECODE(BAR.SLS_AQ_CD, ' ', BAR.SLS_RHQ_CD, BAR.SLS_AQ_CD), BAR.SLS_OFC_CD) OFC_CD,
+                   BAR.TS_FLG,
+                   BAR.IOC_CD,
+                   
+                   -- 20140728 추가
+                   CASE WHEN P.CTRL_USA = 'Y' THEN
+                        BAR.USA_BKG_MOD_CD -- SPC_BKG_AVG_REV.LOCAL/IPI
+                   ELSE
+                        'OTH'
+                   END AS USA_BKG_MOD_CD,
+                   
+                   --CASE WHEN P.CTRL_ACCT = 'Y' 
+                   --     THEN 
+                   --           (
+                   -- 			SELECT NVL(D.CTRL_LOC_ACCT_CD,'XX999999')
+                   --               FROM SPC_ALOC_LANE_CTRL_OPT_DTL D
+                   --              WHERE P.RLANE_CD                         = D.RLANE_CD
+                   --              AND SPC_GET_REP_TRD_FNC(P.RLANE_CD)      = D.TRD_CD
+                   --              AND SPC_GET_REP_SUB_TRD_FNC(P.RLANE_CD)  = D.SUB_TRD_CD
+                   --              AND P.SKD_DIR_CD                         = D.DIR_CD 
+                   --              AND D.ALOC_CTRL_TP_CD                    = 'A'  
+                   --              AND D.CTRL_LOC_ACCT_CD  = BAR.CUST_CNT_CD ||LPAD(BAR.CUST_SEQ,6,'0')                                        
+                   --           ) 
+                   --     ELSE
+                   --	      'XX999999'
+                   --END AS CUST_ACCT,
+                   
+                   BAR.CUST_CNT_CD,
+                   BAR.CUST_SEQ,
+                   
+                   BAR.BKG_REV, BAR.DMDT_COM_AMT,
+                   BAR.ESTM_CM_COST_AMT,
+                   BAR.BKG_TTL_QTY,
+                   BAR.USD_BKG_TTL_WGT,
+                   P.SEASON,
+                   P.TRD_CD
+             FROM SPC_BKG_AVG_REV   BAR,
+                  (SELECT DISTINCT DENSE_RANK() OVER (ORDER BY COST_YRWK) AS RNUM,
+                          COST_YRWK
+                     FROM SPC_BKG_AVG_REV
+                  ) T,
+                  PARAMS            P  
+            WHERE BAR.COST_YRWK  = T.COST_YRWK
+              --AND BAR.OFC_KND_CD IN ('1', '2', '3')
+              AND BAR.TRD_CD     = P.TRD_CD
+              AND BAR.RLANE_CD   = P.RLANE_CD
+              AND BAR.DIR_CD     = P.DIR_CD
+              AND BAR.IOC_CD     = P.IOC_CD
+              AND BAR.SLS_RHQ_CD = P.OFC_CD
+              AND BAR.OFC_KND_CD = '3'
+              AND BAR.POD_YD_CD <> '00000' -- 20140801 변경 (CUST_CNT_CD <> '00' 에서)
+
+              ) T, 
+              SPC_MDL_CUST_CTRL C
+        WHERE T.TRD_CD               = C.TRD_CD     (+)
+          AND SUBSTR(T.SEASON, 1, 6) = C.COST_YRWK  (+)
+          AND SUBSTR(T.SEASON, 8)    = C.VER_SEQ    (+)
+          AND T.CUST_CNT_CD          = C.CUST_CNT_CD(+)
+          AND T.CUST_SEQ             = C.CUST_SEQ   (+)
+     GROUP BY GROUPING SETS (
+                             --(T.RNUM, T.COST_YRWK, T.TS_FLG, T.IOC_CD, T.OFC_CD, DECODE(T.CUST_CNT_CD, '00', ' ', NVL(C.CUST_CTRL_CD,'C')), T.USA_BKG_MOD_CD, T.CUST_ACCT),
+                             (T.RNUM, T.COST_YRWK, T.TS_FLG, T.IOC_CD, T.OFC_CD, DECODE(T.CUST_CNT_CD, '00', ' ', NVL(C.CUST_CTRL_CD,'C')), T.USA_BKG_MOD_CD),
+                             (T.RNUM, T.COST_YRWK, T.TS_FLG, T.IOC_CD, T.OFC_CD, DECODE(T.CUST_CNT_CD, '00', ' ', NVL(C.CUST_CTRL_CD,'C'))),
+                             (T.RNUM, T.COST_YRWK, T.TS_FLG, T.IOC_CD, T.OFC_CD)
+                            ) 
+
+)
+
+SELECT IOC_TS_CD,
+       OFC_CD,
+       NVL(CUST_CTRL_CD,' ') AS CUST_CTRL_CD,
+       -- 20140728 추가(S)
+       DECODE(USA_BKG_MOD_CD1,'OTH','OTHERS',USA_BKG_MOD_CD1) AS USA_BKG_MOD_CD,
+       --CUST_ACCT1 AS CUST_ACCT,
+       
+       --CASE WHEN CUST_ACCT1 = 'XX999999' THEN
+       --      'OTHERS'
+       --ELSE
+       --      (
+       --       SELECT CUST_LGL_ENG_NM
+       --         FROM MDM_CUSTOMER
+       --        WHERE CUST_CNT_CD = SUBSTR(CUST_ACCT1,1,2)
+       --          AND CUST_SEQ    = SUBSTR(CUST_ACCT1,3,6)
+       --      )
+       --END AS CUST_LGL_ENG_NM,
+       
+       QTA_VOL,
+       DECODE(CUST_CTRL_CD, 'C', DECODE(USA_BKG_MOD_CD1,' ', MAX(QTA_VOL) OVER (PARTITION BY IOC_TS_CD, OFC_CD) - MAX(SMP) OVER (PARTITION BY IOC_TS_CD, OFC_CD),0) , SMP) AS SMP,
+       CMB,
+       CMB_WGT,
+       CMB1,
+       CMB_WGT1,
+       CMB2,
+       CMB_WGT2,
+       CMB3,
+       CMB_WGT3,
+       CMB4,
+       CMB_WGT4,
+       FC_TTL_TEU,
+       FCT_VOL,
+       FCT_HC,
+       FCT_45,
+       FCT_53,
+       FCT_RF,
+       FCT_WGT,
+       
+       FCT_D2,
+       FCT_D4,
+       FCT_RD,
+       
+       ALC_VOL,
+       ALC_HC,
+       ALC_45,
+       ALC_53,
+       ALC_RF,
+       ALC_WGT,
+       
+       ALC_D2,
+       ALC_D4,
+       ALC_RD,
+       
+       BKG_VOL,
+       BKG_20,
+       BKG_40,
+       BKG_HC,
+       BKG_45,
+       BKG_53,
+       BKG_RF,
+       BKG_WGT,
+       BKG_D2,
+       BKG_D4,
+       BKG_RD
+       
+  FROM (
+        
+        SELECT IOC_TS_CD,
+               OFC_CD,
+               CUST_CTRL_CD,
+               -- 20140728 추가(S)
+               USA_BKG_MOD_CD AS USA_BKG_MOD_CD1,
+               --CUST_ACCT AS CUST_ACCT1,
+               MAX(QTA_VOL)    AS QTA_VOL,
+               MAX(SMP)        AS SMP,
+               MAX(CMB)        AS CMB,
+               MAX(CMB_WGT)    AS CMB_WGT,
+               MAX(CMB1)       AS CMB1,
+               MAX(CMB_WGT1)   AS CMB_WGT1,
+               MAX(CMB2)       AS CMB2,
+               MAX(CMB_WGT2)   AS CMB_WGT2,
+               MAX(CMB3)       AS CMB3,
+               MAX(CMB_WGT3)   AS CMB_WGT3,
+               MAX(CMB4)       AS CMB4,
+               MAX(CMB_WGT4)   AS CMB_WGT4,
+               MAX(FC_TTL_TEU) AS FC_TTL_TEU,
+               MAX(FCT_VOL)    AS FCT_VOL,
+               MAX(FCT_HC)     AS FCT_HC,
+               MAX(FCT_45)     AS FCT_45,
+               MAX(FCT_53)     AS FCT_53,
+               MAX(FCT_RF)     AS FCT_RF,
+               MAX(FCT_WGT)    AS FCT_WGT,
+               
+               MAX(FCT_D2)     AS FCT_D2,
+               MAX(FCT_D4)     AS FCT_D4,
+               MAX(FCT_RD)     AS FCT_RD,
+               
+               NVL(MAX(ALC_VOL),0)    AS ALC_VOL,
+               NVL(MAX(ALC_HC),0)     AS ALC_HC,
+               NVL(MAX(ALC_45),0)     AS ALC_45,
+               NVL(MAX(ALC_53),0)     AS ALC_53,
+               NVL(MAX(ALC_RF),0)     AS ALC_RF,
+               NVL(MAX(ALC_WGT),0)    AS ALC_WGT,
+               NVL(MAX(ALC_D2),0)     AS ALC_D2,
+               NVL(MAX(ALC_D4),0)     AS ALC_D4,
+               NVL(MAX(ALC_RD),0)     AS ALC_RD,
+               
+               MAX(BKG_VOL)    AS BKG_VOL,
+               MAX(BKG_20)     AS BKG_20,
+               MAX(BKG_40)     AS BKG_40,
+               MAX(BKG_HC)     AS BKG_HC,
+               MAX(BKG_45)     AS BKG_45,
+               MAX(BKG_53)     AS BKG_53,
+               MAX(BKG_RF)     AS BKG_RF,
+               MAX(BKG_WGT)    AS BKG_WGT,
+               MAX(BKG_D2)     AS BKG_D2,
+               MAX(BKG_D4)     AS BKG_D4,
+               MAX(BKG_RD)     AS BKG_RD               
+               
+          FROM (
+              SELECT DECODE(IOC_TS_CD, 'O', 'OCN', 'I', 'IPC', 'T', 'T/S') AS IOC_TS_CD,
+                     OFC_CD,
+                     CUST_CTRL_CD,
+        
+                     -- 20140728 추가(S)
+                     NVL(USA_BKG_MOD_CD,' ') AS USA_BKG_MOD_CD,
+                     --NVL(CUST_ACCT,' ')      AS CUST_ACCT,
+                     -- 20140728 추가(E)
+        
+                     ROUND(SUM(QTA_VOL)) AS QTA_VOL,
+                     SUM(SMP) AS SMP,
+                     (
+                        SELECT ROUND((SUM(BAR.BKG_REV) + SUM(BAR.DMDT_COM_AMT) - SUM(BAR.ESTM_CM_COST_AMT)) / DECODE(SUM(BAR.BKG_TTL_QTY), 0, 1, SUM(BAR.BKG_TTL_QTY)))
+                          FROM WK_CMB BAR
+                         WHERE BAR.OFC_CD      = Z.OFC_CD
+                           AND BAR.TS_FLG      = DECODE(Z.IOC_TS_CD, 'T', 'Y', 'TT', 'Y', 'N')
+                           AND BAR.IOC_CD      = DECODE(Z.IOC_TS_CD, 'O', 'O', 'OT', 'O', 'I')
+                           AND NVL(Z.CUST_CTRL_CD,' ')  = NVL(BAR.CUST_CTRL_CD,' ')
+                           AND Z.IOC_TS_CD       <> 'E'
+                            -- 20140728 추가(S)
+                           AND BAR.USA_BKG_MOD_CD = NVL(Z.USA_BKG_MOD_CD,' ')
+                           --AND BAR.CUST_ACCT      = NVL(Z.CUST_ACCT,' ')
+        					-- 20140728 추가(E)
+                     ) AS CMB,
+                     (
+                        SELECT ROUND((SUM(BAR.BKG_REV) + SUM(BAR.DMDT_COM_AMT) - SUM(BAR.ESTM_CM_COST_AMT)) / DECODE(SUM(BAR.BKG_TTL_WGT), 0, 1, SUM(BAR.BKG_TTL_WGT)))
+                          FROM WK_CMB BAR
+                         WHERE BAR.OFC_CD      = Z.OFC_CD
+                           AND BAR.TS_FLG      = DECODE(Z.IOC_TS_CD, 'T', 'Y', 'TT', 'Y', 'N')
+                           AND BAR.IOC_CD      = DECODE(Z.IOC_TS_CD, 'O', 'O', 'OT', 'O', 'I')
+                           AND NVL(Z.CUST_CTRL_CD,' ')  = NVL(BAR.CUST_CTRL_CD,' ')
+                           AND Z.IOC_TS_CD       <> 'E'
+                            -- 20140728 추가(S)
+                           AND BAR.USA_BKG_MOD_CD = NVL(Z.USA_BKG_MOD_CD,' ')
+                           --AND BAR.CUST_ACCT      = NVL(Z.CUST_ACCT,' ')
+        					-- 20140728 추가(E)
+                     ) AS CMB_WGT,             
+                     -- 주차별 CMB
+                     (
+                        SELECT ROUND((SUM(BAR.BKG_REV) + SUM(BAR.DMDT_COM_AMT) - SUM(BAR.ESTM_CM_COST_AMT)) / DECODE(SUM(BAR.BKG_TTL_QTY), 0, 1, SUM(BAR.BKG_TTL_QTY)))
+                          FROM WK_CMB BAR
+                         WHERE BAR.OFC_CD      = NVL(Z.OFC_CD, '00000')
+                           AND BAR.TS_FLG      = DECODE(Z.IOC_TS_CD, 'T', 'Y', 'TT', 'Y', 'N')
+                           AND BAR.IOC_CD      = DECODE(Z.IOC_TS_CD, 'O', 'O', 'OT', 'O', 'I')
+                           AND NVL(Z.CUST_CTRL_CD,' ')  = NVL(BAR.CUST_CTRL_CD,' ')
+                           AND Z.IOC_TS_CD       <> 'E'
+                            -- 20140728 추가(S)
+                           AND BAR.USA_BKG_MOD_CD = NVL(Z.USA_BKG_MOD_CD,' ')
+                           --AND BAR.CUST_ACCT      = NVL(Z.CUST_ACCT,' ')
+        					-- 20140728 추가(E)
+                           AND BAR.RNUM = 1
+                     ) AS CMB1,
+                     (
+                        SELECT ROUND((SUM(BAR.BKG_REV) + SUM(BAR.DMDT_COM_AMT) - SUM(BAR.ESTM_CM_COST_AMT)) / DECODE(SUM(BAR.BKG_TTL_WGT), 0, 1, SUM(BAR.BKG_TTL_WGT)))
+                          FROM WK_CMB BAR
+                         WHERE BAR.OFC_CD      = NVL(Z.OFC_CD, '00000')
+                           AND BAR.TS_FLG      = DECODE(Z.IOC_TS_CD, 'T', 'Y', 'TT', 'Y', 'N')
+                           AND BAR.IOC_CD      = DECODE(Z.IOC_TS_CD, 'O', 'O', 'OT', 'O', 'I')
+                           AND NVL(Z.CUST_CTRL_CD,' ')  = NVL(BAR.CUST_CTRL_CD,' ')
+                           AND Z.IOC_TS_CD       <> 'E'
+                            -- 20140728 추가(S)
+                           AND BAR.USA_BKG_MOD_CD = NVL(Z.USA_BKG_MOD_CD,' ')
+                           --AND BAR.CUST_ACCT      = NVL(Z.CUST_ACCT,' ')
+        					-- 20140728 추가(E)
+                           AND BAR.RNUM = 1
+                     ) AS CMB_WGT1,
+                     (
+                        SELECT ROUND((SUM(BAR.BKG_REV) + SUM(BAR.DMDT_COM_AMT) - SUM(BAR.ESTM_CM_COST_AMT)) / DECODE(SUM(BAR.BKG_TTL_QTY), 0, 1, SUM(BAR.BKG_TTL_QTY)))
+                          FROM WK_CMB BAR
+                         WHERE BAR.OFC_CD      = NVL(Z.OFC_CD, '00000')
+                           AND BAR.TS_FLG      = DECODE(Z.IOC_TS_CD, 'T', 'Y', 'TT', 'Y', 'N')
+                           AND BAR.IOC_CD      = DECODE(Z.IOC_TS_CD, 'O', 'O', 'OT', 'O', 'I')
+                           AND NVL(Z.CUST_CTRL_CD,' ')  = NVL(BAR.CUST_CTRL_CD,' ')
+                           AND Z.IOC_TS_CD       <> 'E'
+                            -- 20140728 추가(S)
+                           AND BAR.USA_BKG_MOD_CD = NVL(Z.USA_BKG_MOD_CD,' ')
+                           --AND BAR.CUST_ACCT      = NVL(Z.CUST_ACCT,' ')
+        					-- 20140728 추가(E)
+                           AND BAR.RNUM = 2
+                     ) AS CMB2,
+                     (
+                        SELECT ROUND((SUM(BAR.BKG_REV) + SUM(BAR.DMDT_COM_AMT) - SUM(BAR.ESTM_CM_COST_AMT)) / DECODE(SUM(BAR.BKG_TTL_WGT), 0, 1, SUM(BAR.BKG_TTL_WGT)))
+                          FROM WK_CMB BAR
+                         WHERE BAR.OFC_CD      = NVL(Z.OFC_CD, '00000')
+                           AND BAR.TS_FLG      = DECODE(Z.IOC_TS_CD, 'T', 'Y', 'TT', 'Y', 'N')
+                           AND BAR.IOC_CD      = DECODE(Z.IOC_TS_CD, 'O', 'O', 'OT', 'O', 'I')
+                           AND NVL(Z.CUST_CTRL_CD,' ')  = NVL(BAR.CUST_CTRL_CD,' ')
+                           AND Z.IOC_TS_CD       <> 'E'
+                            -- 20140728 추가(S)
+                           AND BAR.USA_BKG_MOD_CD = NVL(Z.USA_BKG_MOD_CD,' ')
+                           --AND BAR.CUST_ACCT      = NVL(Z.CUST_ACCT,' ')
+                           AND BAR.RNUM = 2
+                     ) AS CMB_WGT2,
+                     (
+                        SELECT ROUND((SUM(BAR.BKG_REV) + SUM(BAR.DMDT_COM_AMT) - SUM(BAR.ESTM_CM_COST_AMT)) / DECODE(SUM(BAR.BKG_TTL_QTY), 0, 1, SUM(BAR.BKG_TTL_QTY)))
+                          FROM WK_CMB BAR
+                         WHERE BAR.OFC_CD      = NVL(Z.OFC_CD, '00000')
+                           AND BAR.TS_FLG      = DECODE(Z.IOC_TS_CD, 'T', 'Y', 'TT', 'Y', 'N')
+                           AND BAR.IOC_CD      = DECODE(Z.IOC_TS_CD, 'O', 'O', 'OT', 'O', 'I')
+                           AND NVL(Z.CUST_CTRL_CD,' ')  = NVL(BAR.CUST_CTRL_CD,' ')
+                           AND Z.IOC_TS_CD       <> 'E'
+                            -- 20140728 추가(S)
+                           AND BAR.USA_BKG_MOD_CD = NVL(Z.USA_BKG_MOD_CD,' ')
+                           --AND BAR.CUST_ACCT      = NVL(Z.CUST_ACCT,' ')
+        					-- 20140728 추가(E)
+                           AND BAR.RNUM = 3
+                     ) AS CMB3,
+                     (
+                        SELECT ROUND((SUM(BAR.BKG_REV) + SUM(BAR.DMDT_COM_AMT) - SUM(BAR.ESTM_CM_COST_AMT)) / DECODE(SUM(BAR.BKG_TTL_WGT), 0, 1, SUM(BAR.BKG_TTL_WGT)))
+                          FROM WK_CMB BAR
+                         WHERE BAR.OFC_CD      = NVL(Z.OFC_CD, '00000')
+                           AND BAR.TS_FLG      = DECODE(Z.IOC_TS_CD, 'T', 'Y', 'TT', 'Y', 'N')
+                           AND BAR.IOC_CD      = DECODE(Z.IOC_TS_CD, 'O', 'O', 'OT', 'O', 'I')
+                           AND NVL(Z.CUST_CTRL_CD,' ')  = NVL(BAR.CUST_CTRL_CD,' ')
+                           AND Z.IOC_TS_CD       <> 'E'
+                            -- 20140728 추가(S)
+                           AND BAR.USA_BKG_MOD_CD = NVL(Z.USA_BKG_MOD_CD,' ')
+                           --AND BAR.CUST_ACCT      = NVL(Z.CUST_ACCT,' ')
+        					-- 20140728 추가(E)
+                           AND BAR.RNUM = 3
+                     ) AS CMB_WGT3,
+                     (
+                        SELECT ROUND((SUM(BAR.BKG_REV) + SUM(BAR.DMDT_COM_AMT) - SUM(BAR.ESTM_CM_COST_AMT)) / DECODE(SUM(BAR.BKG_TTL_QTY), 0, 1, SUM(BAR.BKG_TTL_QTY)))
+                          FROM WK_CMB BAR
+                         WHERE BAR.OFC_CD      = NVL(Z.OFC_CD, '00000')
+                           AND BAR.TS_FLG      = DECODE(Z.IOC_TS_CD, 'T', 'Y', 'TT', 'Y', 'N')
+                           AND BAR.IOC_CD      = DECODE(Z.IOC_TS_CD, 'O', 'O', 'OT', 'O', 'I')
+                           AND NVL(Z.CUST_CTRL_CD,' ')  = NVL(BAR.CUST_CTRL_CD,' ')
+                           AND Z.IOC_TS_CD       <> 'E'
+                            -- 20140728 추가(S)
+                           AND BAR.USA_BKG_MOD_CD = NVL(Z.USA_BKG_MOD_CD,' ')
+                           --AND BAR.CUST_ACCT      = NVL(Z.CUST_ACCT,' ')
+        					-- 20140728 추가(E)
+                           AND BAR.RNUM = 4
+                     ) AS CMB4,
+                     (
+                        SELECT ROUND((SUM(BAR.BKG_REV) + SUM(BAR.DMDT_COM_AMT) - SUM(BAR.ESTM_CM_COST_AMT)) / DECODE(SUM(BAR.BKG_TTL_WGT), 0, 1, SUM(BAR.BKG_TTL_WGT)))
+                          FROM WK_CMB BAR
+                         WHERE BAR.OFC_CD      = NVL(Z.OFC_CD, '00000')
+                           AND BAR.TS_FLG      = DECODE(Z.IOC_TS_CD, 'T', 'Y', 'TT', 'Y', 'N')
+                           AND BAR.IOC_CD      = DECODE(Z.IOC_TS_CD, 'O', 'O', 'OT', 'O', 'I')
+                           AND NVL(Z.CUST_CTRL_CD,' ')  = NVL(BAR.CUST_CTRL_CD,' ')
+                           AND Z.IOC_TS_CD       <> 'E'
+                            -- 20140728 추가(S)
+                           AND BAR.USA_BKG_MOD_CD = NVL(Z.USA_BKG_MOD_CD,' ')
+                           --AND BAR.CUST_ACCT      = NVL(Z.CUST_ACCT,' ')
+        					-- 20140728 추가(E)
+                           AND BAR.RNUM = 4
+                     ) AS CMB_WGT4,
+                     SUM(NVL(FCT_VOL, 0) + NVL(FCT_HC, 0) * 2 + NVL(FCT_45, 0) * 2 + NVL(FCT_53, 0) * 2) AS FC_TTL_TEU,
+                     SUM(FCT_VOL) AS FCT_VOL,
+                     SUM(FCT_HC)  AS FCT_HC ,
+                     SUM(FCT_45)  AS FCT_45 ,
+                     SUM(FCT_53)  AS FCT_53 ,
+                     SUM(FCT_RF)  AS FCT_RF ,
+                     SUM(FCT_WGT) AS FCT_WGT,
+        
+                     -- 20140728 추가(S)
+                     SUM(FCT_D2)  AS FCT_D2 ,
+                     SUM(FCT_D4)  AS FCT_D4 ,
+                     SUM(FCT_RD)  AS FCT_RD ,
+        			-- 20140728 추가(E)
+        
+                     SUM(ALC_VOL) AS ALC_VOL,
+                     SUM(ALC_HC)  AS ALC_HC ,
+                     SUM(ALC_45)  AS ALC_45 ,
+                     SUM(ALC_53)  AS ALC_53 ,
+                     SUM(ALC_RF)  AS ALC_RF ,
+                     SUM(ALC_WGT) AS ALC_WGT,
+        
+                    -- 20140728 추가(S)
+                     SUM(ALC_D2)  AS ALC_D2 ,
+                     SUM(ALC_D4)  AS ALC_D4 ,
+                     SUM(ALC_RD)  AS ALC_RD ,
+        			-- 20140728 추가(E)
+        
+                     SUM(BKG_VOL) AS BKG_VOL,
+                     SUM(BKG_20)  AS BKG_20 ,
+                     SUM(BKG_40)  AS BKG_40 ,
+                     SUM(BKG_HC)  AS BKG_HC ,
+                     SUM(BKG_45)  AS BKG_45 ,
+                     SUM(BKG_53)  AS BKG_53 ,
+                     SUM(BKG_RF)  AS BKG_RF ,
+                     SUM(BKG_WGT) AS BKG_WGT,
+        
+                    -- 20140728 추가(S)
+                     SUM(BKG_D2)  AS BKG_D2 ,
+                     SUM(BKG_D4)  AS BKG_D4 ,
+                     SUM(BKG_RD)  AS BKG_RD
+        			-- 20140728 추가(E)
+                FROM (
+                        SELECT IOC_TS_CD,
+                               OFC_CD   ,
+                               'C' AS CUST_CTRL_CD,
+                               
+                               -- 20140728 추가(S)
+                               NULL AS USA_BKG_MOD_CD,
+                               --NULL AS CUST_ACCT,
+        					   -- 20140728 추가(E)
+                               
+                               VOL AS QTA_VOL,
+                               DECODE(VOL, 0, 0, CM / VOL) AS QTA_CMB,
+                               0    AS SMP,
+                               
+                               0    AS FCT_VOL,
+                               0    AS FCT_HC ,
+                               0    AS FCT_45 ,
+                               0    AS FCT_53 ,
+                               0    AS FCT_RF ,
+                               0    AS FCT_WGT,                 
+        
+                    		   -- 20140728 추가(S)
+                               0    AS FCT_D2 ,
+                               0    AS FCT_D4 ,
+                               0    AS FCT_RD ,
+        					   -- 20140728 추가(E)
+        
+                               NULL AS ALC_VOL,
+                               NULL AS ALC_HC ,
+                               NULL AS ALC_45 ,
+                               NULL AS ALC_53 ,
+                               NULL AS ALC_RF ,
+                               NULL AS ALC_WGT,
+        
+                    		   -- 20140728 추가(S)
+                               NULL AS ALC_D2 ,
+                               NULL AS ALC_D4 ,
+                               NULL AS ALC_RD ,
+        					   -- 20140728 추가(E)
+        
+                               0    AS BKG_VOL,
+                               0    AS BKG_20 ,
+                               0    AS BKG_40 ,
+                               0    AS BKG_HC ,
+                               0    AS BKG_45 ,
+                               0    AS BKG_53 ,
+                               0    AS BKG_RF ,
+                               0    AS BKG_WGT,
+        
+                    		   -- 20140728 추가(S)
+                               0    AS BKG_D2 ,
+                               0    AS BKG_D4 ,
+                               0    AS BKG_RD   
+        					   -- 20140728 추가(E)
+                          FROM QTA_DATA
+                        UNION ALL
+                        SELECT IOC_TS_CD,
+                               OFC_CD   ,
+                               CUST_CTRL_CD,
+        
+                               -- 20140728 추가(S)
+                               USA_BKG_MOD_CD,
+                               --CUST_ACCT,
+        					   -- 20140728 추가(E)
+        
+                               0        ,
+                               0        ,
+                               0        ,
+                               
+                               VOL_TTL  ,
+                               VOL_HC   ,
+                               VOL_45   ,
+                               VOL_53   ,
+                               VOL_RF   ,
+                               WGT_TTL  ,
+        
+                               -- 20140728 추가(S)
+                               VOL_D2   ,
+                               VOL_D4   ,
+                               VOL_RD   ,
+        					   -- 20140728 추가(E)
+        
+                               NULL AS ALC_VOL,
+                               NULL AS ALC_HC ,
+                               NULL AS ALC_45 ,
+                               NULL AS ALC_53 ,
+                               NULL AS ALC_RF ,
+                               NULL AS ALC_WGT,
+        
+                               -- 20140728 추가(S)
+                               NULL AS ALC_D2 ,
+                               NULL AS ALC_D4 ,
+                               NULL AS ALC_RD ,
+        					   -- 20140728 추가(E)
+        
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+        
+                               -- 20140728 추가(S)
+                               0,
+                               0,
+                               0
+        					   -- 20140728 추가(E)
+                          FROM FCST_DATA
+                        UNION ALL
+                        SELECT IOC_TS_CD,
+                               OFC_CD   ,
+                               CUST_CTRL_CD,
+        
+                               -- 20140728 추가(S)
+                               USA_BKG_MOD_CD,
+                               --CUST_ACCT,
+        					   -- 20140728 추가(E)
+        
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+        
+                               -- 20140728 추가(S)
+                               0,
+                               0,
+                               0,
+        					   -- 20140728 추가(E)
+        
+                               VOL_TTL,
+                               VOL_HC ,
+                               VOL_45 ,
+                               VOL_53 ,
+                               VOL_RF ,
+                               WGT_TTL,
+        
+                               -- 20140728 추가(S)
+                               VOL_D2   ,
+                               VOL_D4   ,
+                               VOL_RD   ,
+        					   -- 20140728 추가(E)
+        
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+        
+                               -- 20140728 추가(S)
+                               0,
+                               0,
+                               0
+        					   -- 20140728 추가(E)
+                          FROM ALOC_DATA
+                        UNION ALL
+                        SELECT IOC_TS_CD,
+                               OFC_CD   ,
+                               CUST_CTRL_CD,
+        
+                               -- 20140728 추가(S)
+                               USA_BKG_MOD_CD,
+                               --CUST_ACCT,
+        					   -- 20140728 추가(E)
+        
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+        
+                               -- 20140728 추가(S)
+                               0,
+                               0,
+                               0,
+        					   -- 20140728 추가(E)
+        
+                               NULL AS ALC_VOL,
+                               NULL AS ALC_HC ,
+                               NULL AS ALC_45 ,
+                               NULL AS ALC_53 ,
+                               NULL AS ALC_RF ,
+                               NULL AS ALC_WGT,
+        
+                               -- 20140728 추가(S)
+                               NULL AS ALC_D2 ,
+                               NULL AS ALC_D4 ,
+                               NULL AS ALC_RD ,
+                               -- 20140728 추가(E)
+        
+                               BKG_TTL,
+                               BKG_20 ,
+                               BKG_40 ,
+                               BKG_HC ,
+                               BKG_45 ,
+                               BKG_53 ,
+                               BKG_RF ,
+                               BKG_WGT,
+        
+                               -- 20140728 추가(S)
+                               BKG_D2 ,
+                               BKG_D4 ,
+                               BKG_RD
+                               -- 20140728 추가(E)
+                          FROM BKG_DATA
+                        UNION ALL
+                        SELECT IOC_TS_CD,
+                               OFC_CD   ,
+                               CUST_CTRL_CD,
+        
+                               -- 20140728 추가(S)
+                               NULL AS USA_BKG_MOD_CD,
+                               --NULL AS CUST_ACCT,
+        					   -- 20140728 추가(E)
+        
+                               0,
+                               0,
+                               ADJ_QTY,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               
+                               NULL AS ALC_VOL,
+                               NULL AS ALC_HC ,
+                               NULL AS ALC_45 ,
+                               NULL AS ALC_53 ,
+                               NULL AS ALC_RF ,
+                               NULL AS ALC_WGT,
+                               -- 20140728 추가(S)
+                               NULL AS ALC_D2 ,
+                               NULL AS ALC_D4 ,
+                               NULL AS ALC_RD ,
+                               
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0
+                          FROM SMP_DATA
+        
+                     ) Z
+            GROUP BY GROUPING SETS (                            
+                                    --(IOC_TS_CD, OFC_CD, CUST_CTRL_CD, USA_BKG_MOD_CD, CUST_ACCT),                            
+                                    (IOC_TS_CD, OFC_CD, CUST_CTRL_CD, USA_BKG_MOD_CD),                             
+                                    (IOC_TS_CD, OFC_CD, CUST_CTRL_CD), 
+                                    (IOC_TS_CD, OFC_CD)
+                                   )                           
+           )
+      GROUP BY IOC_TS_CD,
+               OFC_CD,
+               CUST_CTRL_CD,
+               USA_BKG_MOD_CD
+               --CUST_ACCT
+       ) T
+ ORDER BY IOC_TS_CD,
+       OFC_CD,
+       CUST_CTRL_CD,
+       USA_BKG_MOD_CD1
+       --CUST_ACCT1			]]></sql>
+			<params>
+				<param name="rhq_txt" type="12" value="" out="N"/>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="subtrade" type="12" value="" out="N"/>
+				<param name="lane" type="12" value="" out="N"/>
+				<param name="bound" type="12" value="" out="N"/>
+				<param name="onc_ipc" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="rhq_gso" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

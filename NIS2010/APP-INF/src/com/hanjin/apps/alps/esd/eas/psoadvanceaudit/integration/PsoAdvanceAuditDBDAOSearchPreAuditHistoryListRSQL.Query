@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PsoAdvanceAuditDBDAOSearchPreAuditHistoryListRSQL">
+			<desc><![CDATA[PsoAdvanceAuditDBDAOSearchPreAuditHistoryList ]]></desc>
+			<sql><![CDATA[
+SELECT ISS_CTY_CD
+     , SO_SEQ
+     , VVD
+     , LGS_COST_CD
+     , MAX(RHQ_OFC_CD) AS RHQ_OFC_CD
+     , MAX(PORT) AS PORT
+     , MAX(YD_CD) AS YARD
+     , MAX(VPS_ATB_DT) AS VPS_ATB_DT
+     , MAX(IO) AS BOUND
+     , MAX(SP_NM) AS SP_NM
+     , MAX(CHG_TP_CD) AS CHG_TP_CD
+     , MAX(ACCT_CD) AS ACCT_CD
+     , MAX(INV_NO) AS INV_NO
+     , MAX(ISS_DT) AS ISSUED
+     , MAX(CURR_CD) AS CURR_CD
+     , SUM(TARIFF_COST) AS TARIFF_COST
+     , SUM(ADJCOST) AS ADJCOST
+     , SUM(AMOUNT) AS AMOUNT
+     , MAX(DIFF_RMK) AS RMK
+     , MAX(RHQ_OFC_CD) AS RHQ_OFC_CD
+     , MAX(CHG_TP_CD) AS CHG_TP_CD
+     , MAX(ACCT_CD) AS ACCT_CD
+  FROM (
+        SELECT (SELECT EAS_EXPN_AUD_PKG.GET_RHQ_OFC_CD(DECODE(T1.INV_OFC_CD, 'PUSMOV', 'SELIB', T1.INV_OFC_CD)) FROM DUAL) RHQ_OFC_CD
+             , SUBSTR(T1.YD_CD, 1, 5) AS PORT
+             , T1.YD_CD     AS YD_CD
+             , T2.VVD
+             , (SELECT MIN(TO_CHAR(X.VPS_ETB_DT, 'YYYY-MM-DD HH24:MI'))
+                  FROM VSK_VSL_PORT_SKD  X
+                 WHERE X.VSL_CD      = T2.VSL_CD
+                   AND X.SKD_VOY_NO  = T2.SKD_VOY_NO
+                   AND X.SKD_DIR_CD  = T2.SKD_DIR_CD
+                   AND X.YD_CD       = T1.YD_CD
+               ) VPS_ATB_DT
+             , DECODE(T2.DP_IO_BND_CD, 'I', 'IN', 'O', 'OUT', 'IN/OUT') AS IO
+             , (SELECT X.VNDR_LGL_ENG_NM
+                  FROM MDM_VENDOR X
+                 WHERE X.VNDR_SEQ = T1.VNDR_SEQ
+               ) AS SP_NM
+             , CASE WHEN C.ACCT_CD NOT IN ('999999', '511795') AND C.ACCT_CD LIKE '5117%' AND MA.ACCT_ENG_NM NOT LIKE 'OTHER PORT%' THEN 'PORT CHARGE'
+                    WHEN C.ACCT_CD LIKE '5118%' AND MA.ACCT_ENG_NM NOT LIKE 'OTHER PORT%' THEN 'PORT SERVICE CHARGE'
+                    WHEN C.ACCT_CD LIKE '5119%' AND MA.ACCT_ENG_NM NOT LIKE 'OTHER PORT%' THEN 'ANAL TRANSIT FEE'
+                    WHEN C.ACCT_CD <> '999999' AND (C.ACCT_CD IN ('564611', '511795') OR MA.ACCT_ENG_NM LIKE 'OTHER PORT%') THEN 'OTHER'
+               END CHG_TP_CD
+             , C.ACCT_CD
+             , T2.LGS_COST_CD
+             , T1.INV_NO
+             , TO_CHAR(T1.ISS_DT, 'YYYY-MM-DD')    AS ISS_DT
+             , T1.CURR_CD
+             , T2.CALC_AMT AS TARIFF_COST
+             , DECODE(T2.CALC_AMT, NULL, DECODE(T2.ADJ_AMT, NULL, T2.LOCL_AMT, T2.ADJ_AMT), T2.ADJ_AMT) AS ADJCOST
+             , T2.LOCL_AMT  AS AMOUNT
+             , T2.DIFF_RMK
+             , T2.ISS_CTY_CD
+             , T2.SO_SEQ
+          FROM PSO_CHARGE   T1
+             , (SELECT X.*
+                     , CASE WHEN X.SO_DTL_SEQ = X.ORG_SO_DTL_SEQ THEN X.VSL_CD||X.SKD_VOY_NO||X.SKD_DIR_CD
+                            ELSE (SELECT Y.VSL_CD||Y.SKD_VOY_NO||Y.SKD_DIR_CD
+                                    FROM PSO_CHG_DTL Y
+                                   WHERE Y.ISS_CTY_CD = X.ISS_CTY_CD
+                                     AND Y.SO_SEQ     = X.SO_SEQ
+                                     AND Y.SO_DTL_SEQ = X.ORG_SO_DTL_SEQ
+                                 )
+                       END VVD
+                  FROM PSO_CHG_DTL X
+               ) T2
+             , TES_LGS_COST C
+             , MDM_ACCOUNT  MA
+             , EAS_PORT_SO_CHG_ACCT CS
+         WHERE 1=1               
+           AND T1.ISS_CTY_CD  = T2.ISS_CTY_CD
+           AND T1.SO_SEQ      = T2.SO_SEQ
+           AND T2.LGS_COST_CD = C.LGS_COST_CD
+           AND C.ACCT_CD      = MA.ACCT_CD
+           AND T2.LGS_COST_CD = CS.LGS_COST_CD
+           AND C.ACCT_CD <> '999999' 
+           AND LENGTH(T2.LGS_COST_CD) = 6
+#if(${rhq}!='' && ${rhq}!='ALL')
+           AND  CS.AUD_OFC_CD     = @[rhq] -- RHQ Office
+#end
+           
+           #if ( ${vesselClass} !='' ) 
+            AND T2.VSL_CD IN (SELECT VSL_CD
+                                FROM MDM_VSL_CNTR AA
+                                  , (SELECT MAX(FM_CD_CAL) AS FM_CD_CAL
+                                          , MAX(TO_CD_CAL) AS TO_CD_CAL
+                                       FROM (SELECT CASE WHEN A.INTG_CD_VAL_DP_SEQ =B.CD_SEQ-1 THEN INTG_CD_VAL_CTNT ELSE '0' END FM_CD_CAL
+                                                  , CASE WHEN A.INTG_CD_VAL_DP_SEQ =B.CD_SEQ THEN INTG_CD_VAL_CTNT ELSE '0' END TO_CD_CAL
+                                               FROM COM_INTG_CD_DTL A
+                                                  , (SELECT INTG_CD_ID,INTG_CD_VAL_DP_SEQ AS CD_SEQ
+                                                       FROM COM_INTG_CD_DTL
+                                                      WHERE 1=1 
+                                                        AND INTG_CD_ID ='CD03434'
+                                                        AND INTG_CD_VAL_CTNT =  @[vesselClass]
+                                                    ) B
+                                              WHERE A.INTG_CD_ID = B.INTG_CD_ID
+                                                AND A.INTG_CD_VAL_DP_SEQ BETWEEN B.CD_SEQ-1 AND B.CD_SEQ
+                                            )      
+                                    )BB
+                              WHERE 1=1
+                                AND CNTR_VSL_CLSS_CAPA  BETWEEN BB.FM_CD_CAL AND BB.TO_CD_CAL  
+                               )
+
+           #end
+           #if ( ${vessel} !='' ) 
+            AND T2.VSL_CD = @[vessel]
+           #end
+	       #if ( ${period1} !='' && ${period2} !='' ) 
+		    AND T1.ISS_DT BETWEEN TO_DATE(@[period1],'YYYY-MM-DD') AND TO_DATE(@[period2],'YYYY-MM-DD') + 0.99999
+           #end
+           #if ( ${country} !='' ) 
+            AND T1.YD_CD LIKE @[country]||'%'
+           #end
+           #if ( ${portCode} !='' ) 
+            AND T1.YD_CD LIKE @[portCode]||'%'
+           #end
+           #if ( ${portCode} !='' && ${yardCd} !='') 
+            AND T1.YD_CD LIKE @[portCode]||@[yardCd]||'%'
+           #end
+           #if ( ${accountCode} !='' )
+            AND C.ACCT_CD = @[accountCode]
+           #end
+           #if ( ${costCode} !='' )
+            AND T2.LGS_COST_CD = @[costCode]
+           #end
+           --Contract type 
+           #if ( ${contractType} !='ALL' && ${period1} !='' && ${period2} !='')
+           AND T2.VSL_CD IN (
+               SELECT VSL_CD
+                 FROM MDM_VSL_CNTR
+                WHERE 1=1
+                  AND VSL_CD IN (SELECT VSL_CD FROM FMS_CONTRACT WHERE FLET_CTRT_TP_CD IN (@[contractType]))
+               )
+           #end
+           --CHARGE TYPE : PORT CHARGE, PORT SERVICE CHARGE
+           #if ( ${chargeType} == '01' )
+             --PORT CHARGE 선택시
+             AND C.ACCT_CD NOT IN ('999999', '511795')
+             AND C.ACCT_CD LIKE '5117%'
+             AND MA.ACCT_ENG_NM NOT LIKE 'OTHER PORT%'
+           #end
+           #if ( ${chargeType} == '02' ) 
+             --PORT SERVICE CHARGE 선택시
+             AND C.ACCT_CD LIKE '5118%'
+             AND MA.ACCT_ENG_NM NOT LIKE 'OTHER PORT%'
+           #end
+           #if ( ${chargeType} == '03' ) 
+           --Canal Transit Fee 선택시
+             AND C.ACCT_CD LIKE '5119%'
+             AND MA.ACCT_ENG_NM NOT LIKE 'OTHER PORT%'
+           #end
+           #if ( ${chargeType} != '' && ${chargeType} == '04' ) 
+           --Other 선택시
+             AND C.ACCT_CD <> '999999' 
+             AND (C.ACCT_CD IN ('564611', '511795') OR MA.ACCT_ENG_NM LIKE 'OTHER PORT%')
+           #end
+)
+WHERE 1=1
+#if(${rhq}!='' && ${rhq}!='ALL')
+AND   RHQ_OFC_CD      = @[rhq] -- RHQ Office
+#end
+GROUP BY ISS_CTY_CD
+     , SO_SEQ
+     , VVD
+     , LGS_COST_CD
+ORDER BY 6, 3			]]></sql>
+			<params>
+				<param name="rhq" type="12" value="" out="N"/>
+				<param name="vesselClass" type="12" value="" out="N"/>
+				<param name="vessel" type="12" value="" out="N"/>
+				<param name="period1" type="12" value="" out="N"/>
+				<param name="period2" type="12" value="" out="N"/>
+				<param name="country" type="12" value="" out="N"/>
+				<param name="portCode" type="12" value="" out="N"/>
+				<param name="yardCd" type="12" value="" out="N"/>
+				<param name="accountCode" type="12" value="" out="N"/>
+				<param name="costCode" type="12" value="" out="N"/>
+				<param name="contractType" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

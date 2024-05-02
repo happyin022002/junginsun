@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CarrierSettlementProcessDBDAOMcsStatusVORSQL">
+			<desc><![CDATA[.]]></desc>
+			<sql><![CDATA[
+SELECT  TRD_CD, RLANE_CD, ACCT_YRMON, STL_CMB_SEQ, JO_CRR_CD, JO_REV, JO_EXP, JO_BALANCE, BENEFIT_LINE, FROM_DT, TO_DT, VVD, LOCL_CURR_CD
+FROM    (
+SELECT  
+        CASE WHEN GUBUN = '00110' THEN 
+                'SubSum:' || JO_CRR_CD
+             WHEN GUBUN = '11110' THEN 
+                 'TOTAL'
+             ELSE ACCT_YRMON
+        END AS ACCT_YRMON
+        , ACCT_YRMON AS ACCT_YRMON2
+        , CASE WHEN GUBUN = '00110' THEN 
+                'Sub-Total'
+             ELSE JO_CRR_CD
+        END AS JO_CRR_CD
+        , JO_CRR_CD AS JO_CRR_CD2
+        , TRD_CD, RLANE_CD, LOCL_CURR_CD, STL_CMB_SEQ, JO_REV, JO_EXP, JO_BALANCE
+        , DECODE(GUBUN, '00000', BENEFIT_LINE, NULL) AS BENEFIT_LINE
+        , FROM_DT, TO_DT, VVD
+        ,  GUBUN
+FROM    (
+SELECT  ACCT_YRMON, JO_CRR_CD, TRD_CD, RLANE_CD, LOCL_CURR_CD, MAX(STL_CMB_SEQ) AS STL_CMB_SEQ, SUM(JO_REV) AS JO_REV
+        , SUM(JO_EXP) AS JO_EXP, SUM(JO_BALANCE) AS JO_BALANCE, MAX(BENEFIT_LINE) AS BENEFIT_LINE, MAX(FROM_DT) AS FROM_DT, MAX(TO_DT) AS TO_DT
+       , MAX(VVD) AS VVD
+       , GROUPING(ACCT_YRMON)|| GROUPING(JO_CRR_CD) || GROUPING(TRD_CD) || GROUPING(RLANE_CD) || GROUPING(LOCL_CURR_CD) AS GUBUN
+FROM
+(
+SELECT  TRD_CD, 
+        RLANE_CD, 
+        ACCT_YRMON, 
+        STL_CMB_SEQ, 
+        JO_CRR_CD, 
+        NVL(JO_REV,0) JO_REV, 
+        NVL(JO_EXP,0) JO_EXP, 
+        NVL(JO_REV,0) - NVL(JO_EXP,0) JO_BALANCE, 
+        DECODE(SIGN(NVL(JO_REV,0) - NVL(JO_EXP,0)), -1, JO_CRR_CD, 1, 'SML', 0, 'SML') BENEFIT_LINE,
+		'' FROM_DT,
+	    '' TO_DT,
+		'' VVD,
+		'' vvd_chk,
+		'' combined_chk,
+       ''JO_STL_ITM_CD,
+       LOCL_CURR_CD
+  FROM (
+    SELECT A.TRD_CD,
+      A.RLANE_CD,
+      A.ACCT_YRMON,
+      LPAD(B.STL_CMB_SEQ, 3, '0') STL_CMB_SEQ,
+      A.JO_CRR_CD
+ 		#if (${usdamount_chk} != '')
+			 ,'USD' AS LOCL_CURR_CD
+             ,SUM(DECODE(A.RE_DIVR_CD, 'R', A.STL_LOCL_AMT / DECODE (A.LOCL_CURR_CD, 'USD', 1, (
+                  SELECT NVL(EX1.USD_LOCL_XCH_RT, 1)
+                  FROM GL_MON_XCH_RT EX1
+                    WHERE EX1.CURR_CD = A.LOCL_CURR_CD
+                    AND EX1.ACCT_XCH_RT_YRMON = TO_CHAR(R.EFF_DT, 'YYYYMM')
+                    AND EX1.ACCT_XCH_RT_LVL = '1' ) ) ) ) AS JO_REV
+             ,SUM(DECODE(A.RE_DIVR_CD, 'E', A.STL_LOCL_AMT) / DECODE (A.LOCL_CURR_CD, 'USD', 1, (
+                   SELECT NVL(EX1.USD_LOCL_XCH_RT, 1)
+                   FROM GL_MON_XCH_RT EX1
+                     WHERE EX1.CURR_CD = A.LOCL_CURR_CD
+                     AND EX1.ACCT_XCH_RT_YRMON = TO_CHAR(R.EFF_DT, 'YYYYMM')
+                     AND EX1.ACCT_XCH_RT_LVL = '1' ) ) ) AS JO_EXP
+        #else
+				  ,A.LOCL_CURR_CD
+                  ,SUM(DECODE(A.RE_DIVR_CD, 'R', A.STL_LOCL_AMT)) JO_REV
+                  ,SUM(DECODE(A.RE_DIVR_CD, 'E', A.STL_LOCL_AMT)) JO_EXP
+        #end
+    FROM JOO_SETTLEMENT A, JOO_STL_CMB_DTL B, JOO_STL_CMB D, JOO_CSR R
+    WHERE A.ACCT_YRMON BETWEEN @[from_dt] AND @[to_dt]
+      AND A.ACCT_YRMON = B.ACCT_YRMON
+      AND A.STL_VVD_SEQ = B.STL_VVD_SEQ
+      AND A.STL_SEQ = B.STL_SEQ
+      AND A.JO_CRR_CD = B.JO_CRR_CD
+      AND A.RE_DIVR_CD = B.RE_DIVR_CD
+--2010.03.19 REVERSE, REJECT건 제외(박효숙 차장)
+      AND D.RVS_CMB_FLG  = 'N'
+      AND D.RJCT_CMB_FLG = 'N'
+--2010.03.08 COMBINED된 DATA가 아닌 CSR 완료된 것으로 (BY 박효숙 차장)
+      AND B.ACCT_YRMON  = D.ACCT_YRMON
+      AND B.JO_CRR_CD   = D.JO_CRR_CD
+      AND B.STL_CMB_SEQ = D.STL_CMB_SEQ
+      AND B.RE_DIVR_CD  = D.RE_DIVR_CD
+      AND D.SLP_SER_NO IS NOT NULL
+#if (${trd_cd} != '') 
+	AND A.TRD_CD LIKE @[trd_cd]||'%'
+#end
+#if (${rlane_cd} != '') 
+	AND A.RLANE_CD LIKE @[rlane_cd]||'%'
+#end
+#if (${jo_crr_cd} != '') 
+	AND A.JO_CRR_CD LIKE @[jo_crr_cd]||'%'
+#end
+    AND A.CMB_CFM_FLG = 'Y'
+    AND A.STL_LOCL_AMT<>0
+	AND  D.SLP_TP_CD = R.SLP_TP_CD
+	AND  D.SLP_FUNC_CD = R.SLP_FUNC_CD
+	AND  D.SLP_OFC_CD = R.SLP_OFC_CD
+	AND  D.SLP_ISS_DT = R.SLP_ISS_DT
+	AND  D.SLP_SER_NO = R.SLP_SER_NO
+  #if (${ofc_cd} != '')
+    AND R.SLP_OFC_CD = @[ofc_cd]
+  #end
+    GROUP BY A.TRD_CD, A.RLANE_CD, A.ACCT_YRMON, B.STL_CMB_SEQ, A.JO_CRR_CD, A.LOCL_CURR_CD
+    ORDER BY A.ACCT_YRMON, A.TRD_CD, A.RLANE_CD,A.JO_CRR_CD,  B.STL_CMB_SEQ
+    )
+	)
+WHERE   1=1
+GROUP BY CUBE (ACCT_YRMON, JO_CRR_CD,LOCL_CURR_CD,  TRD_CD, RLANE_CD)
+)
+WHERE   1=1
+AND     GUBUN IN ('00000', '00110', '11110', '11111')
+ORDER BY ACCT_YRMON2, JO_CRR_CD2, NVL2(TRD_CD, 0, 1), LOCL_CURR_CD
+)			]]></sql>
+			<params>
+				<param name="from_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+				<param name="trd_cd" type="12" value="" out="N"/>
+				<param name="rlane_cd" type="12" value="" out="N"/>
+				<param name="jo_crr_cd" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

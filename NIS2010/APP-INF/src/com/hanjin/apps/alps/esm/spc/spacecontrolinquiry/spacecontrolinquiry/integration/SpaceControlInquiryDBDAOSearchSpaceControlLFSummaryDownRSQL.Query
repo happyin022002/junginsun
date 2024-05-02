@@ -1,0 +1,537 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SpaceControlInquiryDBDAOSearchSpaceControlLFSummaryDownRSQL">
+			<desc><![CDATA[2010.11.02 최윤성 [CHM-201006585-01] 2010년 연간개발계획 - full+empty L/F summary 화면 개발
+2010.12.21 최윤성 [CHM-201007718-01] L/F Summary 화면 BKG 로직 수정
+2011.01.04 최윤성 [CHM-201008093-01] Office Level Table 생성
+ - SPC_ORGANIZATION_V 대신 SPC_OFC_LVL 로 대체
+2011.01.19 최윤성 [CHM-201108422-01] L/F Summary 화면 하드코딩 및 보완 요청
+ - IAS/IP sub-trade 에 한하여 BSA 는 Full BKG volume 과 동일하게 보여지도록 수정
+ - IAS 한하여 Empty 값은 From ~ To 의 Conti 가 모두 A 인 값만 보이고 나머지는 0.
+2011.05.24 김종준 [CHM-201111032-01] L/F Summary 화면 로직 보완
+  - Daily F"cast Status 화면과 동일하도록 로직 보완 
+  - RHQ 선택시 loading office 뿐만이 아니라 From conti 까지 일치 하는 BKG 정보만 가지고 오도록 추가
+2017.1.23 SM상선 전환에 따른 소스변경]]></desc>
+			<sql><![CDATA[
+WITH BSA_FULL AS (
+    SELECT TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           COST_YR   ,
+           COST_MON  ,
+           NUM       ,
+           COST_WK   ,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           VVD       ,
+           SLAN_CD   ,
+           FULL      ,
+           ROUND(MAS_BSA, 10) AS BSA
+      FROM (
+              SELECT TRD_CD    ,
+                     SUB_TRD_CD,
+                     RLANE_CD  ,
+                     DIR_CD    ,
+                     COST_YR   ,
+                     COST_MON  ,
+                     NUM       ,
+                     COST_WK   ,
+                     VSL_CD    ,
+                     SKD_VOY_NO,
+                     SKD_DIR_CD,
+                     VVD       ,
+                     SLAN_CD   ,
+                     NVL(SUM(MAS_QTY), 0)      AS FULL   ,
+                     NVL(SUM(VVD_BSA_CAPA), 0) AS MAS_BSA
+                FROM (
+                        SELECT /*+ USE_HASH(A2, A1, A3, A4) PARALLEL(A2, A4) */
+                               A1.TRD_CD    ,
+                               A1.SUB_TRD_CD,
+                               A1.RLANE_CD  ,
+                               A1.DIR_CD    ,
+                               SUBSTR(A1.SLS_YRMON, 1, 4) AS COST_YR ,
+                               SUBSTR(A1.SLS_YRMON, 5)    AS COST_MON,
+                               P.RNUM AS NUM,
+                               A1.COST_WK   ,
+                               A1.VSL_CD    ,
+                               A1.SKD_VOY_NO,
+                               A1.DIR_CD AS SKD_DIR_CD,
+                               A1.VSL_CD||A1.SKD_VOY_NO||A1.DIR_CD AS VVD,
+                               A1.SLAN_CD   ,
+                               NVL(A3.LOD_SPL_CNG_FLG,'N') AS LOD_SPL_CNG_FLG,
+                               DECODE(NVL(A3.LOD_SPL_CNG_FLG,'N'), 'Y', SUM(DECODE(SPC_GET_CNTR_SZ_FNC(A2.CNTR_TPSZ_CD)
+                                                                 , '2', NVL(A2.BKG_QTY, 0), NVL(A2.BKG_QTY, 0) * 2))
+                                                                 , 'N', MAX(A1.VVD_BSA_CAPA)
+                               ) AS VVD_BSA_CAPA,
+                               SUM(DECODE(SPC_GET_CNTR_SZ_FNC(A2.CNTR_TPSZ_CD), '2', NVL(A2.BKG_QTY, 0), NVL(A2.BKG_QTY, 0) * 2)) AS MAS_QTY
+                         FROM  (
+                                /* 대상 BKG만을 가져옴 */
+                                SELECT TRD_CD, RLANE_CD, IOC_CD,
+                                       VSL_CD, SKD_VOY_NO, DIR_CD, SLS_OFC_CD,
+                                       SUBSTR(SLS_YRMON, 1, 4)||COST_WK BKG_WK,
+                                       CNTR_TPSZ_CD, BKG_QTY,
+                                       BKG_STS_CD, BKG_CGO_TP_CD, BL_NO_TP, BKG_OFC_CD, BKG_NO
+                                  FROM MAS_BKG_EXPN_DTL_WK
+                                 WHERE SUBSTR(SLS_YRMON, 1, 4)||COST_WK >= @[year]||@[week]
+                                   AND BKG_STS_CD         IN ('F','S')
+                                   AND BKG_CGO_TP_CD      <> 'P'
+                                   AND BL_NO_TP           IN ('M','0')
+                               ) A2,
+                               MAS_MON_VVD   A1,
+                               MAS_LANE_RGST A3,
+							   SPC_OFC_LVL   A4,
+                               (
+                                  SELECT /*+ INDEX (P XPKMAS_WK_PRD)*/
+                                         P.COST_YR||P.COST_WK AS COST_YRWK,
+                                         ROWNUM               AS RNUM
+                                    FROM MAS_WK_PRD P
+                                   WHERE P.COST_YR > ' '
+                                     AND P.COST_WK > ' '
+                                     AND P.COST_YR||P.COST_WK >= @[year]||@[week]
+                                     AND ROWNUM               <= @[duration]
+                               ) P
+                         WHERE A1.TRD_CD              = A2.TRD_CD
+                           AND A1.RLANE_CD            = A2.RLANE_CD
+                           AND A1.IOC_CD              = A2.IOC_CD
+                           AND A1.VSL_CD              = A2.VSL_CD
+                           AND A1.SKD_VOY_NO          = A2.SKD_VOY_NO
+                           AND A1.DIR_CD              = A2.DIR_CD
+                           AND A1.TRD_CD              = A3.TRD_CD
+                           AND A1.RLANE_CD            = A3.RLANE_CD
+                           AND A1.IOC_CD              = A3.IOC_CD
+                           AND A1.DIR_CD              = A3.DIR_CD
+                           AND SUBSTR(A1.SLS_YRMON, 1, 4)||A1.COST_WK = P.COST_YRWK
+                           --AND SUBSTR(A1.SLS_YRMON, 1, 4)||A1.COST_WK = SUBSTR(A2.SLS_YRMON, 1, 4)||A2.COST_WK
+						   AND SUBSTR(A1.SLS_YRMON, 1, 4)||A1.COST_WK = A2.BKG_WK
+                           AND NVL(A1.DELT_FLG,'N')   = 'N'
+                           --AND A2.BKG_STS_CD         IN ('F','S')
+                           --AND A2.BKG_CGO_TP_CD      <> 'P'
+                           --AND A2.BL_NO_TP           IN ('M','0')
+                           AND A1.TRD_CD              = @[trade]
+                           AND A4.OFC_TP_CD          IN ('BB', 'BA', 'BS')
+                           AND A4.OFC_CD              = SPC_SCR_OFC_CONV_FNC(A2.SLS_OFC_CD)
+                           AND P.COST_YRWK BETWEEN A4.OFC_APLY_FM_YRWK AND A4.OFC_APLY_TO_YRWK
+#if (${rhq} != '')
+	#if (${rhq} == 'SHARC')
+						   AND (A4.N2ND_PRNT_OFC_CD = 'SHARC' 
+							                                OR EXISTS ( SELECT O.OFC_CD
+							                                              FROM SPC_OFC_LVL O
+							                                             WHERE O.OFC_TP_CD IN ('BB', 'BA', 'BS')
+							                                               AND SPC_SCR_OFC_CONV_FNC(A2.BKG_OFC_CD) = O.OFC_CD
+							                                               AND P.COST_YRWK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+							                                           CONNECT BY NOCYCLE O.PRNT_OFC_CD = PRIOR O.OFC_CD 
+							                                           START WITH O.PRNT_OFC_CD ='SINRS'
+							                                           )
+							   )		
+	#else
+						   AND EXISTS ( SELECT O.OFC_CD
+                                          FROM SPC_OFC_LVL O
+                                         WHERE O.OFC_TP_CD IN ('BB', 'BA', 'BS')
+                                           AND SPC_SCR_OFC_CONV_FNC(A2.BKG_OFC_CD) = O.OFC_CD
+                                           AND P.COST_YRWK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+                                       CONNECT BY NOCYCLE O.PRNT_OFC_CD = PRIOR O.OFC_CD
+                                                 START WITH O.PRNT_OFC_CD IN @[rhq] )
+	#end
+#end
+
+#if (${rhq} != '')
+	#if (${rhq} == 'SHARC')
+	                       AND ((A4.N2ND_PRNT_OFC_CD='SHARC' AND 
+	                            'A' = ( SELECT SPC_CONTI_CONV_FNC(L.CONTI_CD, A1.RLANE_CD, A1.DIR_CD)
+                                                            FROM MDM_LOCATION L, BKG_BOOKING B
+                                                           WHERE L.LOC_CD = NVL(B.PRE_RLY_PORT_CD, B.POL_CD)
+                                                           AND B.BKG_NO = A2.BKG_NO ))	  
+                               OR A4.N2ND_PRNT_OFC_CD='SINRS'                                                           
+                               )
+	#else
+						   AND A4.N2ND_PRNT_OFC_CD    IN @[rhq]
+	#end
+#end
+
+#if (${subtrade} != '')
+                           AND A1.SUB_TRD_CD          = @[subtrade]
+#end
+
+#if (${bound} != '')
+                           AND A1.DIR_CD              = @[bound]
+#end
+                      GROUP BY A1.TRD_CD    ,
+                               A1.SUB_TRD_CD,
+                               A1.RLANE_CD  ,
+                               A1.DIR_CD    ,
+                               SUBSTR(A1.SLS_YRMON, 1, 4),
+                               SUBSTR(A1.SLS_YRMON, 5)   ,
+                               P.RNUM       ,
+                               A1.COST_WK   ,
+                               A1.VSL_CD    ,
+                               A1.SKD_VOY_NO,
+                               A1.DIR_CD    ,
+                               A1.VSL_CD||A1.SKD_VOY_NO||A1.DIR_CD,
+                               A1.SLAN_CD   ,
+                               NVL(A3.LOD_SPL_CNG_FLG, 'N')
+                     )
+            GROUP BY TRD_CD    ,
+                     SUB_TRD_CD,
+                     RLANE_CD  ,
+                     DIR_CD    ,
+                     COST_YR   ,
+                     COST_MON  ,
+                     NUM       ,
+                     COST_WK   ,
+                     VSL_CD    ,
+                     SKD_VOY_NO,
+                     SKD_DIR_CD,
+                     VVD       ,
+                     SLAN_CD
+            ORDER BY TRD_CD    ,
+                     SUB_TRD_CD,
+                     RLANE_CD  ,
+                     DIR_CD    ,
+                     COST_YR   ,
+                     COST_MON  ,
+                     NUM       ,
+                     COST_WK   ,
+                     VSL_CD    ,
+                     SKD_VOY_NO,
+                     SKD_DIR_CD,
+                     VVD       ,
+                     SLAN_CD
+           )
+     WHERE FULL + MAS_BSA <> 0
+)
+, RDR_MTY AS (
+    SELECT C.TRD_CD    ,
+           C.SUB_TRD_CD,
+           C.RLANE_CD  ,
+           C.DIR_CD    ,
+           SUBSTR(C.SLS_YRMON, 1, 4) AS COST_YR ,
+           SUBSTR(c.SLS_YRMON, 5)    AS COST_MON,
+           P.RNUM AS NUM,
+           C.COST_WK   ,
+           C.VSL_CD    ,
+           C.SKD_VOY_NO,
+           C.DIR_CD AS SKD_DIR_CD,
+           C.VSL_CD||C.SKD_VOY_NO||C.DIR_CD AS VVD,
+           C.SLAN_CD   ,
+           SUM(M.SLOT_QTY) AS EMPTY,
+           MAX(C.VVD_BSA_CAPA) AS BSA -- 2014.07.14 [CHM-201431072]
+     FROM  RDR_HEADER  H,
+           RDR_UTILIZE M,
+           (
+              SELECT /*+ INDEX (P XPKMAS_WK_PRD)*/
+                     P.COST_YR||P.COST_WK AS COST_YRWK,
+                     ROWNUM               AS RNUM
+                FROM MAS_WK_PRD P
+               WHERE P.COST_YR > ' '
+                 AND P.COST_WK > ' '
+                 AND P.COST_YR||P.COST_WK >= @[year]||@[week]
+                 AND ROWNUM               <= @[duration]
+           ) P,
+           MAS_MON_VVD C
+     WHERE 1=1
+       AND SUBSTR(C.SLS_YRMON, 1, 4)||C.COST_WK = P.COST_YRWK
+       AND (C.DELT_FLG IS NULL OR C.DELT_FLG = 'N')
+       AND C.IOC_CD     = 'O'
+       AND M.OPR_CD     = 'SML'
+       AND M.TYPE       = 'E'
+       
+       AND C.TRD_CD     = @[trade]
+
+#if (${subtrade} != '')
+       AND C.SUB_TRD_CD = @[subtrade]
+#end
+
+#if (${bound} != '')
+       AND C.DIR_CD     = @[bound]
+#end
+
+#if (${rhq} == 'SHARC')
+       AND M.REGION    IN ('A', 'D', 'F')
+#else
+	#if (${rhq} == 'NYCRA')
+       AND M.REGION    IN ('M', 'S')
+	#else
+       AND M.REGION     = DECODE(@[rhq], 'HAMRU', 'E', '')
+	#end
+#end
+  
+       AND H.VSL_CD     = M.VSL_CD
+       AND H.VOY_NO     = M.VOY_NO
+       AND H.DIR_CD     = M.DIR_CD
+       AND H.REGION     = M.REGION
+       AND H.VSL_CD     = C.VSL_CD
+       AND H.VOY_NO     = C.SKD_VOY_NO
+       AND H.DIR_CD     = C.DIR_CD
+  GROUP BY C.TRD_CD    ,
+           C.SUB_TRD_CD,
+           C.RLANE_CD  ,
+           C.DIR_CD    ,
+           SUBSTR(C.SLS_YRMON, 1, 4),
+           SUBSTR(C.SLS_YRMON, 5)   ,
+           P.RNUM      ,
+           C.COST_WK   ,
+           C.VSL_CD    ,
+           C.SKD_VOY_NO,
+           C.DIR_CD    ,
+           C.VSL_CD||C.SKD_VOY_NO||C.DIR_CD,
+           C.SLAN_CD
+)
+#if (${trade} == 'IAS' || ${trade} == 'IES' || ${trade} == 'IMS')
+, INTRA_MTY AS (
+    SELECT TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           COST_YR   ,
+           COST_MON  ,
+           NUM       ,
+           COST_WK   ,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           VVD       ,
+           SLAN_CD   ,
+           SUM(MTY) AS EMPTY
+      FROM (SELECT M.TRD_CD    ,
+                     M.SUB_TRD_CD,
+                     M.RLANE_CD  ,
+                     M.DIR_CD    ,
+                     M.COST_YR ,
+                     M.COST_MON,
+                     M.NUM,
+                     M.COST_WK   ,
+                     M.VSL_CD    ,
+                     M.SKD_VOY_NO,
+                     M.DIR_CD AS SKD_DIR_CD,
+                     M.VSL_CD||M.SKD_VOY_NO||M.DIR_CD AS VVD,
+                     M.SLAN_CD   ,
+                     NVL(DECODE(BKG_CGO_TP_CD, 'P', DECODE(SPC_GET_CNTR_SZ_FNC(CNTR_TPSZ_CD), '2', OP_CNTR_QTY, OP_CNTR_QTY * 2)),0) AS MTY
+                FROM BKG_BOOKING  BKG,
+                     BKG_VVD      VVD,
+                     BKG_QUANTITY QUA,
+                     MDM_LOCATION ORG,
+                     MDM_LOCATION DES,
+                     (
+                        SELECT M.VSL_CD,  
+							   M.SKD_VOY_NO, 
+							   M.DIR_CD, 
+							   M.TRD_CD, 
+							   M.SUB_TRD_CD,
+							   M.RLANE_CD, 
+							   P.COST_YRWK,
+                               SUBSTR(M.SLS_YRMON, 1, 4) AS COST_YR ,
+                               SUBSTR(M.SLS_YRMON, 5)    AS COST_MON,
+                               P.RNUM AS NUM,
+                               M.COST_WK   ,
+                               M.SLAN_CD
+                        FROM 
+                             MAS_MON_VVD  M,
+                             (
+                               SELECT /*+ INDEX (P XPKMAS_WK_PRD)*/
+                                      P.COST_YR||P.COST_WK AS COST_YRWK,
+                                      ROWNUM               AS RNUM
+                                 FROM MAS_WK_PRD P
+                                WHERE P.COST_YR > ' '
+                                  AND P.COST_WK > ' '
+                                  AND P.COST_YR||P.COST_WK >= @[year]||@[week]
+                                  AND ROWNUM               <= @[duration]
+                             ) P
+                        WHERE SUBSTR(M.SLS_YRMON, 1, 4)||M.COST_WK = P.COST_YRWK
+                          AND NVL(M.DELT_FLG, 'N') = 'N'
+                          AND M.WKY_TGT_FLG   = 'Y'
+                 		  AND M.TRD_CD        = @[trade]
+
+#if (${subtrade} != '')
+                 		  AND M.SUB_TRD_CD    = @[subtrade]
+#end
+
+#if (${bound} != '')
+                 		  AND M.DIR_CD        = @[bound]
+#end
+                    ) M
+               WHERE BKG.BKG_NO      = VVD.BKG_NO
+                 AND BKG.BKG_NO      = QUA.BKG_NO
+                 AND BKG.BKG_STS_CD <> 'X'
+                 AND BKG.POL_CD      = ORG.LOC_CD
+                 AND BKG.POD_CD      = DES.LOC_CD
+                 AND SPC_CONTI_CONV_FNC(ORG.CONTI_CD, M.RLANE_CD, M.DIR_CD) = DECODE(M.TRD_CD||M.SUB_TRD_CD, 'IASIA', 'A',
+                                                                                                             'IASIP', 'A',
+                                                                                                             'IMSIP', 'M',
+                                                                                                             'IESIP', 'E',
+                                                                                                             SPC_CONTI_CONV_FNC(ORG.CONTI_CD, M.RLANE_CD, M.DIR_CD))
+                 AND SPC_CONTI_CONV_FNC(DES.CONTI_CD, M.RLANE_CD, M.DIR_CD) = DECODE(M.TRD_CD||M.SUB_TRD_CD, 'IASIA', 'A',
+                                                                                                             'IASIP', 'A',
+                                                                                                             'IMSIP', 'M',
+                                                                                                             'IESIP', 'E',
+                                                                                                             SPC_CONTI_CONV_FNC(DES.CONTI_CD, M.RLANE_CD, M.DIR_CD))
+                 AND VVD.VSL_CD      = M.VSL_CD
+                 AND VVD.SKD_VOY_NO  = M.SKD_VOY_NO
+                 AND VVD.SKD_DIR_CD  = M.DIR_CD
+                 --AND (M.DELT_FLG IS NULL OR M.DELT_FLG = 'N')
+
+                 --AND SKD.VSL_CD      = M.VSL_CD 
+                 --AND SKD.SKD_VOY_NO  = M.SKD_VOY_NO
+                 --AND SKD.SKD_DIR_CD  = M.DIR_CD
+                 --AND SKD.SLAN_CD     = M.SLAN_CD
+              	AND EXISTS (SELECT 'X' FROM VSK_VSL_PORT_SKD SKD
+             				 WHERE SKD.VSL_CD     = M.VSL_CD 
+             				   AND SKD.SKD_VOY_NO = M.SKD_VOY_NO
+           					   AND SKD.SKD_DIR_CD = M.DIR_CD
+           					   AND SKD.SLAN_CD    = M.SLAN_CD
+           					   AND ROWNUM = 1)
+
+                 --AND M.WKY_TGT_FLG   = 'Y'
+                 --AND SPC_SCR_OFC_CONV_FNC(BKG.OB_SLS_OFC_CD)  = O.OFC_CD
+                 --AND P.COST_YRWK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+                AND SPC_SCR_OFC_CONV_FNC(BKG.OB_SLS_OFC_CD) IN (SELECT OFC_CD 
+																  FROM SPC_OFC_LVL 
+																 WHERE 1=1
+#if (${rhq} != '')
+	#if (${rhq} == 'SHARC')
+						   										   AND N2ND_PRNT_OFC_CD		IN ('SHARC', 'SINRS')
+	#else
+															       AND N2ND_PRNT_OFC_CD    IN @[rhq]
+	#end
+#end
+                                                                   AND M.COST_YRWK BETWEEN OFC_APLY_FM_YRWK AND OFC_APLY_TO_YRWK)
+           )
+     WHERE MTY > 0
+  GROUP BY TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           COST_YR   ,
+           COST_MON  ,
+           NUM       ,
+           COST_WK   ,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           VVD       ,
+           SLAN_CD
+)
+#end
+
+, BASE_DATA AS (
+
+    SELECT TRD_CD
+         , SUB_TRD_CD
+         , RLANE_CD
+         , DIR_CD
+         , COST_YR
+         , COST_MON
+         , NUM
+         , COST_WK
+         , VSL_CD
+         , SKD_VOY_NO
+         , SKD_DIR_CD
+         , VVD
+         , SLAN_CD
+         , MAX(BSA) BSA
+         , MAX(FULL) FULL
+         , MAX(EMPTY) EMPTY
+      FROM (
+        SELECT 'BSA_FULL' AS TY,
+               TRD_CD    ,
+               SUB_TRD_CD,
+               RLANE_CD  ,
+               DIR_CD    ,
+               COST_YR   ,
+               COST_MON  ,
+               NUM       ,
+               COST_WK   ,
+               VSL_CD    ,
+               SKD_VOY_NO,
+               SKD_DIR_CD,
+               VVD       ,
+               SLAN_CD   ,
+               BSA       ,
+               FULL      ,
+               0 AS EMPTY
+          FROM BSA_FULL
+        UNION ALL
+        SELECT 'MTY' AS TY,
+               TRD_CD    ,
+               SUB_TRD_CD,
+               RLANE_CD  ,
+               DIR_CD    ,
+               COST_YR   ,
+               COST_MON  ,
+               NUM       ,
+               COST_WK   ,
+               VSL_CD    ,
+               SKD_VOY_NO,
+               SKD_DIR_CD,
+               VVD       ,
+               SLAN_CD   ,
+               BSA,
+               0 AS FULL,
+               EMPTY
+          FROM RDR_MTY
+
+
+#if (${trade} == 'IAS' || ${trade} == 'IES' || ${trade} == 'IMS')
+        UNION ALL
+        SELECT 'INTRA_MTY' AS TY,
+               TRD_CD    ,
+               SUB_TRD_CD,
+               RLANE_CD  ,
+               DIR_CD    ,
+               COST_YR   ,
+               COST_MON  ,
+               NUM       ,
+               COST_WK   ,
+               VSL_CD    ,
+               SKD_VOY_NO,
+               SKD_DIR_CD,
+               VVD       ,
+               SLAN_CD   ,
+               0 AS BSA,
+               0 AS FULL,
+               EMPTY
+          FROM INTRA_MTY
+#end
+		)
+       GROUP BY TRD_CD , SUB_TRD_CD, RLANE_CD , DIR_CD , COST_YR , COST_MON , NUM , COST_WK , VSL_CD , SKD_VOY_NO, SKD_DIR_CD, VVD , SLAN_CD
+)
+  SELECT COST_WK   ,
+         TRD_CD    ,
+         SUB_TRD_CD,
+         RLANE_CD  ,
+         VVD       ,
+         DIR_CD    ,
+         SUM(DECODE(TRD_CD||SUB_TRD_CD, 'IASIP', FULL, BSA)) AS BSA ,
+         SUM(FULL)                                           AS FULL,
+         SUM(EMPTY)        AS EMPTY   ,
+         SUM(FULL + EMPTY) AS TTL_LOAD,
+         ROUND(DECODE(SUM(DECODE(TRD_CD||SUB_TRD_CD, 'IASIP', FULL, BSA)), 0, 0, DECODE(SUM(FULL), 0, 0, SUM(FULL) * 100 / SUM(DECODE(TRD_CD||SUB_TRD_CD, 'IASIP', FULL, BSA)))), 1) AS FULL_LF,
+         ROUND(DECODE(SUM(DECODE(TRD_CD||SUB_TRD_CD, 'IASIP', FULL, BSA)), 0, 0, DECODE(SUM(FULL + EMPTY), 0, 0, SUM(FULL + EMPTY) * 100 / SUM(DECODE(TRD_CD||SUB_TRD_CD, 'IASIP', FULL, BSA)))), 1) AS TTL_LF
+    FROM BASE_DATA
+GROUP BY COST_WK   ,
+         TRD_CD    ,
+         SUB_TRD_CD,
+         RLANE_CD  ,
+         VVD       ,
+         DIR_CD
+ORDER BY COST_WK   ,
+         TRD_CD    ,
+         SUB_TRD_CD DESC,
+         BSA        DESC,
+         RLANE_CD  ,
+         VVD       ,
+         DIR_CD			]]></sql>
+			<params>
+				<param name="year" type="12" value="" out="N"/>
+				<param name="week" type="12" value="" out="N"/>
+				<param name="duration" type="12" value="" out="N"/>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="rhq" type="12" value="" out="N"/>
+				<param name="subtrade" type="12" value="" out="N"/>
+				<param name="bound" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

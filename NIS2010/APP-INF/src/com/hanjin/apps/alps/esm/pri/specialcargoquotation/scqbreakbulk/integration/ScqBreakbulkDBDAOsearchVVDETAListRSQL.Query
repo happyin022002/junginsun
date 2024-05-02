@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ScqBreakbulkDBDAOsearchVVDETAListRSQL">
+			<desc><![CDATA[Service Lane 및 POL 기준으로 대상 VVD 와 ETA DT 를 조회]]></desc>
+			<sql><![CDATA[
+SELECT  DISTINCT CD, NM
+FROM	
+	(
+		SELECT  VVD_CD AS CD, TO_CHAR ( VPS_ETA_DT, 'YYYY-MM-DD HH24:MI' ) AS NM
+		FROM    PRI_SCQ_BB_MN 
+		WHERE	SCQ_RQST_NO = @[scq_rqst_no]
+		AND		SCQ_VER_NO  = @[scq_ver_no]
+		UNION   ALL
+		SELECT	T2.VSL_CD||T2.SKD_VOY_NO ||T2.SKD_DIR_CD      AS CD
+			,   TO_CHAR (T3.VPS_ETA_DT, 'YYYY-MM-DD HH24:MI') AS NM
+		FROM 	(
+
+				/* 주어진 조회 기간내에 포함되는 VVD및 그와 연결되는 VVD를 조회한다.*/
+				SELECT 	*
+				FROM 	(
+						SELECT 	DISTINCT
+								T1.VSL_CD
+							,	DECODE(MOD(Y, 2), 1, SKD_VOY_NO, 0, TURN_SKD_VOY_NO) SKD_VOY_NO
+							,	DECODE(MOD(Y, 2), 1, SKD_DIR_CD, 0, TURN_SKD_DIR_CD) SKD_DIR_CD
+						FROM 	(
+								SELECT	T1.*
+								FROM	(
+										SELECT	T1.*
+											,	ROW_NUMBER() OVER(PARTITION BY VSL_CD, SKD_VOY_NO, SKD_DIR_CD ORDER BY TURN_SKD_VOY_NO) X
+										FROM 	(
+												SELECT 		T1.VSL_CD
+														,	T1.SKD_VOY_NO
+														,	T1.SKD_DIR_CD
+														,	CASE 	WHEN T1.VSL_SLAN_DIR_SEQ=1 AND T1.TURN_PORT_IND_CD = 'D' THEN T1.TURN_SKD_VOY_NO							/* 첫번째 DIR의 경우, TURN_PORT_IND_CD가 'D' 즉, 두번째 DIR의 SKD_VOY_NO를 구한다.*/
+																	WHEN T1.VSL_SLAN_DIR_SEQ=2 AND T1.TURN_PORT_FLG    = 'Y' AND T1.TURN_PORT_IND_CD='Y' THEN T1.TURN_SKD_VOY_NO /* 두번째 DIR의 경우, TURN_PORT_IND_CD가 'Y' 즉, 이전 VVD의 첫번째 DIR의 SKD_VOY_NO를 구한다.*/
+																	ELSE 'XXXX'
+															END 	TURN_SKD_VOY_NO
+														,	CASE 	WHEN T1.VSL_SLAN_DIR_SEQ=1 AND T1.TURN_PORT_IND_CD = 'D' THEN T1.TURN_SKD_DIR_CD 							/* 첫번째 DIR의 경우, TURN_PORT_IND_CD가 'D' 즉, 두번째 DIR의 SKD_DIR_CD를 구한다.*/
+																	WHEN T1.VSL_SLAN_DIR_SEQ=2 AND T1.TURN_PORT_FLG='Y' AND T1.TURN_PORT_IND_CD='Y' THEN T1.TURN_SKD_DIR_CD 	/* 두번째 DIR의 경우, TURN_PORT_IND_CD가 'Y' 즉, 이전 VVD의 첫번째 DIR의 SKD_DIR_CD를 구한다.*/
+																	ELSE 'XXXX'
+															END 	TURN_SKD_DIR_CD
+												FROM 		(
+															/* VVD별 최소ETB, 최대ETD 계산 */
+															SELECT
+																		T2.VSL_CD
+																	,	T2.SKD_VOY_NO
+																	,	T2.SKD_DIR_CD
+																	,	T1.VSL_SLAN_DIR_SEQ
+																	,	T2.VPS_PORT_CD
+																	,	T2.CLPT_IND_SEQ
+																	,	T2.CLPT_SEQ
+																	,	T2.VPS_ETB_DT
+																	,	T2.VPS_ETD_DT
+																	,	T2.TURN_PORT_FLG
+																	,	T2.TURN_PORT_IND_CD
+																	,	T2.TURN_SKD_VOY_NO
+																	,	T2.TURN_SKD_DIR_CD
+																	,	FIRST_VALUE(T2.VPS_ETB_DT) OVER(PARTITION BY T2.VSL_CD, T2.SKD_VOY_NO, T2.SKD_DIR_CD ORDER BY CLPT_SEQ ASC) FIRST_ETB
+																	,	FIRST_VALUE(T2.VPS_ETD_DT) OVER(PARTITION BY T2.VSL_CD, T2.SKD_VOY_NO, T2.SKD_DIR_CD ORDER BY CLPT_SEQ DESC) LAST_ETD
+															FROM 		(
+																		SELECT
+																					T1.VSL_SLAN_CD
+																				, 	T1.PF_SKD_TP_CD
+																				, 	T1.VSL_CD
+																				, 	T1.SKD_VOY_NO
+																				, 	T1.SKD_DIR_CD
+																					/* PF SKD DETAIL 을 이용하여 DIRECTION SEQ를 구함*/
+																				, 	DECODE(MIN(PORT_ROTN_SEQ), NULL, ROW_NUMBER() OVER(PARTITION BY VSL_CD, SKD_VOY_NO ORDER BY T1.N1ST_PORT_BRTH_DT), 1, 1, 2) AS VSL_SLAN_DIR_SEQ
+																		FROM 		VSK_VSL_SKD 	T1
+																				, 	VSK_PF_SKD_DTL 	T2
+																		WHERE 		1 = 1
+																		AND 		T1.VSL_SLAN_CD  = T2.VSL_SLAN_CD(+)
+																		AND 		T1.PF_SKD_TP_CD = T2.PF_SVC_TP_CD(+)
+																		AND 		T1.SKD_DIR_CD   = T2.SKD_DIR_CD(+)
+																		AND 		T1.VSL_SLAN_CD 	= @[lane_cd]
+																		GROUP BY 	T1.VSL_SLAN_CD
+																				, 	T1.PF_SKD_TP_CD
+																				, 	T1.VSL_CD
+																				, 	T1.SKD_VOY_NO
+																				,	T1.SKD_DIR_CD
+																				, 	T1.N1ST_PORT_BRTH_DT
+																		) T1
+																	, 	VSK_VSL_PORT_SKD 		T2
+																		WHERE 		1 = 1
+																		AND T1.VSL_SLAN_CD		= @[lane_cd]
+																		AND T2.SLAN_CD			= @[lane_cd]
+																		AND T1.VSL_CD			= T2.VSL_CD
+																		AND T1.SKD_VOY_NO		= T2.SKD_VOY_NO
+																		AND T1.SKD_DIR_CD		= T2.SKD_DIR_CD
+																		AND T2.TURN_PORT_IND_CD	!= 'V'
+														   ) T1
+													WHERE 	1 = 1
+													AND 	SYSDATE - 30 <= T1.LAST_ETD
+													AND 	SYSDATE + 90 >= T1.FIRST_ETB
+													/*
+													AND 	TO_DATE('2013-07-01', 'YYYY-MM-DD') <= T1.LAST_ETD
+													AND 	TO_DATE('2013-09-30', 'YYYY-MM-DD') >= T1.FIRST_ETB
+													*/
+													) T1
+											) T1
+										WHERE X = 1
+										) T1
+										/* T1에서 TURN_SKD_VOY_NO, TURN_SKD_DIR_CD를 끌어내기 위해 인위적으로 2개 ROW를 갖는 테이블을 조인한다.*/
+									,	(SELECT ROWNUM AS Y FROM DUAL CONNECT BY LEVEL <= 2) T2
+								) T1
+						WHERE 	T1.SKD_VOY_NO 	!= 'XXXX'
+						AND 	T1.SKD_DIR_CD	!= 'XXXX'
+						)T1
+					, 	(
+						SELECT
+									T1.VSL_SLAN_CD
+								, 	T1.PF_SKD_TP_CD
+								, 	T1.VSL_CD
+								, 	T1.SKD_VOY_NO
+								, 	T1.SKD_DIR_CD
+								, 	MAX(T1.SKD_RMK) AS SKD_RMK
+									/* PF SKD DETAIL 을 이용하여 DIRECTION SEQ를 구함*/
+								, 	DECODE(MIN(PORT_ROTN_SEQ), NULL, ROW_NUMBER() OVER(PARTITION BY VSL_CD, SKD_VOY_NO ORDER BY T1.N1ST_PORT_BRTH_DT), 1, 1, 2) AS VSL_SLAN_DIR_SEQ
+								,	T1.ACT_CRR_CD
+							FROM 	VSK_VSL_SKD 	T1
+								, 	VSK_PF_SKD_DTL 	T2
+							WHERE 	1 = 1
+							AND 	T1.VSL_SLAN_CD  = T2.VSL_SLAN_CD(+)
+							AND 	T1.PF_SKD_TP_CD = T2.PF_SVC_TP_CD(+)
+							AND 	T1.SKD_DIR_CD   = T2.SKD_DIR_CD(+)
+							AND 	T1.VSL_SLAN_CD 	= @[lane_cd]
+							GROUP BY T1.VSL_SLAN_CD
+								, 	T1.PF_SKD_TP_CD
+								, 	T1.VSL_CD
+								, 	T1.SKD_VOY_NO
+								, 	T1.SKD_DIR_CD
+								, 	T1.N1ST_PORT_BRTH_DT
+								,	T1.ACT_CRR_CD
+						) T2
+					, 	VSK_VSL_PORT_SKD T3
+					, 	MDM_VSL_SVC_LANE T4
+				WHERE 	1 = 1
+				AND 	T2.VSL_SLAN_CD	= @[lane_cd]
+				AND 	T2.VSL_SLAN_CD 			=  T4.VSL_SLAN_CD
+				AND 	T1.VSL_CD				=  T2.VSL_CD
+				AND 	T1.SKD_VOY_NO			=  T2.SKD_VOY_NO
+				AND 	T1.SKD_DIR_CD			=  T2.SKD_DIR_CD
+				AND 	T2.VSL_CD				=  T3.VSL_CD
+				AND 	T2.SKD_VOY_NO			=  T3.SKD_VOY_NO
+				AND 	T2.SKD_DIR_CD			=  T3.SKD_DIR_CD
+				AND 	T3.TURN_PORT_IND_CD		!= 'D'
+				AND 	T3.TURN_PORT_IND_CD		!= 'V'
+				AND 	T4.VSL_TP_CD			=  'C' 	/*컨테이너선*/
+				AND     T3.VPS_PORT_CD          = @[pol_cd]
+				AND     T3.CLPT_IND_SEQ         =
+						  ( SELECT  MIN ( X.CLPT_IND_SEQ )
+							FROM    VSK_VSL_PORT_SKD X
+							WHERE   X.VSL_CD = T3.VSL_CD
+							AND     X.SKD_VOY_NO = T3.SKD_VOY_NO
+							AND     X.SKD_DIR_CD = T3.SKD_DIR_CD
+							AND     X.VPS_PORT_CD = T3.VPS_PORT_CD )
+	)
+	ORDER BY NM, CD			]]></sql>
+			<params>
+				<param name="scq_rqst_no" type="12" value="" out="N"/>
+				<param name="scq_ver_no" type="12" value="" out="N"/>
+				<param name="lane_cd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

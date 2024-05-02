@@ -1,0 +1,640 @@
+/*=========================================================
+*Copyright(c) 2016 CyberLogitec
+*@FileName : CollectionSummaryDBDAOsearchCollectionSummaryByCustomerDetailRSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2016.07.07
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2016.07.07 
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.ees.dod.dodreport.collectionsummary.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class CollectionSummaryDBDAOsearchCollectionSummaryByCustomerDetailRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * 20160523 hong 최초생성
+	  * </pre>
+	  */
+	public CollectionSummaryDBDAOsearchCollectionSummaryByCustomerDetailRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("to",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cust_type_N",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cust_type_C",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cust_type_S",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("from",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.ees.dod.dodreport.collectionsummary.integration").append("\n"); 
+		query.append("FileName : CollectionSummaryDBDAOsearchCollectionSummaryByCustomerDetailRSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT  " ).append("\n"); 
+		query.append("      OFC_CD," ).append("\n"); 
+		query.append("      CNTR_NO," ).append("\n"); 
+		query.append("      TPSZ_CD," ).append("\n"); 
+		query.append("      RTN_YD," ).append("\n"); 
+		query.append("      A_RTN_YD," ).append("\n"); 
+		query.append("      RTN_DT," ).append("\n"); 
+		query.append("      TRO_DT," ).append("\n"); 
+		query.append("      BKG_NO," ).append("\n"); 
+		query.append("      POR_CD," ).append("\n"); 
+		query.append("      POL_CD," ).append("\n"); 
+		query.append("      POD_CD," ).append("\n"); 
+		query.append("      DEL_CD," ).append("\n"); 
+		query.append("      SC_NO," ).append("\n"); 
+		query.append("      RFA_NO," ).append("\n"); 
+		query.append("      INV_CUST_CD," ).append("\n"); 
+		query.append("      INV_CUST_NM," ).append("\n"); 
+		query.append("      CUST_CNT_CD," ).append("\n"); 
+		query.append("      CUST_SEQ," ).append("\n"); 
+		query.append("      CUST_CD," ).append("\n"); 
+		query.append("      CUST_NM," ).append("\n"); 
+		query.append("      CONTRACT_OFC," ).append("\n"); 
+		query.append("      CURR_CD," ).append("\n"); 
+		query.append("      DECODE(NVL(PEN_AMT, 0), 0, GEN_TRF_AMT, GEN_AMT) GEN_TRF_AMT," ).append("\n"); 
+		query.append("      DECODE(NVL(PEN_AMT, 0), 0, SPCL_TRF_AMT, SPC_AMT) SPCL_TRF_AMT," ).append("\n"); 
+		query.append("      ADJ_AMT," ).append("\n"); 
+		query.append("      " ).append("\n"); 
+		query.append("      #if(${ar_if} == 'N')" ).append("\n"); 
+		query.append("        0 INV_AMT," ).append("\n"); 
+		query.append("        0 INV_USD_AMT," ).append("\n"); 
+		query.append("      #else" ).append("\n"); 
+		query.append("        INV_AMT," ).append("\n"); 
+		query.append("        INV_USD_AMT," ).append("\n"); 
+		query.append("      #end" ).append("\n"); 
+		query.append(" " ).append("\n"); 
+		query.append("      SPC_AMT," ).append("\n"); 
+		query.append("      GEN_AMT," ).append("\n"); 
+		query.append("      EXEMPTION," ).append("\n"); 
+		query.append("      AR_IF_DT," ).append("\n"); 
+		query.append("      CRE_USR_ID," ).append("\n"); 
+		query.append("      INV_OFC_CD," ).append("\n"); 
+		query.append("      PEN_AMT," ).append("\n"); 
+		query.append("      INV_CNTR" ).append("\n"); 
+		query.append("FROM" ).append("\n"); 
+		query.append("(" ).append("\n"); 
+		query.append("SELECT DISTINCT A.*, " ).append("\n"); 
+		query.append("       DECODE(SPC_AMT, NULL, GEN_AMT, SPC_AMT) AS PEN_AMT" ).append("\n"); 
+		query.append("FROM" ).append("\n"); 
+		query.append("    (" ).append("\n"); 
+		query.append("    SELECT E.CFM_OFC_CD AS OFC_CD" ).append("\n"); 
+		query.append("       , E.CNTR_NO" ).append("\n"); 
+		query.append("       , E.CNTR_TPSZ_CD AS TPSZ_CD" ).append("\n"); 
+		query.append("       , E.CNTR_RTN_YD_CD RTN_YD" ).append("\n"); 
+		query.append("       ,(SELECT /*+ INDEX( M XIE6CTM_MOVEMENT ) */" ).append("\n"); 
+		query.append("                M.ORG_YD_CD AS ACT_TRN_YARD" ).append("\n"); 
+		query.append("            FROM CTM_MOVEMENT M" ).append("\n"); 
+		query.append("               , MST_CONTAINER C" ).append("\n"); 
+		query.append("           WHERE 1 = 1" ).append("\n"); 
+		query.append("             AND M.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("             AND M.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("             AND M.MVMT_STS_CD = 'MT'" ).append("\n"); 
+		query.append("             AND M.CNTR_NO = C.CNTR_NO" ).append("\n"); 
+		query.append("             AND NVL(C.LSTM_CD, '  ') <> 'SH' /* SOC  */" ).append("\n"); 
+		query.append("             AND NVL(M.MVMT_CRE_TP_CD, '  ') NOT IN ( 'C','L' )" ).append("\n"); 
+		query.append("             AND 'ID' = (SELECT /*+ INDEX_DESC ( MM XFN1CTM_MOVEMENT ) */" ).append("\n"); 
+		query.append("                                MM.MVMT_STS_CD /*  PRE_MVMT_STS_CD   */" ).append("\n"); 
+		query.append("                         FROM CTM_MOVEMENT MM" ).append("\n"); 
+		query.append("                         WHERE 1 = 1" ).append("\n"); 
+		query.append("                           AND MM.CNTR_NO = M.CNTR_NO" ).append("\n"); 
+		query.append("                           --AND MM.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("                           AND MM.CNMV_YR || TO_CHAR(MM.CNMV_SEQ, '0000') ||MM.CNMV_SPLIT_NO < M.CNMV_YR||TO_CHAR(M.CNMV_SEQ,'0000')||M.CNMV_SPLIT_NO" ).append("\n"); 
+		query.append("                           AND ROWNUM = 1 " ).append("\n"); 
+		query.append("                         )" ).append("\n"); 
+		query.append("         ) A_RTN_YD" ).append("\n"); 
+		query.append("       ,(SELECT /*+ INDEX( M XIE6CTM_MOVEMENT ) */" ).append("\n"); 
+		query.append("                TO_CHAR(M.CNMV_EVNT_DT,'YYYY-MM-DD')" ).append("\n"); 
+		query.append("            FROM CTM_MOVEMENT M" ).append("\n"); 
+		query.append("               , MST_CONTAINER C" ).append("\n"); 
+		query.append("           WHERE 1 = 1" ).append("\n"); 
+		query.append("             AND M.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("             AND M.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("             AND M.MVMT_STS_CD = 'MT'" ).append("\n"); 
+		query.append("             AND M.CNTR_NO = C.CNTR_NO" ).append("\n"); 
+		query.append("             AND NVL(C.LSTM_CD, '  ') <> 'SH' /* SOC  */" ).append("\n"); 
+		query.append("             AND NVL(M.MVMT_CRE_TP_CD, '  ') NOT IN ( 'C','L' )" ).append("\n"); 
+		query.append("             AND 'ID' = (SELECT /*+ INDEX_DESC ( MM XFN1CTM_MOVEMENT ) */" ).append("\n"); 
+		query.append("                                MM.MVMT_STS_CD /*  PRE_MVMT_STS_CD   */" ).append("\n"); 
+		query.append("                         FROM CTM_MOVEMENT MM" ).append("\n"); 
+		query.append("                         WHERE 1 = 1" ).append("\n"); 
+		query.append("                           AND MM.CNTR_NO = M.CNTR_NO" ).append("\n"); 
+		query.append("                           --AND MM.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("                           AND MM.CNMV_YR || TO_CHAR(MM.CNMV_SEQ, '0000') ||MM.CNMV_SPLIT_NO < M.CNMV_YR||TO_CHAR(M.CNMV_SEQ,'0000')||M.CNMV_SPLIT_NO" ).append("\n"); 
+		query.append("                           AND ROWNUM = 1 " ).append("\n"); 
+		query.append("                         )" ).append("\n"); 
+		query.append("         ) RTN_DT                                   " ).append("\n"); 
+		query.append("       , TO_CHAR(E.CFM_DT, 'YYYY-MM-DD') TRO_DT  -- TRO DATE" ).append("\n"); 
+		query.append("       , E.BKG_NO" ).append("\n"); 
+		query.append("       , B.POR_CD" ).append("\n"); 
+		query.append("       , B.POL_CD" ).append("\n"); 
+		query.append("       , B.POD_CD" ).append("\n"); 
+		query.append("       , B.DEL_CD" ).append("\n"); 
+		query.append("       , B.SC_NO" ).append("\n"); 
+		query.append("       , B.RFA_NO" ).append("\n"); 
+		query.append("       , (SELECT G.CUST_CNT_CD || LPAD(G.CUST_SEQ, 6, '0')" ).append("\n"); 
+		query.append("         FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("         WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("           AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("           AND G.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                                    FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                                   WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                                     AND C.CNTR_NO = G.CNTR_NO" ).append("\n"); 
+		query.append("                                   )) INV_CUST_CD" ).append("\n"); 
+		query.append("                                   " ).append("\n"); 
+		query.append("      , (SELECT SUBSTR(R.CUST_LGL_ENG_NM, 1, 50)" ).append("\n"); 
+		query.append("         FROM DOD_DRP_OFF_CHG G, MDM_CUSTOMER R" ).append("\n"); 
+		query.append("         WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("           AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("           AND G.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                                    FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                                   WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                                     AND C.CNTR_NO = G.CNTR_NO" ).append("\n"); 
+		query.append("                                   ) " ).append("\n"); 
+		query.append("           AND G.CUST_CNT_CD = R.CUST_CNT_CD" ).append("\n"); 
+		query.append("           AND G.CUST_SEQ = R.CUST_SEQ   )  INV_CUST_NM" ).append("\n"); 
+		query.append("       , (SELECT U.CUST_CNT_CD" ).append("\n"); 
+		query.append("            FROM BKG_CUSTOMER U" ).append("\n"); 
+		query.append("           WHERE U.BKG_NO = B.BKG_NO" ).append("\n"); 
+		query.append("             AND U.BKG_CUST_TP_CD = 'S' ) CUST_CNT_CD" ).append("\n"); 
+		query.append("       , (SELECT U.CUST_SEQ" ).append("\n"); 
+		query.append("            FROM BKG_CUSTOMER U" ).append("\n"); 
+		query.append("           WHERE U.BKG_NO = B.BKG_NO" ).append("\n"); 
+		query.append("             AND U.BKG_CUST_TP_CD = 'S' ) CUST_SEQ" ).append("\n"); 
+		query.append("       , (SELECT U.CUST_CNT_CD || LPAD(U.CUST_SEQ, 6, '0')" ).append("\n"); 
+		query.append("            FROM BKG_CUSTOMER U" ).append("\n"); 
+		query.append("           WHERE U.BKG_NO = B.BKG_NO" ).append("\n"); 
+		query.append("             AND U.BKG_CUST_TP_CD = 'S' )AS CUST_CD" ).append("\n"); 
+		query.append("       , DECODE(NVL(B.SC_NO,''), '', RFA.CUST_NM, SC.CTRT_PTY_NM) AS CUST_NM" ).append("\n"); 
+		query.append("       , DECODE(NVL(B.SC_NO,''), '', RFA.PROP_OFC_CD, SC.PROP_OFC_CD) AS CONTRACT_OFC" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("       , E.CFM_CURR_CD CURR_CD" ).append("\n"); 
+		query.append("       ,(SELECT  ROUND(G.GEN_TRF_AMT, 2)" ).append("\n"); 
+		query.append("            FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("           WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("             AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("       #if(${ar_if} == 'Y')" ).append("\n"); 
+		query.append("          AND G.AR_IF_NO IS NOT NULL" ).append("\n"); 
+		query.append("       #end" ).append("\n"); 
+		query.append("       #if(${ar_if} == 'N')" ).append("\n"); 
+		query.append("          AND G.AR_IF_NO IS NULL" ).append("\n"); 
+		query.append("       #end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("             AND G.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                    FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                   WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                     AND C.CNTR_NO = G.CNTR_NO) ) GEN_TRF_AMT" ).append("\n"); 
+		query.append("       , (SELECT ROUND(G.SPCL_TRF_AMT, 2)" ).append("\n"); 
+		query.append("            FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("           WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("             AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("       #if(${ar_if} == 'Y')" ).append("\n"); 
+		query.append("          AND G.AR_IF_NO IS NOT NULL" ).append("\n"); 
+		query.append("       #end" ).append("\n"); 
+		query.append("       #if(${ar_if} == 'N')" ).append("\n"); 
+		query.append("          AND G.AR_IF_NO IS NULL" ).append("\n"); 
+		query.append("       #end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("             AND G.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                    FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                   WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                     AND C.CNTR_NO = G.CNTR_NO) ) SPCL_TRF_AMT" ).append("\n"); 
+		query.append("       , (SELECT ROUND( (-G.DC_AMT + G.SVC_FEE_AMT)*-1 ,2 )" ).append("\n"); 
+		query.append("            FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("           WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("             AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("       #if(${ar_if} == 'Y')" ).append("\n"); 
+		query.append("          AND G.AR_IF_NO IS NOT NULL" ).append("\n"); 
+		query.append("       #end" ).append("\n"); 
+		query.append("       #if(${ar_if} == 'N')" ).append("\n"); 
+		query.append("          AND G.AR_IF_NO IS NULL" ).append("\n"); 
+		query.append("       #end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("             AND G.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                    FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                   WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                     AND C.CNTR_NO = G.CNTR_NO)) ADJ_AMT" ).append("\n"); 
+		query.append("       ,  (SELECT CASE WHEN G.TTL_AMT > 0 THEN ROUND( G.TTL_AMT, 2 )" ).append("\n"); 
+		query.append("                   WHEN G.TTL_AMT < 0 THEN 0" ).append("\n"); 
+		query.append("                   ELSE 0" ).append("\n"); 
+		query.append("                   END END" ).append("\n"); 
+		query.append("            FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("           WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("             AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("       #if(${ar_if} == 'Y')" ).append("\n"); 
+		query.append("          AND G.AR_IF_NO IS NOT NULL" ).append("\n"); 
+		query.append("       #end" ).append("\n"); 
+		query.append("       #if(${ar_if} == 'N')" ).append("\n"); 
+		query.append("          AND G.AR_IF_NO IS NULL" ).append("\n"); 
+		query.append("       #end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("             AND G.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                    FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                   WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                     AND C.CNTR_NO = G.CNTR_NO) ) INV_AMT" ).append("\n"); 
+		query.append("       , (SELECT ROUND( MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC( TO_CHAR(G.TRO_IB_CFM_DT , 'YYYYMM') , G.CURR_CD, 'USD' ,G.TTL_AMT), 2 )" ).append("\n"); 
+		query.append("            FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("           WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("             AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("       #if(${ar_if} == 'Y')" ).append("\n"); 
+		query.append("          AND G.AR_IF_NO IS NOT NULL" ).append("\n"); 
+		query.append("       #end" ).append("\n"); 
+		query.append("       #if(${ar_if} == 'N')" ).append("\n"); 
+		query.append("          AND G.AR_IF_NO IS NULL" ).append("\n"); 
+		query.append("       #end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("             AND G.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                    FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                   WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                     AND C.CNTR_NO = G.CNTR_NO) ) INV_USD_AMT" ).append("\n"); 
+		query.append("         , (SELECT ROUND(D.DRP_OFF_CHG_TRF_AMT, 2)" ).append("\n"); 
+		query.append("              FROM DOD_DRP_OFF_CHG_TRF D" ).append("\n"); 
+		query.append("             WHERE 1 = 1" ).append("\n"); 
+		query.append("               AND DECODE(D.DEL_CD, NULL, '1', D.DEL_CD) = DECODE(D.DEL_CD, NULL, '1', B.POD_CD)" ).append("\n"); 
+		query.append("               AND D.CNTR_RTN_LOC_CD = SUBSTR(E.CNTR_RTN_YD_CD, 1, 5)" ).append("\n"); 
+		query.append("               AND DECODE(D.CNTR_RTN_YD_SFX_CD, NULL, '1', D.CNTR_RTN_YD_SFX_CD) = DECODE(D.CNTR_RTN_YD_SFX_CD, NULL, '1', SUBSTR(E.CNTR_RTN_YD_CD, 6, 2))" ).append("\n"); 
+		query.append("               AND D.POL_CONTI_CD = SUBSTR(B.ORG_SCONTI_CD, 1, 1)" ).append("\n"); 
+		query.append("               AND D.CNTR_TPSZ_CD = E.CNTR_TPSZ_CD" ).append("\n"); 
+		query.append("               AND D.DRP_OFF_CHG_TRF_DIV_CD = 'S'" ).append("\n"); 
+		query.append("               AND D.DRP_OFF_CHG_TRF_CFM_FLG = 'Y'" ).append("\n"); 
+		query.append("               AND D.DRP_OFF_CHG_TRF_EXPT_FLG = 'N'" ).append("\n"); 
+		query.append("               AND B.POL_ETD_DT BETWEEN TO_DATE(D.DRP_OFF_CHG_TRF_EFF_DT, 'YYYYMMDD') + .0 AND TO_DATE(D.DRP_OFF_CHG_TRF_EXP_DT, 'YYYYMMDD') + .99999" ).append("\n"); 
+		query.append("               AND DECODE(D.SPCL_CUST_CNT_CD, NULL, '1', D.SPCL_CUST_CNT_CD) = DECODE(D.SPCL_CUST_CNT_CD, NULL, '1', B.AGMT_ACT_CNT_CD)" ).append("\n"); 
+		query.append("               AND DECODE(D.SPCL_CUST_SEQ, NULL, 1, D.SPCL_CUST_SEQ) = DECODE(D.SPCL_CUST_SEQ, NULL, 1, B.AGMT_ACT_CUST_SEQ)" ).append("\n"); 
+		query.append("               AND DECODE(D.SC_NO, NULL, D.RFA_NO, D.SC_NO) = DECODE(D.SC_NO, NULL, B.RFA_NO, B.SC_NO)" ).append("\n"); 
+		query.append("               AND NVL(D.DEL_CD||D.CNTR_RTN_YD_SFX_CD, 1) = " ).append("\n"); 
+		query.append("                 (SELECT NVL(MAX(D.DEL_CD)||MAX(D.CNTR_RTN_YD_SFX_CD), 1)" ).append("\n"); 
+		query.append("                    FROM DOD_DRP_OFF_CHG_TRF D" ).append("\n"); 
+		query.append("                     WHERE 1 = 1" ).append("\n"); 
+		query.append("                       AND DECODE(D.DEL_CD, NULL, '1', D.DEL_CD) = DECODE(D.DEL_CD, NULL, '1', B.POD_CD)" ).append("\n"); 
+		query.append("                       AND D.CNTR_RTN_LOC_CD = SUBSTR(E.CNTR_RTN_YD_CD, 1, 5)" ).append("\n"); 
+		query.append("                       AND DECODE(D.CNTR_RTN_YD_SFX_CD, NULL, '1', D.CNTR_RTN_YD_SFX_CD) = DECODE(D.CNTR_RTN_YD_SFX_CD, NULL, '1', SUBSTR(E.CNTR_RTN_YD_CD, 6, 2))" ).append("\n"); 
+		query.append("                       AND D.POL_CONTI_CD = SUBSTR(B.ORG_SCONTI_CD, 1, 1)" ).append("\n"); 
+		query.append("                       AND D.CNTR_TPSZ_CD = E.CNTR_TPSZ_CD" ).append("\n"); 
+		query.append("                       AND D.DRP_OFF_CHG_TRF_DIV_CD = 'S'" ).append("\n"); 
+		query.append("                       AND D.DRP_OFF_CHG_TRF_CFM_FLG = 'Y'" ).append("\n"); 
+		query.append("                       AND D.DRP_OFF_CHG_TRF_EXPT_FLG = 'N'" ).append("\n"); 
+		query.append("                       AND B.POL_ETD_DT BETWEEN TO_DATE(D.DRP_OFF_CHG_TRF_EFF_DT, 'YYYYMMDD') + .0 AND TO_DATE(D.DRP_OFF_CHG_TRF_EXP_DT, 'YYYYMMDD') + .99999" ).append("\n"); 
+		query.append("                       AND DECODE(D.SPCL_CUST_CNT_CD, NULL, '1', D.SPCL_CUST_CNT_CD) = DECODE(D.SPCL_CUST_CNT_CD, NULL, '1', B.AGMT_ACT_CNT_CD)" ).append("\n"); 
+		query.append("                       AND DECODE(D.SPCL_CUST_SEQ, NULL, 1, D.SPCL_CUST_SEQ) = DECODE(D.SPCL_CUST_SEQ, NULL, 1, B.AGMT_ACT_CUST_SEQ)" ).append("\n"); 
+		query.append("                       AND DECODE(D.SC_NO, NULL, D.RFA_NO, D.SC_NO) = DECODE(D.SC_NO, NULL, B.RFA_NO, B.SC_NO)" ).append("\n"); 
+		query.append("                       )" ).append("\n"); 
+		query.append("                      AND NVL(D.SPCL_CUST_CNT_CD||D.SPCL_CUST_SEQ, 1) = " ).append("\n"); 
+		query.append("                          (SELECT NVL(MAX(D.SPCL_CUST_CNT_CD||D.SPCL_CUST_SEQ), 1)" ).append("\n"); 
+		query.append("                            FROM DOD_DRP_OFF_CHG_TRF D" ).append("\n"); 
+		query.append("                           WHERE 1 = 1" ).append("\n"); 
+		query.append("                             AND DECODE(D.DEL_CD, NULL, '1', D.DEL_CD) = DECODE(D.DEL_CD, NULL, '1', B.POD_CD)" ).append("\n"); 
+		query.append("                             AND D.CNTR_RTN_LOC_CD = SUBSTR(E.CNTR_RTN_YD_CD, 1, 5)" ).append("\n"); 
+		query.append("                             AND DECODE(D.CNTR_RTN_YD_SFX_CD, NULL, '1', D.CNTR_RTN_YD_SFX_CD) = DECODE(D.CNTR_RTN_YD_SFX_CD, NULL, '1', SUBSTR(E.CNTR_RTN_YD_CD, 6, 2))" ).append("\n"); 
+		query.append("                             AND D.POL_CONTI_CD = SUBSTR(B.ORG_SCONTI_CD, 1, 1)" ).append("\n"); 
+		query.append("                             AND D.CNTR_TPSZ_CD = E.CNTR_TPSZ_CD" ).append("\n"); 
+		query.append("                             AND D.DRP_OFF_CHG_TRF_DIV_CD = 'S'" ).append("\n"); 
+		query.append("                             AND D.DRP_OFF_CHG_TRF_CFM_FLG = 'Y'" ).append("\n"); 
+		query.append("                             AND D.DRP_OFF_CHG_TRF_EXPT_FLG = 'N'" ).append("\n"); 
+		query.append("                             AND B.POL_ETD_DT BETWEEN TO_DATE(D.DRP_OFF_CHG_TRF_EFF_DT, 'YYYYMMDD') + .0 AND TO_DATE(D.DRP_OFF_CHG_TRF_EXP_DT, 'YYYYMMDD') + .99999" ).append("\n"); 
+		query.append("                             AND DECODE(D.SPCL_CUST_CNT_CD, NULL, '1', D.SPCL_CUST_CNT_CD) = DECODE(D.SPCL_CUST_CNT_CD, NULL, '1', B.AGMT_ACT_CNT_CD)" ).append("\n"); 
+		query.append("                             AND DECODE(D.SPCL_CUST_SEQ, NULL, 1, D.SPCL_CUST_SEQ) = DECODE(D.SPCL_CUST_SEQ, NULL, 1, B.AGMT_ACT_CUST_SEQ)" ).append("\n"); 
+		query.append("                             AND DECODE(D.SC_NO, NULL, D.RFA_NO, D.SC_NO) = DECODE(D.SC_NO, NULL, B.RFA_NO, B.SC_NO)         " ).append("\n"); 
+		query.append("                             )   " ).append("\n"); 
+		query.append("                       AND NOT EXISTS (SELECT 'OK'" ).append("\n"); 
+		query.append("                                      FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("                                     WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("                                       AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("                                       )      " ).append("\n"); 
+		query.append("                            " ).append("\n"); 
+		query.append("        ) SPC_AMT" ).append("\n"); 
+		query.append("        , ( SELECT ROUND(D.DRP_OFF_CHG_TRF_AMT, 2)" ).append("\n"); 
+		query.append("            FROM DOD_DRP_OFF_CHG_TRF D" ).append("\n"); 
+		query.append("           WHERE 1 = 1" ).append("\n"); 
+		query.append("             AND DECODE(D.DEL_CD, NULL, '1', D.DEL_CD) = DECODE(D.DEL_CD, NULL, '1', B.POD_CD)" ).append("\n"); 
+		query.append("             AND D.CNTR_RTN_LOC_CD = SUBSTR(E.CNTR_RTN_YD_CD, 1, 5)" ).append("\n"); 
+		query.append("             AND DECODE(D.CNTR_RTN_YD_SFX_CD, NULL, '1', D.CNTR_RTN_YD_SFX_CD) = DECODE(D.CNTR_RTN_YD_SFX_CD, NULL, '1', SUBSTR(E.CNTR_RTN_YD_CD, 6, 2))" ).append("\n"); 
+		query.append("             AND D.POL_CONTI_CD = SUBSTR(B.ORG_SCONTI_CD, 1, 1)" ).append("\n"); 
+		query.append("             AND D.CNTR_TPSZ_CD = E.CNTR_TPSZ_CD" ).append("\n"); 
+		query.append("             AND D.DRP_OFF_CHG_TRF_DIV_CD = 'G'" ).append("\n"); 
+		query.append("             AND D.DRP_OFF_CHG_TRF_CFM_FLG = 'Y'" ).append("\n"); 
+		query.append("             AND D.DRP_OFF_CHG_TRF_EXPT_FLG = 'N'" ).append("\n"); 
+		query.append("             AND B.POL_ETD_DT BETWEEN TO_DATE(D.DRP_OFF_CHG_TRF_EFF_DT, 'YYYYMMDD') + .0 AND TO_DATE(D.DRP_OFF_CHG_TRF_EXP_DT, 'YYYYMMDD') + .99999" ).append("\n"); 
+		query.append("    " ).append("\n"); 
+		query.append("              AND NVL(D.DEL_CD||D.CNTR_RTN_YD_SFX_CD, 1) = " ).append("\n"); 
+		query.append("                   (SELECT NVL(MAX(D.DEL_CD)||MAX(D.CNTR_RTN_YD_SFX_CD), 1)" ).append("\n"); 
+		query.append("                     FROM DOD_DRP_OFF_CHG_TRF D" ).append("\n"); 
+		query.append("                        WHERE 1 = 1" ).append("\n"); 
+		query.append("                     AND DECODE(D.DEL_CD, NULL, '1', D.DEL_CD) = DECODE(D.DEL_CD, NULL, '1', B.POD_CD)" ).append("\n"); 
+		query.append("                          AND D.CNTR_RTN_LOC_CD = SUBSTR(E.CNTR_RTN_YD_CD, 1, 5)" ).append("\n"); 
+		query.append("                          AND DECODE(D.CNTR_RTN_YD_SFX_CD, NULL, '1', D.CNTR_RTN_YD_SFX_CD) = DECODE(D.CNTR_RTN_YD_SFX_CD, NULL, '1', SUBSTR(E.CNTR_RTN_YD_CD, 6, 2))" ).append("\n"); 
+		query.append("                          AND D.POL_CONTI_CD = SUBSTR(B.ORG_SCONTI_CD, 1, 1)" ).append("\n"); 
+		query.append("                          AND D.CNTR_TPSZ_CD = E.CNTR_TPSZ_CD" ).append("\n"); 
+		query.append("                          AND D.DRP_OFF_CHG_TRF_DIV_CD = 'G'" ).append("\n"); 
+		query.append("                          AND D.DRP_OFF_CHG_TRF_CFM_FLG = 'Y'" ).append("\n"); 
+		query.append("                          AND D.DRP_OFF_CHG_TRF_EXPT_FLG = 'N'" ).append("\n"); 
+		query.append("                          AND B.POL_ETD_DT BETWEEN TO_DATE(D.DRP_OFF_CHG_TRF_EFF_DT, 'YYYYMMDD') + .0 AND TO_DATE(D.DRP_OFF_CHG_TRF_EXP_DT, 'YYYYMMDD') + .99999" ).append("\n"); 
+		query.append("                     )" ).append("\n"); 
+		query.append("             AND NOT EXISTS (SELECT 'OK'" ).append("\n"); 
+		query.append("                                      FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("                                     WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("                                       AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("                             )     " ).append("\n"); 
+		query.append("          ) GEN_AMT" ).append("\n"); 
+		query.append("      " ).append("\n"); 
+		query.append("        , (SELECT " ).append("\n"); 
+		query.append("               NVL((CASE WHEN G.DRP_OFF_CHG_TRF_SPCL_SEQ IS NULL" ).append("\n"); 
+		query.append("                    THEN (SELECT F.DRP_OFF_CHG_TRF_EXPT_FLG" ).append("\n"); 
+		query.append("                            FROM DOD_DRP_OFF_CHG D, DOD_DRP_OFF_CHG_TRF F" ).append("\n"); 
+		query.append("                           WHERE D.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                             AND D.CNTR_NO = G.CNTR_NO" ).append("\n"); 
+		query.append("                             AND D.DRP_OFF_CHG_TRF_SEQ = F.DRP_OFF_CHG_TRF_SEQ" ).append("\n"); 
+		query.append("                             AND D.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                                    FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                                   WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                                     AND C.CNTR_NO = G.CNTR_NO))" ).append("\n"); 
+		query.append("                     ELSE (SELECT F.DRP_OFF_CHG_TRF_EXPT_FLG" ).append("\n"); 
+		query.append("                            FROM DOD_DRP_OFF_CHG D, DOD_DRP_OFF_CHG_TRF F" ).append("\n"); 
+		query.append("                           WHERE D.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                             AND D.CNTR_NO = G.CNTR_NO" ).append("\n"); 
+		query.append("                             AND D.DRP_OFF_CHG_TRF_SPCL_SEQ = F.DRP_OFF_CHG_TRF_SEQ" ).append("\n"); 
+		query.append("                             AND D.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                                    FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                                   WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                                     AND C.CNTR_NO = G.CNTR_NO))" ).append("\n"); 
+		query.append("                    END), 'N')" ).append("\n"); 
+		query.append("             FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("             WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("               AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("               AND G.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                                          FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                                         WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                                           AND C.CNTR_NO = G.CNTR_NO) ) EXEMPTION" ).append("\n"); 
+		query.append("           " ).append("\n"); 
+		query.append("       , (SELECT TO_CHAR(G.CRE_DT, 'YYYY-MM-DD')" ).append("\n"); 
+		query.append("            FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("           WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("             AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("             AND G.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                    FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                   WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                     AND C.CNTR_NO = G.CNTR_NO) ) AR_IF_DT" ).append("\n"); 
+		query.append("      , (SELECT G.CRE_USR_ID" ).append("\n"); 
+		query.append("            FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("           WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("             AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("             AND G.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                    FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                   WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                     AND C.CNTR_NO = G.CNTR_NO) ) CRE_USR_ID" ).append("\n"); 
+		query.append("      , (SELECT G.TRO_IB_CFM_OFC_CD" ).append("\n"); 
+		query.append("            FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("           WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("             AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("             AND G.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                    FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                   WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                     AND C.CNTR_NO = G.CNTR_NO) ) INV_OFC_CD" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("     , (SELECT 1" ).append("\n"); 
+		query.append("                FROM DOD_DRP_OFF_CHG G" ).append("\n"); 
+		query.append("               WHERE G.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("                 AND G.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("                 AND G.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                        FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                       WHERE C.BKG_NO = G.BKG_NO" ).append("\n"); 
+		query.append("                         AND C.CNTR_NO = G.CNTR_NO) ) INV_CNTR " ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("    FROM BKG_EUR_TRO E" ).append("\n"); 
+		query.append("       , BKG_CUSTOMER BC" ).append("\n"); 
+		query.append("       , BKG_BOOKING B" ).append("\n"); 
+		query.append("       , (SELECT SPH.SC_NO, SC.PROP_OFC_CD, SCP.CUST_CNT_CD,SCP.CUST_SEQ,SCP.CTRT_PTY_NM" ).append("\n"); 
+		query.append("          FROM   PRI_SP_HDR SPH" ).append("\n"); 
+		query.append("               , PRI_SP_MN SC" ).append("\n"); 
+		query.append("               , PRI_SP_CTRT_PTY SCP " ).append("\n"); 
+		query.append("          WHERE  SPH.PROP_NO = SC.PROP_NO " ).append("\n"); 
+		query.append("          AND    SCP.PROP_NO = SPH.PROP_NO " ).append("\n"); 
+		query.append("          AND    SC.AMDT_SEQ = SCP.AMDT_SEQ " ).append("\n"); 
+		query.append("          AND    SCP.PRC_CTRT_PTY_TP_CD = 'C' " ).append("\n"); 
+		query.append("          AND    SC.AMDT_SEQ = (SELECT MAX (AMDT_SEQ) " ).append("\n"); 
+		query.append("                                  FROM PRI_SP_MN " ).append("\n"); 
+		query.append("                                 WHERE PROP_NO = SPH.PROP_NO " ).append("\n"); 
+		query.append("                                   AND ROWNUM <= 1)" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("#if(${item_list} != '')" ).append("\n"); 
+		query.append("          AND SPH.SC_NO IN (" ).append("\n"); 
+		query.append("	#foreach( $an_item in ${item_list} )" ).append("\n"); 
+		query.append("		#if($velocityCount < $item_list.size())" ).append("\n"); 
+		query.append("			SELECT (CASE WHEN SUBSTR(MSG, 1, INSTR(MSG, '|', 1, 1) - 1) = 'S' " ).append("\n"); 
+		query.append("			            THEN SUBSTR(MSG, INSTR(MSG, '|', 1, 1) + 1, INSTR(MSG, '|', 1, 2) - INSTR(MSG, '|', 1, 1) - 1)" ).append("\n"); 
+		query.append("			            ELSE '' END)" ).append("\n"); 
+		query.append("			FROM (SELECT $an_item AS MSG FROM DUAL) " ).append("\n"); 
+		query.append("			UNION ALL" ).append("\n"); 
+		query.append("		#else" ).append("\n"); 
+		query.append("			SELECT (CASE WHEN SUBSTR(MSG, 1, INSTR(MSG, '|', 1, 1) - 1) = 'S' " ).append("\n"); 
+		query.append("			            THEN SUBSTR(MSG, INSTR(MSG, '|', 1, 1) + 1, INSTR(MSG, '|', 1, 2) - INSTR(MSG, '|', 1, 1) - 1)" ).append("\n"); 
+		query.append("			            ELSE '' END)" ).append("\n"); 
+		query.append("			FROM (SELECT $an_item AS MSG FROM DUAL) " ).append("\n"); 
+		query.append("		#end" ).append("\n"); 
+		query.append("	#end" ).append("\n"); 
+		query.append("         )  " ).append("\n"); 
+		query.append("#end " ).append("\n"); 
+		query.append("          GROUP BY SPH.SC_NO, SC.PROP_OFC_CD, SCP.CUST_CNT_CD,SCP.CUST_SEQ,SCP.CTRT_PTY_NM" ).append("\n"); 
+		query.append("         ) SC" ).append("\n"); 
+		query.append("       , (SELECT RFH.RFA_NO,RFA.CTRT_CUST_CNT_CD, RFA.CTRT_CUST_SEQ, RFA.PROP_OFC_CD, " ).append("\n"); 
+		query.append("                 (SELECT CUST_LGL_ENG_NM FROM MDM_CUSTOMER WHERE CUST_CNT_CD = RFA.CTRT_CUST_CNT_CD AND CUST_SEQ = RFA.CTRT_CUST_SEQ) AS CUST_NM" ).append("\n"); 
+		query.append("          FROM   PRI_RP_HDR RFH" ).append("\n"); 
+		query.append("               , PRI_RP_MN RFA " ).append("\n"); 
+		query.append("          WHERE  RFA.PROP_NO(+) = RFH.PROP_NO " ).append("\n"); 
+		query.append("          AND    RFA.AMDT_SEQ = (SELECT MAX (AMDT_SEQ) " ).append("\n"); 
+		query.append("                                   FROM PRI_RP_MN " ).append("\n"); 
+		query.append("                                  WHERE PROP_NO = RFH.PROP_NO " ).append("\n"); 
+		query.append("                                    AND ROWNUM <= 1)" ).append("\n"); 
+		query.append("#if(${item_list} != '')" ).append("\n"); 
+		query.append("     AND RFH.RFA_NO IN (" ).append("\n"); 
+		query.append("	#foreach( $an_item in ${item_list} )" ).append("\n"); 
+		query.append("		#if($velocityCount < $item_list.size())" ).append("\n"); 
+		query.append("			SELECT (CASE WHEN SUBSTR(MSG, 1, INSTR(MSG, '|', 1, 1) - 1) = 'R' " ).append("\n"); 
+		query.append("			             THEN SUBSTR(MSG, INSTR(MSG, '|', 1, 1) + 1, INSTR(MSG, '|', 1, 2) - INSTR(MSG, '|', 1, 1) - 1)" ).append("\n"); 
+		query.append("			             ELSE '' END)" ).append("\n"); 
+		query.append("			FROM (SELECT $an_item AS MSG FROM DUAL) " ).append("\n"); 
+		query.append("			UNION ALL" ).append("\n"); 
+		query.append("		#else" ).append("\n"); 
+		query.append("			SELECT (CASE WHEN SUBSTR(MSG, 1, INSTR(MSG, '|', 1, 1) - 1) = 'R' " ).append("\n"); 
+		query.append("			             THEN SUBSTR(MSG, INSTR(MSG, '|', 1, 1) + 1, INSTR(MSG, '|', 1, 2) - INSTR(MSG, '|', 1, 1) - 1)" ).append("\n"); 
+		query.append("			             ELSE '' END)" ).append("\n"); 
+		query.append("			FROM (SELECT $an_item AS MSG FROM DUAL) " ).append("\n"); 
+		query.append("		#end" ).append("\n"); 
+		query.append("	#end" ).append("\n"); 
+		query.append("         )  " ).append("\n"); 
+		query.append("#end " ).append("\n"); 
+		query.append("          GROUP BY RFH.RFA_NO,RFA.CTRT_CUST_CNT_CD, RFA.CTRT_CUST_SEQ, RFA.PROP_OFC_CD" ).append("\n"); 
+		query.append("         ) RFA" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("    WHERE 1=1" ).append("\n"); 
+		query.append("     AND E.BKG_NO = B.BKG_NO" ).append("\n"); 
+		query.append("     AND E.IO_BND_CD = 'I'" ).append("\n"); 
+		query.append("     AND E.HLG_TP_CD = 'M'" ).append("\n"); 
+		query.append("     AND SUBSTR(E.CNTR_RTN_YD_CD, 1, 5) <> B.DEL_CD" ).append("\n"); 
+		query.append("     AND E.CXL_FLG = 'N'" ).append("\n"); 
+		query.append("     AND E.CFM_FLG = 'Y'" ).append("\n"); 
+		query.append("     AND E.BKG_NO = BC.BKG_NO(+)" ).append("\n"); 
+		query.append("     AND E.TRO_SEQ = (SELECT MAX(TT.TRO_SEQ)" ).append("\n"); 
+		query.append("                               FROM BKG_EUR_TRO TT" ).append("\n"); 
+		query.append("                              WHERE TT.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("                                AND TT.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("                                AND TT.IO_BND_CD = 'I') " ).append("\n"); 
+		query.append("-- AR I/F 조건" ).append("\n"); 
+		query.append("   #if(${ar_if} == 'Y')" ).append("\n"); 
+		query.append("    AND EXISTS  (SELECT 'OK'" ).append("\n"); 
+		query.append("                FROM DOD_DRP_OFF_CHG GG" ).append("\n"); 
+		query.append("               WHERE GG.BKG_NO = E.BKG_NO" ).append("\n"); 
+		query.append("                 AND GG.CNTR_NO = E.CNTR_NO" ).append("\n"); 
+		query.append("                 AND GG.AR_IF_NO IS NOT NULL" ).append("\n"); 
+		query.append("                 AND GG.DRP_OFF_CHG_SEQ = (SELECT MAX(C.DRP_OFF_CHG_SEQ)" ).append("\n"); 
+		query.append("                                             FROM DOD_DRP_OFF_CHG C" ).append("\n"); 
+		query.append("                                            WHERE C.BKG_NO = GG.BKG_NO" ).append("\n"); 
+		query.append("                                              AND C.CNTR_NO = GG.CNTR_NO)) " ).append("\n"); 
+		query.append("	#end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("--SC_NO BOOKING 조회조건 시작" ).append("\n"); 
+		query.append("#if (${cust_flg} == 'BKG')" ).append("\n"); 
+		query.append("	#if (${cust_type_A} != '')" ).append("\n"); 
+		query.append("     AND BC.BKG_CUST_TP_CD IN ( 'S','C','N' )" ).append("\n"); 
+		query.append("	#else" ).append("\n"); 
+		query.append("     AND BC.BKG_CUST_TP_CD IN ( NVL(@[cust_type_S],' '), NVL(@[cust_type_C],' '), NVL(@[cust_type_N],' ') )" ).append("\n"); 
+		query.append("	#end" ).append("\n"); 
+		query.append("#end " ).append("\n"); 
+		query.append("     AND B.SC_NO = SC.SC_NO(+)" ).append("\n"); 
+		query.append("     AND B.RFA_NO = RFA.RFA_NO(+)" ).append("\n"); 
+		query.append("--SC_NO BOOKING 조회조건 종료" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("#if (${period} == 'W') " ).append("\n"); 
+		query.append("     AND E.CFM_DT BETWEEN (SELECT TO_DATE(K.WK_ST_DT,'YYYYMMDD') + .0" ).append("\n"); 
+		query.append("						   FROM   EQR_WK_PRD K" ).append("\n"); 
+		query.append("						   WHERE  K.PLN_YR||K.PLN_WK = @[from]" ).append("\n"); 
+		query.append("						  )	AND" ).append("\n"); 
+		query.append("						  (SELECT TO_DATE(K.WK_END_DT,'YYYYMMDD') + .99999" ).append("\n"); 
+		query.append("						   FROM   EQR_WK_PRD K" ).append("\n"); 
+		query.append("						   WHERE  K.PLN_YR||K.PLN_WK = @[to]" ).append("\n"); 
+		query.append("						  ) " ).append("\n"); 
+		query.append("#elseif (${period} == 'D' || ${period} == 'M') " ).append("\n"); 
+		query.append("     AND E.CFM_DT BETWEEN TO_DATE( @[from], 'YYYYMMDD') + .0 AND TO_DATE( @[to], 'YYYYMMDD') + .99999" ).append("\n"); 
+		query.append("#end " ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("#if(${item_list} != '')" ).append("\n"); 
+		query.append("     AND (NVL(B.SC_NO,'')||NVL(B.RFA_NO,'')||E.CFM_OFC_CD||SUBSTR(E.CNTR_RTN_YD_CD,1,5)||E.CNTR_TPSZ_CD||DECODE(NVL(B.SC_NO,''), '', RFA.PROP_OFC_CD, SC.PROP_OFC_CD)||DECODE(NVL(B.SC_NO,''), '', RFA.CTRT_CUST_CNT_CD || LPAD(RFA.CTRT_CUST_SEQ, 6, '0'), SC.CUST_CNT_CD || LPAD(SC.CUST_SEQ, 6, '0')))" ).append("\n"); 
+		query.append("          IN " ).append("\n"); 
+		query.append("         (" ).append("\n"); 
+		query.append("	#foreach( $an_item in ${item_list} )" ).append("\n"); 
+		query.append("		#if($velocityCount < $item_list.size())" ).append("\n"); 
+		query.append("			SELECT (CASE WHEN SUBSTR(MSG, 1, INSTR(MSG, '|', 1, 1) - 1) = 'S' " ).append("\n"); 
+		query.append("			            THEN SUBSTR(MSG, INSTR(MSG, '|', 1, 1) + 1, INSTR(MSG, '|', 1, 2) - INSTR(MSG, '|', 1, 1) - 1)" ).append("\n"); 
+		query.append("			            ELSE B.SC_NO END)||" ).append("\n"); 
+		query.append("			      (CASE WHEN SUBSTR(MSG, 1, INSTR(MSG, '|', 1, 1) - 1) = 'R' " ).append("\n"); 
+		query.append("			            THEN SUBSTR(MSG, INSTR(MSG, '|', 1, 1) + 1, INSTR(MSG, '|', 1, 2) - INSTR(MSG, '|', 1, 1) - 1)" ).append("\n"); 
+		query.append("			            ELSE B.RFA_NO END)||" ).append("\n"); 
+		query.append("			       SUBSTR(MSG, INSTR(MSG, '|', 1, 2) + 1, INSTR(MSG, '|', 1, 3) - INSTR(MSG, '|', 1, 2) - 1)||" ).append("\n"); 
+		query.append("			       SUBSTR(MSG, INSTR(MSG, '|', 1, 3) + 1, INSTR(MSG, '|', 1, 4) - INSTR(MSG, '|', 1, 3) - 1)||" ).append("\n"); 
+		query.append("			       SUBSTR(MSG, INSTR(MSG, '|', 1, 4) + 1, INSTR(MSG, '|', 1, 5) - INSTR(MSG, '|', 1, 4) - 1)||" ).append("\n"); 
+		query.append("			       SUBSTR(MSG, INSTR(MSG, '|', 1, 5) + 1, INSTR(MSG, '|', 1, 6) - INSTR(MSG, '|', 1, 5) - 1)||" ).append("\n"); 
+		query.append("			       SUBSTR(MSG, INSTR(MSG, '|', 1, 6) + 1)" ).append("\n"); 
+		query.append("			FROM (SELECT $an_item AS MSG FROM DUAL) " ).append("\n"); 
+		query.append("			UNION ALL" ).append("\n"); 
+		query.append("		#else" ).append("\n"); 
+		query.append("			SELECT (CASE WHEN SUBSTR(MSG, 1, INSTR(MSG, '|', 1, 1) - 1) = 'S' " ).append("\n"); 
+		query.append("			            THEN SUBSTR(MSG, INSTR(MSG, '|', 1, 1) + 1, INSTR(MSG, '|', 1, 2) - INSTR(MSG, '|', 1, 1) - 1)" ).append("\n"); 
+		query.append("			            ELSE B.SC_NO END)||" ).append("\n"); 
+		query.append("			      (CASE WHEN SUBSTR(MSG, 1, INSTR(MSG, '|', 1, 1) - 1) = 'R' " ).append("\n"); 
+		query.append("			            THEN SUBSTR(MSG, INSTR(MSG, '|', 1, 1) + 1, INSTR(MSG, '|', 1, 2) - INSTR(MSG, '|', 1, 1) - 1)" ).append("\n"); 
+		query.append("			            ELSE B.RFA_NO END)||" ).append("\n"); 
+		query.append("			       SUBSTR(MSG, INSTR(MSG, '|', 1, 2) + 1, INSTR(MSG, '|', 1, 3) - INSTR(MSG, '|', 1, 2) - 1)||" ).append("\n"); 
+		query.append("			       SUBSTR(MSG, INSTR(MSG, '|', 1, 3) + 1, INSTR(MSG, '|', 1, 4) - INSTR(MSG, '|', 1, 3) - 1)||" ).append("\n"); 
+		query.append("			       SUBSTR(MSG, INSTR(MSG, '|', 1, 4) + 1, INSTR(MSG, '|', 1, 5) - INSTR(MSG, '|', 1, 4) - 1)||" ).append("\n"); 
+		query.append("			       SUBSTR(MSG, INSTR(MSG, '|', 1, 5) + 1, INSTR(MSG, '|', 1, 6) - INSTR(MSG, '|', 1, 5) - 1)||" ).append("\n"); 
+		query.append("			       SUBSTR(MSG, INSTR(MSG, '|', 1, 6) + 1)" ).append("\n"); 
+		query.append("			FROM (SELECT $an_item AS MSG FROM DUAL) " ).append("\n"); 
+		query.append("		#end" ).append("\n"); 
+		query.append("	#end" ).append("\n"); 
+		query.append("         )  " ).append("\n"); 
+		query.append("#end " ).append("\n"); 
+		query.append(") A" ).append("\n"); 
+		query.append(") A" ).append("\n"); 
+		query.append("#if(${ar_if} == 'N')" ).append("\n"); 
+		query.append("WHERE A.PEN_AMT > 0 " ).append("\n"); 
+		query.append(" OR A.EXEMPTION = 'Y'" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("#if(${ar_if} == 'A')" ).append("\n"); 
+		query.append("WHERE A.PEN_AMT > 0" ).append("\n"); 
+		query.append("  OR INV_CNTR > 0" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+
+	}
+}

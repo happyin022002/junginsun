@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="QtaAdjustmentDBDAOSearchAllocQtaListRSQL">
+			<desc><![CDATA[[Allocation = QTA Setting]을 [조회] 합니다.
+
+* 2014.12.26 [CHM-201433310] SPC에서 I/F시 최초 Load를 사후에도 조회할수 있도록 ORG_LOD_QTY 컬럼 추가, 
+                                              확정데이터 Load를 조회할 수 있도록 CFM_LOD_QTY 컬럼 추가. 
+* 2015.01.22 [CHM-201533664] Planned Load 기준을 Apply 전에는 CFM_QTA테이블의 LOD_QTY 기준으로 
+                                              Apply 후에는 ALOC_QTA테이블의 CFM_LOD_QTY 기준으로 수정
+* 2015.02.12 [CHM-201534142] Trade Direction도 조회되도록 COA_LANE_RGST 테이블과 join시킴
+* 2015.06.15 [CHM-201536164] 주간 MAS Open에 따른 타모듈 프로그램 적용 요청
+* 2015.08.26 [CHM-201537723] [CSR 전환건] Allocation = QTA Adjustment 화면 내 신규 칼럼 추가
+* 2015.08.31 [CHM-201537765] [CSR 전환건] Allocation = QTA Adjustment 데이터 정렬 문제
+* 2015.10.05 [CHM-201537934] [CSR 전환건] Allocation = QTA의 "SPC Alloc Apply" 로직 수정]]></desc>
+			<sql><![CDATA[
+#if (${f_active_flg} != '' && ${f_active_flg} != 'All')
+SELECT * FROM
+(
+#end
+SELECT 
+BSE_YR
+,BSE_MON
+,BSE_WK
+,TRD_CD
+,RLANE_CD
+,DIR_CD
+,HUL_BND_CD
+,VSL_CD
+,SKD_VOY_NO
+,SKD_DIR_CD
+,VVD
+,RGN_OFC_CD
+,RHQ_CD
+,APLY_CNT
+,CFM_LOD_QTY
+,ORG_LOD_QTY
+,LOD_QTY
+,FNL_BSA_CAPA
+,SUB_TRD_CD
+,APLY_FLG
+,D_MINUS_ONE_DATE
+,SQM_ACT_FLG
+,QUARTER
+,(CASE WHEN BSE_YR||QUARTER||RHQ_CD||CONV_DIR_CD 
+    IN (select DISTINCT RLT.BSE_YR||RLT.BSE_QTR_CD||RLT.RHQ_CD||RLT.CONV_DIR_CD from SQM_DAT_RLT RLT
+        WHERE RLT.BSE_TP_CD = 'Q'
+        AND RLT.BSE_YR = @[f_bse_yr]
+        AND RLT.OFC_VW_CD = 'L') 
+    THEN 'VALID' 
+    ELSE BSE_YR||'-'||QUARTER||'-'||DIR_CD||'-'||RHQ_CD||' pair is invalid. Please check Basic Data Relation Setting.' END) AS PAIR_CHECK
+
+FROM
+(
+SELECT A1.BSE_YR
+      ,A1.BSE_MON
+      ,A1.BSE_WK
+      ,A1.TRD_CD
+      ,A1.RLANE_CD
+      ,A1.DIR_CD
+      , NVL( (SELECT DISTINCT CONV_DIR_CD 
+        FROM SQM_DIR_CONV CONV
+        WHERE CONV.BSE_TP_CD = 'Q'
+         AND CONV.BSE_YR = @[f_bse_yr]
+         AND CONV.BSE_QTR_CD = CASE WHEN A1.BSE_MON = '01' THEN '1Q'
+                                WHEN A1.BSE_MON = '02' THEN '1Q'
+                                WHEN A1.BSE_MON = '03' THEN '1Q'
+                                WHEN A1.BSE_MON = '04' THEN '2Q'
+                                WHEN A1.BSE_MON = '05' THEN '2Q'
+                                WHEN A1.BSE_MON = '06' THEN '2Q'
+                                WHEN A1.BSE_MON = '07' THEN '3Q'
+                                WHEN A1.BSE_MON = '08' THEN '3Q'
+                                WHEN A1.BSE_MON = '09' THEN '3Q'
+                                WHEN A1.BSE_MON = '10' THEN '4Q'
+                                WHEN A1.BSE_MON = '11' THEN '4Q'
+                                WHEN A1.BSE_MON = '12' THEN '4Q'
+                                END
+         AND CONV.TRD_CD = A1.TRD_CD
+         AND CONV.RLANE_CD = A1.RLANE_CD
+         AND CONV.DIR_CD = A1.DIR_CD ), A1.DIR_CD) AS CONV_DIR_CD
+	  ,DECODE(A3.HUL_BND_CD,'BH','B/H','H/H') HUL_BND_CD
+      ,A1.VSL_CD
+      ,A1.SKD_VOY_NO
+      ,A1.SKD_DIR_CD
+      ,A1.VSL_CD||A1.SKD_VOY_NO||A1.SKD_DIR_CD AS VVD
+      ,A1.RGN_OFC_CD
+      ,A1.RHQ_CD
+      ,SUM(DECODE(A1.APLY_FLG,'Y',1,0)) OVER (PARTITION BY A1.TRD_CD
+                          ,A1.RLANE_CD
+                          ,A1.DIR_CD
+                          ,A1.VSL_CD
+                          ,A1.SKD_VOY_NO
+                          ,A1.SKD_DIR_CD
+                          ,A1.VSL_CD
+                          ,A1.SKD_VOY_NO
+                          ,A1.SKD_DIR_CD ) AS APLY_CNT
+--VVD중 하나라도 Apply가 되면 Apply가 되지않은 Office도 ALOC_QTA 테이블의  CFM_LOD_QTY를 보여줌. 그렇지 않으면 계속 0으로 나오기 때문.
+      ,CASE WHEN (SUM(DECODE(A1.APLY_FLG,'Y',1,0)) OVER (PARTITION BY A1.TRD_CD
+                          ,A1.RLANE_CD
+                          ,A1.DIR_CD
+                          ,A1.VSL_CD
+                          ,A1.SKD_VOY_NO
+                          ,A1.SKD_DIR_CD
+                          ,A1.VSL_CD
+                          ,A1.SKD_VOY_NO
+                          ,A1.SKD_DIR_CD )) > 0 
+            THEN A1.CFM_LOD_QTY 
+            ELSE NVL(A2.LOD_QTY,0)
+            END CFM_LOD_QTY
+      ,A1.ORG_LOD_QTY
+      ,A1.LOD_QTY
+      ,A1.FNL_BSA_CAPA
+      ,A1.SUB_TRD_CD
+      ,A1.APLY_FLG
+      ,TO_CHAR(VSK2.VPS_ETB_DT - 1, 'YYYY-MM-DD') AS D_MINUS_ONE_DATE
+      ,NVL((SELECT DISTINCT A4.SQM_ACT_FLG
+            FROM SQM_QTA_LANE_OFC A4
+            WHERE 1=1
+             AND A4.BSE_TP_CD = 'Q'
+             AND A4.BSE_YR = A1.BSE_YR
+             AND A4.BSE_QTR_CD = (CASE WHEN A1.BSE_MON = '01' THEN '1Q'
+                            WHEN A1.BSE_MON = '02' THEN '1Q'
+                            WHEN A1.BSE_MON = '03' THEN '1Q'
+                            WHEN A1.BSE_MON = '04' THEN '2Q'
+                            WHEN A1.BSE_MON = '05' THEN '2Q'
+                            WHEN A1.BSE_MON = '06' THEN '2Q'
+                            WHEN A1.BSE_MON = '07' THEN '3Q'
+                            WHEN A1.BSE_MON = '08' THEN '3Q'
+                            WHEN A1.BSE_MON = '09' THEN '3Q'
+                            WHEN A1.BSE_MON = '10' THEN '4Q'
+                            WHEN A1.BSE_MON = '11' THEN '4Q'
+                            WHEN A1.BSE_MON = '12' THEN '4Q'
+                            END)
+             AND A4.OFC_VW_CD = 'L'
+             AND A4.TRD_CD = A1.TRD_CD
+             AND A4.RLANE_CD = A1.RLANE_CD
+             AND A4.DIR_CD = A1.DIR_CD
+             AND A4.RGN_OFC_CD = A1.RGN_OFC_CD
+          ), 'X') AS SQM_ACT_FLG
+          ,CASE WHEN A1.BSE_MON = '01' THEN '1Q'
+            WHEN A1.BSE_MON = '02' THEN '1Q'
+            WHEN A1.BSE_MON = '03' THEN '1Q'
+            WHEN A1.BSE_MON = '04' THEN '2Q'
+            WHEN A1.BSE_MON = '05' THEN '2Q'
+            WHEN A1.BSE_MON = '06' THEN '2Q'
+            WHEN A1.BSE_MON = '07' THEN '3Q'
+            WHEN A1.BSE_MON = '08' THEN '3Q'
+            WHEN A1.BSE_MON = '09' THEN '3Q'
+            WHEN A1.BSE_MON = '10' THEN '4Q'
+            WHEN A1.BSE_MON = '11' THEN '4Q'
+            WHEN A1.BSE_MON = '12' THEN '4Q' END AS QUARTER
+ FROM SQM_ALOC_QTA A1, SQM_CFM_QTA A2, MAS_LANE_RGST A3, vsk_vsl_skd VSK1, vsk_vsl_port_skd VSK2
+ WHERE 1=1
+ AND A1.BSE_YR      = A2.BSE_YR(+)
+ AND A1.TRD_CD      = A2.TRD_CD(+)
+ AND A1.RLANE_CD    = A2.RLANE_CD(+)
+ AND A1.DIR_CD      = A2.DIR_CD(+)
+ AND A1.VSL_CD      = A2.VSL_CD(+)
+ AND A1.SKD_VOY_NO  = A2.SKD_VOY_NO(+)
+ AND A1.SKD_DIR_CD  = A2.SKD_DIR_CD(+)
+ AND A1.RGN_OFC_CD  = A2.RGN_OFC_CD(+)
+
+ AND A1.TRD_CD      = A3.TRD_CD
+ AND A1.RLANE_CD    = A3.RLANE_CD
+ AND A1.DIR_CD      = A3.DIR_CD
+ AND A1.SUB_TRD_CD  = A3.SUB_TRD_CD
+ 
+ AND A1.VSL_CD      = VSK1.VSL_CD
+ AND A1.SKD_VOY_NO  = VSK1.SKD_VOY_NO
+ AND A1.SKD_DIR_CD  = VSK1.SKD_DIR_CD
+ AND VSK1.VSL_CD    = VSK2.VSL_CD
+ AND VSK1.SKD_VOY_NO = VSK2.SKD_VOY_NO
+ AND VSK1.SKD_DIR_CD = VSK2.SKD_DIR_CD
+ AND VSK1.ST_PORT_CD = VSK2.VPS_PORT_CD
+
+ AND A1.BSE_YR                        = @[f_bse_yr]
+ AND A2.BSE_TP_CD(+)                  = 'Q'
+ AND A2.OFC_VW_CD(+)                  = 'L'
+ AND A2.QTA_TGT_CD(+)                 = 'D'
+ AND SUBSTR(A2.QTA_RLSE_VER_NO(+),-2) = '02'
+#if (${f_trd_cd} != '' && ${f_trd_cd} != 'All')
+   AND A1.TRD_CD                     = @[f_trd_cd]
+#end
+#if (${f_rlane_cd} != '' && ${f_rlane_cd} != 'All')
+   AND A1.RLANE_CD                   = @[f_rlane_cd]
+#end
+#if (${f_click} != 'on' && ${f_dir_cd} != '' && ${f_dir_cd} != 'All')
+   AND A1.DIR_CD      = @[f_dir_cd]
+#end
+#if (${f_rhq_cd} != '' && ${f_rhq_cd} != 'All')
+   AND A1.RHQ_CD                     = @[f_rhq_cd]
+#end
+#if (${f_rgn_ofc_cd} != '' && ${f_rgn_ofc_cd} != 'All')
+   AND A1.RGN_OFC_CD                 = @[f_rgn_ofc_cd]
+#end
+#if (${f_to_mon} != '' && ${f_to_mon} != 'All')
+   AND A1.BSE_MON                    = @[f_to_mon]
+#end
+#if (${f_to_wk} != '' && ${f_to_wk} != 'All')
+   AND A1.BSE_WK                     = @[f_to_wk]
+#end
+#if (${f_vsl_cd} != '' )
+   AND A1.VSL_CD                     = @[f_vsl_cd]
+#end
+#if (${f_skd_voy_no} != '' )
+   AND A1.SKD_VOY_NO                 = @[f_skd_voy_no]
+#end
+#if (${f_skd_dir_cd} != '' )
+   AND A1.SKD_DIR_CD                 = @[f_skd_dir_cd]
+#end
+#if (${f_aply_flg} != '' && ${f_aply_flg} != 'All')
+   AND A1.APLY_FLG                  = @[f_aply_flg]
+#end
+#if (${f_click} == 'on' && ${f_hul_bnd_cd} != '' && ${f_hul_bnd_cd} != 'All')
+   AND A3.HUL_BND_CD  = @[f_hul_bnd_cd]
+#end
+)
+ORDER BY BSE_YR
+,TRD_CD
+,SUB_TRD_CD
+,RLANE_CD
+,SKD_DIR_CD
+,HUL_BND_CD
+,BSE_MON
+,BSE_WK
+,VVD
+,FNL_BSA_CAPA
+,RHQ_CD
+,RGN_OFC_CD
+
+#if (${f_active_flg} != '' && ${f_active_flg} != 'All')
+)
+WHERE SQM_ACT_FLG                  = @[f_active_flg]
+ORDER BY BSE_YR
+,TRD_CD
+,SUB_TRD_CD
+,RLANE_CD
+,SKD_DIR_CD
+,HUL_BND_CD
+,BSE_MON
+,BSE_WK
+,VVD
+,FNL_BSA_CAPA
+,RHQ_CD
+,RGN_OFC_CD
+#end			]]></sql>
+			<params>
+				<param name="f_bse_yr" type="12" value="" out="N"/>
+				<param name="f_trd_cd" type="12" value="" out="N"/>
+				<param name="f_rlane_cd" type="12" value="" out="N"/>
+				<param name="f_dir_cd" type="12" value="" out="N"/>
+				<param name="f_rhq_cd" type="12" value="" out="N"/>
+				<param name="f_rgn_ofc_cd" type="12" value="" out="N"/>
+				<param name="f_to_mon" type="12" value="" out="N"/>
+				<param name="f_to_wk" type="12" value="" out="N"/>
+				<param name="f_vsl_cd" type="12" value="" out="N"/>
+				<param name="f_skd_voy_no" type="12" value="" out="N"/>
+				<param name="f_skd_dir_cd" type="12" value="" out="N"/>
+				<param name="f_aply_flg" type="12" value="" out="N"/>
+				<param name="f_hul_bnd_cd" type="12" value="" out="N"/>
+				<param name="f_active_flg" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

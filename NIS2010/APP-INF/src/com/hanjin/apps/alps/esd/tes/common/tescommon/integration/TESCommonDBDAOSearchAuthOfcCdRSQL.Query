@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TESCommonDBDAOSearchAuthOfcCdRSQL">
+			<desc><![CDATA[SearchAuthOfcCd]]></desc>
+			<sql><![CDATA[
+SELECT
+--        act_tp ACT_TP,
+--        B.OFC_CD,
+--        B.OFC_TP_CD,
+--        B.AR_HD_QTR_OFC_CD,
+--        DECODE(C.CNT_CD,'HQ','KR',C.CNT_CD) CNT_CD,
+        NVL(
+  CASE
+        WHEN B.OFC_TP_CD IN ('HT')
+        THEN 'Y'
+        WHEN B.OFC_TP_CD IN ('HQ','QT')
+        THEN
+           (SELECT
+                CASE
+                WHEN COUNT(X.OFC_CD) > 0 THEN 'Y'
+                ELSE 'N1' || @[act_tp]
+                END
+            FROM (
+                SELECT OFC_CD
+                FROM MDM_ORGANIZATION
+                WHERE DELT_FLG = 'N'
+                CONNECT BY NOCYCLE PRIOR OFC_CD = PRNT_OFC_CD
+                START WITH OFC_CD = (SELECT AR_HD_QTR_OFC_CD FROM MDM_ORGANIZATION WHERE OFC_CD = @[no_ofc_cd])
+                ) X
+            WHERE X.OFC_CD = @[cre_ofc_cd])
+        ELSE
+            CASE
+            WHEN @[act_tp] = 'AGMT' --//LOGIN OFC와 YARD의 Country가 동일한 것에만 권한 부여
+            THEN
+--               (SELECT --// AS-IS
+--                    CASE
+--                    WHEN Y.LOC_CD IS NOT NULL
+--                    THEN DECODE(SUBSTR(Y.LOC_CD,1,2),DECODE(L.CNT_CD,'HQ','KR',L.CNT_CD),'Y','N2'|| [act_tp])
+--                    ELSE 'N2'|| [act_tp]
+--                    END
+--                FROM MDM_YARD Y, MDM_LOCATION L
+--                WHERE Y.LOC_CD = L.LOC_CD(+)
+--				AND   Y.OFC_CD =  [cre_ofc_cd]
+--				AND   Y.YD_CD = nvl( [no_yd_cd],'') AND NVL(Y.DELT_FLG,'N')='N')--// AGMT CRE OFC            
+               (SELECT --// TO-BE
+                    CASE
+                    WHEN Y.OFC_CD = @[cre_ofc_cd]
+                    THEN 'Y'
+					-- Login Office와 Agreement Yard의 Control Office의 "Parent Office" 혹은 "AR Office"가 동일한 경우
+                    WHEN (SELECT COUNT(X.OFC_CD) 
+                        FROM (
+                            SELECT OFC_CD
+                            FROM MDM_ORGANIZATION
+                            WHERE DELT_FLG = 'N'
+                            CONNECT BY NOCYCLE PRIOR OFC_CD = PRNT_OFC_CD
+                            START WITH OFC_CD = (SELECT AR_HD_QTR_OFC_CD
+                                                 FROM MDM_YARD Y , MDM_ORGANIZATION M
+                                                 WHERE Y.OFC_CD = M.OFC_CD
+                                                 AND Y.YD_CD = nvl(@[no_yd_cd], '') 
+                                                 AND NVL(Y.DELT_FLG, 'N') = 'N')
+                            ) X
+                        WHERE X.OFC_CD = @[cre_ofc_cd]) > 0 
+                    THEN 'Y' 
+                    ------------------------------------------------
+                    ELSE 
+                        -- LOGIN OFC와 YARD의 Ctrl OFC가 동일한 경우
+                        CASE WHEN Y.LOC_CD IS NOT NULL AND Y.LOC_CD = C.LOC_CD
+                        	THEN DECODE(SUBSTR(Y.LOC_CD, 1, 2), DECODE(C.CNT_CD, 'HQ', 'KR', C.CNT_CD), 'Y', 'N2' || @[act_tp])
+							-- 지점이지만 독립점소로 HQ 권한을 가진 OFFICE 포함 (SELBB = SELIB, TYOBB = TYOIB) 
+							-- CHM-201538996 블라디보스톡 대리점가상 RHQ신설 관련 TES 하드코딩 요청건 (VVOBA = VVOIA)
+                        	ELSE CASE WHEN (SELECT AR_HD_QTR_OFC_CD FROM MDM_ORGANIZATION WHERE OFC_CD = Y.OFC_CD) IN (SUBSTR(@[cre_ofc_cd], 1, 3) || 'IB', SUBSTR(@[cre_ofc_cd], 1, 3) || 'IA')
+								  THEN 'Y'
+								  ELSE 'N2' || @[act_tp]
+								  END
+                        END
+                    END
+                FROM MDM_YARD Y 
+                WHERE Y.YD_CD = nvl(@[no_yd_cd], '') AND NVL(Y.DELT_FLG, 'N') = 'N')
+--               (SELECT --// 2014-02까지
+--                    CASE
+--                    WHEN Y.LOC_CD IS NOT NULL
+--                    THEN DECODE(SUBSTR(Y.LOC_CD,1,2),DECODE(C.CNT_CD,'HQ','KR',C.CNT_CD),'Y','N2'|| [act_tp])
+--                    ELSE 'N2'|| [act_tp]
+--                    END
+--                FROM MDM_YARD Y
+--                WHERE Y.YD_CD = nvl([no_yd_cd],'') AND NVL(Y.DELT_FLG,'N')='N')-- no_ofc_cd == AGMT CRE OFC (AGMT HDR GRID에서 추출)
+            WHEN @[act_tp] = 'INV'  --//LOGIN OFC와 하위 OFC에 권한 부여
+            THEN
+               (SELECT
+                    CASE
+                    WHEN COUNT(X.OFC_CD) > 0 THEN 'Y'
+                    ELSE 'N2' || @[act_tp]
+                    END
+                FROM (
+                    SELECT OFC_CD
+                    FROM MDM_ORGANIZATION
+                    WHERE DELT_FLG = 'N'
+                    CONNECT BY NOCYCLE PRIOR OFC_CD = PRNT_OFC_CD
+                    START WITH OFC_CD = @[cre_ofc_cd]
+                    ) X
+                WHERE X.OFC_CD = @[no_ofc_cd]) --AGMT CRE OFC (AGMT HDR GRID에서 추출)
+            ELSE ''
+            END
+        END, 'X') AUTH_OFCS
+FROM MDM_ORGANIZATION B,
+     (SELECT C.LOC_CD, C.CNT_CD FROM MDM_LOCATION C WHERE NVL(C.DELT_FLG,'N') <> 'Y') C
+WHERE 1 = 1
+AND B.OFC_CD = @[cre_ofc_cd] --LOGIN OFC
+AND NVL(B.DELT_FLG,'N') <> 'Y'
+AND B.LOC_CD = C.LOC_CD(+)			]]></sql>
+			<params>
+				<param name="act_tp" type="12" value="" out="N"/>
+				<param name="no_ofc_cd" type="12" value="" out="N"/>
+				<param name="cre_ofc_cd" type="12" value="" out="N"/>
+				<param name="no_yd_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

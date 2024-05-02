@@ -1,0 +1,322 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CarrierSettlementProcessDBDAORobSummary2RSQL">
+			<desc><![CDATA[ROB 조회 Total
+    - 더블콜링 발생시에 
+    - VVD 스케줄상에 SKIP이 발생시에 
+수정 버전]]></desc>
+			<sql><![CDATA[
+WITH PRE_VVD AS (  
+	SELECT DISTINCT 
+	   VSL_CD
+	  ,TURN_SKD_VOY_NO AS SKD_VOY_NO
+	  ,TURN_SKD_DIR_CD AS SKD_DIR_CD
+	FROM VSK_VSL_PORT_SKD
+	WHERE 1=1
+	AND LEVEL <= FLOOR(TO_NUMBER('3')/2)
+	AND (TURN_SKD_VOY_NO IS NOT NULL OR TURN_SKD_DIR_CD IS NOT NULL) START WITH VSL_CD = SUBSTR(@[in_vvd_cd],1,4)
+	AND SKD_VOY_NO = SUBSTR(@[in_vvd_cd],5,4)
+	AND SKD_DIR_CD = SUBSTR(@[in_vvd_cd],9,1)
+	AND TURN_PORT_IND_CD IN ('Y','N') CONNECT BY PRIOR TURN_SKD_VOY_NO = SKD_VOY_NO
+	AND PRIOR TURN_SKD_DIR_CD = SKD_DIR_CD
+	AND PRIOR VSL_CD = VSL_CD
+	AND TURN_PORT_IND_CD IN ('Y','N')
+	AND LEVEL <= FLOOR(TO_NUMBER('3')/2)
+)
+,VPS_ETD AS (
+	SELECT T1.VPS_ETD_DT
+	FROM VSK_VSL_PORT_SKD T1
+	WHERE 1=1
+	AND T1.VSL_CD     = SUBSTR(@[in_vvd_cd],1,4)
+	AND T1.SKD_VOY_NO = SUBSTR(@[in_vvd_cd],5,4)
+	AND T1.SKD_DIR_CD = SUBSTR(@[in_vvd_cd],9,1)  
+	AND T1.VPS_PORT_CD = @[in_pol_cd]
+	AND T1.CLPT_IND_SEQ = @[pol_split_no]
+	AND T1.YD_CD = @[in_pol_cd] || @[in_pol_yd_cd]  
+)
+, CTM_LIST AS (
+        SELECT
+         AA.CRNT_VSL_CD         AS VSL_CD
+        ,AA.CRNT_SKD_VOY_NO     AS SKD_VOY_NO
+        ,AA.CRNT_SKD_DIR_CD     AS SKD_DIR_CD    
+        ,AA.CNTR_NO
+        ,MAX(DECODE(AA.MVMT_STS_CD,'VL',AA.CNTR_TPSZ_CD,'')) AS CNTR_TPSZ_CD
+        ,MAX(DECODE(AA.MVMT_STS_CD,'VL',AA.CNMV_EVNT_DT,'')) AS CNMV_EVNT_DT_VL
+        ,NVL(MAX(DECODE(AA.MVMT_STS_CD,'VD',AA.CNMV_EVNT_DT,'')),TO_DATE('999912312359','YYYYMMDDHH24MISS')) AS CNMV_EVNT_DT_VD
+        ,MAX(DECODE(AA.MVMT_STS_CD,'VL',AA.BKG_NO,AA.BKG_NO)) AS BKG_NO
+        ,MAX(DECODE(AA.MVMT_STS_CD,'VL',AA.BL_NO,AA.BL_NO)) AS BL_NO      
+        ,MAX(DECODE(AA.MVMT_STS_CD,'VL',AA.INP_YD_CD,'')) AS POL
+        ,MAX(DECODE(AA.MVMT_STS_CD,'VD',AA.INP_YD_CD,'')) AS POD        
+        FROM
+        (
+            SELECT   A.CNTR_NO
+                    ,A.CNTR_TPSZ_CD
+                    ,A.MVMT_STS_CD
+                    ,A.CNMV_EVNT_DT
+                    ,A.CRNT_VSL_CD
+                    ,A.CRNT_SKD_VOY_NO
+                    ,A.CRNT_SKD_DIR_CD
+                    ,A.BKG_NO
+                    ,A.BL_NO
+                    ,A.INP_YD_CD
+            FROM CTM_MOVEMENT A
+            WHERE 1=1 
+            AND A.CRNT_VSL_CD = SUBSTR(@[in_vvd_cd],1,4)
+            AND A.CRNT_SKD_VOY_NO = SUBSTR(@[in_vvd_cd],5,4)
+            AND A.CRNT_SKD_DIR_CD = SUBSTR(@[in_vvd_cd],9,1)
+            UNION
+            SELECT   A.CNTR_NO
+                    ,A.CNTR_TPSZ_CD            
+                    ,A.MVMT_STS_CD
+                    ,A.CNMV_EVNT_DT
+                    ,A.CRNT_VSL_CD
+                    ,A.CRNT_SKD_VOY_NO
+                    ,A.CRNT_SKD_DIR_CD
+                    ,A.BKG_NO
+                    ,A.BL_NO
+                    ,A.INP_YD_CD
+            FROM CTM_MOVEMENT A
+            WHERE 1=1
+            AND A.CRNT_VSL_CD       = (SELECT VSL_CD FROM PRE_VVD)
+            AND A.CRNT_SKD_VOY_NO   = (SELECT SKD_VOY_NO FROM PRE_VVD)
+            AND A.CRNT_SKD_DIR_CD   = (SELECT SKD_DIR_CD FROM PRE_VVD)
+        ) AA    
+        GROUP BY AA.CNTR_NO
+                ,AA.CRNT_VSL_CD
+                ,AA.CRNT_SKD_VOY_NO
+                ,AA.CRNT_SKD_DIR_CD 
+)      
+, CTM_LIST2 AS (
+    SELECT C.* 
+    FROM CTM_LIST C
+    WHERE C.CNMV_EVNT_DT_VD > TO_DATE((SELECT TO_CHAR(VPS_ETD_DT,'YYYYMMDDHH24MISS') FROM VPS_ETD),'YYYYMMDDHH24MISS')
+    AND   C.CNMV_EVNT_DT_VL <= TO_DATE((SELECT TO_CHAR(VPS_ETD_DT,'YYYYMMDDHH24MISS') FROM VPS_ETD),'YYYYMMDDHH24MISS')  
+) 
+, ROB_LIST AS (
+	SELECT	
+		CNTR_NO, 
+		CNTR_TPSZ_CD, 
+		CNTR_WGT, 
+		TO_CHAR(A_CNTR_WGT,'9,999,990.000') A_CNTR_WGT,
+		ROUND((round(nvl(ACT_WGT, 0) * decode(substr(CNTR_TPSZ_CD, 2, 1), '2', 1, 2) / TOT) + 
+		NVL(CNTR_VOL_QTY, 1)* decode(nvl(mst_tare,0), 0, decode(nvl(mdm_tare,0), 0, 2500, mdm_tare), mst_tare))/1000) E_CNTR_WGT,
+		POL_CD,
+		POL_YD_CD,
+		POD_CD,
+		POD_YD_CD,        
+		A_POL_CD, 
+		POL_NOD_CD,
+		A_POD_CD,    
+		POD_NOD_CD,    
+		RCV_TERM_CD,
+		DE_TERM_CD,
+		TS_CD,	
+		BKG_CGO_TP_CD,
+		HOT_DE_FLG,
+		'' SPCL_CGO_DESC_TYPE,
+		'' SPCL_CGO_DESC
+		,SLAN_CD
+		,DCGO_FLG
+		,RC_FLG
+		,AWK_CGO_FLG
+		,PRCT_FLG
+		,RD_CGO_FLG
+		,HNGR_FLG    
+		,VVD_CD
+		,BKG_NO
+		,POL_YD_CD2
+        ,POD_YD_CD2 --추가
+        ,POL_CLPT_IND_SEQ         
+   	    ,POD_CLPT_IND_SEQ    
+	FROM (
+            SELECT      
+                 CTM.CNTR_NO
+                ,CTM.CNTR_TPSZ_CD            
+                ,CNTR.CNTR_WGT  A_CNTR_WGT
+                ,ROUND(CNTR.CNTR_WGT/1000,0) CNTR_WGT
+                ,DOC.ACT_WGT
+                ,(
+                    SELECT SUM(DECODE(SUBSTR(CNTR_TPSZ_CD,2,1),'2',1,2)) TOT 
+                    FROM BKG_CONTAINER BC
+                    WHERE BC.BKG_NO = BKG.BKG_NO
+                ) TOT
+                ,CNTR.CNTR_VOL_QTY     
+                ,(select max(nvl(spec.tare_wgt, 0)) mst_wgt
+                        from mst_container mst,
+                          mst_cntr_spec spec
+                        where mst.cntr_no = cntr.CNTR_NO
+                          and mst.cntr_spec_no = spec.cntr_spec_no ) mst_tare
+                ,(
+                    select max(nvl(mdm.CNTR_TPSZ_TARE_WGT, 0)) mdm_wgt
+                    from mdm_cntr_tp_sz mdm
+                    where mdm.cntr_tpsz_cd = CNTR.CNTR_TPSZ_CD
+                ) mdm_tare                   
+                ,SUBSTR(CTM.POL,1,5) AS POL_CD
+                ,SUBSTR(CTM.POL,6,2) AS POL_YD_CD
+                ,SUBSTR(CTM.POD,1,5) AS POD_CD
+                ,SUBSTR(CTM.POD,6,2) AS POD_YD_CD                        
+                ,'' AS A_POL_CD     /* BKG */      
+                ,'' AS POL_NOD_CD   /* BKG */      
+                ,'' AS A_POD_CD     /* BKG */      
+                ,'' AS POD_NOD_CD   /* BKG */          
+                ,CNTR.RCV_TERM_CD        
+                ,CNTR.DE_TERM_CD        
+                ,DECODE(BKG.POL_CD,VVD.POL_CD,'L','T') TS_CD        
+                ,BKG.BKG_CGO_TP_CD
+                ,BKG.HOT_DE_FLG        
+                ,VVD.SLAN_CD
+                ,CNTR.DCGO_FLG
+                ,CNTR.RC_FLG
+                ,CNTR.AWK_CGO_FLG
+                ,BKG.PRCT_FLG   
+                ,CNTR.RD_CGO_FLG RD_CGO_FLG         
+                ,CNTR.HNGR_FLG
+                ,VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD VVD_CD                    
+                ,CTM.BKG_NO
+                ,CTM.POL AS POL_YD_CD2  
+                ,CTM.POD AS POD_YD_CD2
+                ,CTM.BL_NO
+                ,VVD.VSL_SEQ 
+                ,VVD.POL_CLPT_IND_SEQ 
+                ,VVD.POD_CLPT_IND_SEQ 
+                ,CTM.CNMV_EVNT_DT_VL
+                ,CTM.CNMV_EVNT_DT_VD
+            FROM     CTM_LIST2 CTM
+                    ,BKG_BOOKING BKG
+                    ,BKG_CONTAINER CNTR
+                    ,BKG_BL_DOC DOC
+                    ,BKG_VVD VVD
+                    ,MDM_LOCATION MDM        
+            WHERE 1=1
+            AND CTM.BKG_NO = BKG.BKG_NO
+            AND CTM.BKG_NO = CNTR.BKG_NO
+            AND CTM.CNTR_NO = CNTR.CNTR_NO
+            AND CTM.VSL_CD      = VVD.VSL_CD
+            AND CTM.SKD_VOY_NO  = VVD.SKD_VOY_NO
+            AND CTM.SKD_DIR_CD  = VVD.SKD_DIR_CD
+            AND BKG.BKG_STS_CD  <> 'S'	    
+            AND CTM.BKG_NO = VVD.BKG_NO
+            AND CTM.BKG_NO = DOC.BKG_NO	
+  /*          AND NVL(BKG.BKG_STS_CD,' ') NOT IN ('X','A')		*/
+            AND MDM.LOC_CD = BKG.DEL_CD    
+	#if (${in_dcgo_flg} == '' && ${in_rc_flg} == '' && ${in_awk_cgo_flg} == '' && ${in_bb_cgo_flg} == '' && ${in_stwg_cd} == '' && ${in_hot_de_flg} == '' && ${in_rd_cgo_flg} == '' && ${in_soc_flg} == '' && ${in_prct_flg} == '' && ${in_hngr_flg} == '')
+		AND '1' = '1'
+	#else
+		AND ( '1' = '2' 
+		#if (${in_dcgo_flg} != '' ) 
+			OR CNTR.DCGO_FLG = @[in_dcgo_flg]
+		#end
+		#if (${in_rc_flg} != '' ) 
+			OR CNTR.RC_FLG = @[in_rc_flg]
+		#end
+		#if (${in_awk_cgo_flg} != '' ) 
+			OR CNTR.AWK_CGO_FLG = @[in_awk_cgo_flg]
+		#end
+		#if (${in_bb_cgo_flg} != '' ) 
+			OR CNTR.BB_CGO_FLG = @[in_bb_cgo_flg]
+		#end
+		#if (${in_stwg_cd} != '' ) 
+			OR BKG.STWG_CD IS NOT NULL
+		#end
+		#if (${in_hot_de_flg} != '' ) 
+			OR BKG.HOT_DE_FLG = @[in_hot_de_flg]
+		#end
+		#if (${in_rd_cgo_flg} != '' ) 
+			OR CNTR.RD_CGO_FLG = @[in_rd_cgo_flg]
+		#end
+		#if (${in_soc_flg} != '' ) 
+			OR CNTR.SOC_FLG = @[in_soc_flg]
+		#end
+		#if (${in_prct_flg} != '' ) 
+			OR BKG.PRCT_FLG = @[in_prct_flg]
+		#end
+		#if (${in_hngr_flg} != '' ) 
+			OR CNTR.HNGR_FLG = @[in_hngr_flg]
+		#end
+		)
+	#end
+	) TB1
+)
+, ROB_LIST2 AS (
+SELECT 
+     CNTR_NO
+    ,SUM(E_CNTR_WGT)    AS E_CNTR_WGT		/* E.WGT(T) SUM */
+    ,MAX(CNTR_TPSZ_CD)  AS CNTR_TPSZ_CD
+    ,MAX(BKG_CGO_TP_CD) AS BKG_CGO_TP_CD
+    ,MAX(AWK_CGO_FLG)   AS AWK_CGO_FLG    
+    ,MAX(POL_CD)	    AS POL_CD
+    ,MAX(RC_FLG)        AS RC_FLG
+    ,MAX(DCGO_FLG)      AS DCGO_FLG
+    ,MAX(SLAN_CD)       AS SLAN_CD
+FROM ROB_LIST R
+GROUP BY CNTR_NO
+)
+SELECT
+     '1' AS sub_chk
+    ,JR.JO_BSA_TEU_QTY   AS ALL_TEU
+    ,JR.CGO_TON_WGT      AS ALL_WGT
+    ,'IST'  AS source
+    ,JR.jo_20ft_sub_teu_qty   
+    ,JR.jo_20ft_n1st_rto   
+    ,JR.jo_40ft_sub_teu_qty   
+    ,JR.jo_40ft_n1st_rto   
+    ,JR.jo_45ft_sub_teu_qty   
+    ,JR.Jo_45ft_n1st_rto   
+    ,JR.jo_45ft_n2nd_rto       
+    ,JR.jo_rnd_rule_lvl   
+    ,JR.JO_TON_TEU_QTY AS teu_qty
+    ,R.*
+    ,NVL((
+        SELECT SUM(B.OVR_VOID_SLT_QTY)
+        FROM   BKG_AWK_CGO B
+        WHERE 1=1
+        AND B.BKG_NO IN (SELECT BKG_NO FROM ROB_LIST)   
+    ),0)*2 AS ak_void  
+FROM
+(
+    SELECT 
+         SUM(E_CNTR_WGT)  AS GRAND_TTL_WGT
+        ,SUM(DECODE(INSTR(R.CNTR_TPSZ_CD,'2'),0,0,DECODE(INSTR(R.BKG_CGO_TP_CD,'F'),0,0,1))) AS full_20
+        ,SUM(DECODE(INSTR(R.CNTR_TPSZ_CD,'2'),0,0,DECODE(INSTR(R.BKG_CGO_TP_CD,'P'),0,0,1))) AS mt_20
+        ,SUM(DECODE(INSTR(R.CNTR_TPSZ_CD,'4'),0,0,DECODE(INSTR(R.BKG_CGO_TP_CD,'F'),0,0,1))) AS full_40
+        ,SUM(DECODE(INSTR(R.CNTR_TPSZ_CD,'4'),0,0,DECODE(INSTR(R.BKG_CGO_TP_CD,'P'),0,0,1))) AS mt_40    
+        ,SUM(DECODE(INSTR(R.CNTR_TPSZ_CD,'3'),0,0,DECODE(INSTR(R.BKG_CGO_TP_CD,'F'),0,0,1))) AS hc_ld_20    
+        ,SUM(DECODE(INSTR(R.CNTR_TPSZ_CD,'3'),0,0,DECODE(INSTR(R.BKG_CGO_TP_CD,'P'),0,0,1))) AS hc_bsa_20        
+        ,SUM(DECODE(INSTR(R.CNTR_TPSZ_CD,'5'),0,0,DECODE(INSTR(R.BKG_CGO_TP_CD,'F'),0,0,1))) AS hc_ld_40
+        ,SUM(DECODE(INSTR(R.CNTR_TPSZ_CD,'5'),0,0,DECODE(INSTR(R.BKG_CGO_TP_CD,'P'),0,0,1))) AS hc_bsa_40            
+        ,SUM(DECODE(INSTR(R.CNTR_TPSZ_CD,'7'),0,0,DECODE(INSTR(R.BKG_CGO_TP_CD,'F'),0,0,1))) AS hc_ld_45    
+        ,SUM(DECODE(INSTR(R.CNTR_TPSZ_CD,'7'),0,0,DECODE(INSTR(R.BKG_CGO_TP_CD,'P'),0,0,1))) AS hc_bsa_45    
+        ,SUM(DECODE(R.AWK_CGO_FLG,'Y',1,0)) AS ak_unit
+        --,'0' AS ak_void
+        ,SUM(DECODE(R.POL_CD || R.RC_FLG,@[in_pol_cd] || 'Y',1,0)) 	AS rf_20_qty
+	    ,SUM(DECODE(R.RC_FLG,'Y',1,0)) AS rf_rdr_qty
+        ,'0' AS rf_40_qty
+        ,SUM(DECODE(R.POL_CD || R.DCGO_FLG,@[in_pol_cd] || 'Y',1,0)) 	AS dg_20
+        ,'0' AS dg_40
+        ,'0' AS mt_teu
+        ,'0' AS mt_wt   
+        ,R.SLAN_CD
+    FROM ROB_LIST2 R
+    GROUP BY R.SLAN_CD
+) R, (SELECT * FROM JOO_ROB_RTO WHERE SKD_DIR_CD = SUBSTR(@[in_vvd_cd],9,1)) JR
+WHERE 1=1
+AND R.SLAN_CD = JR.SLAN_CD			]]></sql>
+			<params>
+				<param name="in_vvd_cd" type="12" value="" out="N"/>
+				<param name="in_pol_cd" type="12" value="" out="N"/>
+				<param name="pol_split_no" type="12" value="" out="N"/>
+				<param name="in_pol_yd_cd" type="12" value="" out="N"/>
+				<param name="in_dcgo_flg" type="12" value="" out="N"/>
+				<param name="in_rc_flg" type="12" value="" out="N"/>
+				<param name="in_awk_cgo_flg" type="12" value="" out="N"/>
+				<param name="in_bb_cgo_flg" type="12" value="" out="N"/>
+				<param name="in_hot_de_flg" type="12" value="" out="N"/>
+				<param name="in_rd_cgo_flg" type="12" value="" out="N"/>
+				<param name="in_soc_flg" type="12" value="" out="N"/>
+				<param name="in_prct_flg" type="12" value="" out="N"/>
+				<param name="in_hngr_flg" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

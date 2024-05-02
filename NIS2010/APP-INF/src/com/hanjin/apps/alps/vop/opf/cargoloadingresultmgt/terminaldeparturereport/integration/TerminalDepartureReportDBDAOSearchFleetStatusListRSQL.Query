@@ -1,0 +1,329 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TerminalDepartureReportDBDAOSearchFleetStatusListRSQL">
+			<desc><![CDATA[DESC Enter..]]></desc>
+			<sql><![CDATA[
+WITH TB_SRC AS (
+
+#if(${ownr_seq} != '')    -- OWNER SEQ                
+    SELECT C.VSL_CD, C.FLET_CTRT_TP_CD, V.VNDR_SEQ, V.VNDR_LGL_ENG_NM, O.OWNR_NM
+    FROM FMS_CONTRACT C,
+         MDM_VENDOR V,
+         FMS_OWNER O
+    WHERE 1 = 1
+      AND C.VNDR_SEQ = V.VNDR_SEQ
+      AND V.FLET_MGMT_OWNR_VNDR_SEQ = O.OWNR_SEQ   
+      AND C.FLET_CTRT_FACT_CD = 'ACT'
+      AND O.OWNR_SEQ = @[ownr_seq]
+#end
+
+#if(${ownr_seq} == '')    -- OWNER SEQ
+    SELECT 'X' AS VSL_CD FROM DUAL
+#end
+
+)
+, TB_SRC1 AS (
+SELECT  T1.VSL_SLAN_CD, T1.CRR_CD, T1.VSL_CLASS, T1.VSL_ENG_NM, T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD, T1.ROUTEX
+        , CASE
+          WHEN T1.CHK_ETB_DT = MAX(DECODE(T1.CRR_CD, 'SML', NULL, T1.CHK_ETB_DT)) OVER (PARTITION BY T1.VSL_SLAN_CD) THEN
+                1
+          ELSE
+                0
+          END AS MAX_ETB
+        , COUNT(*) OVER (PARTITION BY T1.VSL_SLAN_CD, T1.CRR_CD, T1.VSL_CLASS) AS VSL_CNT_BY_LANE
+        , SUM(SUM(DECODE(T1.CRR_CD, 'SML', 1, 0))) OVER () AS VSL_CNT_HJS
+        , SUM(SUM(DECODE(T1.CRR_CD, 'SML', 0, 1))) OVER () AS VSL_CNT_OTH
+FROM    (
+        SELECT  T1.*,
+                (
+                SELECT  TRIM(TO_CHAR(MAX(PORT_ROTN_SEQ), '0000'))
+                        || TRIM(TO_CHAR(MAX(S1.SVC_DUR_DYS), '0000')) 
+                        || TRIM(TO_CHAR(MAX(NVL(S1.N1ST_VSL_CLSS_KNT, 0) + NVL(S1.N2ND_VSL_CLSS_KNT, 0) + NVL(S1.N3RD_VSL_CLSS_KNT,0)), '0000'))
+                        || REGEXP_REPLACE(SUBSTR(WM_CONCAT(DISTINCT TO_CHAR(PORT_ROTN_SEQ, '00') || S2.PORT_CD ), 4), ', [0-9][0-9]', '-')
+                FROM    VSK_PF_SKD      S1,
+                        VSK_PF_SKD_DTL  S2
+                WHERE   1=1
+                AND     T1.VSL_SLAN_CD      = S1.VSL_SLAN_CD
+                AND     T1.PF_SKD_TP_CD     = S1.PF_SVC_TP_CD
+                AND     S1.VSL_SLAN_CD      = S2.VSL_SLAN_CD
+                AND     S1.PF_SVC_TP_CD     = S2.PF_SVC_TP_CD
+                ) AS ROUTEX
+                , ROW_NUMBER() OVER (PARTITION BY T1.VSL_CD ORDER BY T1.SKD_VOY_NO, T1.VSL_SLAN_DIR_SEQ, T1.CLPT_SEQ) AS VSL_SEQ
+                , ROW_NUMBER() OVER (PARTITION BY T1.VSL_CD ORDER BY T1.PORT_CNT DESC) AS PORT_COUNT_SEQ
+        FROM    (
+                SELECT  T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD, T1.VPS_PORT_CD, T1.CLPT_IND_SEQ, T1.CLPT_SEQ, T1.SLAN_CD, T3.VSL_SLAN_CD, T3.PF_SKD_TP_CD, T1.VPS_ETA_DT, T1.VPS_ETB_DT, T1.VPS_ETD_DT
+                        , TO_CHAR(T1.VPS_ETB_DT, 'YYYYMMDD') AS FM_ETB_DT, TO_CHAR(T1.VPS_ETB_DT, 'YYYYMMDDHH24MISS') AS CHK_ETB_DT
+                        , LEAD(T1.VSL_CD ||'-'|| T1.SKD_VOY_NO ||'-'|| T1.SKD_DIR_CD ||'-'|| T1.VPS_PORT_CD ||'-'|| T1.CLPT_IND_SEQ) OVER (PARTITION BY T1.VSL_CD ORDER BY T1.SKD_VOY_NO, T2.VSL_SLAN_DIR_SEQ, T1.CLPT_SEQ)        AS TO_VVD
+                        , LEAD(TO_CHAR(T1.VPS_ETB_DT, 'YYYYMMDD')) OVER (PARTITION BY T1.VSL_CD ORDER BY T1.SKD_VOY_NO, T2.VSL_SLAN_DIR_SEQ, T1.CLPT_SEQ)                   AS TO_ETB_DT
+                        , T1.SLAN_CD AS FM_SLAN_CD, LEAD(T1.SLAN_CD) OVER (PARTITION BY T1.VSL_CD ORDER BY T1.SKD_VOY_NO, T2.VSL_SLAN_DIR_SEQ, T1.CLPT_SEQ)                 AS TO_SLAN_CD
+                        , T1.TURN_SKD_VOY_NO AS FM_TURN_SKD_VOY_NO, LEAD(T1.TURN_SKD_VOY_NO) OVER (PARTITION BY T1.VSL_CD ORDER BY T1.SKD_VOY_NO, T2.VSL_SLAN_DIR_SEQ, T1.CLPT_SEQ)       AS TO_TURN_VOY
+                        , COUNT(*) OVER (PARTITION BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD) AS PORT_CNT
+                        , T2.VSL_SLAN_DIR_SEQ, T4.VSL_SVC_TP_CD, NVL(T3.ACT_CRR_CD, T5.CRR_CD) AS CRR_CD, NVL(T5.CNTR_VSL_CLSS_CAPA, T5.CNTR_DZN_CAPA) AS VSL_CLASS, T5.VSL_ENG_NM
+                FROM    VSK_VSL_PORT_SKD            T1,
+                        MDM_VSL_SVC_LANE_DIR        T2,
+                        VSK_VSL_SKD                 T3,
+                        MDM_VSL_SVC_LANE            T4,
+                        MDM_VSL_CNTR                T5,
+						TB_SRC                      T6
+                WHERE   1 = 1
+                AND     T1.SLAN_CD          = T2.VSL_SLAN_CD
+                AND     T1.SKD_DIR_CD       = T2.VSL_SLAN_DIR_CD
+                AND     T1.VSL_CD           = T3.VSL_CD
+                AND     T1.SKD_VOY_NO       = T3.SKD_VOY_NO
+                AND     T1.SKD_DIR_CD       = T3.SKD_DIR_CD
+                AND     T3.VSL_SLAN_CD      = T4.VSL_SLAN_CD
+                AND     T4.VSL_SVC_TP_CD    <> 'O'
+				AND     T3.VSL_CD           = DECODE(T6.VSL_CD,'X',T3.VSL_CD,T6.VSL_CD)
+--                AND 	T3.VSL_SLAN_CD 	= 'BSF'   -- VSL CD : 2, VSL QTY : 1
+--                AND     T1.VSL_CD     ='EEGL'
+                AND     T3.VSL_CD           = T5.VSL_CD
+                AND     T1.TURN_PORT_IND_CD IN ('Y', 'N')
+                AND     'S'                 <> NVL(T1.SKD_CNG_STS_CD, ' ')
+                AND     T1.VPS_ETB_DT       BETWEEN  TO_DATE(REPLACE(@[p_date], '-', ''), 'YYYYMMDD') - 90      -- '2014-11-07'
+                                            AND      TO_DATE(REPLACE(@[p_date], '-', ''), 'YYYYMMDD') + 30	-- '2014-11-07'
+
+			#if(${vsl_type} == 'O')     --Owner
+	                and T5.VSL_OWN_IND_CD = 'O'
+					and NVL(T3.ACT_CRR_CD, T5.CRR_CD) = 'SML'    
+			#end
+	        #if(${vsl_type} == 'C')  --Charter
+	                and     T5.VSL_OWN_IND_CD <> 'O'
+	                and     NVL(T3.ACT_CRR_CD, T5.CRR_CD) = 'SML'
+			#end
+	        #if(${vsl_type} == 'J')   --Joint Operation
+					and     NVL(T3.ACT_CRR_CD, T5.CRR_CD) <> 'SML'    -- VSL_OWN_IND_CD : owner(O), charter 포함
+	        #end
+              
+            #if(${carrier_cd}!= '')
+                  	AND   NVL(T3.ACT_CRR_CD, T5.CRR_CD)   = UPPER(@[carrier_cd])  -- carrier_code
+            #end
+                                         
+                ) T1
+        WHERE   1=1
+        AND     T1.TO_ETB_DT    IS NOT NULL -- 다음 SKD 있을 경우에 조회 대상. (다)
+        AND     REPLACE(@[p_date], '-', '') BETWEEN FM_ETB_DT AND TO_ETB_DT
+        AND     1       =   (
+                            CASE
+                            WHEN   (FM_SLAN_CD  <> TO_SLAN_CD AND TO_TURN_VOY IS NULL) THEN
+                                    -- TURNING PORT가 끊긴 선박은 호출하지 않는다.
+                                    0
+                            ELSE
+                                    1
+                            END
+                            )
+         ) T1
+WHERE   1=1
+AND     (
+        CASE
+        WHEN FM_SLAN_CD = TO_SLAN_CD THEN
+            VSL_SEQ
+        WHEN FM_SLAN_CD <> TO_SLAN_CD THEN
+            CASE
+            WHEN   FM_ETB_DT = REPLACE(@[p_date], '-', '') THEN		-- '2014-11-07'
+                PORT_COUNT_SEQ
+            ELSE
+                VSL_SEQ
+            END
+        ELSE
+            1
+        END
+        ) 
+        =
+        (
+        CASE
+        WHEN FM_SLAN_CD = TO_SLAN_CD THEN
+            1
+        WHEN FM_SLAN_CD <> TO_SLAN_CD THEN
+            CASE
+            WHEN   FM_ETB_DT = REPLACE(@[p_date], '-', '') THEN		-- '2014-11-07'
+                    1
+            ELSE
+                    1
+            END
+        ELSE
+                0
+        END
+        )
+GROUP BY T1.VSL_SLAN_CD, T1.CRR_CD, T1.VSL_CLASS, T1.VSL_ENG_NM, T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD, T1.ROUTEX, CHK_ETB_DT
+)
+, TB_SRC2 AS (
+SELECT  T1.VSL_SLAN_CD, T1.SVC_DUR_DYS, REPLACE(WM_CONCAT( DISTINCT FLEET_STATUS ), ',', NULL) AS FLEET_STATUS, MAX(T1.ROUTE) AS ROUTE
+        , SUM(VSL_CD_CNT) AS VSL_CD_CNT, MAX(T1.PF_VSL_CNT)                                     AS VSL_QTY_TTL
+        , REPLACE(WM_CONCAT(CRR_HJS), ',', CHR(13))                                             AS HJS_VSL_OWN_NM
+        , REPLACE(WM_CONCAT(CRR_OTH), ',', CHR(13))                                             AS HJS_VSL_CHT_NM
+        , SUM(SUM( CASE WHEN HJS_GUBUN = 1 AND CRR_HJS_SEQ = 1 THEN 1 ELSE 0 END)) OVER ()      AS LANE_HJS
+        , SUM(COUNT(DISTINCT T1.VSL_SLAN_CD)) OVER ()
+          - SUM(SUM( CASE WHEN HJS_GUBUN = 1 AND CRR_HJS_SEQ = 1 THEN 1 ELSE 0 END)) OVER ()    AS LANE_OTHERS
+        , SUM(COUNT(DISTINCT T1.VSL_SLAN_CD)) OVER ()                                           AS LANE_TOTAL
+        , VSL_CNT_HJS                                                                           AS EA_HJS
+        , VSL_CNT_OTH                                                                           AS EA_OTHERS
+        , (VSL_CNT_HJS + VSL_CNT_OTH)                                                           AS EA_TOTAL
+FROM    (
+        SELECT  T1.VSL_SLAN_CD, T1.CRR_CD
+                , TO_NUMBER(SUBSTR(MAX(MAX(T1.ROUTEX)) OVER (PARTITION BY T1.VSL_SLAN_CD), 1, 4)) AS CALLING_CNT
+                , TO_NUMBER(SUBSTR(MAX(MAX(T1.ROUTEX)) OVER (PARTITION BY T1.VSL_SLAN_CD), 5, 4)) AS SVC_DUR_DYS
+                , TO_NUMBER(SUBSTR(MAX(MAX(T1.ROUTEX)) OVER (PARTITION BY T1.VSL_SLAN_CD), 9, 4)) AS PF_VSL_CNT
+                , SUBSTR(MAX(MAX(T1.ROUTEX)) OVER (PARTITION BY T1.VSL_SLAN_CD), 13) AS ROUTE
+                , T1.VSL_CLASS ||' x '|| T1.VSL_CNT_BY_LANE ||' '|| T1.CRR_CD ||CHR(13) AS FLEET_STATUS
+                , DECODE(T1.CRR_CD, 'SML', T1.VSL_ENG_NM, NULL) AS CRR_HJS
+                , DECODE(T1.CRR_CD, 'SML', NULL, T1.VSL_ENG_NM) AS CRR_OTH
+                , ROW_NUMBER() OVER (PARTITION BY T1.VSL_SLAN_CD ORDER BY DECODE(T1.CRR_CD, 'SML', 1, 2) ASC) AS CRR_HJS_SEQ
+                , ROW_NUMBER() OVER (PARTITION BY T1.VSL_SLAN_CD ORDER BY DECODE(T1.CRR_CD, 'SML', 2, 1) ASC) AS CRR_OTH_SEQ
+                , DECODE(T1.CRR_CD, 'SML', 1, 0) AS HJS_GUBUN
+                , 1 AS VSL_CD_CNT, VSL_CNT_HJS, VSL_CNT_OTH
+        FROM    TB_SRC1 T1
+        GROUP BY T1.VSL_SLAN_CD, T1.VSL_CLASS ||' x '|| T1.VSL_CNT_BY_LANE ||' '|| T1.CRR_CD ||CHR(13)
+                 , DECODE(T1.CRR_CD, 'SML', T1.VSL_ENG_NM, NULL), DECODE(T1.CRR_CD, 'SML', NULL, T1.VSL_ENG_NM), VSL_CNT_HJS, VSL_CNT_OTH
+                 , T1.CRR_CD
+        ORDER BY T1.VSL_CLASS ||' x '|| T1.VSL_CNT_BY_LANE ||' '|| T1.CRR_CD ||CHR(13)
+        ) T1
+WHERE   1=1
+GROUP BY T1.VSL_SLAN_CD, T1.SVC_DUR_DYS, VSL_CNT_HJS, VSL_CNT_OTH
+ORDER BY 1
+)
+
+#if(${bsa_type} == 'Y')   --BSA Check = 'Y' START
+
+	, TB_SRC3 AS (   --BSA Check = 'Y'
+	SELECT  MAX(YR_WK) AS YR_WK, VSL_SLAN_CD
+	        , REPLACE(WM_CONCAT(TTL_BSA_W       ), ',', CHR(13)) AS TTL_BSA_W
+	        , REPLACE(WM_CONCAT(TTL_BSA_E       ), ',', CHR(13)) AS TTL_BSA_E
+	        , REPLACE(WM_CONCAT(HJS_BSA_W       ), ',', CHR(13)) AS HJS_BSA_W
+	        , REPLACE(WM_CONCAT(HJS_BSA_E       ), ',', CHR(13)) AS HJS_BSA_E
+	        , REPLACE(WM_CONCAT(CO_BSA_W        ), ',', CHR(13)) AS CO_BSA_W
+	        , REPLACE(WM_CONCAT(CO_BSA_E        ), ',', CHR(13)) AS CO_BSA_E
+	        , REPLACE(WM_CONCAT(HJS_BSA_RTO_W   ), ',', CHR(13)) AS HJS_BSA_RTO_W
+	        , REPLACE(WM_CONCAT(HJS_BSA_RTO_E   ), ',', CHR(13)) AS HJS_BSA_RTO_E
+	        , REPLACE(WM_CONCAT(CHTR_BSA_RTO_W  ), ',', CHR(13)) AS CHTR_BSA_RTO_W
+	        , REPLACE(WM_CONCAT(CHTR_BSA_RTO_E  ), ',', CHR(13)) AS CHTR_BSA_RTO_E
+	FROM    (
+	        SELECT  MAX(YR_WK) AS YR_WK, VSL_SLAN_CD, TTL_BSA_W, TTL_BSA_E, HJS_BSA_W, HJS_BSA_E
+	                , CASE WHEN (TTL_BSA_W > 0 AND HJS_BSA_W > 0 ) THEN (TTL_BSA_W - HJS_BSA_W) END AS CO_BSA_W
+	                , CASE WHEN (TTL_BSA_E > 0 AND HJS_BSA_E > 0 ) THEN (TTL_BSA_E - HJS_BSA_E) END AS CO_BSA_E
+	                , DECODE(TTL_BSA_W, 0, 0, ROUND(NVL(HJS_BSA_W / TTL_BSA_W,0)*100, 2))           AS HJS_BSA_RTO_W
+	                , DECODE(TTL_BSA_E, 0, 0, ROUND(NVL(HJS_BSA_E / TTL_BSA_E,0)*100, 2))           AS HJS_BSA_RTO_E
+	                , CASE
+	                  WHEN (TTL_BSA_W > 0 AND HJS_BSA_W > 0 ) THEN
+	                        DECODE(TTL_BSA_W, 0, 0, ROUND(NVL((TTL_BSA_W - HJS_BSA_W) / TTL_BSA_W,0)*100, 2)) 
+	                  END                                                                           AS CHTR_BSA_RTO_W
+	                , CASE
+	                  WHEN (TTL_BSA_E > 0 AND HJS_BSA_E > 0 ) THEN
+	                        DECODE(TTL_BSA_E, 0, 0, ROUND(NVL((TTL_BSA_E - HJS_BSA_E) / TTL_BSA_E,0)*100, 2)) 
+	                  END                                                                           AS CHTR_BSA_RTO_E
+	        FROM    (
+	                SELECT  YR_WK, VSL_SLAN_CD,CRR_CD,VSL_CLASS,VSL_ENG_NM, TTL_BSA_W,TTL_BSA_E,HJS_BSA_W,HJS_BSA_E,CO_BSA_W,CO_BSA_E
+	                        , DENSE_RANK() OVER (PARTITION BY VSL_SLAN_CD ORDER BY CHK_HJS DESC, CHK_OTH DESC) AS RK
+	                FROM    (
+	                        SELECT  T1.VSL_SLAN_CD, T1.CRR_CD, T1.VSL_CLASS, T1.VSL_ENG_NM
+	                                , MAX(SUBSTR(T2.SLS_YRMON,1,4)||T2.COST_WK)                     AS YR_WK
+	                                , MAX(NVL(DECODE(T3.SKD_DIR_CD, 'W', T3.BSA_CAPA        ), 0))  AS TTL_BSA_W         -- LOADABLE CAPACITY
+	                                , MAX(NVL(DECODE(T3.SKD_DIR_CD, 'E', T3.BSA_CAPA        ), 0))  AS TTL_BSA_E  
+	                                , MAX(NVL(DECODE(T3.SKD_DIR_CD, 'W', T3.FNL_HJS_BSA_CAPA), 0))  AS HJS_BSA_W        -- HJS FINAL
+	                                , MAX(NVL(DECODE(T3.SKD_DIR_CD, 'E', T3.FNL_HJS_BSA_CAPA), 0))  AS HJS_BSA_E
+	                                , MAX(NVL(DECODE(T3.SKD_DIR_CD, 'W', T3.CO_BSA_CAPA     ), 0))  AS CO_BSA_W         -- CHT OUT
+	                                , MAX(NVL(DECODE(T3.SKD_DIR_CD, 'E', T3.CO_BSA_CAPA     ), 0))  AS CO_BSA_E
+	                                , MAX(DECODE(T1.CRR_CD, 'SML', 1, 0))                           AS CHK_HJS
+	                                , MAX(MAX_ETB)                                                  AS CHK_OTH
+	                                , MAX(DECODE(T1.CRR_CD, 'SML', 1, 0)) OVER ()                   AS CHK_HJS_EXISTS
+	                        FROM    TB_SRC1      T1,
+	                                MAS_MON_VVD  T2,
+	                                BSA_VVD_MST  T3
+	                        WHERE   1=1
+	--                        AND     T1.VSL_SLAN_CD  = 'ADN'
+	                        AND     T1.VSL_CD       = T2.VSL_CD         (+)
+	                        AND     T1.SKD_VOY_NO   = T2.SKD_VOY_NO     (+)
+	                        AND     T1.VSL_SLAN_CD  = T2.SLAN_CD        (+)
+	                        
+	                        AND     T2.TRD_CD       = T3.TRD_CD         (+)
+	                        AND     T2.RLANE_CD     = T3.RLANE_CD       (+)
+	                        AND     T2.IOC_CD       = T3.IOC_CD         (+)
+	                        AND     T2.VSL_CD       = T3.VSL_CD         (+)
+	                        AND     T2.SKD_VOY_NO   = T3.SKD_VOY_NO     (+)
+	                        AND     T2.DIR_CD       = T3.SKD_DIR_CD     (+)
+	                        
+	                        AND     'N'             = NVL(T2.DELT_FLG(+), 'N')
+	                        AND SUBSTR(T2.SLS_YRMON,1,4)||T2.COST_WK <= (
+	                                                                    SELECT COST_YR||COST_WK
+	                                                                    FROM MAS_WK_PRD
+	                                                                    WHERE TO_CHAR(ADD_MONTHS(TO_DATE(REPLACE(@[p_date], '-', ''),'YYYYMMDD') , +2),'YYYYMMDD') BETWEEN SLS_FM_DT AND SLS_TO_DT    -- '2014-11-07'
+	                                                                    )
+	                        AND SUBSTR(T2.SLS_YRMON,1,4)||T2.COST_WK >= (
+	                                                                    SELECT  COST_YR||COST_WK
+	                                                                    FROM    MAS_WK_PRD
+	                                                                    WHERE   TO_CHAR(ADD_MONTHS(TO_DATE(REPLACE(@[p_date], '-', ''),'YYYYMMDD') , -2),'YYYYMMDD') BETWEEN SLS_FM_DT AND SLS_TO_DT    -- '2014-11-07'
+	                                                                    )
+	                        GROUP BY T1.VSL_SLAN_CD, T1.CRR_CD, T1.VSL_CLASS, T1.VSL_ENG_NM
+	                        )
+	                WHERE   1=1
+	                AND     (CHK_HJS = 1 OR CHK_OTH = 1)
+	                )
+	        WHERE   1=1
+	        AND     RK = 1
+	        GROUP BY VSL_SLAN_CD, TTL_BSA_W, TTL_BSA_E, HJS_BSA_W, HJS_BSA_E, CO_BSA_W, CO_BSA_E
+	        )
+	WHERE   1=1
+	GROUP BY VSL_SLAN_CD
+	)
+
+#end     	-- BSA NOT CHECK = 'Y' END
+
+#if(${bsa_type} != 'Y')  -- BSA Check = 'N' START
+
+, TB_SRC3 AS(       -- BSA Check = 'N' START
+        SELECT 
+            '' YR_WK, 
+            '' VSL_SLAN_CD,
+            '' TTL_BSA_W,
+            '' TTL_BSA_E,  
+            '' HJS_BSA_W,
+            '' HJS_BSA_E,
+            '' CO_BSA_W,
+            '' CO_BSA_E,
+            '' HJS_BSA_RTO_W,
+            '' HJS_BSA_RTO_E,
+            '' CHTR_BSA_RTO_W,
+            '' CHTR_BSA_RTO_E
+        FROM DUAL
+	)
+#end -- BSA Check = 'N' END
+
+SELECT   ROWNUM AS SEQ
+        , T2.YR_WK
+        , T1.VSL_SLAN_CD AS SLAN_CD
+        , T1.SVC_DUR_DYS
+        , T1.FLEET_STATUS
+        , T1.VSL_CD_CNT
+        , T1.VSL_QTY_TTL
+        , T1.HJS_VSL_OWN_NM
+        , T1.HJS_VSL_CHT_NM
+        , T2.TTL_BSA_W
+        , T2.TTL_BSA_E
+        , T2.HJS_BSA_W
+        , T2.HJS_BSA_E
+        , T2.CO_BSA_W
+        , T2.CO_BSA_E
+        , T2.HJS_BSA_RTO_W
+        , T2.HJS_BSA_RTO_E
+        , T2.CHTR_BSA_RTO_W
+        , T2.CHTR_BSA_RTO_E
+        , T1.ROUTE          AS PORT_ROT
+        , T1.LANE_HJS
+        , T1.LANE_OTHERS
+        , T1.LANE_TOTAL
+        , T1.EA_HJS
+        , T1.EA_OTHERS
+        , T1.EA_TOTAL
+FROM    TB_SRC2 T1,
+        TB_SRC3 T2
+WHERE   1=1
+AND     T1.VSL_SLAN_CD  = T2.VSL_SLAN_CD (+)
+ORDER BY 1			]]></sql>
+			<params>
+				<param name="ownr_seq" type="12" value="" out="N"/>
+				<param name="p_date" type="12" value="" out="N"/>
+				<param name="carrier_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

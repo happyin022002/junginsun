@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="OwnDangerousCargoApprovalDBDAOSearchScgRequestApvlTimeDetailVORSQL">
+			<desc><![CDATA[일정기간 동안 Request 된 Special Cargo 승인요청에 대한 처리 시간에 대한 상세목록을 조회한다.]]></desc>
+			<sql><![CDATA[
+-- RSO 구분 없이 조회되도록 수정 2017.07.10
+SELECT S1.SLAN_CD
+     , S1.VSL_CD||S1.SKD_VOY_NO||S1.SKD_DIR_CD VVD_CD
+     , DECODE(S1.VSL_PRE_PST_CD,'S','Pre'||S1.VSL_SEQ,'T','Trunk','U','Post'||S1.VSL_SEQ) AS VSL_PRE_PST_NM
+     , S1.BKG_NO
+     , S1.SPCL_CGO_CATE_CD
+     , S1.SPCL_CGO_APRO_RQST_SEQ
+     , TO_CHAR(S1.RQST_GDT, 'YYYY-MM-DD HH24:MI') RQST_DT
+     , S1.RQST_USR_ID     
+     , TO_CHAR(S1.AUTH_GDT, 'YYYY-MM-DD HH24:MI') AUTH_DT
+     , S1.AUTH_USR_ID
+     , S1.AUTH_FLG
+     , DECODE(S1.AUTH_FLG,'R','',CEIL((S1.AUTH_GDT-S1.RQST_GDT)*24)) TRET_GAP
+  FROM (
+        SELECT R1.SLAN_CD
+             , R1.VSL_CD
+             , R1.SKD_VOY_NO
+             , R1.SKD_DIR_CD
+             , R1.BKG_NO
+             , R1.SPCL_CGO_APRO_RQST_SEQ
+             , R1.VSL_PRE_PST_CD
+             , R1.VSL_SEQ
+             , R3.SPCL_CGO_CATE_CD
+             , R3.LST_RQST_DAT_FLG
+             , R3.RQST_USR_ID
+             , R2.AUTH_USR_ID
+             , R3.RQST_GDT
+             , R2.AUTH_GDT
+             , NVL(R2.SPCL_CGO_AUTH_CD,'R') AS AUTH_FLG
+             , ROW_NUMBER() OVER(PARTITION BY R1.BKG_NO
+                                            , R1.SPCL_CGO_APRO_RQST_SEQ
+                                            , R1.VSL_PRE_PST_CD
+                                            , R1.VSL_SEQ
+                                            , R3.SPCL_CGO_CATE_CD
+                                           ORDER BY 
+                                              DECODE(NVL(R2.SPCL_CGO_AUTH_CD,'R'),'P',1,'N',2,'R',3,4)) AUTH_FIX
+          FROM SCG_VVD_APRO_RQST    R1
+             , SCG_AUTHORIZATION    R2
+             , SCG_APRO_RQST        R3
+             --, SCG_RGN_SHP_OPR_PORT RS
+             , MDM_VSL_CNTR         VO
+         WHERE R1.BKG_NO                 = R2.BKG_NO
+           AND R1.SPCL_CGO_APRO_RQST_SEQ = R2.SPCL_CGO_APRO_RQST_SEQ
+           AND R1.BKG_NO                 = R3.BKG_NO(+)
+           AND R1.SPCL_CGO_APRO_RQST_SEQ = R3.SPCL_CGO_APRO_RQST_SEQ(+)
+           --AND R1.POL_CD                 = RS.LOC_CD(+) 
+           AND R1.VSL_CD                 = VO.VSL_CD(+)
+           --AND RS.RGN_SHP_OPR_CD        IS NOT NULL
+           AND (R2.SPCL_CGO_AUTH_CD != 'D' OR R2.SPCL_CGO_AUTH_CD IS NULL)
+           AND R3.RQST_GDT BETWEEN TO_DATE(@[from_rqst_dt]||'000000','YYYYMMDDHH24MISS') AND TO_DATE(@[to_rqst_dt]||'235959','YYYYMMDDHH24MISS') --(3) Period
+		   #if (${rgn_shp_opr_cd} != '')
+--           AND RS.RGN_SHP_OPR_CD   = @[rgn_shp_opr_cd] 	--(1) RSO
+           #end
+           #if (${crr_cd} != '' && ${crr_cd} != 'NOTSML')
+           AND VO.CRR_CD          = @[crr_cd] 		    --(5) VSL OPR
+           #end
+           #if (${crr_cd} == 'NOTSML')
+           AND VO.CRR_CD          != 'SML' 		    --(5) VSL OPR
+           #end
+           #if (${slan_cd} != '')
+           AND R1.SLAN_CD          = @[slan_cd] 		--(6) Lane
+           #end
+           #if (${vsl_cd} != '')
+           AND R1.VSL_CD           = @[vsl_cd] 			--(7) VVD
+           #end
+           #if (${skd_voy_no} != '')
+           AND R1.SKD_VOY_NO       = @[skd_voy_no] 		--(7) VVD
+           #end
+           #if (${skd_dir_cd} != '')
+           AND R1.SKD_DIR_CD       = @[skd_dir_cd] 		--(7) VVD    
+           #end
+           #if (${option_post_vvd} == 'E')
+           AND R1.VSL_PRE_PST_CD  != 'U' 		        --(9) EXCLUDE POST VVD    
+           #end
+           #if (${auth_usr_id} != '')
+           AND R2.AUTH_USR_ID     LIKE '%'||@[auth_usr_id]||'%'	-- USRID
+           #end
+           AND R3.SPCL_CGO_CATE_CD IN ( 
+               #foreach($key IN ${cgo_type_obj})
+			   		#if($velocityCount < $cgo_type_obj.size()) 
+						 '$key', 
+					#else 
+						 '$key'
+					#end 
+               #end
+               )    --(8) SPCL CGO Type
+ ) S1   
+ WHERE S1.AUTH_FIX = 1
+   AND (S1.AUTH_FLG = 'Y' OR S1.AUTH_FLG = 'N' OR (S1.AUTH_FLG = 'R' AND S1.LST_RQST_DAT_FLG = 'Y')  
+    #if (${option_pending} == 'Y') 
+    OR AUTH_FLG = 'P') --(2) Option
+    #else
+    )
+    #end
+ ORDER BY
+       S1.SLAN_CD
+     , S1.VSL_CD
+     , S1.SKD_VOY_NO
+     , S1.SKD_DIR_CD
+     , S1.BKG_NO
+     , S1.VSL_PRE_PST_CD
+     , S1.VSL_SEQ
+     , S1.SPCL_CGO_CATE_CD
+     , S1.SPCL_CGO_APRO_RQST_SEQ			]]></sql>
+			<params>
+				<param name="from_rqst_dt" type="12" value="" out="N"/>
+				<param name="to_rqst_dt" type="12" value="" out="N"/>
+				<param name="rgn_shp_opr_cd" type="12" value="" out="N"/>
+				<param name="crr_cd" type="12" value="" out="N"/>
+				<param name="slan_cd" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="auth_usr_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

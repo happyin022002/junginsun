@@ -1,0 +1,538 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PickUpNoticeDBDAOsearchPkupNtcSendListRSQL">
+			<desc><![CDATA[PickUp Notice를 발송(Success)한 대상및 미 발송(Fail or 누락)된 대상정보들을 조회 한다.]]></desc>
+			<sql><![CDATA[
+-- PkupNtcSendListVO 생성
+SELECT PKUP_NTC.BKG_NO,
+       PKUP_NTC.NTC_SEQ,
+       DECODE(PKUP_NTC.PKUP_NTC_SND_STS_CD,'X','V','') AS PKUP_NTC_SND_STS_CD,
+       '' MNL_FLG,
+       PKUP_NTC.MNL_FLG AS MNL_FLG_SHOW,
+       DECODE(PKUP_NTC.PKUP_NTC_TP_CD,'WO','MA',PKUP_NTC.PKUP_NTC_TP_CD) AS PKUP_NTC_TP_CD,
+       PKUP_NTC.PKUP_NTC_FOM_CD,
+       'EV1' AS PKUP_NTC_FOM_CD_SHOW,
+       BKG.BL_NO,
+       PKUP_NTC.CNTR_NO,
+       CASE WHEN RAIL.TRSP_SO_OFC_CTY_CD IS NULL THEN CNTR.CNTR_WGT * DECODE(CNTR.WGT_UT_CD,'KGS',(1/0.453),1)
+            ELSE RAIL.CNTR_WGT * DECODE(RAIL.WGT_MEAS_UT_CD, 'KGS', (1/0.453), 1) END AS CNTR_WGT,
+       DECODE(SIGN(CASE WHEN RAIL.TRSP_SO_OFC_CTY_CD IS NULL THEN CNTR.CNTR_WGT * DECODE(CNTR.WGT_UT_CD,'KGS',(1/0.453),1)
+                        ELSE RAIL.CNTR_WGT * DECODE(RAIL.WGT_MEAS_UT_CD, 'KGS', (1/0.453), 1) END
+                   - 45000),1,'Y','N') AS OVER_WGT_FLG,
+       PKUP_NTC.RAIL_LOD_DT,
+       PKUP_NO.PKUP_AVAL_DT,
+       PKUP_NO.LST_FREE_DT,
+       PKUP_NO.PKUP_NO,
+       PKUP_NO.PKUP_YD_CD,
+       PKUP_NO.RTN_YD_CD,
+       NVL(NVL(US_CGO.FRT_CLT_FLG,PKUP_NTC.FRT_CLT_FLG)   ,'N') AS FRT_CLT_FLG,
+       NVL(NVL(US_CGO.OBL_RDEM_FLG,PKUP_NTC.OBL_CLT_FLG)  ,'N') AS OBL_CLT_FLG,
+
+       (CASE WHEN SUBSTR(BKG.DEL_CD,1,2) = 'CA' THEN 'Y' -- 'CA' 인 경우 C Status 를 'Y' 로 고정
+			 WHEN SUBSTR(BKG.POD_CD,1,2) = 'CA' THEN                  
+                  (SELECT SUBSTR(MAX(LPAD(CSTMS_SEQ,12,'0')||CSTMS_CLR_CD),-1)
+                     FROM BKG_CSTMS_ADV_CNTR_RSLT CN_RSLT
+                    WHERE CNT_CD  = 'US'
+                      AND BL_NO   = BKG.BL_NO
+                      AND CN_RSLT.CNTR_NO LIKE SUBSTR(PKUP_NTC.CNTR_NO,1,LENGTH(PKUP_NTC.CNTR_NO)-1)||'%')
+             ELSE NVL(NVL(US_CGO.CSTMS_CLR_CD,PKUP_NTC.CSTMS_CLR_FLG),'N')
+        END) AS CSTMS_CLR_FLG,
+
+       US_CGO.CSTMS_DSPO_CD AS CSTMS_CLR_CD,
+--       DECODE(US_CGO.FRT_CLT_FLG||US_CGO.OBL_RDEM_FLG||US_CGO.CSTMS_CLR_CD,'YYY','Y','N') AS FOC_FLG,
+       NVL(DECODE(PKUP_NO.LST_FREE_DT,NULL,DECODE(PKUP_NO.PKUP_AVAL_DT,NULL,NULL,'NT'),'NF'),PKUP_NTC.EDI_322_MVMT_CD) AS EDI_322_MVMT_CD,
+       PKUP_NO.PKUP_UPD_DT AS PKUP_NO_UPLD_DT,
+       CASE WHEN PKUP_NO.PKUP_UPD_USR_ID = 'BAT_BKG_019' THEN 'EDI'
+            ELSE PKUP_NO.PKUP_UPD_USR_ID END AS        PKUP_NO_UPLD_USR_ID,
+       CASE WHEN PKUP_NO.PKUP_UPD_USR_ID IS NULL THEN NULL
+            WHEN PKUP_NO.PKUP_UPD_USR_ID IN ('SYSTEM', 'BAT_BKG_019') THEN 'Auto' 
+            ELSE 'Manual' END AS PKUP_NO_UPLD_VIA,
+       '' AS PKUP_NO_UPLD_RAIL_CO,
+       RAIL.POD_CD,
+       CSTMS.CSTMS_LOC_CD AS IBD_TRSP_HUB_CD,
+       RAIL.DEL_CD,
+       LOC.EQ_CTRL_OFC_CD,
+       DECODE(@[usr_ofc_cd], LOC.EQ_CTRL_OFC_CD,'Y','N') AS PKUP_YD_CD_FLG,
+       RAIL.NVOCC_FILE_NO,
+       BKG.DE_TERM_CD,
+       PKUP_NTC.DOR_TRKR_WO_FLG,
+       CASE WHEN RAIL.TRSP_SO_OFC_CTY_CD IS NULL THEN 'No Rail Billing'
+            ELSE RAIL.POD_CD||' - <Rail> - '||SUBSTR(RAIL.TO_NOD_CD, 1, 5)||
+                 CASE WHEN SUBSTR(RAIL.TO_NOD_CD, 1, 5) <> RAIL.DEL_CD THEN ' - <Truck(DR)> - ' || RAIL.DEL_CD END
+       END AS ROUT_GID_DESC,
+       RAIL.VSL_CD || RAIL.SKD_VOY_NO || RAIL.SKD_DIR_CD AS VVD_ID,
+
+       CASE WHEN AUTO_SND_STOP_FLG = 'Y' AND AUTO_SND_RESM_FLG = 'N' THEN 'Stopped'
+            WHEN NULLIF(GRT_FAX_SND_DT,TO_DATE('0001-01-01','YYYY-MM-DD')) IS NOT NULL AND
+                 NULLIF(GRT_EML_SND_DT,TO_DATE('0001-01-01','YYYY-MM-DD')) IS NOT NULL THEN 'Both'
+            WHEN NULLIF(GRT_FAX_SND_DT,TO_DATE('0001-01-01','YYYY-MM-DD')) IS NOT NULL AND
+                 NULLIF(GRT_EML_SND_DT,TO_DATE('0001-01-01','YYYY-MM-DD')) IS NULL THEN 'Faxed'
+            WHEN NULLIF(GRT_FAX_SND_DT,TO_DATE('0001-01-01','YYYY-MM-DD')) IS NULL AND
+                 NULLIF(GRT_EML_SND_DT,TO_DATE('0001-01-01','YYYY-MM-DD')) IS NOT NULL THEN 'Emailed'
+            ELSE 'Nil'
+       END AS SND_STS_DESC ,
+       NULLIF(GREATEST(GRT_FAX_SND_DT),TO_DATE('0001-01-01','YYYY-MM-DD')) AS FAX_SND_DT,
+       NULLIF(GREATEST(GRT_EML_SND_DT),TO_DATE('0001-01-01','YYYY-MM-DD')) AS EML_SND_DT,
+       NULLIF(GREATEST(GRT_FAX_SND_DT, GRT_EML_SND_DT),TO_DATE('0001-01-01','YYYY-MM-DD')) AS SND_DT,
+
+       CASE WHEN NULLIF(GREATEST(GRT_FAX_SND_DT, GRT_EML_SND_DT),TO_DATE('0001-01-01','YYYY-MM-DD')) IS NULL THEN 'N'
+            ELSE 'Y' END AS SND_YN,
+
+       CASE NULLIF(GREATEST(GRT_FAX_SND_DT, GRT_EML_SND_DT),TO_DATE('0001-01-01','YYYY-MM-DD'))
+            WHEN C1_FAX_SND_DT THEN DECODE(C1_FAX_SND_USR_ID,'BAT_BKG_015','Auto',C1_FAX_SND_USR_ID)
+            WHEN C2_FAX_SND_DT THEN DECODE(C2_FAX_SND_USR_ID,'BAT_BKG_015','Auto',C2_FAX_SND_USR_ID)
+            WHEN B1_FAX_SND_DT THEN DECODE(B1_FAX_SND_USR_ID,'BAT_BKG_015','Auto',B1_FAX_SND_USR_ID)
+            WHEN B2_FAX_SND_DT THEN DECODE(B2_FAX_SND_USR_ID,'BAT_BKG_015','Auto',B2_FAX_SND_USR_ID)
+            WHEN AN_FAX_SND_DT THEN DECODE(AN_FAX_SND_USR_ID,'BAT_BKG_015','Auto',AN_FAX_SND_USR_ID)
+            WHEN C1_EML_SND_DT THEN DECODE(C1_EML_SND_USR_ID,'BAT_BKG_015','Auto',C1_EML_SND_USR_ID)
+            WHEN C2_EML_SND_DT THEN DECODE(C2_EML_SND_USR_ID,'BAT_BKG_015','Auto',C2_EML_SND_USR_ID)
+            WHEN B1_EML_SND_DT THEN DECODE(B1_EML_SND_USR_ID,'BAT_BKG_015','Auto',B1_EML_SND_USR_ID)
+            WHEN B2_EML_SND_DT THEN DECODE(B2_EML_SND_USR_ID,'BAT_BKG_015','Auto',B2_EML_SND_USR_ID)
+            WHEN AN_EML_SND_DT THEN DECODE(AN_EML_SND_USR_ID,'BAT_BKG_015','Auto',AN_EML_SND_USR_ID)
+            ELSE NULL
+       END AS SND_USR_ID,
+       
+       CASE WHEN C1_FAX_SND_DT IS NULL AND 
+                 C2_FAX_SND_DT IS NULL AND 
+                 B1_FAX_SND_DT IS NULL AND 
+                 B2_FAX_SND_DT IS NULL AND 
+                 AN_FAX_SND_DT IS NULL AND
+                 C1_EML_SND_DT IS NULL AND 
+                 C2_EML_SND_DT IS NULL AND 
+                 B1_EML_SND_DT IS NULL AND 
+                 B2_EML_SND_DT IS NULL AND 
+                 AN_EML_SND_DT IS NULL THEN 'N'              
+            WHEN NULLIF(LEAST(NVL(C1_FAX_NTC_SND_RSLT_CD,'9'), NVL(C2_FAX_NTC_SND_RSLT_CD,'9'), NVL(B1_FAX_NTC_SND_RSLT_CD,'9'), 
+                              NVL(B2_FAX_NTC_SND_RSLT_CD,'9'), NVL(AN_FAX_NTC_SND_RSLT_CD,'9')),'9') = '6' OR
+                 NULLIF(LEAST(NVL(C1_EML_NTC_SND_RSLT_CD,'9'), NVL(C2_EML_NTC_SND_RSLT_CD,'9'), NVL(B1_EML_NTC_SND_RSLT_CD,'9'), 
+                              NVL(B2_EML_NTC_SND_RSLT_CD,'9'), NVL(AN_EML_NTC_SND_RSLT_CD,'9')),'9') = '4' THEN 'F'              
+            WHEN GREATEST(NVL(C1_FAX_NTC_SND_RSLT_CD,'0'), NVL(C2_FAX_NTC_SND_RSLT_CD,'0'), NVL(B1_FAX_NTC_SND_RSLT_CD,'0'), 
+                          NVL(B2_FAX_NTC_SND_RSLT_CD,'0'), NVL(AN_FAX_NTC_SND_RSLT_CD,'0')) IN ('5') OR                   
+                 GREATEST(NVL(C1_EML_NTC_SND_RSLT_CD,'0'), NVL(C2_EML_NTC_SND_RSLT_CD,'0'), NVL(B1_EML_NTC_SND_RSLT_CD,'0'), 
+                          NVL(B2_EML_NTC_SND_RSLT_CD,'0'), NVL(AN_EML_NTC_SND_RSLT_CD,'0')) IN ('3') THEN 'S'
+            ELSE 'P' END AS SND_PROC_STS_CD       ,
+       GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL',PKUP_NTC.AUTO_SND_STOP_DT,USR_ORG.LOC_CD ) AS AUTO_SND_STOP_DT,
+       PKUP_NTC.AUTO_SND_STOP_USR_ID,
+       GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL',PKUP_NTC.AUTO_SND_RESM_DT,USR_ORG.LOC_CD ) AS AUTO_SND_RESM_DT,
+       PKUP_NTC.AUTO_SND_RESM_USR_ID,
+       PKUP_NTC.BKG_CUST_TP_CD,
+       PKUP_NTC.CUST_CNT_CD,
+       PKUP_NTC.CUST_SEQ,
+       PKUP_NTC.CUST_CNT_CD||DECODE(PKUP_NTC.CUST_CNT_CD,'','',LPAD(PKUP_NTC.CUST_SEQ,6,'0')) AS CUST_CD,
+       PKUP_NTC.CUST_NM,
+       
+       PKUP_BKG.C1_FAX_NO_CHK,
+       PKUP_BKG.C1_FAX_NO              ,
+       PKUP_BKG.C1_FAX_SND_DT          ,
+       PKUP_BKG.C1_FAX_SND_USR_ID      ,
+       PKUP_BKG.C1_FAX_NTC_SND_ID      ,
+       DECODE(NVL(PKUP_BKG.C1_FAX_NTC_SND_RSLT_CD,'9'),'5','S','6','F','9','N','P' ) AS C1_FAX_NTC_SND_RSLT,
+       
+       PKUP_BKG.C2_FAX_NO_CHK,
+       PKUP_BKG.C2_FAX_NO              ,
+       PKUP_BKG.C2_FAX_SND_DT          ,
+       PKUP_BKG.C2_FAX_SND_USR_ID      ,
+       PKUP_BKG.C2_FAX_NTC_SND_ID      ,
+       DECODE(NVL(PKUP_BKG.C2_FAX_NTC_SND_RSLT_CD,'9'),'5','S','6','F','9','N','P' ) AS C2_FAX_NTC_SND_RSLT,
+       
+       PKUP_BKG.B1_FAX_NO_CHK,
+       PKUP_BKG.B1_FAX_NO              ,
+       PKUP_BKG.B1_FAX_SND_DT          ,
+       PKUP_BKG.B1_FAX_SND_USR_ID      ,
+       PKUP_BKG.B1_FAX_NTC_SND_ID      ,
+       DECODE(NVL(PKUP_BKG.B1_FAX_NTC_SND_RSLT_CD,'9'),'5','S','6','F','9','N','P' ) AS B1_FAX_NTC_SND_RSLT,
+       
+       PKUP_BKG.B2_FAX_NO_CHK,
+       PKUP_BKG.B2_FAX_NO              ,
+       PKUP_BKG.B2_FAX_SND_DT          ,
+       PKUP_BKG.B2_FAX_SND_USR_ID      ,
+       PKUP_BKG.B2_FAX_NTC_SND_ID      ,
+       DECODE(NVL(PKUP_BKG.B2_FAX_NTC_SND_RSLT_CD,'9'),'5','S','6','F','9','N','P' ) AS B2_FAX_NTC_SND_RSLT,
+       
+       PKUP_BKG.AN_FAX_NO_CHK,
+       PKUP_BKG.AN_FAX_NO              ,
+       PKUP_BKG.AN_FAX_SND_DT          ,
+       PKUP_BKG.AN_FAX_SND_USR_ID      ,
+       PKUP_BKG.AN_FAX_NTC_SND_ID      ,
+       DECODE(NVL(PKUP_BKG.AN_FAX_NTC_SND_RSLT_CD,'9'),'5','S','6','F','9','N','P' ) AS AN_FAX_NTC_SND_RSLT,
+       
+       PKUP_BKG.C1_NTC_EML_CHK,
+       PKUP_BKG.C1_NTC_EML             ,
+       PKUP_BKG.C1_EML_SND_DT          ,
+       PKUP_BKG.C1_EML_SND_USR_ID      ,
+       PKUP_BKG.C1_EML_NTC_SND_ID      ,
+       DECODE(NVL(C1_EML_NTC_SND_RSLT_CD,'9'),'3','S','4','F','9','N','P' ) AS C1_EML_NTC_SND_RSLT,
+       
+       PKUP_BKG.C2_NTC_EML_CHK,
+       PKUP_BKG.C2_NTC_EML             ,
+       PKUP_BKG.C2_EML_SND_DT          ,
+       PKUP_BKG.C2_EML_SND_USR_ID      ,
+       PKUP_BKG.C2_EML_NTC_SND_ID      ,
+       DECODE(NVL(C2_EML_NTC_SND_RSLT_CD,'9'),'3','S','4','F','9','N','P' ) AS C2_EML_NTC_SND_RSLT,
+       
+       PKUP_BKG.B1_NTC_EML_CHK,
+       PKUP_BKG.B1_NTC_EML             ,
+       PKUP_BKG.B1_EML_SND_DT          ,
+       PKUP_BKG.B1_EML_SND_USR_ID      ,
+       PKUP_BKG.B1_EML_NTC_SND_ID      ,
+       DECODE(NVL(B1_EML_NTC_SND_RSLT_CD,'9'),'3','S','4','F','9','N','P' ) AS B1_EML_NTC_SND_RSLT,
+       
+       PKUP_BKG.B2_NTC_EML_CHK,
+       PKUP_BKG.B2_NTC_EML             ,
+       PKUP_BKG.B2_EML_SND_DT          ,
+       PKUP_BKG.B2_EML_SND_USR_ID      ,
+       PKUP_BKG.B2_EML_NTC_SND_ID      ,
+       DECODE(NVL(B2_EML_NTC_SND_RSLT_CD,'9'),'3','S','4','F','9','N','P' ) AS B2_EML_NTC_SND_RSLT,
+       
+       PKUP_BKG.AN_NTC_EML_CHK,
+       PKUP_BKG.AN_NTC_EML             ,
+       PKUP_BKG.AN_EML_SND_DT          ,
+       PKUP_BKG.AN_EML_SND_USR_ID      ,
+       PKUP_BKG.AN_EML_NTC_SND_ID      ,
+       DECODE(NVL(AN_EML_NTC_SND_RSLT_CD,'9'),'3','S','4','F','9','N','P' ) AS AN_EML_NTC_SND_RSLT,      		   
+                               
+       PKUP_NTC.DIFF_RMK,
+       PKUP_NTC.TRSP_SO_OFC_CTY_CD,
+       PKUP_NTC.TRSP_SO_SEQ,
+       PKUP_NTC.ECLZ_OBL_CPY_FLG,
+       
+       IBD.FREE_TRD_ZN_FLG     AS FREE_TRD_ZN_FLG,
+       (CASE WHEN IBD.DIR_DE_FLG = ' ' THEN 'N/A' ELSE NVL(IBD.DIR_DE_FLG,'N') END) AS DIR_DE_FLG
+  FROM (
+        SELECT A.BKG_NO, A.CNTR_NO, A.BKG_CUST_TP_CD, A.NTC_SEQ,                                                                                
+               '' AS C1_FAX_NO_CHK,                                                                                                 
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C1',C.FAX_NO)) AS C1_FAX_NO,                                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C1',NVL(C.FAX_SND_DT,COM_FAX.FAX_SND_LOCL_DT))) AS C1_FAX_SND_DT,
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C1',C.FAX_SND_USR_ID)) AS C1_FAX_SND_USR_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C1',C.FAX_NTC_SND_ID)) AS C1_FAX_NTC_SND_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C1',NVL(C.FAX_NTC_SND_RSLT_CD,COM_FAX.FAX_PROC_STS_CD))) AS C1_FAX_NTC_SND_RSLT_CD,      
+                                                                                                     
+               '' AS C2_FAX_NO_CHK,                                                                               
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C2',C.FAX_NO)) AS C2_FAX_NO,                                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C2',NVL(C.FAX_SND_DT,COM_FAX.FAX_SND_LOCL_DT))) AS C2_FAX_SND_DT,                        
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C2',C.FAX_SND_USR_ID)) AS C2_FAX_SND_USR_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C2',C.FAX_NTC_SND_ID)) AS C2_FAX_NTC_SND_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C2',NVL(C.FAX_NTC_SND_RSLT_CD,COM_FAX.FAX_PROC_STS_CD))) AS C2_FAX_NTC_SND_RSLT_CD,      
+               
+               '' AS B1_FAX_NO_CHK,                                                                               
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B1',C.FAX_NO)) AS B1_FAX_NO,                                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B1',NVL(C.FAX_SND_DT,COM_FAX.FAX_SND_LOCL_DT))) AS B1_FAX_SND_DT,                        
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B1',C.FAX_SND_USR_ID)) AS B1_FAX_SND_USR_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B1',C.FAX_NTC_SND_ID)) AS B1_FAX_NTC_SND_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B2',NVL(C.FAX_NTC_SND_RSLT_CD,COM_FAX.FAX_PROC_STS_CD))) AS B1_FAX_NTC_SND_RSLT_CD,      
+               
+               '' AS B2_FAX_NO_CHK,                                                                               
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B2',C.FAX_NO)) AS B2_FAX_NO,                                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B2',NVL(C.FAX_SND_DT,COM_FAX.FAX_SND_LOCL_DT))) AS B2_FAX_SND_DT,                        
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B2',C.FAX_SND_USR_ID)) AS B2_FAX_SND_USR_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B2',C.FAX_NTC_SND_ID)) AS B2_FAX_NTC_SND_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B2',NVL(C.FAX_NTC_SND_RSLT_CD,COM_FAX.FAX_PROC_STS_CD))) AS B2_FAX_NTC_SND_RSLT_CD,      
+               
+               '' AS AN_FAX_NO_CHK,                                                                               
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'AN',C.FAX_NO)) AS AN_FAX_NO,                                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'AN',NVL(C.FAX_SND_DT,COM_FAX.FAX_SND_LOCL_DT))) AS AN_FAX_SND_DT,                        
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'AN',C.FAX_SND_USR_ID)) AS AN_FAX_SND_USR_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'AN',C.FAX_NTC_SND_ID)) AS AN_FAX_NTC_SND_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'AN',NVL(C.FAX_NTC_SND_RSLT_CD,COM_FAX.FAX_PROC_STS_CD))) AS AN_FAX_NTC_SND_RSLT_CD,      
+               
+               '' AS C1_NTC_EML_CHK,                                                                              
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C1',C.NTC_EML)) AS C1_NTC_EML,                              
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C1',NVL(C.EML_SND_DT,GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL', COM_MAIL.EML_DT, NVL(ORG.LOC_CD,DECODE(A.EDI_322_MVMT_CD,'RL',D.POD_CD,D.DEL_CD)))))) AS C1_EML_SND_DT,
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C1',C.EML_SND_USR_ID)) AS C1_EML_SND_USR_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C1',C.EML_NTC_SND_ID)) AS C1_EML_NTC_SND_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C1',NVL(C.EML_NTC_SND_RSLT_CD,COM_MAIL.EML_PROC_STS_CD))) AS C1_EML_NTC_SND_RSLT_CD,
+               
+               '' AS C2_NTC_EML_CHK,                                                                              
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C2',C.NTC_EML)) AS C2_NTC_EML,                              
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C2',NVL(C.EML_SND_DT,GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL', COM_MAIL.EML_DT, NVL(ORG.LOC_CD,DECODE(A.EDI_322_MVMT_CD,'RL',D.POD_CD,D.DEL_CD)))))) AS C2_EML_SND_DT,                        
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C2',C.EML_SND_USR_ID)) AS C2_EML_SND_USR_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C2',C.EML_NTC_SND_ID)) AS C2_EML_NTC_SND_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'C2',NVL(C.EML_NTC_SND_RSLT_CD,COM_MAIL.EML_PROC_STS_CD))) AS C2_EML_NTC_SND_RSLT_CD,      
+               
+               '' AS B1_NTC_EML_CHK,                                                                              
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B1',C.NTC_EML)) AS B1_NTC_EML,                              
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B1',NVL(C.EML_SND_DT,GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL', COM_MAIL.EML_DT, NVL(ORG.LOC_CD,DECODE(A.EDI_322_MVMT_CD,'RL',D.POD_CD,D.DEL_CD)))))) AS B1_EML_SND_DT,                        
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B1',C.EML_SND_USR_ID)) AS B1_EML_SND_USR_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B1',C.EML_NTC_SND_ID)) AS B1_EML_NTC_SND_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B1',NVL(C.EML_NTC_SND_RSLT_CD,COM_MAIL.EML_PROC_STS_CD))) AS B1_EML_NTC_SND_RSLT_CD,      
+               
+               '' AS B2_NTC_EML_CHK,                                                                              
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B2',C.NTC_EML)) AS B2_NTC_EML,                              
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B2',NVL(C.EML_SND_DT,GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL', COM_MAIL.EML_DT, NVL(ORG.LOC_CD,DECODE(A.EDI_322_MVMT_CD,'RL',D.POD_CD,D.DEL_CD)))))) AS B2_EML_SND_DT,                        
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B2',C.EML_SND_USR_ID)) AS B2_EML_SND_USR_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B2',C.EML_NTC_SND_ID)) AS B2_EML_NTC_SND_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'B2',NVL(C.EML_NTC_SND_RSLT_CD,COM_MAIL.EML_PROC_STS_CD))) AS B2_EML_NTC_SND_RSLT_CD,      
+               
+               '' AS AN_NTC_EML_CHK,                                                                              
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'AN',C.NTC_EML)) AS AN_NTC_EML,                              
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'AN',NVL(C.EML_SND_DT,GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL', COM_MAIL.EML_DT, NVL(ORG.LOC_CD,DECODE(A.EDI_322_MVMT_CD,'RL',D.POD_CD,D.DEL_CD)))))) AS AN_EML_SND_DT,                        
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'AN',C.EML_SND_USR_ID)) AS AN_EML_SND_USR_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'AN',C.EML_NTC_SND_ID)) AS AN_EML_NTC_SND_ID,                
+               MAX(DECODE(C.CUST_CNTC_TP_CD,'AN',NVL(C.EML_NTC_SND_RSLT_CD,COM_MAIL.EML_PROC_STS_CD))) AS AN_EML_NTC_SND_RSLT_CD,      
+                                                                                                                  
+               MAX(
+               GREATEST(NVL(DECODE(C.CUST_CNTC_TP_CD,'C1',NVL(C.FAX_SND_DT,COM_FAX.FAX_SND_LOCL_DT)),NULL_DT),                   
+                        NVL(DECODE(C.CUST_CNTC_TP_CD,'C2',NVL(C.FAX_SND_DT,COM_FAX.FAX_SND_LOCL_DT)),NULL_DT),                   
+                        NVL(DECODE(C.CUST_CNTC_TP_CD,'B1',NVL(C.FAX_SND_DT,COM_FAX.FAX_SND_LOCL_DT)),NULL_DT),                   
+                        NVL(DECODE(C.CUST_CNTC_TP_CD,'B2',NVL(C.FAX_SND_DT,COM_FAX.FAX_SND_LOCL_DT)),NULL_DT),                   
+                        NVL(DECODE(C.CUST_CNTC_TP_CD,'AN',NVL(C.FAX_SND_DT,COM_FAX.FAX_SND_LOCL_DT)),NULL_DT))) AS GRT_FAX_SND_DT,
+               MAX(                                                                                                   
+               GREATEST(NVL(DECODE(C.CUST_CNTC_TP_CD,'C1',NVL(C.EML_SND_DT,GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL', COM_MAIL.EML_DT, NVL(ORG.LOC_CD,DECODE(A.EDI_322_MVMT_CD,'RL',D.POD_CD,D.DEL_CD))))),NULL_DT), 
+                        NVL(DECODE(C.CUST_CNTC_TP_CD,'C2',NVL(C.EML_SND_DT,GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL', COM_MAIL.EML_DT, NVL(ORG.LOC_CD,DECODE(A.EDI_322_MVMT_CD,'RL',D.POD_CD,D.DEL_CD))))),NULL_DT),                   
+                        NVL(DECODE(C.CUST_CNTC_TP_CD,'B1',NVL(C.EML_SND_DT,GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL', COM_MAIL.EML_DT, NVL(ORG.LOC_CD,DECODE(A.EDI_322_MVMT_CD,'RL',D.POD_CD,D.DEL_CD))))),NULL_DT),                   
+                        NVL(DECODE(C.CUST_CNTC_TP_CD,'B2',NVL(C.EML_SND_DT,GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL', COM_MAIL.EML_DT, NVL(ORG.LOC_CD,DECODE(A.EDI_322_MVMT_CD,'RL',D.POD_CD,D.DEL_CD))))),NULL_DT),                   
+                        NVL(DECODE(C.CUST_CNTC_TP_CD,'AN',NVL(C.EML_SND_DT,GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL', COM_MAIL.EML_DT, NVL(ORG.LOC_CD,DECODE(A.EDI_322_MVMT_CD,'RL',D.POD_CD,D.DEL_CD))))),NULL_DT))) AS GRT_EML_SND_DT,
+              
+               ROW_NUMBER() OVER (PARTITION BY A.BKG_NO,A.CNTR_NO, A.BKG_CUST_TP_CD ORDER BY NVL(A.EXP_SND_KR_DT,TO_DATE('0001-01-01','YYYY-MM-DD')) DESC, A.NTC_SEQ DESC) RNUM
+#if(${sch_tp_cd} == 'DATE' && ${dt_tp_cd} == 'SENT')
+          FROM BKG_PKUP_NTC      A
+              ,BKG_PKUP_NTC_DTL  C          
+              ,COM_FAX_SND_INFO  COM_FAX
+              ,COM_EML_SND_INFO  COM_MAIL
+              ,BKG_BOOKING       D
+              ,MDM_ORGANIZATION  ORG
+              ,COM_USER          USR
+              ,( SELECT TO_DATE('0001-01-01','YYYY-MM-DD') AS NULL_DT
+                   FROM DUAL)
+         WHERE A.EXP_SND_DT     >= TO_DATE(@[dt_s], 'YYYY-MM-DD')
+           AND A.EXP_SND_DT     < TO_DATE(@[dt_e], 'YYYY-MM-DD') + 1
+           AND C.BKG_NO(+)      = A.BKG_NO                                                                           
+           AND C.NTC_SEQ(+)     = A.NTC_SEQ     
+           AND C.FAX_NTC_SND_ID = COM_FAX.FAX_SND_NO(+)
+           AND C.EML_NTC_SND_ID = COM_MAIL.EML_SND_NO(+) 
+           AND A.BKG_NO         = D.BKG_NO
+           AND USR.USR_ID(+)    = C.EML_SND_USR_ID
+           AND ORG.OFC_CD(+)    = USR.OFC_CD
+           AND A.PKUP_NTC_TP_CD <> 'TO'
+           AND A.PKUP_NTC_SND_STS_CD != 'X'
+      GROUP BY A.BKG_NO, A.CNTR_NO, A.BKG_CUST_TP_CD, A.NTC_SEQ, A.EXP_SND_KR_DT   
+
+#elseif(${sch_tp_cd} == 'MVMT')
+          FROM BKG_PKUP_NTC      A
+              ,BKG_PKUP_NTC_DTL  C          
+              ,COM_FAX_SND_INFO  COM_FAX
+              ,COM_EML_SND_INFO  COM_MAIL
+              ,BKG_BOOKING       D
+              ,MDM_ORGANIZATION  ORG
+              ,COM_USER          USR
+              ,( SELECT TO_DATE('0001-01-01','YYYY-MM-DD') AS NULL_DT
+                   FROM DUAL)
+         WHERE A.PKUP_NTC_EVNT_DT >= TO_DATE(@[dt_mvmt_s]||' '||@[tm_mvmt_s], 'YYYY-MM-DD HH24:MI')
+           AND A.PKUP_NTC_EVNT_DT < TO_DATE(@[dt_mvmt_e]||' '||@[tm_mvmt_e], 'YYYY-MM-DD HH24:MI') + 1
+           AND C.BKG_NO(+)       = A.BKG_NO                                                                           
+           AND C.NTC_SEQ(+)      = A.NTC_SEQ     
+           AND C.FAX_NTC_SND_ID = COM_FAX.FAX_SND_NO(+)
+           AND C.EML_NTC_SND_ID = COM_MAIL.EML_SND_NO(+) 
+           AND A.BKG_NO         = D.BKG_NO
+           AND USR.USR_ID(+)    = C.EML_SND_USR_ID
+           AND ORG.OFC_CD(+)    = USR.OFC_CD
+           AND A.PKUP_NTC_TP_CD <> 'TO'
+           AND A.PKUP_NTC_SND_STS_CD != 'X'
+      GROUP BY A.BKG_NO, A.CNTR_NO, A.BKG_CUST_TP_CD, A.NTC_SEQ, A.EXP_SND_KR_DT   
+
+#elseif(${sch_tp_cd} == 'DATE' && ${dt_tp_cd} == 'UPLOAD')
+          FROM BKG_PKUP_NTC         A                                                                             
+              ,BKG_PKUP_NTC_PKUP_NO B                                                                             
+              ,BKG_PKUP_NTC_DTL     C          
+              ,COM_FAX_SND_INFO     COM_FAX
+              ,COM_EML_SND_INFO     COM_MAIL
+              ,BKG_BOOKING          D
+              ,MDM_ORGANIZATION     ORG
+              ,COM_USER             USR
+              ,( SELECT TO_DATE('0001-01-01','YYYY-MM-DD') AS NULL_DT
+                   FROM DUAL)
+         WHERE B.BKG_NO         = A.BKG_NO                                                                           
+           AND B.CNTR_NO        = A.CNTR_NO                                                                          
+           AND B.PKUP_UPD_DT    >= TO_DATE(@[dt_s], 'YYYY-MM-DD')                                               
+           AND B.PKUP_UPD_DT    < TO_DATE(@[dt_e], 'YYYY-MM-DD') + 1                                                                                                                     
+           AND C.BKG_NO(+)      = A.BKG_NO                                                                           
+           AND C.NTC_SEQ(+)     = A.NTC_SEQ     
+           AND C.FAX_NTC_SND_ID = COM_FAX.FAX_SND_NO(+)
+           AND C.EML_NTC_SND_ID = COM_MAIL.EML_SND_NO(+) 
+           AND A.BKG_NO         = D.BKG_NO
+           AND USR.USR_ID(+)    = C.EML_SND_USR_ID
+           AND ORG.OFC_CD(+)    = USR.OFC_CD
+           AND A.PKUP_NTC_TP_CD <> 'TO'
+           AND A.PKUP_NTC_SND_STS_CD != 'X'
+      GROUP BY A.BKG_NO, A.CNTR_NO, A.BKG_CUST_TP_CD, A.NTC_SEQ, A.EXP_SND_KR_DT
+
+#elseif(${sch_tp_cd} == 'DATE' && ${dt_tp_cd} == 'ATA')
+            FROM BKG_PKUP_NTC      A
+                ,VSK_VSL_PORT_SKD  B
+                ,BKG_PKUP_NTC_DTL  C
+                ,BKG_BOOKING       D       
+                ,COM_FAX_SND_INFO  COM_FAX
+                ,COM_EML_SND_INFO  COM_MAIL
+                ,MDM_ORGANIZATION  ORG
+                ,COM_USER          USR
+                ,( SELECT TO_DATE('0001-01-01','YYYY-MM-DD') AS NULL_DT
+                     FROM DUAL)
+           WHERE D.BKG_NO         = A.BKG_NO
+             AND D.VSL_CD         = B.VSL_CD
+             AND D.SKD_VOY_NO     = B.SKD_VOY_NO
+             AND D.SKD_DIR_CD     = B.SKD_DIR_CD
+             AND B.VPS_ETA_DT     >= TO_DATE(@[dt_s], 'YYYY-MM-DD')
+             AND B.VPS_ETA_DT     <  TO_DATE(@[dt_e], 'YYYY-MM-DD') + 1
+             AND C.BKG_NO(+)      = A.BKG_NO                                                                           
+             AND C.NTC_SEQ(+)     = A.NTC_SEQ    
+             AND C.FAX_NTC_SND_ID = COM_FAX.FAX_SND_NO(+)
+             AND C.EML_NTC_SND_ID = COM_MAIL.EML_SND_NO(+) 
+             AND USR.USR_ID(+)    = C.EML_SND_USR_ID
+             AND ORG.OFC_CD(+)    = USR.OFC_CD
+             AND A.PKUP_NTC_TP_CD <> 'TO'
+             AND A.PKUP_NTC_SND_STS_CD != 'X'
+      GROUP BY A.BKG_NO, A.CNTR_NO, A.BKG_CUST_TP_CD, A.NTC_SEQ, A.EXP_SND_KR_DT
+
+#elseif(${sch_tp_cd} == 'BL')
+          FROM BKG_PKUP_NTC         A                                                                           
+              ,BKG_PKUP_NTC_DTL     C          
+              ,COM_FAX_SND_INFO     COM_FAX
+              ,COM_EML_SND_INFO     COM_MAIL
+              ,BKG_BOOKING          D
+              ,MDM_ORGANIZATION     ORG
+              ,COM_USER             USR
+              ,( SELECT TO_DATE('0001-01-01','YYYY-MM-DD') AS NULL_DT
+                   FROM DUAL)
+         WHERE D.BKG_NO         = A.BKG_NO
+           AND D.BL_NO          = @[bl_no]                                                                                                               
+           AND C.BKG_NO(+)      = A.BKG_NO                                                                           
+           AND C.NTC_SEQ(+)     = A.NTC_SEQ     
+           AND C.FAX_NTC_SND_ID = COM_FAX.FAX_SND_NO(+)
+           AND C.EML_NTC_SND_ID = COM_MAIL.EML_SND_NO(+) 
+           AND USR.USR_ID(+)    = C.EML_SND_USR_ID
+           AND ORG.OFC_CD(+)    = USR.OFC_CD
+           AND A.PKUP_NTC_TP_CD <> 'TO'
+           AND A.PKUP_NTC_SND_STS_CD != 'X'
+      GROUP BY A.BKG_NO, A.CNTR_NO, A.BKG_CUST_TP_CD, A.NTC_SEQ, A.EXP_SND_KR_DT
+#end
+      
+       ) PKUP_BKG,
+       BKG_PKUP_NTC          PKUP_NTC,
+       BKG_PKUP_NTC_PKUP_NO  PKUP_NO ,
+       BKG_BOOKING           BKG     ,
+       TRS_TRSP_RAIL_BIL_ORD RAIL    ,
+       BKG_CGO_RLSE          US_CGO  ,
+       MDM_LOCATION          LOC     ,
+       BKG_CSTMS_ADV_BL      CSTMS   ,
+       MDM_ORGANIZATION      USR_ORG ,
+       BKG_CONTAINER         CNTR    ,
+       BKG_CSTMS_ADV_IBD     IBD
+ WHERE PKUP_BKG.RNUM = 1
+   AND PKUP_BKG.NTC_SEQ        = PKUP_BKG.NTC_SEQ
+   
+   AND PKUP_BKG.BKG_NO         = PKUP_NTC.BKG_NO
+   AND PKUP_BKG.NTC_SEQ        = PKUP_NTC.NTC_SEQ
+   
+   AND PKUP_NTC.BKG_NO         = PKUP_NO.BKG_NO
+   AND PKUP_NTC.CNTR_NO        = PKUP_NO.CNTR_NO   
+   
+   AND PKUP_NTC.BKG_NO         = BKG.BKG_NO
+   AND PKUP_NTC.TRSP_SO_OFC_CTY_CD = RAIL.TRSP_SO_OFC_CTY_CD(+)
+   AND PKUP_NTC.TRSP_SO_SEQ    = RAIL.TRSP_SO_SEQ(+)
+   
+   AND BKG.BL_NO               = US_CGO.BL_NO(+)
+   AND BKG.DEL_CD              = LOC.LOC_CD
+
+   AND DECODE(SUBSTR(BKG.DEL_CD,1,2),'US','PHXSA',LOC.EQ_CTRL_OFC_CD) = PKUP_NO.OFC_CD
+   AND USR_ORG.OFC_CD(+)       = @[usr_ofc_cd]
+
+   AND BKG.BL_NO               = CSTMS.BL_NO(+)
+   AND CSTMS.CNT_CD(+)         = 'US'
+
+   AND PKUP_BKG.BKG_NO         = CNTR.BKG_NO(+)
+   AND PKUP_BKG.CNTR_NO        = CNTR.CNTR_NO(+)
+
+   AND IBD.CNT_CD(+)         = 'US'
+   AND BKG.BL_NO        = IBD.BL_NO(+)
+
+#if(${eq_ofc_cd} != '')
+ AND LOC.EQ_CTRL_OFC_CD = @[eq_ofc_cd]
+#end
+
+#if(${upd_usr_id} != '')
+ AND PKUP_NO.PKUP_UPD_USR_ID = DECODE(@[upd_usr_id],'EDI','BAT_BKG_019',@[upd_usr_id])
+#end
+
+#if(${snd_sts_cd} != '')
+ AND CASE 
+     WHEN LEAST(NVL(C1_FAX_NTC_SND_RSLT_CD,'9'), NVL(C2_FAX_NTC_SND_RSLT_CD,'9'), NVL(B1_FAX_NTC_SND_RSLT_CD,'9'), 
+                       NVL(B2_FAX_NTC_SND_RSLT_CD,'9'), NVL(AN_FAX_NTC_SND_RSLT_CD,'9')) = '9' AND
+          LEAST(NVL(C1_EML_NTC_SND_RSLT_CD,'9'), NVL(C2_EML_NTC_SND_RSLT_CD,'9'), NVL(B1_EML_NTC_SND_RSLT_CD,'9'), 
+                       NVL(B2_EML_NTC_SND_RSLT_CD,'9'), NVL(AN_EML_NTC_SND_RSLT_CD,'9')) = '9' THEN 'N'              
+     WHEN NULLIF(LEAST(NVL(C1_FAX_NTC_SND_RSLT_CD,'9'), NVL(C2_FAX_NTC_SND_RSLT_CD,'9'), NVL(B1_FAX_NTC_SND_RSLT_CD,'9'), 
+                       NVL(B2_FAX_NTC_SND_RSLT_CD,'9'), NVL(AN_FAX_NTC_SND_RSLT_CD,'9')),'9') = '6' OR
+          NULLIF(LEAST(NVL(C1_EML_NTC_SND_RSLT_CD,'9'), NVL(C2_EML_NTC_SND_RSLT_CD,'9'), NVL(B1_EML_NTC_SND_RSLT_CD,'9'), 
+                       NVL(B2_EML_NTC_SND_RSLT_CD,'9'), NVL(AN_EML_NTC_SND_RSLT_CD,'9')),'9') = '4' THEN 'F'              
+     WHEN GREATEST(NVL(C1_FAX_NTC_SND_RSLT_CD,'0'), NVL(C2_FAX_NTC_SND_RSLT_CD,'0'), NVL(B1_FAX_NTC_SND_RSLT_CD,'0'), 
+                   NVL(B2_FAX_NTC_SND_RSLT_CD,'0'), NVL(AN_FAX_NTC_SND_RSLT_CD,'0')) IN ('5') OR                   
+          GREATEST(NVL(C1_EML_NTC_SND_RSLT_CD,'0'), NVL(C2_EML_NTC_SND_RSLT_CD,'0'), NVL(B1_EML_NTC_SND_RSLT_CD,'0'), 
+                   NVL(B2_EML_NTC_SND_RSLT_CD,'0'), NVL(AN_EML_NTC_SND_RSLT_CD,'0')) IN ('3') THEN 'S'
+	#if(${snd_sts_cd} == 'Y')
+		ELSE 'P' END IN ('F','S','P')
+	#else
+		ELSE 'P' END = @[snd_sts_cd]
+    #end
+#end
+
+#if(${ntc_tp_cd} != '')
+    #if(${ntc_tp_cd} == 'MA')
+ AND PKUP_NTC.PKUP_NTC_TP_CD IN ('MA','WO')
+    #else
+ AND PKUP_NTC.PKUP_NTC_TP_CD = @[ntc_tp_cd]
+    #end
+#end
+
+#if(${foc_tp_cd} == 'C')
+ AND US_CGO.FRT_CLT_FLG||US_CGO.OBL_RDEM_FLG||US_CGO.CSTMS_CLR_CD = 'YYY'
+#elseif(${foc_tp_cd} == 'N')
+ AND US_CGO.FRT_CLT_FLG||US_CGO.OBL_RDEM_FLG||US_CGO.CSTMS_CLR_CD <> 'YYY'
+#end
+
+#if(${ow_flag} != '')
+ AND CASE WHEN RAIL.TRSP_SO_OFC_CTY_CD IS NULL THEN CNTR.CNTR_WGT * DECODE(CNTR.WGT_UT_CD,'KGS',(1/0.453),1)
+          ELSE RAIL.CNTR_WGT * DECODE(RAIL.WGT_MEAS_UT_CD, 'KGS', (1/0.453), 1) END > 45000
+#end
+
+#if(${contact_flag} != '')
+ AND (PKUP_BKG.C1_FAX_NO IS NULL AND
+      PKUP_BKG.C2_FAX_NO IS NULL AND
+      PKUP_BKG.B1_FAX_NO IS NULL AND
+      PKUP_BKG.B2_FAX_NO IS NULL AND
+      PKUP_BKG.AN_FAX_NO IS NULL AND
+      PKUP_BKG.C1_NTC_EML IS NULL AND
+      PKUP_BKG.C2_NTC_EML IS NULL AND
+      PKUP_BKG.B1_NTC_EML IS NULL AND
+      PKUP_BKG.B2_NTC_EML IS NULL AND
+      PKUP_BKG.AN_NTC_EML IS NULL)
+#end
+
+#if(${stop_flag} != '')
+ AND DECODE(PKUP_NTC.AUTO_SND_STOP_FLG||PKUP_NTC.AUTO_SND_RESM_FLG,'YN','Y','N') = 'Y'
+#end
+
+#if(${rail_co_cd} == 'B')
+AND BKG.POD_CD LIKE 'CA%'
+#end
+
+#if(${mvmt_cd} != '')
+AND NVL(DECODE(PKUP_NO.LST_FREE_DT,NULL,DECODE(PKUP_NO.PKUP_AVAL_DT,NULL,NULL,'NT'),'NF'),PKUP_NTC.EDI_322_MVMT_CD) = @[mvmt_cd]
+#end			]]></sql>
+			<params>
+				<param name="usr_ofc_cd" type="12" value="" out="N"/>
+				<param name="dt_s" type="12" value="" out="N"/>
+				<param name="dt_e" type="12" value="" out="N"/>
+				<param name="dt_mvmt_s" type="12" value="" out="N"/>
+				<param name="tm_mvmt_s" type="12" value="" out="N"/>
+				<param name="dt_mvmt_e" type="12" value="" out="N"/>
+				<param name="tm_mvmt_e" type="12" value="" out="N"/>
+				<param name="bl_no" type="12" value="" out="N"/>
+				<param name="eq_ofc_cd" type="12" value="" out="N"/>
+				<param name="upd_usr_id" type="12" value="" out="N"/>
+				<param name="snd_sts_cd" type="12" value="" out="N"/>
+				<param name="ntc_tp_cd" type="12" value="" out="N"/>
+				<param name="mvmt_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

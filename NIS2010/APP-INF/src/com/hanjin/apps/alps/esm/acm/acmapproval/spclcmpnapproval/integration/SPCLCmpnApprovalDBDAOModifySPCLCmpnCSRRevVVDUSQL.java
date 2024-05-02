@@ -1,0 +1,135 @@
+/*=========================================================
+*Copyright(c) 2015 CyberLogitec
+*@FileName : SPCLCmpnApprovalDBDAOModifySPCLCmpnCSRRevVVDUSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2015.06.23
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2015.06.23 
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.acm.acmapproval.spclcmpnapproval.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class SPCLCmpnApprovalDBDAOModifySPCLCmpnCSRRevVVDUSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * ModifySPCLCmpnCSRRevVVD
+	  * </pre>
+	  */
+	public SPCLCmpnApprovalDBDAOModifySPCLCmpnCSRRevVVDUSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("vndr_seq",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("ap_ofc_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("date_to",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("cust_cnt_seq",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("date_fm",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.esm.acm.acmapproval.spclcmpnapproval.integration").append("\n"); 
+		query.append("FileName : SPCLCmpnApprovalDBDAOModifySPCLCmpnCSRRevVVDUSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("UPDATE /*+ bypass_ujvc */" ).append("\n"); 
+		query.append("(" ).append("\n"); 
+		query.append("  SELECT I.RLANE_CD ACM_RLANE_CD," ).append("\n"); 
+		query.append("    I.REV_VVD_CD ACM_REV_VVD_CD," ).append("\n"); 
+		query.append("    C.RLANE_CD COA_RLANE_CD," ).append("\n"); 
+		query.append("    C.VSL_CD || C.SKD_VOY_NO || C.FINC_DIR_CD COA_REV_VVD_CD" ).append("\n"); 
+		query.append("  FROM ACM_AGN_BKG_INFO I," ).append("\n"); 
+		query.append("    MAS_RGST_BKG C" ).append("\n"); 
+		query.append("  WHERE I.BKG_NO = C.BKG_NO" ).append("\n"); 
+		query.append("    AND I.REV_VVD_CD <> C.VSL_CD || C.SKD_VOY_NO || C.FINC_DIR_CD" ).append("\n"); 
+		query.append("    AND I.BKG_NO IN (SELECT A.BKG_NO" ).append("\n"); 
+		query.append("                     FROM ACM_SPCL_CMPN A," ).append("\n"); 
+		query.append("                       ACM_AGN_BKG_INFO B" ).append("\n"); 
+		query.append("                     WHERE A.BKG_NO = B.BKG_NO" ).append("\n"); 
+		query.append("                       AND B.BL_NO IS NOT NULL" ).append("\n"); 
+		query.append("                       AND A.CRE_USR_ID != 'COST'" ).append("\n"); 
+		query.append("                       AND A.VNDR_SEQ  = @[vndr_seq]" ).append("\n"); 
+		query.append("                       AND A.CUST_CNT_CD || TO_CHAR(A.CUST_SEQ, 'FM000000') = @[cust_cnt_seq]" ).append("\n"); 
+		query.append("                       AND A.AP_OFC_CD = @[ap_ofc_cd]" ).append("\n"); 
+		query.append("-- 날짜 조회 조건" ).append("\n"); 
+		query.append("#if (${date_div} == 'C')" ).append("\n"); 
+		query.append("                       AND A.IF_DT IS NULL" ).append("\n"); 
+		query.append("                       AND B.BKG_CRE_DT BETWEEN TO_DATE(REPLACE(@[date_fm], '-', ''), 'YYYYMMDD') AND TO_DATE(REPLACE(@[date_to], '-', ''), 'YYYYMMDD') + 0.99999" ).append("\n"); 
+		query.append("#elseif (${date_div} == 'E')" ).append("\n"); 
+		query.append("                       AND A.IF_DT IS NULL" ).append("\n"); 
+		query.append("                       AND A.VSL_DEP_DT BETWEEN TO_DATE(REPLACE(@[date_fm], '-', ''), 'YYYYMMDD') AND TO_DATE(REPLACE(@[date_to], '-', ''), 'YYYYMMDD') + 0.99999" ).append("\n"); 
+		query.append("#elseif (${date_div} == 'I')" ).append("\n"); 
+		query.append("                       AND A.IF_DT BETWEEN TO_DATE(REPLACE(@[date_fm], '-', ''), 'YYYYMMDD') AND TO_DATE(REPLACE(@[date_to], '-', ''), 'YYYYMMDD') + 0.99999" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("                       AND A.SPCL_CMPN_STS_CD = 'CS'" ).append("\n"); 
+		query.append("                       AND NVL(A.PAY_CHK_FLG, 'N') = 'Y'" ).append("\n"); 
+		query.append("                    )" ).append("\n"); 
+		query.append(")" ).append("\n"); 
+		query.append("SET ACM_RLANE_CD = COA_RLANE_CD," ).append("\n"); 
+		query.append("  ACM_REV_VVD_CD = COA_REV_VVD_CD" ).append("\n"); 
+
+	}
+}

@@ -1,0 +1,146 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : EsmMas0037ViewAdapter.java
+*@FileTitle : EsmMas0037ViewAdapter
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.07.14
+*@LastModifier : 김기대
+*@LastVersion : 1.0
+* 2009.07.14 김기대 
+* 1.0 Creation
+* 2011.01.26 최윤성 [CHM-201108537-01] Create VSL Table 수정
+*  - OPR, OPR2 동적 메소드 적용
+=========================================================*/
+package com.hanjin.apps.alps.esm.mas.weeklypfmc.opmaster.event;
+
+import java.sql.SQLException;
+import java.util.HashMap;
+
+import com.hanjin.apps.alps.esm.mas.common.basic.CommonBC;
+import com.hanjin.apps.alps.esm.mas.common.basic.CommonBCImpl;
+import com.hanjin.framework.component.rowset.DBRowSet;
+import com.hanjin.framework.component.util.JSPUtil;
+import com.hanjin.framework.core.controller.DefaultViewAdapter;
+import com.hanjin.framework.core.controller.html.HTMLAction;
+import com.hanjin.framework.core.layer.event.EventException;
+
+/**
+ * ESM_MAS_0037 에 대한 ViewAdapter<br>
+ * - ESM_MAS_0037HTMLAction에서 작성<br>
+ *
+ * @author 김기대
+ * @see HTMLAction 참조
+ * @since J2EE 1.6
+ */
+public class EsmMas0037ViewAdapter extends DefaultViewAdapter {
+	
+    public EsmMas0037ViewAdapter(){
+    	super();
+    }
+    
+	/**
+	 * View Adapter 생성시 자동으로 호출된다.<br>
+	 *  - RowSet 데이타에 대해서 XML을 구현한 문자열을 구현하여 준다.<br>
+	 * 
+	 * @param DBRowSet rs
+	 * @param String prefix
+	 * @return String
+	 * @exception EventException
+	 */	      
+    protected String makeDataTag(DBRowSet rs, String prefix){
+        StringBuilder strBuilder = new StringBuilder();
+        
+        if(rs.isPivot()){
+        	strBuilder.append(makePivotDataTag(rs));
+        	return strBuilder.toString();
+        }        
+        
+    	int totCnt  = getRowSetCnt(rs);//rs.getRowCount()
+    	
+    	//로직----------------------------------------
+	    CommonBC commonBc = new CommonBCImpl();
+	    String comboCode = " | ";
+		String vOPR  = null;
+		String vOPR2 = null;
+		HashMap opr  = null;
+		HashMap opr2 = null;
+		
+    	try{
+    		opr  = commonBc.getCodeCombo("vsl_oshp_cd", "VslOwner", "SML", "code"); 
+    		opr2 = commonBc.getCodeCombo("vsl_oshp_cd", "VslOwner", "OTH", "code");
+    		
+    		vOPR  = (String)opr.get("");
+    		vOPR2 = (String)opr2.get("");
+    		
+    		if(!"".equals(vOPR)){
+                int tIdx = 0;
+                if(vOPR.startsWith("|")){
+                    tIdx = vOPR.indexOf("|");
+                    vOPR = vOPR.substring(tIdx+1);
+                    tIdx = 0;
+                }
+            }
+    		
+    		if(!"".equals(vOPR2)){
+                int tIdx = 0;
+                if(vOPR2.startsWith("|")){
+                    tIdx = vOPR2.indexOf("|");
+                    vOPR2 = vOPR2.substring(tIdx+1);
+                    tIdx = 0;
+                }
+            }
+    		
+		}catch(Exception e){
+			log.error("err " + e.toString(), e);
+		}
+		//----------------------------------------------
+    	
+    	try{
+		    if(rs.getMaxRows() > 0){
+		      	totCnt = rs.getMaxRows();
+		    }    
+
+		    strBuilder.append("<DATA TOTAL=\""+totCnt+"\">");
+		    if(totCnt > 0){
+		    		while(rs.next()){
+		    			int i=6;	// 5개 항목은 직접 append 했으므로 6 부터.
+		    			
+		    			if(!JSPUtil.getNull(rs.getString("VOP_CD")).equals("")) comboCode = "|" + (JSPUtil.getNull(rs.getString("VOP_CD")).equals("OTH")?vOPR2:vOPR);
+		    			
+		    			strBuilder.append("<TR");
+    					if(JSPUtil.getNull(rs.getString("cre_usr_id")).equals("BATCH")){ 
+    						strBuilder.append(" BGCOLOR='243,252,220'");
+    					}
+    					strBuilder.append(">");		    			
+    					
+    					strBuilder.append("	<TD></TD>");
+    					strBuilder.append("	<TD></TD>");
+//    					strBuilder.append("	<TD>R</TD>");
+		    			
+    					strBuilder.append("	<TD><![CDATA["+JSPUtil.getNull(rs.getString("STATUS"))+"]]></TD>");
+    					strBuilder.append("	<TD><![CDATA["+JSPUtil.getNull(rs.getString("VSL_CD"))+"]]></TD>");
+    					strBuilder.append("	<TD><![CDATA["+JSPUtil.getNull(rs.getString("VSL_TP_CD"))+"]]></TD>");
+    					strBuilder.append("	<TD><![CDATA["+JSPUtil.getNull(rs.getString("VOP_CD"))+"]]></TD>");
+    					strBuilder.append("	<TD DATA-TYPE=\"dtCombo\" COMBO-TEXT=\""+ comboCode +"\" COMBO-CODE=\""+ comboCode +"\"><![CDATA["+JSPUtil.getNull(rs.getString("VSL_OSHP_CD"))+"]]></TD>");
+    					
+		    			for (int j = 5 ; j < rs.getMetaData().getColumnCount() ; j++) {
+		    				strBuilder.append("	<TD><![CDATA["+JSPUtil.getNull(rs.getString(i++))+"]]></TD>");
+			    		}
+			    		
+			    		strBuilder.append("</TR>");
+		    		}
+		    }
+	    
+		    strBuilder.append("</DATA>");
+        }
+        catch(SQLException ex){
+            throw new RuntimeException(ex.getMessage());
+        }
+        catch(Exception ex){
+            log.error(ex.getMessage(), ex);
+            throw new RuntimeException(ex.getMessage());
+        }
+        return strBuilder.toString();
+    }
+}

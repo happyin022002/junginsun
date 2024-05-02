@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="EQMatchBackNLoadFactorMgtDBDAOsearchLocationMBByCOABKGDataRSQL">
+			<desc><![CDATA[searchLocationMBByCOABKGData]]></desc>
+			<sql><![CDATA[
+WITH LV_PARA AS
+(
+SELECT
+     #if (${tpsz_list} != '')
+     	#foreach ($user_tp_sz IN ${tpSzs})
+        	'$user_tp_sz' AS TS$velocityCount,
+     	#end
+ 	 #end
+	 #if (${trade_cd} != '')
+     	#foreach ($user_trd_cd IN ${tradeCds})
+        	#if($velocityCount < $tradeCds.size())
+            	'$user_trd_cd' AS TRD$velocityCount,
+    	  	#else
+				'$user_trd_cd' AS TRD$velocityCount
+		  	#end
+     	#end
+ 	 #end
+FROM DUAL
+),
+ LV_DATA0 AS
+(
+    SELECT  C.ECC_CD FM_LOC_CD,E.ECC_CD TO_LOC_CD,
+            DECODE(SUBSTR(A.SPCL_CNTR_TPSZ_CD,1,2),'RD',SUBSTR(A.SPCL_CNTR_TPSZ_CD,1,1)||SUBSTR(A.SPCL_CNTR_TPSZ_CD,3,1),A.SPCL_CNTR_TPSZ_CD) TPSZ,
+            A.TRD_CD,
+            ROUND(SUM(ROUND(A.BKG_QTY,0)),0) QTY
+    FROM  
+           COA_BKG_EXPN_DTL_WK A , MDM_LOCATION B, MDM_EQ_ORZ_CHT C , MDM_LOCATION D, MDM_EQ_ORZ_CHT E
+    WHERE 1 = 1
+#if (${period} == 'W')
+    AND SUBSTR(A.SLS_YRMON,1,4)||A.COST_WK BETWEEN REPLACE(@[froms], '-', '') AND REPLACE(@[tos], '-', '') 
+#else
+	AND A.SLS_YRMON BETWEEN REPLACE(@[froms], '-', '') AND REPLACE(@[tos], '-', '')
+#end 
+	AND NVL(A.DELT_FLG, 'N') = 'N' 
+    AND A.BKG_STS_CD    IN ('F','S',NULL)  
+    AND A.BKG_CGO_TP_CD <> 'P'
+    AND A.BL_NO_TP      IN ('M','0')
+	#if (${trade_cd} != '')
+		AND A.TRD_CD IN
+		(
+     	#foreach ($user_trd_cd IN ${tradeCds})
+        	#if($velocityCount < $tradeCds.size())
+            	'$user_trd_cd',
+    	  	#else
+				'$user_trd_cd'
+		  	#end
+     	#end
+		)
+ 	 #end	
+    AND A.BKG_POR_CD = B.LOC_CD
+    AND B.SCC_CD = C.SCC_CD
+    AND A.BKG_DEL_CD = D.LOC_CD
+    AND D.SCC_CD = E.SCC_CD
+    AND (C.ECC_CD IN (SELECT ECC_CD
+                    FROM CIM_COA_MTCH_BAK_LOC
+                   WHERE USR_ID = @[usr_id]
+                     AND USE_FLG = 'Y')
+			OR E.ECC_CD IN (SELECT ECC_CD
+                    FROM CIM_COA_MTCH_BAK_LOC
+                   WHERE USR_ID = @[usr_id]
+                     AND USE_FLG = 'Y'))
+#if (${tpsz} == 'R')	
+	#if (${rdtype} == 'E')
+		AND A.SPCL_CNTR_TPSZ_CD IN ('R2','R5')
+	#elseif (${rdtype} == 'O')
+		AND A.SPCL_CNTR_TPSZ_CD IN ('RD2','RD5')
+	#else 
+		AND A.SPCL_CNTR_TPSZ_CD IN ('RD2','RD5','R2','R5')
+	#end
+#else
+	#if (${tpsz_list} != '')
+		AND A.SPCL_CNTR_TPSZ_CD IN
+		(
+    	#foreach ($user_tp_sz IN ${tpSzs})
+			#if($velocityCount < $tpSzs.size())
+			'$user_tp_sz',
+			#else
+        	'$user_tp_sz'
+			#end
+    	#end
+		)
+ 	#end	
+#end
+	#if (${soc} == 'E')
+		AND A.SOC_FLG = 'N'
+	#end
+	#if (${soc} == 'O')
+		AND A.SOC_FLG = 'Y'
+	#end
+    GROUP BY C.ECC_CD,E.ECC_CD,A.SPCL_CNTR_TPSZ_CD,A.TRD_CD
+)
+
+,LV_DATA1 AS
+(
+    SELECT LOC_CD,TPSZ,TRD_CD,SUM(DECODE(SEQ,1,QTY,0)) IB_QTY, SUM(DECODE(SEQ,2,QTY,0)) OB_QTY
+    FROM(
+    	SELECT DECODE(SEQ,1,TO_LOC_CD,FM_LOC_CD) LOC_CD,TPSZ,SEQ,TRD_CD,SUM(QTY) QTY
+    		FROM LV_DATA0 , (SELECT LEVEL SEQ FROM DUAL CONNECT BY LEVEL<=2)
+        	GROUP BY DECODE(SEQ,1,TO_LOC_CD,FM_LOC_CD),TPSZ,SEQ,TRD_CD 
+    		ORDER BY DECODE(SEQ,1,TO_LOC_CD,FM_LOC_CD),TPSZ,SEQ,TRD_CD
+    )
+    WHERE LOC_CD IN (SELECT ECC_CD
+                    FROM CIM_COA_MTCH_BAK_LOC
+                   WHERE USR_ID = @[usr_id]
+                     AND USE_FLG = 'Y')
+    GROUP BY LOC_CD,TPSZ,TRD_CD
+)
+
+,LV_DATA2 AS
+(
+    SELECT LOC_CD,
+           IB_QTY0,
+		   OB_QTY0,
+           CIM_MB_RAT_FNC(IB_QTY0,OB_QTY0,2) MB_QTY0,
+		   #if (${trade_cd} != '')
+     			#foreach ($user_trd_cd IN ${tradeCds})
+					#set ($tradeCount = $velocityCount)
+        			#foreach ($user_tp_sz IN ${tpSzs})
+						#if($tradeCount == $tradeCds.size() && $velocityCount == $tpSzs.size())
+							IB_QTY${tradeCount}_$velocityCount,
+							OB_QTY${tradeCount}_$velocityCount,
+							DECODE(SIGN(IB_QTY${tradeCount}_$velocityCount - OB_QTY${tradeCount}_$velocityCount),-1,DECODE(OB_QTY${tradeCount}_$velocityCount,0,0,(-1*IB_QTY${tradeCount}_$velocityCount)/OB_QTY${tradeCount}_$velocityCount),DECODE(IB_QTY${tradeCount}_$velocityCount,0,0,OB_QTY${tradeCount}_$velocityCount/IB_QTY${tradeCount}_$velocityCount))*100 MB_QTY${tradeCount}_$velocityCount
+						#else
+							IB_QTY${tradeCount}_$velocityCount,
+							OB_QTY${tradeCount}_$velocityCount,
+							DECODE(SIGN(IB_QTY${tradeCount}_$velocityCount - OB_QTY${tradeCount}_$velocityCount),-1,DECODE(OB_QTY${tradeCount}_$velocityCount,0,0,(-1*IB_QTY${tradeCount}_$velocityCount)/OB_QTY${tradeCount}_$velocityCount),DECODE(IB_QTY${tradeCount}_$velocityCount,0,0,OB_QTY${tradeCount}_$velocityCount/IB_QTY${tradeCount}_$velocityCount))*100 MB_QTY${tradeCount}_$velocityCount,
+						#end									
+					#end
+     		   	#end
+ 	 	   #end    
+	 FROM
+    (
+        SELECT LOC_CD,
+               SUM(IB_QTY) IB_QTY0,
+               SUM(OB_QTY) OB_QTY0,
+			   #if (${trade_cd} != '')
+     		   		#foreach ($user_trd_cd IN ${tradeCds})
+						#set ($tradeCount = $velocityCount)
+        				#foreach ($user_tp_sz IN ${tpSzs})
+							#if($tradeCount == $tradeCds.size() && $velocityCount == $tpSzs.size())
+								SUM(DECODE(TRD_CD,TRD${tradeCount},DECODE(TPSZ,TS$velocityCount,IB_QTY,0),0)) IB_QTY${tradeCount}_$velocityCount,
+               					SUM(DECODE(TRD_CD,TRD${tradeCount},DECODE(TPSZ,TS$velocityCount,OB_QTY,0),0)) OB_QTY${tradeCount}_$velocityCount
+							#else
+								SUM(DECODE(TRD_CD,TRD${tradeCount},DECODE(TPSZ,TS$velocityCount,IB_QTY,0),0)) IB_QTY${tradeCount}_$velocityCount,
+               					SUM(DECODE(TRD_CD,TRD${tradeCount},DECODE(TPSZ,TS$velocityCount,OB_QTY,0),0)) OB_QTY${tradeCount}_$velocityCount,
+							#end									
+						#end
+     		   		#end
+ 	 		   #end
+        FROM LV_DATA1 , LV_PARA B
+        GROUP BY ROLLUP(LOC_CD)
+    )    
+)
+SELECT
+	    'HEADER' AS LOC_CD,
+	    #if (${trade_cd} != '')
+			'qty0,' ||
+     		#foreach ($user_trd_cd IN ${tradeCds})
+				#set ($tradeCount = $velocityCount)
+        		#foreach ($user_tp_sz IN ${tpSzs})
+					#if($tradeCount == $tradeCds.size() && $velocityCount == $tpSzs.size())
+						'qty${tradeCount}_$velocityCount' AS DIV,
+					#else
+						'qty${tradeCount}_$velocityCount,' ||
+					#end					
+				#end
+     		#end
+ 	   #end
+	   0 AS QTY0,
+	   #if (${trade_cd} != '')
+     		#foreach ($user_trd_cd IN ${tradeCds})
+				#set ($tradeCount = $velocityCount)
+        		#foreach ($user_tp_sz IN ${tpSzs})
+					#if($tradeCount == $tradeCds.size() && $velocityCount == $tpSzs.size())
+						0 AS QTY${tradeCount}_$velocityCount
+					#else
+						0 AS QTY${tradeCount}_$velocityCount,
+					#end					
+				#end
+     		#end
+ 	   #end
+FROM DUAL
+UNION ALL
+SELECT
+LOC_CD,DIV,QTY0,
+	  #if (${trade_cd} != '')
+     		#foreach ($user_trd_cd IN ${tradeCds})
+				#set ($tradeCount = $velocityCount)
+        		#foreach ($user_tp_sz IN ${tpSzs})
+					#if($tradeCount == $tradeCds.size() && $velocityCount == $tpSzs.size())
+						QTY${tradeCount}_$velocityCount
+					#else
+						QTY${tradeCount}_$velocityCount,
+					#end					
+				#end
+     		#end
+ 	   #end
+FROM (
+SELECT LOC_CD,
+	   #if(${work_type} == 'MBD1')
+	   'M/B Ratio(%)' DIV,
+	   MAX(ROUND(MB_QTY0,1)) QTY0,
+	   #else
+	   DECODE(SEQ,1,'I/B',2,'O/B',3,'Balance',4,'M/B Ratio(%)') DIV,
+	   MAX(DECODE(SEQ,1,IB_QTY0,2,OB_QTY0,3,IB_QTY0-OB_QTY0,4,ROUND(MB_QTY0,1))) QTY0, 	
+	   #end	
+	   #if (${trade_cd} != '')
+     		#foreach ($user_trd_cd IN ${tradeCds})
+				#set ($tradeCount = $velocityCount)
+        		#foreach ($user_tp_sz IN ${tpSzs})
+					#if($tradeCount == $tradeCds.size() && $velocityCount == $tpSzs.size())
+						#if(${work_type} == 'MBD1')
+							MAX(ROUND(MB_QTY${tradeCount}_$velocityCount,1)) QTY${tradeCount}_$velocityCount
+						#else
+							MAX(DECODE(SEQ,1,IB_QTY${tradeCount}_$velocityCount,2,OB_QTY${tradeCount}_$velocityCount,3,IB_QTY${tradeCount}_$velocityCount - OB_QTY${tradeCount}_$velocityCount,4,ROUND(MB_QTY${tradeCount}_$velocityCount,1))) QTY${tradeCount}_$velocityCount
+						#end	
+					#else
+						#if(${work_type} == 'MBD1')
+							MAX(ROUND(MB_QTY${tradeCount}_$velocityCount,1)) QTY${tradeCount}_$velocityCount,
+						#else
+							MAX(DECODE(SEQ,1,IB_QTY${tradeCount}_$velocityCount,2,OB_QTY${tradeCount}_$velocityCount,3,IB_QTY${tradeCount}_$velocityCount - OB_QTY${tradeCount}_$velocityCount,4,ROUND(MB_QTY${tradeCount}_$velocityCount,1))) QTY${tradeCount}_$velocityCount,
+						#end	
+					#end					
+				#end
+     		#end
+ 	   #end
+FROM LV_DATA2 ,
+#if(${work_type} == 'MBD1')
+	(SELECT LEVEL SEQ FROM DUAL CONNECT BY LEVEL <=1) B
+#else
+	(SELECT LEVEL SEQ FROM DUAL CONNECT BY LEVEL <=4) B
+#end
+GROUP BY LOC_CD,SEQ
+ORDER BY LOC_CD,SEQ
+)			]]></sql>
+			<params>
+				<param name="froms" type="12" value="" out="N"/>
+				<param name="tos" type="12" value="" out="N"/>
+				<param name="usr_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

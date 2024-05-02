@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="InvoiceInquiryDBDAOsearchInvoiceInquiryListRSQL">
+			<desc><![CDATA[Invoice Inquiry 조회 한다.]]></desc>
+			<sql><![CDATA[
+SELECT ROWNUM, C.* FROM (
+SELECT inv_no
+ 	,inv_curr_cd
+ 	,inv_ttl_amt
+ 	,inv_iss_dt
+ 	,inv_rcv_dt
+ 	,inv_rjct_flg
+ 	,status
+ 	,to_char(paidDate,'YYYY-MM-DD') paidDate
+ 	,paymentMethod
+ 	,checkTTNumber
+ 	,inv_vndr_seq
+ 	,if_sys_knd_name
+ 	,(select sp_inv_rmk
+ 	    from trs_trsp_svc_ord
+ 	   where inv_no = A.inv_no
+ 	     and INV_VNDR_SEQ = A.INV_VNDR_SEQ
+ 	     and NVL(delt_flg,'E') != 'Y'
+ 	     and sp_inv_rmk is not null
+ 	     and rownum < 2	) sp_inv_rmk
+	,'' inv_edi_rslt_cd
+FROM (
+SELECT DISTINCT
+	INV.inv_no,
+	INV.inv_curr_cd,
+	INV.inv_vndr_seq,
+	NVL(INV.inv_bzc_amt, 0.0) inv_ttl_amt,
+	TO_CHAR(INV.inv_iss_dt, 'YYYY-MM-DD') inv_iss_dt,
+	TO_CHAR(INV.inv_rcv_dt, 'YYYY-MM-DD') inv_rcv_dt,
+	INV.trsp_inv_aud_sts_cd status,
+	NVL(INV.inv_rjct_flg,'E') inv_rjct_flg,
+	(select intg_cd_val_dp_desc
+	 from com_intg_cd_dtl
+	 where intg_cd_id = 'CD00824'
+	 and intg_cd_val_ctnt = INV.trsp_inv_aud_sts_cd) status_nm,
+	INV.pay_dt paidDate,
+	INV.inv_pay_mzd_cd paymentMethod,
+	INV.inv_chk_trns_no checkTTNumber
+	,DECODE(INV.IF_SYS_KND_CD,'I','EDI','E','Paper','WEB') if_sys_knd_name
+FROM trs_trsp_inv_wrk INV, trs_trsp_svc_ord SVC
+WHERE INV.inv_no IS NOT NULL
+	AND INV.inv_no = SVC.inv_no
+	AND NVL(INV.delt_flg, 'E') <> 'Y'
+#if(${vndr_dvsn} == 'S' || (${vndr_dvsn} == 'M' && ${period_type} != ''))
+	#if ($sp_cd.size() == 1)
+		AND INV.inv_vndr_seq = (select prnt_vndr_seq from mdm_vendor where vndr_seq = @[vndr_seq])
+	#elseif ($sp_cd.size() > 1)
+ 		AND INV.inv_vndr_seq in (select distinct(prnt_vndr_seq) from mdm_vendor where (1,vndr_seq) in (
+			#foreach($sp_cd_key in ${sp_cd}) 
+				#if($velocityCount < $sp_cd.size()) 
+					(1,'$sp_cd_key'),
+				#else 
+					(1,'$sp_cd_key')
+				#end 
+			#end 
+		))
+	#end
+#end
+#if(${period_type} == 'ID')
+	AND TO_CHAR(INV.inv_iss_dt, 'YYYYMMDD') BETWEEN @[dt_fr] AND @[dt_to]
+#elseif (${period_type} == 'SD')
+	AND TO_CHAR(INV.inv_rcv_dt, 'YYYYMMDD') BETWEEN @[dt_fr] AND @[dt_to]
+#end
+#if ($trsp_inv_aud_sts_cd.size() > 0)
+	AND (1,INV.trsp_inv_aud_sts_cd) in (
+	#foreach($trsp_inv_aud_sts_cd_key IN ${trsp_inv_aud_sts_cd})
+		#if($velocityCount < $trsp_inv_aud_sts_cd.size())
+			(1,'$trsp_inv_aud_sts_cd_key'),
+		#else
+			(1,'$trsp_inv_aud_sts_cd_key')
+		#end
+	#end
+    )
+#end
+#if ($inv_no.size() > 0)
+    AND  (1,INV.inv_no) in ( 
+	#foreach($inv_no_key IN ${inv_no})
+		#if($velocityCount < $inv_no.size()) 
+			(1,'$inv_no_key') ,
+		#else
+			(1,'$inv_no_key')
+		#end 
+	#end  
+    )
+#end
+#if ($wo_no.size() > 0) 
+    AND (SVC.trsp_wo_ofc_cty_cd,SVC.trsp_wo_seq) in (
+	#foreach($wonoKey in ${wo_no}) 
+		#if($velocityCount < $wo_no.size()) 
+			(substr('$wonoKey',0,3),to_number(substr('$wonoKey',4,length('$wonoKey')))),
+		#else 
+			(substr('$wonoKey',0,3),to_number(substr('$wonoKey',4,length('$wonoKey'))))
+		#end 
+	#end 
+  )
+#end
+#if ($eq_no.size() > 0)
+    AND  (1,SVC.eq_no) in ( 
+	#foreach($eq_no_key IN ${eq_no})
+		#if($velocityCount < $eq_no.size()) 
+			(1,'$eq_no_key') ,
+		#else
+			(1,'$eq_no_key')
+		#end 
+	#end  
+    )
+#end
+ORDER BY inv_rcv_dt DESC
+) A
+
+UNION
+
+SELECT
+EDI.INV_NO,
+EDI.INV_CURR_CD,
+EDI.INV_AMT,
+TO_CHAR(EDI.INV_ISS_DT, 'YYYY-MM-DD'),
+TO_CHAR(EDI.CRE_DT, 'YYYY-MM-DD'),
+'Y',
+'EF',
+'',
+'',
+'',
+SVC2.VNDR_SEQ,
+'EDI',
+EDI.INV_RMK,
+EDI.INV_EDI_RSLT_CD
+FROM TRS_TRSP_INV_EDI EDI, TRS_TRSP_SVC_ORD SVC2
+WHERE EDI.TRSP_WO_OFC_CTY_CD = SVC2.TRSP_WO_OFC_CTY_CD
+AND EDI.TRSP_WO_SEQ = SVC2.TRSP_WO_SEQ
+AND EDI.TRSP_SO_OFC_CTY_CD = SVC2.TRSP_SO_OFC_CTY_CD
+AND EDI.TRSP_SO_SEQ = SVC2.TRSP_SO_SEQ
+AND EDI.EQ_NO = SVC2.EQ_NO
+#if(${period_type} == 'ID')
+    AND TO_CHAR(EDI.INV_ISS_DT, 'YYYYMMDD') BETWEEN @[dt_fr] AND @[dt_to]
+#elseif (${period_type} == 'SD')
+	AND TO_CHAR(EDI.CRE_DT, 'YYYYMMDD') BETWEEN @[dt_fr] AND @[dt_to]
+#end
+
+#if ($inv_no.size() > 0)
+AND (1,EDI.INV_NO) in (
+    #foreach($inv_no_key IN ${inv_no})
+		#if($velocityCount < $inv_no.size()) 
+			(1,'$inv_no_key') ,
+		#else
+			(1,'$inv_no_key')
+		#end 
+	#end  
+    )
+#end
+
+#if ($wo_no.size() > 0)
+    AND (EDI.TRSP_WO_OFC_CTY_CD,EDI.TRSP_WO_SEQ) in (
+    #foreach($wonoKey in ${wo_no}) 
+		#if($velocityCount < $wo_no.size()) 
+			(substr('$wonoKey',0,3),to_number(substr('$wonoKey',4,length('$wonoKey')))),
+		#else 
+			(substr('$wonoKey',0,3),to_number(substr('$wonoKey',4,length('$wonoKey'))))
+		#end 
+	#end 
+  )
+#end
+#if ($eq_no.size() > 0)
+    AND (1,EDI.EQ_NO) in (
+    #foreach($eq_no_key IN ${eq_no})
+		#if($velocityCount < $eq_no.size()) 
+			(1,'$eq_no_key') ,
+		#else
+			(1,'$eq_no_key')
+		#end 
+	#end  
+    )
+#end
+#if(${vndr_dvsn} == 'S' || (${vndr_dvsn} == 'M' && ${period_type} != ''))
+	#if ($sp_cd.size() == 1)
+		AND ((SVC2.VNDR_SEQ = @[vndr_seq]) 
+		OR SVC2.VNDR_SEQ = (select prnt_vndr_seq from mdm_vendor where vndr_seq = @[vndr_seq]))
+	#elseif ($sp_cd.size() > 1)
+ 		AND (SVC2.VNDR_SEQ in (select distinct(vndr_seq) from mdm_vendor where (1,vndr_seq) in (
+			#foreach($sp_cd_key in ${sp_cd}) 
+				#if($velocityCount < $sp_cd.size()) 
+					(1,'$sp_cd_key'),
+				#else 
+					(1,'$sp_cd_key')
+				#end 
+			#end 
+		))
+		OR SVC2.VNDR_SEQ in (select distinct(prnt_vndr_seq) from mdm_vendor where (1,vndr_seq) in (
+			#foreach($sp_cd_key in ${sp_cd}) 
+				#if($velocityCount < $sp_cd.size()) 
+					(1,'$sp_cd_key'),
+				#else 
+					(1,'$sp_cd_key')
+				#end 
+			#end 
+		)))
+	#end
+#end
+AND SVC2.INV_NO IS NULL
+AND EDI.INV_NO IS NOT NULL
+AND EDI.INV_EDI_RSLT_CD = 'D'
+#if ($trsp_inv_aud_sts_cd.size() > 0)
+	AND (1,'EF') in (
+	#foreach($trsp_inv_aud_sts_cd_key IN ${trsp_inv_aud_sts_cd})
+		#if($velocityCount < $trsp_inv_aud_sts_cd.size())
+			(1,'$trsp_inv_aud_sts_cd_key'),
+		#else
+			(1,'$trsp_inv_aud_sts_cd_key')
+		#end
+	#end
+    )
+#end
+ORDER BY inv_rcv_dt DESC
+) C			]]></sql>
+			<params>
+				<param name="vndr_seq" type="12" value="" out="N"/>
+				<param name="dt_fr" type="12" value="" out="N"/>
+				<param name="dt_to" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

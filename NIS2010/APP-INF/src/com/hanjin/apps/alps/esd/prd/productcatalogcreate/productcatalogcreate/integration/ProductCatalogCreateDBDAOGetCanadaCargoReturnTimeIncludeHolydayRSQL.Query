@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ProductCatalogCreateDBDAOGetCanadaCargoReturnTimeIncludeHolydayRSQL">
+			<desc><![CDATA[Rail cut off time 산출시 12월 25일, 1월 1일이 포함되어 있는지 여부를 확인하여 계산에서 제외할지 여부를 조회한다]]></desc>
+			<sql><![CDATA[
+SELECT  
+MAX(CASE WHEN HL.HL_DY BETWEEN POL_ETA-ARR_DT AND POL_ETA THEN 1
+     ELSE 0 END) AS INC_HLYDY
+FROM
+(
+SELECT
+    A1.*
+, DECODE(UPPER(POL_ETA_DAY),'SUN',ARR_SUN_DYS,'MON',ARR_MON_DYS,
+                                        'TUE',ARR_TUE_DYS,'WED',ARR_WED_DYS,
+                                        'THU',ARR_THU_DYS,'FRI',ARR_FRI_DYS,
+                                        'SAT',ARR_SAT_DYS) ARR_DT                                    
+FROM
+(
+    SELECT (SELECT CASE WHEN SUBSTR(PRDM.POL_CD,1,2)='US' THEN TRUNC(COALESCE(MIN(VPS_ETB_DT),MIN(VPS_ETA_DT),MIN(PF_ETA_DT)))
+                     ELSE TRUNC(COALESCE(MIN(VPS_ETA_DT),MIN(PF_ETA_DT)))
+                     END 
+         FROM PRD_PROD_CTL_ROUT_DTL E, VSK_VSL_PORT_SKD V
+         WHERE E.PCTL_NO = PRDM.PCTL_NO
+         AND E.ORG_NOD_CD LIKE PRDM.POL_CD||'%'
+         AND E.NOD_LNK_DIV_CD = 'L'
+         AND E.TRSP_MOD_CD = 'VD'
+         AND E.VSL_CD = V.VSL_CD
+         AND E.SKD_VOY_NO = V.SKD_VOY_NO
+         AND E.SKD_DIR_CD = V.SKD_DIR_CD
+         AND E.ORG_NOD_CD = V.YD_CD
+         AND NVL(V.PORT_SKD_STS_CD,'X') <> 'S'
+         ) POL_ETA
+         ,TO_CHAR((SELECT CASE WHEN SUBSTR(PRDM.POL_CD,1,2)='US' THEN TRUNC(COALESCE(MIN(VPS_ETB_DT),MIN(VPS_ETA_DT),MIN(PF_ETA_DT)))
+                     ELSE TRUNC(COALESCE(MIN(VPS_ETA_DT),MIN(PF_ETA_DT)))
+                     END 
+         FROM PRD_PROD_CTL_ROUT_DTL E, VSK_VSL_PORT_SKD V
+         WHERE E.PCTL_NO = PRDM.PCTL_NO
+         AND E.ORG_NOD_CD LIKE PRDM.POL_CD||'%'
+         AND E.NOD_LNK_DIV_CD = 'L'
+         AND E.TRSP_MOD_CD = 'VD' -- 미주는 FEEDER 없음
+         AND E.VSL_CD = V.VSL_CD
+         AND E.SKD_VOY_NO = V.SKD_VOY_NO
+         AND E.SKD_DIR_CD = V.SKD_DIR_CD
+         AND E.ORG_NOD_CD = V.YD_CD
+         AND NVL(V.PORT_SKD_STS_CD,'X') <> 'S'
+         ),'DY','NLS_DATE_LANGUAGE=ENGLISH') POL_ETA_DAY
+         ,CCTM.*
+         ------------------------------por node add
+         ,RANK() OVER(PARTITION BY PRDM.POL_NOD_CD ORDER BY DECODE(PRDM.POL_NOD_CD ,CCTM.POL_NOD_CD, 1, 2) ,
+                                                          DECODE((
+                                                                    SELECT ORG_NOD_CD
+                                                                    FROM PRD_PROD_CTL_ROUT_DTL D 
+                                                                    WHERE D.PCTL_NO = @[pctl_no]
+                                                                    AND D.PCTL_IO_BND_CD = 'O' 
+                                                                    AND D.TRSP_MOD_CD = 'RD' 
+                                                                    AND ROWNUM = 1 
+                                                                   ) ,CCTM.POR_NOD_CD, 1, 2) )  rn
+    FROM PRD_PROD_CTL_MST PRDM, PRD_CND_TML_CCT_MGMT CCTM 
+    WHERE CCTM.POR_CD = (
+                            SELECT SUBSTR(ORG_NOD_CD,1,5) 
+                            FROM PRD_PROD_CTL_ROUT_DTL D 
+                            WHERE D.PCTL_NO = @[pctl_no]
+                            AND D.PCTL_IO_BND_CD = 'O' 
+                            AND D.TRSP_MOD_CD = 'RD' 
+                            AND ROWNUM = 1 
+                        )
+    ------------------------------por node add
+    AND CCTM.POR_NOD_CD = DECODE( CCTM.POR_NOD_CD, ' ', CCTM.POR_NOD_CD,
+                                    (
+                                    SELECT ORG_NOD_CD
+                                    FROM PRD_PROD_CTL_ROUT_DTL D 
+                                    WHERE D.PCTL_NO = @[pctl_no]
+                                    AND D.PCTL_IO_BND_CD = 'O' 
+                                    AND D.TRSP_MOD_CD = 'RD' 
+                                    AND ROWNUM = 1 
+                                   )
+                                )
+    AND DECODE(LENGTH(CCTM.POL_NOD_CD),5,PRDM.POL_CD ,PRDM.POL_NOD_CD  )  = CCTM.POL_NOD_CD -- JSY , POL 이 5또는 7자리로 변경, 컬럼명 변경
+    AND PRDM.PCTL_NO = @[pctl_no]
+
+) A1
+WHERE RN=1
+) CON
+, ( ---- 현재 시점으로부터 -2년 + 1년간을 검사할 수 있도록 DUMMY DATA 생성
+SELECT TO_DATE(Y.YR||D.DY, 'YYYYMMDD') HL_DY  FROM
+  (SELECT EXTRACT(YEAR FROM SYSDATE)-2 YR FROM DUAL UNION
+   SELECT EXTRACT(YEAR FROM SYSDATE)-1 YR FROM DUAL UNION
+   SELECT EXTRACT(YEAR FROM SYSDATE) FROM DUAL UNION
+   SELECT EXTRACT(YEAR FROM SYSDATE)+1 FROM DUAL) Y
+, (SELECT '1225' DY FROM DUAL UNION
+   SELECT '0101' FROM DUAL) D
+) HL			]]></sql>
+			<params>
+				<param name="pctl_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

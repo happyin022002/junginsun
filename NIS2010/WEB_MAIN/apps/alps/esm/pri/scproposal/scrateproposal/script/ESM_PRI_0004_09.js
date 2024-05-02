@@ -1,0 +1,1954 @@
+/*=========================================================
+ *Copyright(c) 2009 CyberLogitec
+ *@FileName : ESM_PRI_0004_09.js
+ *@FileTitle : S/C Proposal General/Special Rate - Inquiry
+ *Open Issues :
+ *Change history :
+ *@LastModifyDate : 2009.09.23
+ *@LastModifier : 박성수
+ *@LastVersion : 1.0
+ * 2009.09.23 박성수
+ * 1.0 Creation
+ ===========================================================
+* History
+* 2013.09.05 전윤주 [CHM-201326372] Autorating 결과 계약 조회시 편의 기능 구현
+                                 - Autorating 에서 사용된 commodity, Route 일 경우 색 변경해줌
+* 2015.04.06 송호진 [CHM-201534007] Fixed index 개발 & Rate 표시 Grid 높이 조절
+=========================================================*/
+/****************************************************************************************
+ 이벤트 구분 코드: [초기화]INIT=0; [입력]ADD=1; [조회]SEARCH=2; [리스트조회]SEARCHLIST=3;
+ [수정]MODIFY=4; [삭제]REMOVE=5; [리스트삭제]REMOVELIST=6 [다중처리]MULTI=7
+ 기타 여분의 문자상수  COMMAND01=11; ~ COMMAND20=30;
+ ***************************************************************************************/
+
+    /*------------------다음 코드는 JSDoc을 잘 만들기 위해서 추가된 코드임 ------------------*/
+    /**
+     * @fileoverview 업무에서 공통으로 사용하는 자바스크립트파일로 달력 관련 함수가 정의되어 있다.
+     * @author 한진해운
+     */
+    
+    /**
+     * @extends
+     * @class Guideline Creation : Guideline Creation 생성을 위한 화면에서 사용하는 업무 스크립트를
+     *        정의한다.
+     */
+    function ESM_PRI_0004_09() {
+        this.processButtonClick = tprocessButtonClick;
+        this.setSheetObject = setSheetObject;
+        this.loadPage = loadPage;
+        this.initSheet = initSheet;
+        this.initControl = initControl;
+        this.doActionIBSheet = doActionIBSheet;
+        this.setTabObject = setTabObject;
+        this.validateForm = validateForm;
+    }
+
+    /* 개발자 작업 */
+
+    // 공통전역변수
+    var tabObjects = new Array();
+    var tabCnt = 0;
+    var beforetab = 1;
+    
+    var sheetObjects = new Array();
+    var sheetCnt = 0;
+    
+    var tabLoad = new Array();
+    tabLoad[0] = 0;
+    tabLoad[1] = 0;
+    
+    var LoadingComplete = false;
+    
+//    var arrTermOrg = new Array();
+//    var arrTermDest = new Array();
+//    var arrNoteClass = new Array();
+//    var arrTransMode = new Array();
+    
+    var acptCnt = new Array();
+    var notAcptCnt = new Array();
+    
+    // 버튼클릭이벤트를 받아 처리하는 이벤트핸들러 정의 */
+    document.onclick = processButtonClick;
+    
+	/**
+	 * 버튼 네임으로 구분하여 프로세스를 분기처리하는 이벤트핸들러 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     processButtonClick();
+	 * </pre>
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function processButtonClick() {
+        /** *** 탭당 시트가 2개 이상인 경우엔 추가 시트변수 지정하여 사용한 **** */
+    
+        var sheetObject1 = sheetObjects[0];
+    
+        /** **************************************************** */
+        var formObject = document.form;
+    
+        try {
+            var srcName = window.event.srcElement.getAttribute("name");
+            if (srcName != null && srcName != "" && srcName.indexOf("btn") == 0) {
+            	if (getButtonTable(srcName).disabled) {
+            		return false;
+            	}
+            }
+    
+            switch (srcName) {
+            case "btn_retrieve":
+            	//getConversionChecked();
+                doActionIBSheet(sheetObjects[0], document.form, IBSEARCH);
+                break;
+                
+            case "btn_gricalc":
+            	if (formObject.prop_no.value != "" && formObject.amdt_seq.value != "" && formObject.svc_scp_cd.value != "") {
+            		ComPriOpenWindowCenter("/hanjin/ESM_PRI_0112.do?" + FormQueryString(formObject), "ESM_PRI_0112", 1000, 435, false);
+                }
+                break;
+                
+            case "gen_spcl_rt_tp_cd":
+                if (formObject.prop_no.value != "" && formObject.amdt_seq.value != "" && formObject.svc_scp_cd.value != "") {
+                	if (getGenSpclRtTpCd() == "G") {
+                		sheetObjects[0].ColHidden("cust_lgl_eng_nm") = true;
+                		sheetObjects[0].ColWidth("prc_cmdt_def_nm") =  650;
+                	} else {
+                		sheetObjects[0].ColHidden("cust_lgl_eng_nm") = false;
+                		sheetObjects[0].ColWidth("prc_cmdt_def_nm") =  350;
+                	}
+                    doActionIBSheet(sheetObjects[0], document.form, IBSEARCH);
+                }
+                break;
+
+            } // end switch
+        } catch (e) {
+            if (e == "[object Error]") {
+                ComShowMessage(OBJECT_ERROR);
+            } else {
+                ComShowMessage(e);
+            }
+        }
+    }
+    
+	/**
+	 * IBSheet Object를 배열로 등록 <br>
+	 * 향후 다른 항목들을 일괄처리할 필요가 있을 때 배열로 담는 프로세스를 추가할 수 있다 <br>
+	 * 배열은 소스 상단에 정의 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     setSheetObject(sheetObj);
+	 * </pre>
+	 * @param {ibsheet} sheet_obj 필수 IBSheet Object
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function setSheetObject(sheet_obj) {
+        sheetObjects[sheetCnt++] = sheet_obj;
+    }
+    
+	/**
+	 * Sheet 기본 설정 및 초기화 <br>
+	 * body 태그의 onLoad 이벤트핸들러 구현 <br>
+	 * 화면을 브라우저에서 로딩한 후에 선처리해야 하는 기능을 추가한다. <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     loadPage();
+	 * </pre>
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function loadPage() {
+        for (var i = 0; i < sheetObjects.length; i++) {
+            ComConfigSheet(sheetObjects[i]);
+            initSheet(sheetObjects[i], i + 1);
+            sheetObjects[i].WaitImageVisible = false;
+            ComEndConfigSheet(sheetObjects[i]);
+        }
+        
+        parent.loadTabPage();
+    }  
+    
+	/**
+	 * 시트 초기설정값, 헤더 정의 <br>
+	 * 시트가 다수일 경우 시트 수만큼 case를 추가하여 시트 초기화모듈을 구성한다 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     initSheet(sheetObj,1);
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {int} sheetNo 필수 IBSheet Object 태그의 아이디에 붙인 일련번호
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function initSheet(sheetObj, sheetNo) {
+    
+        var cnt = 0;
+        var sheetID = sheetObj.id;
+        switch (sheetID) {
+        case "sheet1":  // Grid 1
+            with (sheetObj) {
+                // 높이 설정
+                style.height = 142;
+                // 전체 너비 설정
+                SheetWidth = mainTable.clientWidth;
+    
+                // Host정보 설정[필수][HostIp, Port, PagePath]
+                if (location.hostname != "")
+                    InitHostInfo(location.hostname, location.port, page_path);
+    
+                // 전체Merge 종류 [선택, Default msNone]
+                MergeSheet = msNone;
+    
+                // 전체Edit 허용 여부 [선택, Default false]
+                Editable = true;
+    
+                // 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+                InitRowInfo(1, 1, 3, 100);
+                
+                var HeadTitle = "|Seq.|Proposal No.|Amendent Seq.|Service Scope|Rate Type|Commodity Header Seq.|F|Bullet No.|Commodity Group|Actual Customer|Commodity Note|note_clss_nm_tooltip|Not Deleted Rows|Not Accepted Rows|n1st_cmnc_amdt_seq";
+                var headCount = ComCountHeadTitle(HeadTitle);
+    
+                // 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+                InitColumnInfo(headCount, 0, 0, true);
+    
+                // 해더에서 처리할 수 있는 각종 기능을 설정한다
+                InitHeadMode(false, true, true, true, false, false)
+    
+                // 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+                InitHeadRow(0, HeadTitle, true);
+    
+                // 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+                // KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+                // INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+                // SAVESTATUS, FORMATFIX]
+                InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+                InitDataProperty(0, cnt++, dtDataSeq, 40, daCenter, true, "seq");
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "prop_no", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "amdt_seq", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "svc_scp_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "gen_spcl_rt_tp_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "cmdt_hdr_seq", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtCheckBox, 50, daCenter, false, "fx_rt_flg", false, "", dfNone, 0, false, false, -1, false, true, "", false);
+                InitDataProperty(0, cnt++, dtData, 75, daCenter, false, "blet_dp_seq", false, "", dfNullInteger, 0, false, false);
+                InitDataProperty(0, cnt++, dtPopup, 350, daLeft, false, "prc_cmdt_def_nm", false, "", dfNone, 0, true, true);
+        		InitDataProperty(0, cnt++, dtPopup, 300, daLeft, false, "cust_lgl_eng_nm", false, "", dfNone, 0, true, true);
+        		InitDataProperty(0, cnt++, dtPopup, 130, daLeft, false, "note_clss_nm", false, "", dfNone, 0, true, true);
+        		InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "note_clss_nm_tooltip", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "nd_cnt", false, "", dfInteger, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "na_cnt", false, "", dfInteger, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "n1st_cmnc_amdt_seq", false, "", dfNone, 0, false, false);
+                
+        		ToolTipOption="balloon:true;width:1000;icon:1;title:Commodity Note";
+                Ellipsis = true;
+                ShowButtonImage = 2;
+                CountPosition = 0;
+                UnEditableColor = RgbColor(255, 255, 255);
+            }
+            break;
+    
+        case "sheet2":  // Grid 2
+            with (sheetObj) {
+                // 높이 설정
+                style.height = 142;
+                // 전체 너비 설정
+                SheetWidth = mainTable.clientWidth;
+    
+                // Host정보 설정[필수][HostIp, Port, PagePath]
+                if (location.hostname != "")
+                    InitHostInfo(location.hostname, location.port, page_path);
+    
+                // 전체Merge 종류 [선택, Default msNone]
+                MergeSheet = msHeaderOnly;
+    
+                // 전체Edit 허용 여부 [선택, Default false]
+                Editable = true;
+    
+                // 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+                InitRowInfo(1, 1, 3, 100);
+                
+                var HeadTitle = "|Seq.|F|Proposal No.|Amendent Seq.|Service Scope|Rate Type|Commodity Header Seq.|Route Seq.|Origin|O.Via|D.Via|Dest.|Direct Call|Note|Note Tooltip|Not Deleted Rows|Not Accepted Rows|note_dp_seq|n1st_cmnc_amdt_seq";
+                var headCount = ComCountHeadTitle(HeadTitle);
+    
+                // 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+                InitColumnInfo(headCount, 0, 0, true);
+    
+                // 해더에서 처리할 수 있는 각종 기능을 설정한다
+                InitHeadMode(false, true, true, true, false, false)
+    
+                // 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+                InitHeadRow(0, HeadTitle, true);
+    
+                // 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+                // KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+                // INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+                // SAVESTATUS, FORMATFIX]
+                InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+                InitDataProperty(0, cnt++, dtData, 40, daCenter, true, "rn", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtCheckBox, 50, daCenter, false, "fx_rt_flg", false, "", dfNone, 0, false, false, -1, false, true, "", false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "prop_no", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "amdt_seq", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "svc_scp_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "gen_spcl_rt_tp_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "cmdt_hdr_seq", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "rout_seq", false, "", dfNone, 0, false, false);             
+                InitDataProperty(0, cnt++, dtPopup, 165, daLeft, false, "org_rout_pnt_loc_def_cd", false, "", dfNone, 0, true, true);
+                InitDataProperty(0, cnt++, dtPopup, 165, daLeft, false, "org_rout_via_port_def_cd", false, "", dfNone, 0, true, true);
+                InitDataProperty(0, cnt++, dtPopup, 165, daLeft, false, "dest_rout_via_port_def_cd", false, "", dfNone, 0, true, true);
+                InitDataProperty(0, cnt++, dtPopup, 165, daLeft, false, "dest_rout_pnt_loc_def_cd", false, "", dfNone, 0, true, true);
+                InitDataProperty(0, cnt++, dtCheckBox, 80, daCenter, false, "dir_call_flg", false, "", dfNone, 0, false, false, -1, false, true, "", false);
+                //InitDataProperty(0, cnt++, dtPopup, 20, daCenter, false, "dir_call_flg_pop", false, "", dfNone, 0, true, true, -1, false, true, "", false);
+                InitDataProperty(0, cnt++, dtPopup, 130, daLeft, false, "note_clss_nm", false, "", dfNone, 0, true, true);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "note_clss_nm_tooltip", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "nd_cnt", false, "", dfInteger, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "na_cnt", false, "", dfInteger, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "note_dp_seq", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "n1st_cmnc_amdt_seq", false, "", dfNone, 0, false, false);
+                
+                ToolTipOption="balloon:true;width:1000;icon:1;title:Route Note";
+                Ellipsis = true;
+                ShowButtonImage = 2;
+                CountPosition = 0;
+                UnEditableColor = RgbColor(255, 255, 255);
+    
+            }
+            break;
+    
+        case "sheet3":  // Grid 3
+            with (sheetObj) {
+                // 높이 설정
+                style.height = 142;
+                // 전체 너비 설정
+                SheetWidth = mainTable.clientWidth;
+    
+                // Host정보 설정[필수][HostIp, Port, PagePath]
+                if (location.hostname != "")
+                    InitHostInfo(location.hostname, location.port, page_path);
+    
+                // 전체Merge 종류 [선택, Default msNone]
+                MergeSheet = msHeaderOnly;
+    
+                // 전체Edit 허용 여부 [선택, Default false]
+                Editable = false;
+    
+                // 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+                InitRowInfo(1, 1, 3, 100);
+                
+        		var HeadTitle = "|Seq.|Proposal No.|Amendent Seq.|Service Scope|Rate Type|Commodity Header Seq.|Route Seq.|Rate Seq.|Per|CGO Type|CUR|Proposal|C/Offer|Final|EFF Date|next_n1st_cmnc_amdt_seq|EXP Date|Source Code|Source|Status Code|Status|GRI|GRI|Accept Staff/Team|Accept Date|n1st_cmnc_amdt_seq|Accept User ID|1st ord|2nd ord";
+                var headCount = ComCountHeadTitle(HeadTitle);
+    
+                // 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+                InitColumnInfo(headCount, 0, 0, true);
+    
+                // 해더에서 처리할 수 있는 각종 기능을 설정한다
+                InitHeadMode(false, true, true, true, false, false)
+    
+                // 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+                InitHeadRow(0, HeadTitle, true);
+    
+                // 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+                // KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+                // INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+                // SAVESTATUS, FORMATFIX]
+                InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+                InitDataProperty(0, cnt++, dtDataSeq, 40, daCenter, false, "seq");
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "prop_no", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 40, daLeft, false, "amdt_seq", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "svc_scp_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "gen_spcl_rt_tp_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "cmdt_hdr_seq", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "rout_seq", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "rt_seq", false, "", dfNone, 0, false, false);
+                
+                InitDataProperty(0, cnt++, dtCombo,40, daCenter, false, "rat_ut_cd", false, "", dfNone, 0, true, true);
+                InitDataProperty(0, cnt++, dtCombo,70, daCenter, false, "prc_cgo_tp_cd", false, "", dfNone, 0, true, true);
+                InitDataProperty(0, cnt++, dtCombo,40, daCenter, false, "curr_cd", false, "", dfNone, 0, true, true);
+                InitDataProperty(0, cnt++, dtData, 70, daRight,  false, "prop_frt_rt_amt", false, "", dfNullFloat, 2, true, true, 9);
+                InitDataProperty(0, cnt++, dtData, 70, daRight,  false, "coffr_frt_rt_amt", false, "", dfNullFloat, 2, true, true, 9);
+                InitDataProperty(0, cnt++, dtData, 70, daRight,  false, "fnl_frt_rt_amt", false, "", dfNullFloat, 2, false, false, 9);
+                
+                InitDataProperty(0, cnt++, dtData, 70, daCenter, false, "eff_dt", false, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 70, daCenter, false, "next_n1st_cmnc_amdt_seq", false, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 70, daCenter, false, "exp_dt", false, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daCenter, false, "src_info_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 90, daCenter, false, "src_info_nm", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daCenter, false, "prc_prog_sts_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 90, daCenter, false, "prc_prog_sts_nm", false, "", dfNone, 0, false, false);
+                
+                InitDataProperty(0, cnt++, dtData, 20, daCenter, false, "gri_appl_tp_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 50, daCenter, false, "gri_appl_amt", false, "", dfNullFloat, 2, false, false);
+                
+                InitDataProperty(0, cnt++, dtData, 120, daLeft, false, "acpt_usr_nm", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 70, daCenter, false, "acpt_dt", false, "", dfDateYmd, 0, false, false);
+                
+                InitDataProperty(0, cnt++, dtHidden, 90, daLeft, false, "n1st_cmnc_amdt_seq", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 90, daCenter, false, "acpt_usr_id", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 100, daCenter, false, "n1st_ord_ref", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtHidden, 100, daCenter, false, "n2nd_ord_ref", false, "", dfNone, 0, false, false);
+                
+                InitDataCombo(0, "rat_ut_cd", ratUtCdText, ratUtCdValue, "D4");
+                InitDataCombo(0, "prc_cgo_tp_cd", prcCgoTpCdText, prcCgoTpCddValue, "DR");
+                InitDataCombo(0, "curr_cd", currCdText, currCdValue, "USD");
+                
+                Ellipsis = true;
+                ShowButtonImage = 2;
+                CountPosition = 0;
+                UnEditableColor = RgbColor(255, 255, 255);
+            }
+            break;
+            
+        case "sheet4":  // Grid 1의 Commodity 
+            with (sheetObj) {
+                // 높이 설정
+                style.height = 100;
+                // 전체 너비 설정
+                SheetWidth = mainTable.clientWidth;
+    
+                // Host정보 설정[필수][HostIp, Port, PagePath]
+                if (location.hostname != "")
+                    InitHostInfo(location.hostname, location.port, page_path);
+    
+                // 전체Merge 종류 [선택, Default msNone]
+                MergeSheet = msNone;
+    
+                // 전체Edit 허용 여부 [선택, Default false]
+                Editable = true;
+    
+                // 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+                InitRowInfo(1, 1, 3, 100);
+                
+                var HeadTitle = "4-1|4-2|4-3|4-4|4-5|4-6|4-7|4-8|4-9|4-10|4-11|4-12|4-13|4-14|4-15|4-16|4-17|4-18|4-19|4-20|4-21|4-22";
+                var headCount = ComCountHeadTitle(HeadTitle);
+    
+                // 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+                InitColumnInfo(headCount, 0, 0, true);
+    
+                // 해더에서 처리할 수 있는 각종 기능을 설정한다
+                InitHeadMode(false, true, true, true, false, false)
+    
+                // 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+                InitHeadRow(0, HeadTitle, true);
+    
+                // 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+                // KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+                // INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+                // SAVESTATUS, FORMATFIX]
+                InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prop_no", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "svc_scp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "gen_spcl_rt_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cmdt_hdr_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cmdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_cmdt_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_cmdt_def_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_cmdt_def_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "eff_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "exp_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_nm", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_dt", false, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_cmnc_amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_id", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_ord_ref", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n2nd_ord_ref", false, "", dfNone, 0, false, false);
+            }
+            break;
+            
+        case "sheet5":  // Grid 1의 Actual Customer
+            with (sheetObj) {
+                // 높이 설정
+                style.height = 100;
+                // 전체 너비 설정
+                SheetWidth = mainTable.clientWidth;
+    
+                // Host정보 설정[필수][HostIp, Port, PagePath]
+                if (location.hostname != "")
+                    InitHostInfo(location.hostname, location.port, page_path);
+    
+                // 전체Merge 종류 [선택, Default msNone]
+                MergeSheet = msNone;
+    
+                // 전체Edit 허용 여부 [선택, Default false]
+                Editable = true;
+    
+                // 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+                InitRowInfo(1, 1, 3, 100);
+                
+                var HeadTitle = "5-1|5-2|5-3|5-4|5-5|5-6|5-7|5-8|5-9|5-10|5-11|5-12|5-13|5-14|5-15|5-16|5-17|5-18|5-19|5-20";
+                var headCount = ComCountHeadTitle(HeadTitle);
+    
+                // 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+                InitColumnInfo(headCount, 0, 0, true);
+    
+                // 해더에서 처리할 수 있는 각종 기능을 설정한다
+                InitHeadMode(false, true, true, true, false, false)
+    
+                // 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+                InitHeadRow(0, HeadTitle, true);
+    
+                // 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+                // KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+                // INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+                // SAVESTATUS, FORMATFIX]
+                InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prop_no", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "svc_scp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "gen_spcl_rt_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cmdt_hdr_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "act_cust_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cust_cnt_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cust_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cust_lgl_eng_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "eff_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "exp_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_nm", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_dt", false, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_cmnc_amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_id", false, "", dfNone, 0, false, false);
+            }
+            break;
+            
+        case "sheet6":  // Grid 1의 Commodity Note
+            with (sheetObj) {
+                // 높이 설정
+                style.height = 100;
+                // 전체 너비 설정
+                SheetWidth = mainTable.clientWidth;
+    
+                // Host정보 설정[필수][HostIp, Port, PagePath]
+                if (location.hostname != "")
+                    InitHostInfo(location.hostname, location.port, page_path);
+    
+                // 전체Merge 종류 [선택, Default msNone]
+                MergeSheet = msNone;
+    
+                // 전체Edit 허용 여부 [선택, Default false]
+                Editable = true;
+    
+                // 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+                InitRowInfo(1, 1, 3, 100);
+                
+                var HeadTitle = "6-1|6-2|6-3|6-4|6-5|6-6|6-7|6-8|6-9|6-10|6-11|6-12|6-13|6-14|6-15|6-16|6-17|6-18|6-19|6-20|6-21|6-22|6-23|6-24";
+                var headCount = ComCountHeadTitle(HeadTitle);
+    
+                // 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+                InitColumnInfo(headCount, 0, 0, true);
+    
+                // 해더에서 처리할 수 있는 각종 기능을 설정한다
+                InitHeadMode(false, true, true, true, false, false)
+    
+                // 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+                InitHeadRow(0, HeadTitle, true);
+    
+                // 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+                // KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+                // INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+                // SAVESTATUS, FORMATFIX]
+                InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prop_no", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "svc_scp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "gen_spcl_rt_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cmdt_hdr_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cmdt_note_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "note_clss_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "chg_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "note_ctnt", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "note_conv_mapg_id", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "note_conv_mapg_id_chk", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "note_chg_tp_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "eff_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "exp_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_nm", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_dt", false, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_cmnc_amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_id", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_ord_ref", false, "", dfNone, 0, false, false);
+            }
+            break;
+            
+        case "sheet7":  // Grid 2의 Origin Point
+            with (sheetObj) {
+                // 높이 설정
+                style.height = 100;
+                // 전체 너비 설정
+                SheetWidth = mainTable.clientWidth;
+    
+                // Host정보 설정[필수][HostIp, Port, PagePath]
+                if (location.hostname != "")
+                    InitHostInfo(location.hostname, location.port, page_path);
+    
+                // 전체Merge 종류 [선택, Default msNone]
+                MergeSheet = msNone;
+    
+                // 전체Edit 허용 여부 [선택, Default false]
+                Editable = true;
+    
+                // 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+                InitRowInfo(1, 1, 3, 100);
+                
+                var HeadTitle = "7-1|7-2|7-3|7-4|7-5|7-6|7-7|7-8|7-9|7-10|7-11|7-12|7-13|7-14|7-15|7-16|7-17|7-18|7-19|7-20|7-21|7-22|7-23|7-24|7-25|7-26|7-27|7-28";
+                var headCount = ComCountHeadTitle(HeadTitle);
+    
+                // 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+                InitColumnInfo(headCount, 0, 0, true);
+    
+                // 해더에서 처리할 수 있는 각종 기능을 설정한다
+                InitHeadMode(false, true, true, true, false, false)
+    
+                // 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+                InitHeadRow(0, HeadTitle, true);
+    
+                // 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+                // KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+                // INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+                // SAVESTATUS, FORMATFIX]
+                InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prop_no", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "svc_scp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "gen_spcl_rt_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cmdt_hdr_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "org_dest_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_pnt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_pnt_loc_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_pnt_loc_def_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_pnt_loc_def_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_trsp_mod_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rcv_de_term_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "loc_grd_cnt_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "loc_grd_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "eff_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "exp_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_nm", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_dt", false, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_cmnc_amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_id", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_ord_ref", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n2nd_ord_ref", false, "", dfNone, 0, false, false);
+            }
+            break;
+            
+        case "sheet8":  // Grid 2의 Origin Via.
+            with (sheetObj) {
+                // 높이 설정
+                style.height = 100;
+                // 전체 너비 설정
+                SheetWidth = mainTable.clientWidth;
+    
+                // Host정보 설정[필수][HostIp, Port, PagePath]
+                if (location.hostname != "")
+                    InitHostInfo(location.hostname, location.port, page_path);
+    
+                // 전체Merge 종류 [선택, Default msNone]
+                MergeSheet = msNone;
+    
+                // 전체Edit 허용 여부 [선택, Default false]
+                Editable = true;
+    
+                // 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+                InitRowInfo(1, 1, 3, 100);
+                
+                var HeadTitle = "8-1|8-2|8-3|8-4|8-5|8-6|8-7|8-8|8-9|8-10|8-11|8-12|8-13|8-14|8-15|8-16|8-17|8-18|8-19|8-20|8-21|8-22|8-23|8-24";
+                var headCount = ComCountHeadTitle(HeadTitle);
+    
+                // 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+                InitColumnInfo(headCount, 0, 0, true);
+    
+                // 해더에서 처리할 수 있는 각종 기능을 설정한다
+                InitHeadMode(false, true, true, true, false, false)
+    
+                // 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+                InitHeadRow(0, HeadTitle, true);
+    
+                // 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+                // KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+                // INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+                // SAVESTATUS, FORMATFIX]
+                InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prop_no", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "svc_scp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "gen_spcl_rt_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cmdt_hdr_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "org_dest_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_via_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_via_port_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_via_port_def_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_via_port_def_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "eff_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "exp_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_nm", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_dt", false, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_cmnc_amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_id", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_ord_ref", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n2nd_ord_ref", false, "", dfNone, 0, false, false);
+            }
+            break;
+            
+        case "sheet9":  // Grid 2의 Destination Via.
+            with (sheetObj) {
+                // 높이 설정
+                style.height = 100;
+                // 전체 너비 설정
+                SheetWidth = mainTable.clientWidth;
+    
+                // Host정보 설정[필수][HostIp, Port, PagePath]
+                if (location.hostname != "")
+                    InitHostInfo(location.hostname, location.port, page_path);
+    
+                // 전체Merge 종류 [선택, Default msNone]
+                MergeSheet = msNone;
+    
+                // 전체Edit 허용 여부 [선택, Default false]
+                Editable = true;
+    
+                // 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+                InitRowInfo(1, 1, 3, 100);
+                
+                var HeadTitle = "9-1|9-2|9-3|9-4|9-5|9-6|9-7|9-8|9-9|9-10|9-11|9-12|9-13|9-14|9-15|9-16|9-17|9-18|9-19|9-20|9-21|9-22|9-23|9-24";
+                var headCount = ComCountHeadTitle(HeadTitle);
+    
+                // 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+                InitColumnInfo(headCount, 0, 0, true);
+    
+                // 해더에서 처리할 수 있는 각종 기능을 설정한다
+                InitHeadMode(false, true, true, true, false, false)
+    
+                // 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+                InitHeadRow(0, HeadTitle, true);
+    
+                // 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+                // KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+                // INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+                // SAVESTATUS, FORMATFIX]
+                InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prop_no", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "svc_scp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "gen_spcl_rt_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cmdt_hdr_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "org_dest_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_via_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_via_port_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_via_port_def_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_via_port_def_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "eff_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "exp_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_nm", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_dt", false, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_cmnc_amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_id", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_ord_ref", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n2nd_ord_ref", false, "", dfNone, 0, false, false);
+            }
+            break;
+            
+        case "sheet10":  // Grid 2의 Destination Point
+            with (sheetObj) {
+                // 높이 설정
+                style.height = 100;
+                // 전체 너비 설정
+                SheetWidth = mainTable.clientWidth;
+    
+                // Host정보 설정[필수][HostIp, Port, PagePath]
+                if (location.hostname != "")
+                    InitHostInfo(location.hostname, location.port, page_path);
+    
+                // 전체Merge 종류 [선택, Default msNone]
+                MergeSheet = msNone;
+    
+                // 전체Edit 허용 여부 [선택, Default false]
+                Editable = true;
+    
+                // 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+                InitRowInfo(1, 1, 3, 100);
+                
+                var HeadTitle = "10-1|10-2|10-3|10-4|10-5|10-6|10-7|10-8|10-9|10-10|10-11|10-12|10-13|10-14|10-15|10-16|10-17|10-18|10-19|10-20|10-21|10-22|10-23|10-24|10-25|10-26|10-27|10-28";
+                var headCount = ComCountHeadTitle(HeadTitle);
+                
+                // 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+                InitColumnInfo(headCount, 0, 0, true);
+    
+                // 해더에서 처리할 수 있는 각종 기능을 설정한다
+                InitHeadMode(false, true, true, true, false, false)
+    
+                // 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+                InitHeadRow(0, HeadTitle, true);
+    
+                // 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+                // KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+                // INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+                // SAVESTATUS, FORMATFIX]
+                InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prop_no", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "svc_scp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "gen_spcl_rt_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cmdt_hdr_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "org_dest_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_pnt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_pnt_loc_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_pnt_loc_def_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_pnt_loc_def_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_trsp_mod_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rcv_de_term_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "loc_grd_cnt_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "loc_grd_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "eff_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "exp_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_nm", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_dt", false, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_cmnc_amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_id", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_ord_ref", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n2nd_ord_ref", false, "", dfNone, 0, false, false);
+            }
+            break;
+            
+        case "sheet11":  // Grid 2의 Direct Call
+            with (sheetObj) {
+                // 높이 설정
+                style.height = 100;
+                // 전체 너비 설정
+                SheetWidth = mainTable.clientWidth;
+    
+                // Host정보 설정[필수][HostIp, Port, PagePath]
+                if (location.hostname != "")
+                    InitHostInfo(location.hostname, location.port, page_path);
+    
+                // 전체Merge 종류 [선택, Default msNone]
+                MergeSheet = msNone;
+    
+                // 전체Edit 허용 여부 [선택, Default false]
+                Editable = true;
+    
+                // 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+                InitRowInfo(1, 1, 3, 100);
+                
+                var HeadTitle = "11-1|11-2|11-3|11-4|11-5|11-6|11-7|11-8|11-9|11-10|11-11|11-12|11-13|11-14|11-15|11-16|11-17|11-18";
+                var headCount = ComCountHeadTitle(HeadTitle);
+    
+                // 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+                InitColumnInfo(headCount, 0, 0, true);
+    
+                // 해더에서 처리할 수 있는 각종 기능을 설정한다
+                InitHeadMode(false, true, true, true, false, false)
+    
+                // 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+                InitHeadRow(0, HeadTitle, true);
+    
+                // 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+                // KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+                // INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+                // SAVESTATUS, FORMATFIX]
+                InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prop_no", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "svc_scp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "gen_spcl_rt_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cmdt_hdr_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "dir_call_flg", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "eff_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "exp_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_nm", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_dt", false, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_cmnc_amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_id", false, "", dfNone, 0, false, false);
+            }
+            break;
+            
+        case "sheet12":  // Grid 2의 Rnote
+            with (sheetObj) {
+                // 높이 설정
+                style.height = 100;
+                // 전체 너비 설정
+                SheetWidth = mainTable.clientWidth;
+    
+                // Host정보 설정[필수][HostIp, Port, PagePath]
+                if (location.hostname != "")
+                    InitHostInfo(location.hostname, location.port, page_path);
+    
+                // 전체Merge 종류 [선택, Default msNone]
+                MergeSheet = msNone;
+    
+                // 전체Edit 허용 여부 [선택, Default false]
+                Editable = true;
+    
+                // 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+                InitRowInfo(1, 1, 3, 100);
+                
+                var HeadTitle = "12-1|12-2|12-3|12-4|12-5|12-6|12-7|12-8|12-9|12-10|12-11|12-12|12-13|12-14|12-15|12-16|12-17|12-18|12-19|12-20|12-21|12-22|12-23|12-24|12-25";
+                var headCount = ComCountHeadTitle(HeadTitle);
+                
+                // 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+                InitColumnInfo(headCount, 0, 0, true);
+    
+                // 해더에서 처리할 수 있는 각종 기능을 설정한다
+                InitHeadMode(false, true, true, true, false, false)
+    
+                // 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+                InitHeadRow(0, HeadTitle, true);
+    
+                // 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+                // KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+                // INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+                // SAVESTATUS, FORMATFIX]
+                InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prop_no", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "svc_scp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "gen_spcl_rt_tp_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "cmdt_hdr_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "rout_note_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "note_clss_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "chg_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "note_ctnt", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "note_conv_mapg_id", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "note_chg_tp_cd", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "prc_prog_sts_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_cd", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "src_info_nm", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "eff_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "exp_dt", true, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_nm", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_dt", false, "", dfDateYmd, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_cmnc_amdt_seq", true, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "acpt_usr_id", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "n1st_ord_ref", false, "", dfNone, 0, false, false);
+                InitDataProperty(0, cnt++, dtData, 100, daCenter, false, "note_conv_mapg_id_chk", false, "", dfNone, 0, false, false);
+            }
+            break;
+        }
+    }
+    
+	/**
+	 * OnSelectCell 이벤트 발생시 호출되는 function <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {int} Row 필수 Onclick 이벤트가 발생한 해당 셀의 Row Index
+	 * @param {int} Col 필수 Onclick 이벤트가 발생한 해당 셀의 Column Index
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function sheet1_OnSelectCell(sheetObj, OldRow, OldCol, NewRow, NewCol) {
+        doRowChange1(OldRow, NewRow, OldCol, NewCol);
+    }
+    
+	/**
+	 * OnSelectCell 이벤트 발생시 호출되는 function <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {int} Row 필수 Onclick 이벤트가 발생한 해당 셀의 Row Index
+	 * @param {int} Col 필수 Onclick 이벤트가 발생한 해당 셀의 Column Index
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function sheet2_OnSelectCell(sheetObj, OldRow, OldCol, NewRow, NewCol) {
+        doRowChange2(OldRow, NewRow, OldCol, NewCol);
+    }    
+    
+    /**
+     * sheet1_OnSearchEnd 이벤트 발생시 호출되는 function <br>
+     * <br>Autorating 에서 넘어온 인자가 있는 경우 색으로 표시해준다.
+     * <b>Example :</b>
+     * 
+     * @param {ibsheet} sheetObj 필수 IBSheet Object
+     * @return 없음
+     * @author 전윤주
+     * @version 2013.08.19
+     */
+    function sheet1_OnSearchEnd(sheetObj) {
+    	var m = sheetObj.LastCol;
+    	var j = 0;
+    	var formObj = document.form;
+//    	alert("색깔 시작");
+//    	alert(formObj.s_svc_scp_cd_clr.value);
+//    	alert(formObj.s_cmdt_hdr_seq_clr.value);
+    	
+    	for (var i = sheetObj.HeaderRows; i <= sheetObj.LastRow; i++) {	
+    		if (sheetObj.CellValue(i, "svc_scp_cd") == formObj.s_svc_scp_cd_clr.value
+    			&& sheetObj.CellValue(i, "gen_spcl_rt_tp_cd") == formObj.s_gen_spcl_rt_tp_cd_clr.value
+    			&& sheetObj.CellValue(i, "cmdt_hdr_seq") == formObj.s_cmdt_hdr_seq_clr.value) {
+    			for (j = 0; j < m; j++) {
+    				sheetObj.CellBackColor(i, j) = sheetObj.RgbColor(255,192,203);
+    			}
+    		}
+    	}
+    }
+
+    /**
+     * sheet2_OnSearchEnd 이벤트 발생시 호출되는 function <br>
+     * <br>Autorating 에서 넘어온 인자가 있는 경우 색으로 표시해준다.
+     * <b>Example :</b>
+     * 
+     * @param {ibsheet} sheetObj 필수 IBSheet Object
+     * @return 없음
+     * @author 전윤주
+     * @version 2013.08.19
+     */
+    function sheet2_OnSearchEnd(sheetObj) {	
+    	
+    	var m = sheetObj.LastCol;
+    	var j = 0;
+    	var formObj = document.form;
+    	
+//    	alert("색깔2");
+//    	alert(formObj.s_svc_scp_cd_clr.value);
+//    	alert(formObj.s_cmdt_hdr_seq_clr.value);
+//    	alert(formObj.s_rout_seq_clr.value);    	
+    	
+    	for (var i = sheetObj.HeaderRows; i <= sheetObj.LastRow; i++) {		
+    		
+    		if (sheetObj.CellValue(i, "svc_scp_cd") == formObj.s_svc_scp_cd_clr.value
+    			&& sheetObj.CellValue(i, "gen_spcl_rt_tp_cd") == formObj.s_gen_spcl_rt_tp_cd_clr.value
+    			&& sheetObj.CellValue(i, "cmdt_hdr_seq") == formObj.s_cmdt_hdr_seq_clr.value
+    		    && sheetObj.CellValue(i, "rout_seq") == formObj.s_rout_seq_clr.value) {
+    			for (j = 0; j < m; j++) {
+    				sheetObj.CellBackColor(i, j) = sheetObj.RgbColor(255,192,203);
+    			}
+    		}
+    	}
+    }    
+    
+    
+	/**
+	 * OnSearchEnd 이벤트 발생시 호출되는 function <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 * 
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {string} ErrMsg 필수 서버에서 넘어온 메세지
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.20
+	 */
+    function sheet7_OnSearchEnd(sheetObj, ErrMsg) {
+        if (ErrMsg == "") {
+        	origin_desc.innerHTML = "";
+            for (var i = sheetObj.HeaderRows; i <= sheetObj.LastRow; i++) {
+            	var sStr = "";
+                if (sheetObj.RowStatus(i) == "D") {
+                    continue;
+                }
+                if (sheetObj.CellValue(i, "amdt_seq") != document.form.amdt_seq.value
+                		&& sheetObj.CellValue(i + 1, "src_info_cd") == "AD") {
+                	continue;
+                }
+                
+                sStr += sheetObj.CellValue(i, "rout_pnt_loc_def_nm");
+                
+                if (sheetObj.CellValue(i, "rcv_de_term_cd") != null && sheetObj.CellValue(i, "rcv_de_term_cd") != "") {
+                	sStr += "(" + arrTermOrg[sheetObj.CellValue(i, "rcv_de_term_cd")] + ")";
+                }
+                if (sheetObj.CellValue(i, "prc_trsp_mod_cd") != null && sheetObj.CellValue(i, "prc_trsp_mod_cd") != "") {
+                	sStr += "(" + arrTransMode[sheetObj.CellValue(i, "prc_trsp_mod_cd")] + ")";
+                }
+                if ((sheetObj.CellValue(i, "loc_grd_cnt_cd") != null && sheetObj.CellValue(i, "loc_grd_cnt_cd") != "")
+                		|| (sheetObj.CellValue(i, "loc_grd_cd") != null && sheetObj.CellValue(i, "loc_grd_cd") != "")) {
+                	sStr += "(" + sheetObj.CellValue(i, "loc_grd_cnt_cd") + sheetObj.CellValue(i, "loc_grd_cd") + ")";
+                }
+                
+            	if (document.form.amdt_seq.value != "0") {
+            		if (sheetObj.CellValue(i, "amdt_seq") != document.form.amdt_seq.value
+            				|| sheetObj.CellValue(i, "src_info_cd") == "AD") {
+                		sStr = "<s>" + sStr + "</s>";
+            		} 
+            		if (sheetObj.CellValue(i, "src_info_cd") == "AD") {
+            			sStr += "(Deleted)";
+            		}
+            		/*
+            		if (sheetObj.CellValue(i, "n1st_cmnc_amdt_seq") == document.form.amdt_seq.value) {
+                		sStr = "<font color='red'>" + sStr + "</font>";
+                	}
+                	*/
+            	}
+                
+                sStr += "<br>";
+                origin_desc.innerHTML += sStr;
+            }
+        }
+    }
+	
+	/**
+	 * OnSearchEnd 이벤트 발생시 호출되는 function <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 * 
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {string} ErrMsg 필수 서버에서 넘어온 메세지
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.20
+	 */
+    function sheet8_OnSearchEnd(sheetObj, ErrMsg) {
+        if (ErrMsg == "") {
+        	ovia_desc.innerHTML = "";
+            for (var i = sheetObj.HeaderRows; i <= sheetObj.LastRow; i++) {
+            	var sStr = "";
+                if (sheetObj.RowStatus(i) == "D") {
+                    continue;
+                }
+                if (sheetObj.CellValue(i, "amdt_seq") != document.form.amdt_seq.value
+                		&& sheetObj.CellValue(i + 1, "src_info_cd") == "AD") {
+                	continue;
+                }
+                
+                sStr += sheetObj.CellValue(i, "rout_via_port_def_nm");
+                
+            	if (document.form.amdt_seq.value != "0") {
+            		if (sheetObj.CellValue(i, "amdt_seq") != document.form.amdt_seq.value
+            				|| sheetObj.CellValue(i, "src_info_cd") == "AD") {
+                		sStr = "<s>" + sStr + "</s>";
+            		} 
+            		if (sheetObj.CellValue(i, "src_info_cd") == "AD") {
+            			sStr += "(Deleted)";
+            		}
+            		/*
+            		if (sheetObj.CellValue(i, "n1st_cmnc_amdt_seq") == document.form.amdt_seq.value) {
+                		sStr = "<font color='red'>" + sStr + "</font>";
+                	}
+                	*/
+            	}
+                
+                sStr += "<br>";
+                ovia_desc.innerHTML += sStr;
+            }
+        }
+    }
+    
+	/**
+	 * OnSearchEnd 이벤트 발생시 호출되는 function <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 * 
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {string} ErrMsg 필수 서버에서 넘어온 메세지
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.20
+	 */
+    function sheet9_OnSearchEnd(sheetObj, ErrMsg) {
+        if (ErrMsg == "") {
+        	dvia_desc.innerHTML = "";
+            for (var i = sheetObj.HeaderRows; i <= sheetObj.LastRow; i++) {
+            	var sStr = "";
+                if (sheetObj.RowStatus(i) == "D") {
+                    continue;
+                }
+                if (sheetObj.CellValue(i, "amdt_seq") != document.form.amdt_seq.value
+                		&& sheetObj.CellValue(i + 1, "src_info_cd") == "AD") {
+                	continue;
+                }
+                
+                sStr += sheetObj.CellValue(i, "rout_via_port_def_nm");
+                
+            	if (document.form.amdt_seq.value != "0") {
+            		if (sheetObj.CellValue(i, "amdt_seq") != document.form.amdt_seq.value
+            				|| sheetObj.CellValue(i, "src_info_cd") == "AD") {
+                		sStr = "<s>" + sStr + "</s>";
+            		} 
+            		if (sheetObj.CellValue(i, "src_info_cd") == "AD") {
+            			sStr += "(Deleted)";
+            		}
+            		/*
+            		if (sheetObj.CellValue(i, "n1st_cmnc_amdt_seq") == document.form.amdt_seq.value) {
+                		sStr = "<font color='red'>" + sStr + "</font>";
+                	}
+                	*/
+            	}
+                
+                sStr += "<br>";
+                dvia_desc.innerHTML += sStr;
+            }
+        }
+    }
+    
+	/**
+	 * OnSearchEnd 이벤트 발생시 호출되는 function <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 * 
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {string} ErrMsg 필수 서버에서 넘어온 메세지
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.20
+	 */
+    function sheet10_OnSearchEnd(sheetObj, ErrMsg) {
+        if (ErrMsg == "") {
+        	dest_desc.innerHTML = "";
+            for (var i = sheetObj.HeaderRows; i <= sheetObj.LastRow; i++) {
+            	var sStr = "";
+                if (sheetObj.RowStatus(i) == "D") {
+                    continue;
+                }
+                if (sheetObj.CellValue(i, "amdt_seq") != document.form.amdt_seq.value
+                		&& sheetObj.CellValue(i + 1, "src_info_cd") == "AD") {
+                	continue;
+                }
+                
+                sStr += sheetObj.CellValue(i, "rout_pnt_loc_def_nm");
+                
+                if (sheetObj.CellValue(i, "rcv_de_term_cd") != null && sheetObj.CellValue(i, "rcv_de_term_cd") != "") {
+                	sStr += "(" + arrTermDest[sheetObj.CellValue(i, "rcv_de_term_cd")] + ")";
+                }
+                if (sheetObj.CellValue(i, "prc_trsp_mod_cd") != null && sheetObj.CellValue(i, "prc_trsp_mod_cd") != "") {
+                	sStr += "(" + arrTransMode[sheetObj.CellValue(i, "prc_trsp_mod_cd")] + ")";
+                }
+                if ((sheetObj.CellValue(i, "loc_grd_cnt_cd") != null && sheetObj.CellValue(i, "loc_grd_cnt_cd") != "")
+                		|| (sheetObj.CellValue(i, "loc_grd_cd") != null && sheetObj.CellValue(i, "loc_grd_cd") != "")) {
+                	sStr += "(" + sheetObj.CellValue(i, "loc_grd_cnt_cd") + sheetObj.CellValue(i, "loc_grd_cd") + ")";
+                }
+                
+            	if (document.form.amdt_seq.value != "0") {
+            		if (sheetObj.CellValue(i, "amdt_seq") != document.form.amdt_seq.value
+            				|| sheetObj.CellValue(i, "src_info_cd") == "AD") {
+                		sStr = "<s>" + sStr + "</s>";
+            		} 
+            		if (sheetObj.CellValue(i, "src_info_cd") == "AD") {
+            			sStr += "(Deleted)";
+            		}
+            		/*
+            		if (sheetObj.CellValue(i, "n1st_cmnc_amdt_seq") == document.form.amdt_seq.value) {
+                		sStr = "<font color='red'>" + sStr + "</font>";
+                	}
+            		*/
+            	}
+                
+                sStr += "<br>";
+                dest_desc.innerHTML += sStr;
+            }
+        }
+    }
+    
+	/**
+	 * OnPopupClick 이벤트 발생시 호출되는 function <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {int} Row 필수 Onclick 이벤트가 발생한 해당 셀의 Row Index
+	 * @param {int} Col 필수 Onclick 이벤트가 발생한 해당 셀의 Column Index
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function sheet1_OnPopupClick(sheetObj, Row, Col) {
+        var colName = sheetObj.ColSaveName(Col);
+        var formObj = document.form;
+        
+        if (colName == "prc_cmdt_def_nm") {
+            var sUrl = "/hanjin/ESM_PRI_0049.do?" + FormQueryString(document.form);
+            ComPriOpenWindowCenter(sUrl, "ESM_PRI_0049", 900, 235, true);
+        }
+
+        if (colName == "cust_lgl_eng_nm") {
+        	var sUrl = "/hanjin/ESM_PRI_0103.do?" + FormQueryString(document.form);
+            ComPriOpenWindowCenter(sUrl, "ESM_PRI_0103", 820, 220, true);
+        }
+        
+        if (colName == "note_clss_nm") {
+        	var sUrl = "/hanjin/ESM_PRI_0092.do?" + FormQueryString(document.form);
+            ComPriOpenWindowCenter(sUrl, "ESM_PRI_0092", 1000, 240, true);
+        }
+    }
+    
+	/**
+	 * OnPopupClick 이벤트 발생시 호출되는 function <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {int} Row 필수 Onclick 이벤트가 발생한 해당 셀의 Row Index
+	 * @param {int} Col 필수 Onclick 이벤트가 발생한 해당 셀의 Column Index
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function sheet2_OnPopupClick(sheetObj, Row, Col) {
+        if (!LoadingComplete) {
+            return;
+        }
+        
+        var colName = sheetObj.ColSaveName(Col);
+        var formObj = document.form;
+        
+        var sUrl = "/hanjin/ESM_PRI_0050.do?" + FormQueryString(document.form);
+
+        if (colName == "org_rout_pnt_loc_def_cd") {
+            sUrl += "&org_dest_tp_cd=" + "O" + "&pnt_via_tp_cd=" + "P";
+            ComPriOpenWindowCenter(sUrl, "ESM_PRI_0050", 1000, 295, true);
+        }
+        if (colName == "org_rout_via_port_def_cd") {
+            sUrl += "&org_dest_tp_cd=" + "O" + "&pnt_via_tp_cd=" + "V";
+            ComPriOpenWindowCenter(sUrl, "ESM_PRI_0050", 1000, 295, true);
+        }
+        if (colName == "dest_rout_via_port_def_cd") {
+            sUrl += "&org_dest_tp_cd=" + "D" + "&pnt_via_tp_cd=" + "V";
+            ComPriOpenWindowCenter(sUrl, "ESM_PRI_0050", 1000, 295, true);
+        }
+        if (colName == "dest_rout_pnt_loc_def_cd") {
+            sUrl += "&org_dest_tp_cd=" + "D" + "&pnt_via_tp_cd=" + "P";
+            ComPriOpenWindowCenter(sUrl, "ESM_PRI_0050", 1000, 295, true);
+        }
+        /*
+        if (colName == "dir_call_flg_pop") {
+            sUrl = "/hanjin/ESM_PRI_0117.do?" + FormQueryString(document.form);
+            ComPriOpenWindowCenter(sUrl, "ESM_PRI_0117", 600, 195, true);
+        }
+        */
+        if (colName == "note_clss_nm") {
+            sUrl = "/hanjin/ESM_PRI_0098.do?" + FormQueryString(document.form);
+            ComPriOpenWindowCenter(sUrl, "ESM_PRI_0098", 1000, 240, true);
+        }
+    }
+    
+    var isFiredNested = false;
+    var isFiredNestedExt = false;
+    var supressConfirm = false;
+	/**
+	 * Sheet에서 Row변경되었을 때 이벤트를 처리할 함수. <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {form} formObj 필수 html form object
+	 * @param {int} sAction 필수 프로세스 플래그 상수
+	 * @returns bool <br>
+	 *          true  : 폼입력값이 유효할 경우<br>
+	 *          false : 폼입력값이 유효하지 않을 경우
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function doRowChange1(OldRow, NewRow, OldCol, NewCol, sAction) {
+        var formObj = document.form;
+    
+        if (!isFiredNested && (OldRow != NewRow)) {
+            if (sheetObjects[0].IsDataModified
+            		|| sheetObjects[3].IsDataModified
+            		|| sheetObjects[4].IsDataModified
+            		|| sheetObjects[5].IsDataModified) {
+            	isFiredNested = true;
+                sheetObjects[0].SelectCell(OldRow, OldCol, false);
+                isFiredNested = false;
+            	
+                if (validateForm(sheetObjects[0], document.form, IBSAVE)) {
+                	if (sAction != IBINSERT && sAction != IBCOPYROW) {
+	                	isFiredNested = true;
+	                    sheetObjects[0].SelectCell(NewRow, NewCol, false);
+	                    isFiredNested = false;
+                	}
+                } else {
+                	isFiredNested = true;
+                    sheetObjects[0].SelectCell(OldRow, OldCol, false);
+                    isFiredNested = false;
+                    return -1;
+                }
+            }
+            
+            if (sheetObjects[1].IsDataModified
+                    || sheetObjects[2].IsDataModified
+                    || sheetObjects[6].IsDataModified
+                    || sheetObjects[7].IsDataModified
+                    || sheetObjects[8].IsDataModified
+                    || sheetObjects[9].IsDataModified
+                    || sheetObjects[10].IsDataModified
+                    || sheetObjects[11].IsDataModified) {
+                isFiredNested = true;
+                sheetObjects[0].SelectCell(OldRow, OldCol, false);
+                isFiredNested = false;
+            	
+                var rslt = false;
+                if (ComShowCodeConfirm("PRI00006")) {
+                    supressConfirm = true;
+                    var rslt = doActionIBSheet(sheetObjects[2], document.form, IBSAVE);
+                    supressConfirm = false;
+                }
+                if (rslt) {
+                	if (sAction != IBINSERT && sAction != IBCOPYROW) {
+	                    isFiredNested = true;
+	                    sheetObjects[0].SelectCell(NewRow, NewCol, false);
+	                    isFiredNested = false;
+                	}
+                } else {
+                    isFiredNested = true;
+                    sheetObjects[0].SelectCell(OldRow, OldCol, false);
+                    isFiredNested = false;
+                	return -1;
+                }
+            }
+    
+            if (sAction == IBINSERT) {
+                isFiredNested = true;
+                var idx = sheetObjects[0].DataInsert();
+                isFiredNested = false;
+                return idx;
+            } else if (sAction == IBCOPYROW) {
+                isFiredNested = true;
+                var idx = sheetObjects[0].DataCopy();
+                isFiredNested = false;
+                return idx;
+            } else {
+                formObj.cmdt_hdr_seq.value = sheetObjects[0].CellValue(NewRow, "cmdt_hdr_seq");
+                doActionIBSheet(sheetObjects[1], document.form, IBSEARCH);
+            }
+        }
+    }
+    
+	/**
+	 * Sheet에서 Row변경되었을 때 이벤트를 처리할 함수. <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {form} formObj 필수 html form object
+	 * @param {int} sAction 필수 프로세스 플래그 상수
+	 * @returns bool <br>
+	 *          true  : 폼입력값이 유효할 경우<br>
+	 *          false : 폼입력값이 유효하지 않을 경우
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function doRowChange2(OldRow, NewRow, OldCol, NewCol, sAction) {
+        var formObj = document.form;
+        var adjNewRow = NewRow;
+        
+        if (!isFiredNested && !isFiredNestedExt && (OldRow != NewRow)) {
+            if (sheetObjects[1].IsDataModified
+                    || sheetObjects[2].IsDataModified
+                    || sheetObjects[6].IsDataModified
+                    || sheetObjects[7].IsDataModified
+                    || sheetObjects[8].IsDataModified
+                    || sheetObjects[9].IsDataModified
+                    || sheetObjects[10].IsDataModified
+                    || sheetObjects[11].IsDataModified) {
+                isFiredNested = true;
+                sheetObjects[1].SelectCell(OldRow, OldCol, false);
+                isFiredNested = false;
+            	
+                var rslt = false;
+                if (ComShowCodeConfirm("PRI00006")) {
+                    supressConfirm = true;
+                    adjNewRow = Math.max(NewRow - sheetObjects[1].RowCount("D"), sheetObjects[1].HeaderRows);
+                    rslt = doActionIBSheet(sheetObjects[2], document.form, IBSAVE);
+                    supressConfirm = false;
+                }
+                if (rslt) {
+                	if (sAction != IBINSERT && sAction != IBCOPYROW) {
+	                    isFiredNested = true;
+	                    sheetObjects[1].SelectCell(adjNewRow, NewCol, false);
+	                    isFiredNested = false;
+                	}
+                } else {
+                    isFiredNested = true;
+                    sheetObjects[1].SelectCell(OldRow, OldCol, false);
+                    isFiredNested = false;
+                	return -1;
+                }
+            }
+            
+            if (sAction == IBINSERT) {
+                isFiredNested = true;
+                var idx = sheetObjects[1].DataInsert();
+                isFiredNested = false;
+                return idx;
+            } else if (sAction == IBCOPYROW) {
+                isFiredNested = true;
+                var idx = sheetObjects[1].DataCopy();
+                isFiredNested = false;
+                return idx;
+            } else {
+                LoadingComplete = false;
+                formObj.rout_seq.value = sheetObjects[1].CellValue(adjNewRow, "rout_seq");
+                doActionIBSheet(sheetObjects[2], document.form, IBSEARCH);
+                LoadingComplete = true;
+            }
+        }
+    }
+    
+	/**
+	 * Sheet관련 프로세스 처리 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     doActionIBSheet(sheetObj, document.form, IBSEARCH)
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {form} formObj 필수 html form object
+	 * @param {int} sAction 필수 프로세스 플래그 상수
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function doActionIBSheet(sheetObj, formObj, sAction) {
+        try {
+            if (window.event == null || window.event.srcElement == null || window.event.srcElement.getAttribute("suppressWait") != "Y") {
+                ComOpenWait(true);
+            }
+	        sheetObj.ShowDebugMsg = false;
+	        switch (sAction) {
+	            
+	        case IBSEARCH: // 조회
+	            if (!validateForm(sheetObj, document.form, sAction)) {
+	                return false;
+	            }
+	            
+	            /*
+	            if (getConversionChecked() == "N" && formObj.amdt_seq.value == "0") {
+	            	tabClearSheet();
+	            	return false;
+	            }
+	            */
+	            
+	            if (sheetObj.id == "sheet1") {
+	                for (var i = 0; i < sheetObjects.length; i++) {
+	                    sheetObjects[i].RemoveAll();
+	                }
+	                
+	                formObj.f_cmd.value = SEARCH01;
+	                var sXml = sheetObj.GetSearchXml("ESM_PRI_0004_09GS.do" , FormQueryString(formObj));
+	                var arrXml = sXml.split("|$$|");
+	                
+	                if (arrXml.length > 0) sheetObjects[0].LoadSearchXml(arrXml[0]);    // Grid1.
+	                if (arrXml.length > 1) sheetObjects[3].LoadSearchXml(arrXml[1]);    // Hidden. Grid1의 Commodity
+	                if (arrXml.length > 2) sheetObjects[4].LoadSearchXml(arrXml[2]);    // Hidden. Grid1의 Actual Customer
+	                if (arrXml.length > 3) sheetObjects[5].LoadSearchXml(arrXml[3]);    // Hidden. Grid1의 Commodity Note
+	                
+	                var griCnt = ComGetEtcData(arrXml[0], "gri_cnt");
+	                if (parseInt(griCnt) > 0) {
+	                	enableButton("btn_gricalc");
+	                } else {
+	                	disableButton("btn_gricalc");
+	                }
+	                
+	            } else if (sheetObj.id == "sheet2") {
+	                for (var i = 1; i < sheetObjects.length; i++) {
+	                    if (i == 3 || i == 4 || i == 5) {
+	                        continue;
+	                    }
+	                    sheetObjects[i].RemoveAll();
+	                }
+	                
+	                origin_desc.innerHTML = "";
+	                ovia_desc.innerHTML = "";
+	                dvia_desc.innerHTML = "";
+	                dest_desc.innerHTML = "";
+	                
+	                formObj.f_cmd.value = SEARCH02;
+	                sheetObj.DoSearch("ESM_PRI_0004_09GS.do" , FormQueryString(formObj) + "&cmdt_row_seq=" + sheetObjects[0].CellValue(sheetObjects[0].SelectRow, "blet_dp_seq"));
+	                
+	            } else if (sheetObj.id == "sheet3") {
+	                for (var i = 2; i < sheetObjects.length; i++) {
+	                	if (i == 3 || i == 4 || i == 5) {
+	                        continue;
+	                    }
+	                    sheetObjects[i].RemoveAll();
+	                }
+	                
+	                formObj.f_cmd.value = SEARCH03;
+	                var sXml = sheetObj.GetSearchXml("ESM_PRI_0004_09GS.do" , FormQueryString(formObj));
+	                var arrXml = sXml.split("|$$|");
+	                
+	                if (arrXml.length > 0) sheetObjects[2].LoadSearchXml(arrXml[0]);    // Grid3.
+	                if (arrXml.length > 1) sheetObjects[6].LoadSearchXml(arrXml[1]);    // Hidden. Grid2의 Origin Point.
+	                if (arrXml.length > 2) sheetObjects[7].LoadSearchXml(arrXml[2]);    // Hidden. Grid2의 Origin Via.
+	                if (arrXml.length > 3) sheetObjects[8].LoadSearchXml(arrXml[3]);    // Hidden. Grid2의 Destination Via.
+	                if (arrXml.length > 4) sheetObjects[9].LoadSearchXml(arrXml[4]);    // Hidden. Grid2의 Destination Point.
+	                if (arrXml.length > 5) sheetObjects[10].LoadSearchXml(arrXml[5]);    // Hidden. Grid2의 Direct Call.
+	                if (arrXml.length > 6) sheetObjects[11].LoadSearchXml(arrXml[6]);    // Hidden. Grid2의 Route Note.
+	                
+	                setSheet3Style(sheetObj, -1);
+	                
+	            }
+	            break;
+	    
+	        }
+        } catch (e) {
+            if (e == "[object Error]") {
+                ComShowMessage(OBJECT_ERROR);
+            } else {
+                ComShowMessage(e);
+            }
+        } finally {
+        	ComOpenWait(false);
+        }
+    }
+    
+	/**
+	 * 화면 폼입력값에 대한 유효성검증 프로세스 처리 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     if (validateForm(sheetObj,document.form,IBSAVE)) {
+	 *         로직처리;
+	 *     }
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {form} formObj 필수 html form object
+	 * @param {int} sAction 필수 프로세스 플래그 상수
+	 * @returns bool <br>
+	 *          true  : 폼입력값이 유효할 경우<br>
+	 *          false : 폼입력값이 유효하지 않을 경우
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function validateForm(sheetObj, formObj, sAction) {
+        switch (sAction) {
+
+        case IBSEARCH: // 조회
+        	if (formObj.prop_no.value == "" || formObj.amdt_seq.value == "" || formObj.svc_scp_cd.value == "") {
+                return false;
+            } else {
+                return true;
+            }
+            break;
+        }
+    }
+    
+    function setSheet3Style(sheetObj, idx) {
+    	/*
+        if (idx == null || idx < 0) {
+            for (var i = sheetObj.HeaderRows; i <= sheetObj.LastRow; i++) {
+            	setLineStyle(sheetObj, i);
+            }
+        } else {
+        	setLineStyle(sheetObj, idx);
+        }
+        */
+    }
+    
+    function setLineStyle(sheetObj, idx) {
+    	/*
+    	if (idx <= 0) {
+    		return false;
+    	}
+    	
+    	if (document.form.amdt_seq.value == "0") {
+    		return true;
+    	}
+    	
+    	if (sheetObj.RowStatus(idx) == "D") {
+    		sheetObj.RowHidden(idx) = true;
+    	}
+    	
+    	if (sheetObj.CellValue(idx, "amdt_seq") != document.form.amdt_seq.value) {
+			sheetObj.CellFont("FontStrikethru", idx, 1, idx, sheetObj.LastCol) = true;
+			sheetObj.RowEditable(idx) = false;
+			
+			return true;
+		} else {
+			sheetObj.CellFont("FontStrikethru", idx, 1, idx, sheetObj.LastCol) = false;
+			sheetObj.RowEditable(idx) = true;
+    	}
+    	
+    	if (sheetObj.CellValue(idx, "n1st_cmnc_amdt_seq") == document.form.amdt_seq.value) {
+			sheetObj.CellFont("FontColor", idx, 1, idx, sheetObj.LastCol) = sheetObj.RgbColor(255,0,0);
+    	} else {
+    		sheetObj.CellFont("FontColor", idx, 1, idx, sheetObj.LastCol) = sheetObj.RgbColor(0,0,0);
+    	}
+    	*/
+    }
+    
+    function drawGenSpclRtTpCd() {
+    	var formObj = document.form;
+    	
+        formObj.f_cmd.value = SEARCH20;
+        var sXml = sheetObjects[sheetObjects.length - 1].GetSearchXml("ESM_PRI_0004_09GS.do" , FormQueryString(formObj) + "&n1st_cmnc_amdt_seq=" + formObj.amdt_seq.value);
+        var arrData = ComPriXml2Array(sXml, "cd|nm|rate_cnt|amdt_flg|acpt_flg|acpt_cnt|not_acpt_cnt");
+        
+        var sHTML = "";
+        var prevChecked = getGenSpclRtTpChecked();
+        var firstMatch = -1;
+
+        for (var i = 0; i < arrData.length; i++) {
+        	var bAmdtFlg = arrData[i][3];
+        	var bAcptFlg = arrData[i][4];
+        	
+        	acptCnt[i] = arrData[i][5];
+        	notAcptCnt[i] = arrData[i][6];
+        	
+        	/*
+        	if (bAmdtFlg == "Y" && bAcptFlg == "Y") {
+        		arrData[i][1] = "<font color='blue'>" + arrData[i][1] + "</font>";
+        	} else if (bAmdtFlg == "Y" && bAcptFlg != "Y" && formObj.amdt_seq.value != "0") {
+        		arrData[i][1] = "<font color='red'>" + arrData[i][1] + "</font>";
+        	}
+        	*/
+        	
+            if (parseInt(arrData[i][2]) > 0) {
+                if (firstMatch < 0) {
+                    firstMatch = i;
+                }
+                arrData[i][1] = "<b>" + arrData[i][1] + "</b>";
+            }
+            
+            sHTML += "<input name='gen_spcl_rt_tp_cd' value='" + arrData[i][0] + "' type='radio' class='trans'>";
+            sHTML += arrData[i][1] + "&nbsp;&nbsp;&nbsp;&nbsp;";
+        }
+        
+        rdoRateTp.innerHTML = sHTML;
+        
+        if (prevChecked != null && prevChecked != undefined && prevChecked >= 0 && parseInt(arrData[prevChecked][2]) > 0) {
+        	formObj.gen_spcl_rt_tp_cd[prevChecked].checked = true;
+        } else if (firstMatch >= 0) {
+        	formObj.gen_spcl_rt_tp_cd[firstMatch].checked = true;
+        } else {
+        	formObj.gen_spcl_rt_tp_cd[0].checked = true;
+        }
+        
+        if (formObj.gen_spcl_rt_tp_cd[0].checked) {
+        	sheetObjects[0].ColHidden("cust_lgl_eng_nm") = true;
+        	sheetObjects[0].ColWidth("prc_cmdt_def_nm") =  650;
+        }
+    }
+    
+    function getGenSpclRtTpCd() {
+        for (var i = 0; i < document.form.gen_spcl_rt_tp_cd.length; i++) {
+            if (document.form.gen_spcl_rt_tp_cd[i].checked) {
+                return document.form.gen_spcl_rt_tp_cd[i].value;
+            }
+        }
+    }
+    
+    function getGenSpclRtTpChecked() {
+        for (var i = 0; i < document.form.gen_spcl_rt_tp_cd.length; i++) {
+            if (document.form.gen_spcl_rt_tp_cd[i].checked) {
+                return i;
+            }
+        }
+    }
+    
+    function getSurchargeList(sheetNo) {
+        var formObj = document.form;
+        var arrSurcharge = new Array();
+        
+        if (sheetNo == 5 || sheetNo == 11) {
+        	for (var i = sheetObjects[sheetNo].HeaderRows; sheetObjects[sheetNo].RowCount > 0 && i <= sheetObjects[sheetNo].LastRow; i++) {
+        		if (sheetObjects[sheetNo].CellValue(i, "note_clss_cd") == "S") {
+	        		var chgCd = sheetObjects[sheetNo].CellValue(i, "chg_cd");
+	        		if (chgCd != null && chgCd != "") {
+	        			arrSurcharge.push(chgCd);
+	        		}
+        		}
+        	}
+        }
+        
+        return arrSurcharge;
+    }
+    
+    /*
+    function getConversionChecked() {
+    	if (parent.document.form.con_flg.checked) {
+    		document.form.conv_chk.value = "Y";
+    	} else {
+    		document.form.conv_chk.value = "N";
+    	}
+    	
+    	return document.form.conv_chk.value;
+    }
+    */
+    
+	/**
+	 * Sheet Data를 XML형태로 넘겨받는다. <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 * </pre>
+	 * @param {int} sheetNo sheet번호
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function getSheetXml(sheetNo) {
+        var formObj = document.form;
+        var sXml = "";
+        var sCol = "";
+        var sValue = "";
+        
+        if (sheetNo == 3 || sheetNo == 4 || sheetNo == 5) {
+            sCol = "prop_no|svc_scp_cd|gen_spcl_rt_tp_cd|cmdt_hdr_seq";
+            sValue = formObj.prop_no.value + "|" +  formObj.svc_scp_cd.value + "|" + getGenSpclRtTpCd() + "|" + formObj.cmdt_hdr_seq.value;
+        }
+
+        sXml = ComPriSheet2Xml(sheetObjects[sheetNo], "", sCol, sValue);
+        
+        return sXml;
+    }
+    
+	/**
+	 * Sheet Data를 XML형태로 넘겨받는다. <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 * </pre>
+	 * @param {int} sheetNo sheet번호
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function setSheetXml(sXml, sheetNo) {
+        var formObj = document.form;
+        var sCol = "";
+        var sValue = "";
+        var bAppendMode = 0;
+        
+        if (sheetNo == 3 || sheetNo == 4 || sheetNo == 5) {
+            bAppendMode = 1;
+            sCol = "prop_no|svc_scp_cd|gen_spcl_rt_tp_cd|cmdt_hdr_seq";
+            sValue = formObj.prop_no.value + "|" +  formObj.svc_scp_cd.value + "|" + getGenSpclRtTpCd() + "|" + formObj.cmdt_hdr_seq.value;
+        }
+        
+        ComPriXml2Sheet(sheetObjects[sheetNo], sXml, bAppendMode, sCol, sValue);
+    }
+
+	/**
+	 * 탭안의 화면이 로드되었을때 상위에서 호출하는 함수. 초기값을 세팅하고 화면을 조회한다.<br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *
+	 * </pre>
+	 * @param 
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function tabLoadSheet(sPropNo, sAmdtSeq, sSvcScpCd, sSvcScpCdClr, sGenSpclRtTpCdClr, sCmdtHdrSeqClr, sRoutSeqClr) {
+        var formObject = document.form;
+        
+        if (sSvcScpCd == null || sSvcScpCd == "") {
+        	return;
+        }
+    
+        if (formObject.prop_no.value != sPropNo
+                || formObject.amdt_seq.value != sAmdtSeq
+                || formObject.svc_scp_cd.value != sSvcScpCd) {
+        	formObject.prop_no.value = sPropNo;
+        	formObject.amdt_seq.value = sAmdtSeq;
+            formObject.svc_scp_cd.value = sSvcScpCd;
+            //색 변경을 위한 파라미터 세팅
+            formObject.s_svc_scp_cd_clr.value = sSvcScpCdClr;
+            formObject.s_gen_spcl_rt_tp_cd_clr.value = sGenSpclRtTpCdClr;
+    		formObject.s_cmdt_hdr_seq_clr.value = sCmdtHdrSeqClr;
+    		formObject.s_rout_seq_clr.value = sRoutSeqClr;
+    		
+    		
+//    		alert("0004넘어와서 form object")
+//    		alert(formObject.s_svc_scp_cd_clr.value);
+//    		alert(formObject.s_cmdt_hdr_seq_clr.value);
+//    		alert(formObject.s_rout_seq_clr.value);
+
+            /*
+            if (getConversionChecked() == "N" && formObject.amdt_seq.value == "0") {
+            	tabClearSheet();
+            	return false;
+            }
+            */
+            // TPE, ACE Scope일 경우에만 F(Fixed) 컬럼이 표시되도록 한다.
+            if (formObject.svc_scp_cd.value == "TPE" || formObject.svc_scp_cd.value == "ACE" ) {
+            	sheetObjects[0].ColHidden("fx_rt_flg") = false;
+            	sheetObjects[1].ColHidden("fx_rt_flg") = false;
+            } else {
+            	sheetObjects[0].ColHidden("fx_rt_flg") = true;
+            	sheetObjects[1].ColHidden("fx_rt_flg") = true;
+            }
+            
+            
+            drawGenSpclRtTpCd();
+    
+            doActionIBSheet(sheetObjects[0], document.form, IBSEARCH);
+        }
+    }
+    
+	/**
+	 * 화면의 모든 내용을 초기화하는 함수로, 상위프레임에서 호출된다.<br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *
+	 * </pre>
+	 * @param 
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+    function tabClearSheet() {
+        var formObject = document.form;
+    
+    	formObject.prop_no.value = "";
+    	formObject.amdt_seq.value = "";
+        formObject.svc_scp_cd.value = "";
+        
+        for (var i = 0; i < sheetObjects.length; i++) {
+            sheetObjects[i].RemoveAll();
+        }
+        
+        origin_desc.innerHTML = "";
+        ovia_desc.innerHTML = "";
+        dvia_desc.innerHTML = "";
+        dest_desc.innerHTML = "";
+    }
+    
+    var enableFlag = true;
+    function tabEnableSheet(flag) {
+        var formObject = document.form;
+    
+        enableFlag = flag;
+    
+        sheetObjects[0].Editable = flag;
+        sheetObjects[1].Editable = flag;
+        sheetObjects[2].Editable = flag;
+    }
+    
+/* 개발자 작업 끝 */

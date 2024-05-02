@@ -1,0 +1,764 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="VesselScheduleMgtDBDAOSearchCanalTzListRSQL">
+			<desc><![CDATA[Canal Surchange 조회
+
+History
+2012.10.24 CHM-201220527-01 진마리아 Departure/Noon Report 데이터를 FCM 데이터와 I/F하도록 변경 요청]]></desc>
+			<sql><![CDATA[
+WITH TB_SRC1 AS (
+SELECT  BOUND 
+		, SVC_SCP
+        , VVD
+        , VSL_CD
+        , SKD_VOY_NO 
+        , SKD_DIR_CD
+        , VPS_PORT_CD
+        , VNDR_SEQ
+        , YD_CD
+        , CLPT_SEQ
+        , BAY_YD
+        , BAY_LOC
+        , BAY_CAL
+        , VSL_SLAN_CD
+        , VPS_ETA_DT
+        , VPS_ETB_DT
+        , VPS_ETD_DT
+        , DETAIL
+        , DECODE(SUBSTR(BKG_STS, 1, 1), 'Q', 'Booked', 'A', 'Booked', 'P', 'Booked', 'R', 'Ready') AS BKG_STS
+        , SUBSTR(BKG_STS, 2   )                                                                    AS BKG_CRE_DT
+        , SCG_LMT_ACT_RATIO
+        , SCG_LMT_ACT_SPD
+        , ''  AS LOAD_TEU
+FROM    (
+        -- T0005 START.
+        SELECT   T2.BOUND
+			   , T2.SVC_SCP
+               , T2.VSL_CD || T2.SKD_VOY_NO || T2.SKD_DIR_CD                              AS VVD
+               , T2.VSL_CD, T2.SKD_VOY_NO, T2.SKD_DIR_CD, T2.VPS_PORT_CD, T2.YD_CD, T2.CLPT_SEQ
+               , SUBSTR(BAY_VVD, 1, 5)                                                    AS BAY_LOC
+               , SUBSTR(BAY_VVD, 6, 1)                                                    AS BAY_CAL
+               , SUBSTR(BAY_VVD, 7, 7)                                                    AS BAY_YD
+               , T2.VSL_SLAN_CD, T2.VPS_ETA_DT, T2.VPS_ETB_DT, T2.VPS_ETD_DT, T2.VNDR_SEQ
+               , CASE
+                 WHEN (T2.CUR_NOON_FLG = 'Y' AND CUR_DEP_FLG = 'Y') AND (T2.VPS_PORT_CD = 'EGSUZ') THEN
+                    '0' /* 선박의 다음 포트가 EGSUZ이고 REPORT가 존재하는 경우(DETAIL을 조회가 가능한 상태)  */
+                 ELSE
+                    '1' /* DETAIL 조회 불가능 상태 */
+                 END                                                                        AS DETAIL
+               , (
+                 SELECT  NVL(S2.CNL_TZ_PROC_STS_CD, 'R') ||
+                         (
+                         SELECT   TO_CHAR(P.ISS_DT, 'YYYYMMDD')
+                         FROM     PSO_CHARGE P
+                         WHERE    P.ISS_CTY_CD  = S2.ISS_CTY_CD
+                         AND      P.SO_SEQ      = S2.SO_SEQ
+                         )
+                 FROM    PSO_TGT_VVD S1, PSO_CNL_TZ_FEE S2
+                 WHERE   1=1
+                 AND     T2.VSL_CD         = S1.VSL_CD
+                 AND     T2.SKD_VOY_NO     = S1.SKD_VOY_NO
+                 AND     T2.SKD_DIR_CD     = S1.SKD_DIR_CD
+                 AND     S1.PSO_BZTP_CD    = S2.PSO_BZTP_CD      (+)
+                 AND     S1.VSL_CD         = S2.VSL_CD           (+)
+                 AND     S1.SKD_VOY_NO     = S2.SKD_VOY_NO       (+)
+                 AND     S1.SKD_DIR_CD     = S2.SKD_DIR_CD       (+)
+                 AND     S1.PSO_BZTP_CD    = '5'
+                 AND     'E'               = S2.CNL_TZ_BZTP_CD   (+)
+                 AND     @[port_cd]||'T1'  = S2.YD_CD            (+)
+                 )                                                                       AS BKG_STS
+               , CASE
+                 WHEN T2.VPS_PORT_CD = 'PAPAC' THEN
+                      NULL
+                 ELSE (
+                      NVL((
+                          SELECT  LMT_TM_SCG_RTO
+                          FROM    VSK_PORT_CNL_PASS_COND S
+                          WHERE   SVC_SCP_BND_CD     = T2.SVC_SCP_BND_CD
+                          AND     LOC_CD             = T2.VPS_PORT_CD
+                          AND     CNL_TZ_SEQ_CD      =
+                                  ( /* 해당 선박으로 INVOICE가 청구된 EGSUZ CANAL NET TON를 조회한다. */
+                                  SELECT  CASE
+                                          WHEN TO_NUMBER(NVL(SUBSTR(MAX(TO_CHAR(S1.RQST_DT, 'YYYYMMDDHH24MI') || S1.SUZ_NET_TONG_WGT ), 13), '0')) >= 70000 THEN
+                                               '1'  /* EGSUZ CANAL NET TON 이 70000  보다 클 경우 : FIRST COMBO를 이용함 */
+                                          ELSE
+                                               '2'  /* EGSUZ CANAL NET TON 이 70000  보다 작을 경우 : SECOND COMBO를 이용함 */
+                                          END
+                                  FROM    PSO_CNL_TZ_FEE S1
+                                  WHERE   S1.PSO_BZTP_CD		= '5' /* Canal Transit Business    */
+                                  AND     S1.CNL_TZ_BZTP_CD	= 'I' /* Inputted invoice at Canal Agency */
+                                  AND     S1.VSL_CD			= T2.VSL_CD
+                                  AND     S1.SKD_DIR_CD		= T2.SKD_DIR_CD
+                                  AND     S1.YD_CD			= T2.YD_CD)
+                                  AND     TO_CHAR(T2.VPS_ETA_DT, 'HH24MI')	BETWEEN SCG_FM_LMT_HRMNT
+                                                                            AND     SCG_TO_LMT_HRMNT
+                                  ),
+                           0)) /* NULL일 경우 SURCHARGE는 0 % 이다 */
+                 END                                                                      AS SCG_LMT_ACT_RATIO
+               , CASE
+                 WHEN T2.VPS_PORT_CD = 'PAPAC' THEN
+                      NULL
+                 ELSE (
+                      ROUND(
+                           CASE
+                           WHEN CUR_NOON_FLG = 'Y' THEN
+                                /* NOON REPORT가 있는 경우 NOON REPORT 의 ETA SPEED 사용 */
+                                (
+                                SELECT  RMN_AVG_SPD
+                                FROM    FCM_NOON_RPT S
+                                WHERE   1=1
+                                AND     T2.VSL_CD         = S.VSL_CD
+                                AND     T2.SKD_VOY_NO     = S.SKD_VOY_NO
+                                AND     T2.SKD_DIR_CD     = S.SKD_DIR_CD
+                                AND     T2.NOON_RPT_DT    = S.NOON_RPT_DT
+                                )
+                           WHEN CUR_DEP_FLG = 'Y' THEN
+                                /* NOON REPORTS는 없고, DEPARTURE REPORT가 있는 경우 DEPARTURE REPORT 의 ETA SPEED 사용 */
+                                (
+                                SELECT  TO_NUMBER(VSK_REMOVE_NONE_NUMERIC_FNC(RMN_AVG_SPD))
+                                FROM    FCM_DEP_RPT S
+                                WHERE   1=1
+                                AND     T2.VSL_CD         = S.VSL_CD
+                                AND     T2.SKD_VOY_NO     = S.SKD_VOY_NO
+                                AND     T2.SKD_DIR_CD     = S.SKD_DIR_CD
+                                AND     T2.VPS_PORT_CD    = S.DEP_PORT_CD
+                                AND     T2.CLPT_IND_SEQ   = S.CLPT_IND_SEQ
+                                )
+                           WHEN CUR_NOON_FLG||CUR_DEP_FLG = 'NN' THEN
+                                /* 4. NOON & DEPARTURE REPORT가 전혀 입력되지 않은 경우.  */
+                                /* 4. 또는 아직 LAST PORT에도 도착하지 않은 경우...기타등등. */
+                                TO_NUMBER(DECODE(T2.VPS_ETA_DT - PRE_PORT_ETD_DT, 0, NULL,
+                                      NVL((
+                                           SELECT  STND_DIST
+                                           FROM    VSK_PORT_DIST
+                                           WHERE   FM_LOC_CD = T2.PRE_PORT
+                                           AND     TO_LOC_CD = T2.VPS_PORT_CD),
+                                           (NVL(T2.PRE_LNK_DIST, 0))
+                                           ) / (( T2.VPS_ETA_DT - PRE_PORT_ETD_DT) * 24 )
+                                  ))
+                           END
+                           , 1))
+                 END                                                                      AS SCG_LMT_ACT_SPD
+               , '' AS LOAD_TEU
+        FROM   (
+               -- T0004 START.
+               SELECT  T1.*
+                       , NVL((  
+                             SELECT 'Y'
+                             FROM    FCM_DEP_RPT S1, VSK_VSL_PORT_SKD S2
+                             WHERE   1 = 1
+                             AND     T1.VSL_CD       = S1.VSL_CD
+                             AND     T1.SKD_VOY_NO   = S1.SKD_VOY_NO
+                             AND     T1.SKD_DIR_CD   = S1.SKD_DIR_CD
+                             AND     T1.VPS_PORT_CD  = S1.NXT_PORT_CD
+                             AND     S1.VSL_CD       = S2.VSL_CD
+                             AND     S1.SKD_VOY_NO   = S2.SKD_VOY_NO
+                             AND     S1.SKD_DIR_CD   = S2.SKD_DIR_CD
+                             AND     S1.DEP_PORT_CD  = S2.VPS_PORT_CD
+                             AND     S1.CLPT_IND_SEQ = S2.CLPT_IND_SEQ
+                             AND     S2.TURN_PORT_IND_CD NOT IN ('D', 'V', 'F')
+                             AND     ROWNUM          = 1
+                             )
+                             , 'N')                                              AS CUR_DEP_FLG
+                       , (
+                          SELECT  S1.VPS_ETD_DT
+                          FROM    FCM_DEP_RPT S1, VSK_VSL_PORT_SKD S2
+                          WHERE   1 = 1
+                          AND     T1.VSL_CD       = S1.VSL_CD
+                          AND     T1.SKD_VOY_NO   = S1.SKD_VOY_NO
+                          AND     T1.SKD_DIR_CD   = S1.SKD_DIR_CD
+                          AND     T1.VPS_PORT_CD  = S1.NXT_PORT_CD
+                          AND     S1.VSL_CD       = S2.VSL_CD
+                          AND     S1.SKD_VOY_NO   = S2.SKD_VOY_NO
+                          AND     S1.SKD_DIR_CD   = S2.SKD_DIR_CD
+                          AND     S1.DEP_PORT_CD  = S2.VPS_PORT_CD
+                          AND     S1.CLPT_IND_SEQ = S2.CLPT_IND_SEQ
+                          AND     S2.TURN_PORT_IND_CD NOT IN ('D', 'V', 'F')
+                          AND     ROWNUM          = 1
+                          )                                                      AS ACT_DEP_DT
+                       , NVL((
+                             SELECT  'Y'
+                             FROM    FCM_NOON_RPT S
+                             WHERE   1 = 1
+                             AND     T1.VSL_CD       = S.VSL_CD
+                             AND     T1.SKD_VOY_NO   = S.SKD_VOY_NO
+                             AND     T1.SKD_DIR_CD   = S.SKD_DIR_CD
+                             AND     T1.VPS_PORT_CD  = S.NXT_PORT_CD
+                             AND     ROWNUM          = 1
+                             )
+                             , 'N') AS CUR_NOON_FLG
+                       , (
+                         SELECT  /*+ INDEX_DESC (S XPKVSK_NOON_RPT) */
+                                 S.NOON_RPT_DT
+                         FROM    FCM_NOON_RPT S
+                         WHERE   1 = 1
+                         AND     T1.VSL_CD        = S.VSL_CD
+                         AND     T1.SKD_VOY_NO    = S.SKD_VOY_NO
+                         AND     T1.SKD_DIR_CD    = S.SKD_DIR_CD
+                         AND     T1.VPS_PORT_CD   = S.NXT_PORT_CD
+                         AND     ROWNUM           = 1
+                         )                                                       AS NOON_RPT_DT
+                       , (
+                         SELECT /*+ INDEX_DESC (S1 XAK12VSK_VSL_PORT_SKD) */
+                                S1.VPS_PORT_CD || S1.CLPT_IND_SEQ || S1.YD_CD
+                         FROM   VSK_VSL_PORT_SKD S1
+                         WHERE  S1.VSL_CD       = T1.VSL_CD
+                         AND    S1.SKD_VOY_NO   = T1.SKD_VOY_NO
+                         AND    S1.SKD_DIR_CD	= T1.SKD_DIR_CD
+                         AND    S1.VPS_ETD_DT  <= T1.VPS_ETD_DT
+                         AND    T1.VPS_PORT_CD  = @[port_cd]
+                         AND    EXISTS         (
+                                               SELECT  'X'
+                                               FROM    BAY_PLAN S2
+                                               WHERE   S2.VSL_CD      = S1.VSL_CD
+                                               AND     S2.VOY_NO      = S1.SKD_VOY_NO
+                                               AND     S2.DIR_CD      = S1.SKD_DIR_CD
+                                               AND     S2.PORT_CD     = S1.VPS_PORT_CD
+                                               AND     S2.CALL_IND    = S1.CLPT_IND_SEQ
+                                               AND     ROWNUM         = 1
+                                               )
+                         AND     ROWNUM        = 1
+                         )                                                       AS BAY_VVD
+               FROM    (
+                       -- T0003 START.
+                       SELECT  T1.*
+                               , LNK_DIST
+                               , LAG(LNK_DIST) OVER(PARTITION BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD ORDER BY T1.CLPT_SEQ) PRE_LNK_DIST
+                       FROM    (
+                               -- T0002 START.
+                               SELECT  DECODE(T3.SVC_SCP_BND_CD, 'N', 'North Bound', 'S', 'South Bound') BOUND
+									   , T3.SVC_SCP_BND_CD AS SVC_SCP
+                                       , T1.VSL_SLAN_CD
+                                       , T1.PF_SKD_TP_CD
+                                       , T2.VSL_CD
+                                       , T2.SKD_VOY_NO
+                                       , T2.SKD_DIR_CD
+                                       , T2.VPS_PORT_CD
+                                       , T2.CLPT_IND_SEQ
+                                       , T2.CLPT_SEQ
+                                       , T2.YD_CD
+                                       , T2.VPS_ETA_DT                                       , T2.VPS_ETB_DT                                       , T2.VPS_ETD_DT
+                                       , T2.SKD_CNG_STS_CD
+                                       , DECODE(T3.SVC_SCP_BND_CD, 'W', 'N', 'E', 'S') AS SVC_SCP_BND_CD
+                                       , LAG(T2.VPS_PORT_CD) OVER (PARTITION BY T2.VSL_CD, T2.SKD_VOY_NO, T2.SKD_DIR_CD ORDER BY T2.CLPT_SEQ) AS PRE_PORT
+                                       , LAG(T2.VPS_ETD_DT ) OVER (PARTITION BY T2.VSL_CD, T2.SKD_VOY_NO, T2.SKD_DIR_CD ORDER BY T2.CLPT_SEQ) AS PRE_PORT_ETD_DT
+                                       , T0.VNDR_SEQ
+                               FROM    (
+                                       -- T0001 START.
+                                       SELECT  T2.*, T5.VNDR_SEQ
+                                       FROM    VSK_VSL_SKD            T1
+                                               , VSK_VSL_PORT_SKD     T2
+                                               , MDM_VSL_CNTR         T3
+                                              -- , MDM_VSL_SVC_LANE     T4
+                                               , MDM_VENDOR           T5
+                                               , VSK_CNL_VNDR         T6
+                                       WHERE   1=1
+                                       AND     T1.VSL_CD        = T2.VSL_CD
+                                       AND     T1.SKD_VOY_NO    = T2.SKD_VOY_NO
+                                       AND     T1.SKD_DIR_CD    = T2.SKD_DIR_CD
+#if (${port_cd} == 'A')
+                                       AND     (T2.VPS_PORT_CD = 'EGSUZ' OR T2.VPS_PORT_CD = 'PAPAC')
+#else
+                                       AND     T2.VPS_PORT_CD   = @[port_cd]
+#end
+#if (${vsl_slan_cd} != '')
+                                       AND     T1.VSL_SLAN_CD   = @[vsl_slan_cd]
+#end
+                                       AND     T2.VPS_ETB_DT    BETWEEN TO_DATE(@[start_date], 'YYYY-MM-DD')
+                                                                AND     TO_DATE(@[end_date], 'YYYY-MM-DD') + 0.99999
+                                       AND     T2.VSL_CD        = T3.VSL_CD
+                                       AND     NVL(T1.ACT_CRR_CD, T3.CRR_CD)    = 'SML'
+                                     --  AND     T1.VSL_SLAN_CD   = T4.VSL_SLAN_CD
+                                      -- AND     T5.CNL_AGN_FLG   = 'Y'
+                                      -- AND     T4.VSL_TP_CD     = 'C' 
+                                       AND     T6.VSL_SLAN_CD   = T1.VSL_SLAN_CD 
+                                       AND     T6.CNL_AGN_VNDR_SEQ = T5.VNDR_SEQ 
+									   AND     T5.VNDR_CNT_CD = SUBSTR(@[port_cd],0,2)
+#if (${vndr_seq} != 'ALL')
+                                       AND T5.VNDR_SEQ = TO_NUMBER(@[vndr_seq])
+#end
+                                       -- T0001 END.
+                                       )                       T0
+                                       , VSK_VSL_SKD           T1
+                                       , VSK_VSL_PORT_SKD      T2
+                                       , MDM_VSL_SVC_LANE_DIR  T3
+                               WHERE   1=1
+                               AND     T0.VSL_CD        = T1.VSL_CD
+                               AND     T0.SKD_VOY_NO    = T1.SKD_VOY_NO
+                               AND     T0.SKD_DIR_CD    = T1.SKD_DIR_CD
+                               AND     T1.VSL_CD        = T2.VSL_CD
+                               AND     T1.SKD_VOY_NO    = T2.SKD_VOY_NO
+                               AND     T1.SKD_DIR_CD    = T2.SKD_DIR_CD
+                               AND     T1.VSL_SLAN_CD   = T3.VSL_SLAN_CD
+                               AND     T1.SKD_DIR_CD    = T3.VSL_SLAN_DIR_CD
+                               AND     T3.SVC_SCP_BND_CD IS NOT NULL
+                               AND     NVL(T2.SKD_CNG_STS_CD, ' ') != 'S'
+                               -- T0002 END.
+                               ) T1, VSK_PF_SKD_DTL S
+                       WHERE   1 = 1
+                       AND     S.VSL_SLAN_CD (+)    = T1.VSL_SLAN_CD
+                       AND     S.PF_SVC_TP_CD (+)   = T1.PF_SKD_TP_CD
+                       AND     S.SKD_DIR_CD (+)     = T1.SKD_DIR_CD
+                       AND     S.PORT_CD (+)        = T1.VPS_PORT_CD
+                       AND     S.CLPT_SEQ (+)       = T1.CLPT_IND_SEQ
+                       -- T0003 END.
+                       ) T1
+               WHERE   1=1
+               AND     VPS_PORT_CD  = @[port_cd]
+               -- T0004 END.
+               ) T2
+       -- T0005 END.
+       )
+WHERE  1=1
+#if (${surcharge} == 'Y') 
+AND    NVL(SCG_LMT_ACT_RATIO, 0) != 0
+#elseif (${surcharge} == 'N') 
+AND    NVL(SCG_LMT_ACT_RATIO, 0) = 0
+#else 
+#end
+)
+, TB_SUZ_SURCHG AS (
+#if (${port_cd} == 'EGSUZ')
+--------------------------------- EGSUZ(스웨즈) --------------------------------------------
+SELECT  B6.VSL_CD, B6.VOY_NO, B6.DIR_CD, B6. PORT_CD, B6.CALL_IND
+        , B6.TIER_NO     AS SCG_CAR_TIER
+        , B6.TEU         AS SCG_CAR_TEU
+        , B6.BOX         AS SCG_CAR_BOX
+        , B6.BOX_20FT    AS FT20_QTY
+        , B6.BOX_40FT    AS FT40_QTY
+        , B6.TEU_40FT    AS FT20_TEU
+        , DECODE(B6.TEU_OVER10_CHK, 'Y', SCG.TR_SCG_RTO  , SCG.UNDER_TR_SCG_RTO)  AS SCG_CAR_RATIO        
+        --Rehandling TEU qunt calculate
+        , CASE
+          WHEN B6.TEU_OVER10_CHK = 'Y' THEN
+               -- 11 TEU 이상일 경우 Rehandling 작업을 실행하게 됨.
+              ( CASE
+               WHEN  SIGN(B6.BOX_20FT - 10) = -1 THEN
+               -- 20ft Container를 먼저 뺀 후 40ft를 나중에 빼도록 한다.
+                     B6.BOX_40FT - ( ABS(B6.BOX_20FT - 10) / 2)
+               ELSE
+                     B6.BOX_40FT + ( B6.BOX_20FT - 10 )
+               END)
+          ELSE
+               (CASE
+               WHEN  SIGN(B6.UNDER_BOX_20FT - 10) = -1  THEN
+               -- 20ft Container를 먼저 뺀 후 40ft를 나중에 빼도록 한다.
+                     B6.UNDER_BOX_40FT- ( ABS(B6.UNDER_BOX_20FT - 10) / 2) + B6.BOX_20FT + B6.BOX_40FT
+               ELSE
+                     B6.UNDER_BOX_40FT+ ( B6.UNDER_BOX_20FT-10 ) + B6.BOX_20FT + B6.BOX_40FT
+                     
+               END)
+          END   AS RHND_CNTR_QTY
+--        , B6.UNDER_TIER_NO AS TIER_2ND
+--        , B6.UNDER_TEU     AS TEU_2ND
+--        , DECODE(B6.TEU_OVER10_CHK, 'N', 
+          , B6.UNDER_TIER_NO, B6.UNDER_TEU, B6.UNDER_BOX, B6.UNDER_BOX_20FT, B6.UNDER_BOX_40FT
+--        , DECODE(B6.TEU_OVER10_CHK, 'Y', SCG.TR_SCG_RTO, UNDER_TR_SCG_RTO) AS RATIO
+FROM    (
+            SELECT B5.VSL_CD, B5.VOY_NO, B5.DIR_CD, B5.PORT_CD, B5.CALL_IND, B5.TIER, B5.TIER_NO, B5.TIER_RANK, B5.TEU, B5.BOX, B5.BOX_20FT, B5.BOX_40FT, B5.TEU_40FT
+                   , LEAD(B5.TIER_NO)  OVER(PARTITION BY VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND ORDER BY TIER_RANK)  AS UNDER_TIER_NO
+                   , LEAD(B5.TEU)      OVER(PARTITION BY VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND ORDER BY TIER_RANK)  AS UNDER_TEU
+                   , LEAD(B5.BOX)      OVER(PARTITION BY VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND ORDER BY TIER_RANK)  AS UNDER_BOX
+                   , LEAD(B5.BOX_20FT) OVER(PARTITION BY VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND ORDER BY TIER_RANK)  AS UNDER_BOX_20FT
+                   , LEAD(B5.BOX_40FT) OVER(PARTITION BY VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND ORDER BY TIER_RANK)  AS UNDER_BOX_40FT
+                   , LEAD(B5.TEU_40FT) OVER(PARTITION BY VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND ORDER BY TIER_RANK)  AS UNDER_TEU_40FT
+                   , DECODE(SIGN(B5.TEU - 11), -1, 'N', 'Y')                                                            AS TEU_OVER10_CHK
+            FROM (
+                    SELECT  B4.VSL_CD, B4.VOY_NO, B4.DIR_CD, B4.PORT_CD, B4.CALL_IND, B4.TIER
+                            , ROW_NUMBER()  OVER(PARTITION BY B4.VSL_CD, B4.VOY_NO, B4.DIR_CD, B4.PORT_CD, B4.CALL_IND ORDER BY B4.TIER)      AS TIER_NO
+                            , RANK()        OVER(PARTITION BY B4.VSL_CD, B4.VOY_NO, B4.DIR_CD, B4.PORT_CD, B4.CALL_IND ORDER BY B4.TIER DESC) AS TIER_RANK
+                            , SUM(B4.PER_TEU)       AS TEU
+                            , SUM(B4.PER_BOX)       AS BOX
+                            , SUM(B4.PER_BOX_20FT)  AS BOX_20FT
+                            , SUM(B4.PER_BOX_40FT)  AS BOX_40FT
+                            , SUM(B4.PER_TEU_40FT)  AS TEU_40FT
+                    FROM    (
+                                SELECT B1.VSL_CD, B1.VOY_NO, B1.DIR_CD, B1.PORT_CD, B1.CALL_IND, B1.TIER
+                                FROM 
+                                (
+                                    SELECT  DISTINCT B0.VSL_CD, B0.VOY_NO, B0.DIR_CD, B0.PORT_CD, B0.CALL_IND, B0.TIER
+                                    FROM    BAY_PLAN B0
+                                            , TB_SRC1 S
+                                    WHERE   1=1
+                                    AND     S.VSL_CD = B0.VSL_CD
+                                    AND     S.SKD_VOY_NO = B0.VOY_NO
+                                    AND     S.SKD_DIR_CD = B0.DIR_CD
+                                    AND     S.BAY_LOC = B0.PORT_CD
+                                    AND     S.BAY_CAL = B0.CALL_IND
+                                    AND     B0.TIER >= '50'
+                                    ORDER BY B0.TIER
+                                ) B1
+                                WHERE 1=1
+                            ) B2
+                           ,(
+                                SELECT   B3.VSL_CD, B3.VOY_NO, B3.DIR_CD, B3.PORT_CD, B3.CALL_IND
+                                        , B3.TIER
+                                        , B3.SZTP
+                                        , DECODE(SUBSTR(B3.SZTP, 2, 1) ,2,1 ,3,1 ,2) AS PER_TEU
+                                        , DECODE(SUBSTR(B3.SZTP, 2, 1) ,2,1 ,3,1 ,1) AS PER_BOX
+                                        , DECODE(SUBSTR(B3.SZTP, 2, 1) ,2,1 ,3,1 ,0) AS PER_BOX_20FT
+                                        , DECODE(SUBSTR(B3.SZTP, 2, 1) ,2,0 ,3,0 ,1) AS PER_BOX_40FT
+                                        , DECODE(SUBSTR(B3.SZTP, 2, 1) ,2,0 ,3,0 ,2) AS PER_TEU_40FT
+                                FROM    BAY_PLAN B3
+                                        , TB_SRC1 S
+                                WHERE   1=1
+                                AND     S.VSL_CD = B3.VSL_CD
+                                AND     S.SKD_VOY_NO = B3.VOY_NO
+                                AND     S.SKD_DIR_CD = B3.DIR_CD
+                                AND     S.BAY_LOC = B3.PORT_CD
+                                AND     S.BAY_CAL = B3.CALL_IND
+                                AND     B3.PLAN_TYPE = 'F'
+                                AND     B3.TIER >= '50'
+                                ORDER BY B3.TIER
+                            ) B4
+                    WHERE   1=1
+                    AND     B2.VSL_CD = B4.VSL_CD
+                    AND     B2.VOY_NO = B4.VOY_NO
+                    AND     B2.DIR_CD = B4.DIR_CD
+                    AND     B2.PORT_CD = B4.PORT_CD
+                    AND     B2.CALL_IND = B4.CALL_IND
+                    AND     B2.TIER = B4.TIER
+                    GROUP BY    B4.VSL_CD, B4.VOY_NO, B4.DIR_CD, B4.PORT_CD, B4.CALL_IND, B4.TIER
+                    ORDER BY    B4.TIER
+                    ) B5
+            WHERE 1=1
+            ORDER BY B5.VSL_CD, B5.VOY_NO, B5.DIR_CD, B5.PORT_CD, B5.CALL_IND, B5.TIER DESC
+        ) B6
+       ,(
+            SELECT  LOC_CD
+                    , TR_SEQ
+                    , TR_SCG_RTO
+                    , LAG(TR_SCG_RTO) OVER(PARTITION BY SKD_DIR_CD ORDER BY TR_SEQ) AS UNDER_TR_SCG_RTO
+                    , VSL_TR_NO
+                    , SKD_DIR_CD
+--                    , DECODE(SKD_DIR_CD, 'N','W','S','E',SKD_DIR_CD) AS SKD_DIR_CD2
+            FROM    VSK_PORT_CNL_TR_SCG 
+            WHERE   1=1
+       ) SCG
+       , TB_SRC1 B7
+       , MDM_VSL_SVC_LANE_DIR MDM              
+WHERE       1=1
+AND         B6.TIER_RANK    = 1
+AND         B6.TIER_NO      = SCG.TR_SEQ
+AND         B7.SVC_SCP      = SCG.SKD_DIR_CD
+AND         B6.VSL_CD       = B7.VSL_CD
+AND         B6.VOY_NO       = B7.SKD_VOY_NO
+AND         B6.DIR_CD       = B7.SKD_DIR_CD
+AND         B7.VSL_SLAN_CD  = MDM.VSL_SLAN_CD
+AND         B7.SVC_SCP      = MDM.SVC_SCP_BND_CD
+ORDER BY    B6.DIR_CD, B6.VSL_CD, B6.VOY_NO, B6.TIER_RANK
+
+
+#else
+--------------------------------- PAPAC(파나마) --------------------------------------------
+SELECT  TB.VSL_CD
+        , TB.VOY_NO
+        , TB.DIR_CD
+        , TB.PORT_CD
+        , TB.CALL_IND
+        , NVL(ST.TR_SCHG_DECK_KNT  , TB.TIER_NO )       AS SCG_CAR_TIER
+        , NVL(ST.TR_SCHG_TEU , 0 )			AS SCG_CAR_TEU
+        , NVL(ST.TR_SCHG_BOX , ( TB.FT20_QTY + TB.FT40_QTY ) ) AS SCG_CAR_BOX
+        , NULL                          AS SCG_CAR_RATIO
+        , NULL                          AS TR_SCG_RTO_SEQ
+        , NULL                          AS RHND_CNTR_QTY
+        , MD.CNTR_PNM_CAPA		AS ALLOWANCE_TEU
+        , TB.TEU                        AS LOAD_TEU
+        , ST.VIS_LEN                    AS VISI_RANGE
+        , ST.VIS_CNTR_QTY               AS UND_ACP_QTY
+	, CASE WHEN  ST.VIS_LEN > MD.LOA_LEN THEN 4000 ELSE 0 END AS  EXD_ACP_ESTI
+	, PD.USD_AMT			AS EXD_ACP_ACTUAL
+FROM    (
+        -- T0002 START.
+        SELECT  VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND, TIER_NO
+                , SUM(TEU     )  AS TEU
+                , SUM(FT20_QTY)  AS FT20_QTY
+                , SUM(FT40_QTY)  AS FT40_QTY
+                , ROW_NUMBER () OVER (PARTITION BY VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND ORDER BY TIER_NO DESC)      AS TIER_NO_SEQ
+        FROM    (
+                -- T0001 START.
+                SELECT  T1.VSL_CD, T1.VOY_NO, T1.DIR_CD, T1.PORT_CD, T1.CALL_IND, T1.PLAN_TYPE, T1.TIER
+                        , MAX(T1.TIER) OVER (PARTITION BY T1.VSL_CD, T1.VOY_NO, T1.DIR_CD, T1.PORT_CD, T1.CALL_IND, T1.BAY )             AS MAX_TIER_BY_BAY
+                        , COUNT (DISTINCT T1.TIER) OVER (PARTITION BY T1.VSL_CD, T1.VOY_NO, T1.DIR_CD, T1.PORT_CD, T1.CALL_IND, T1.BAY ) AS TIER_NO
+                        , SUM(CASE
+                              WHEN SUBSTR(T1.SZTP||T1.FE, 2, 2)  IN ('WF', 'XF')    THEN 3.02  
+                              WHEN SUBSTR(T1.SZTP||T1.FE, 2, 2)  IN ('8F', '9F')    THEN 2.68
+                              WHEN SUBSTR(T1.SZTP||T1.FE, 2, 2)  IN ('7F')          THEN 2.51
+                              WHEN SUBSTR(T1.SZTP||T1.FE, 2, 2)  IN ('5F')          THEN 2.24 
+                              WHEN SUBSTR(T1.SZTP||T1.FE, 2, 2)  IN ('4F')          THEN 2
+                              WHEN SUBSTR(T1.SZTP||T1.FE, 2, 2)  IN ('3F')          THEN 1.12
+                              WHEN SUBSTR(T1.SZTP||T1.FE, 2, 2)  IN ('2F')          THEN 1
+                              ELSE 0
+                              END
+                              )                                                                                                          AS TEU
+                        , SUM(DECODE(SUBSTR(T1.SZTP, 2, 1), '2', 1, 0))                                                                  AS FT20_QTY
+                        , SUM(DECODE(SUBSTR(T1.SZTP, 2, 1), '2', 0, 1))                                                                  AS FT40_QTY
+                        , RANK() OVER (PARTITION BY T1.VSL_CD, T1.VOY_NO, T1.DIR_CD, T1.PORT_CD, T1.CALL_IND ORDER BY T1.PLAN_TYPE DESC) AS PLAN_TYPE_RK
+                FROM    BAY_PLAN   T1,
+                        TB_SRC1    T2
+                WHERE   1 = 1
+                AND     T2.VSL_CD          = T1.VSL_CD
+                AND     T2.SKD_VOY_NO      = T1.VOY_NO
+                AND     T2.SKD_DIR_CD      = T1.DIR_CD
+                AND     T2.BAY_LOC         = T1.PORT_CD
+                AND     T2.BAY_CAL         = T1.CALL_IND
+                AND     T1.TIER            >= '50'         -- VSK_PORT_CNL_TR_SCG : Tier별 Surcharge를 순차적으로 등록했기 때문에 필요함.
+                GROUP BY T1.VSL_CD, T1.VOY_NO, T1.DIR_CD, T1.PORT_CD, T1.CALL_IND, T1.PLAN_TYPE, T1.BAY, T1.TIER
+                -- T0001 END.
+                )
+        WHERE   PLAN_TYPE_RK    = 1     -- 실제로 사용할 Bay Plan 판별 (PLAN_TYPE이 'F', 'E'가 동시에 존재할 경우가 있으며, 이럴경우 'F'를 사용하도록 처리함.
+        AND     MAX_TIER_BY_BAY = TIER  -- MAX TIER만 사용
+        GROUP BY VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND, TIER_NO
+        -- T0002 END.
+        )TB , STO_STB_PORT ST
+	, MDM_VSL_CNTR MD
+	, ( SELECT * FROM PSO_CHG_DTL WHERE LGS_COST_CD = 'CNTFAV' ) PD
+WHERE   1=1
+AND     TB.TIER_NO_SEQ  = 1   -- 최고의 TIER NO를 판별
+AND     TB.VSL_CD = ST.VSL_CD(+)
+AND     TB.VOY_NO = ST.VOY_NO(+)
+AND     TB.DIR_CD = ST.DIR_CD(+)
+AND     TB.PORT_CD = ST.PORT_CD(+)
+AND     TB.CALL_IND = ST.CALL_IND(+)
+AND	TB.VSL_CD = MD.VSL_CD(+)
+AND	TB.VSL_CD = PD.VSL_CD(+)
+AND	TB.VOY_NO = PD.SKD_VOY_NO(+)
+AND	TB.DIR_CD = PD.SKD_DIR_CD(+)
+#end
+)
+, TB_NEXT_PORT AS (
+SELECT    TT.VSL_CD 
+        , TT.SKD_VOY_NO 
+        , TT.SKD_DIR_CD
+        , TT.NEXT_PORT
+        , TT.NEXT_YD 
+	, TT.NEXT_ETB_DT
+FROM ( SELECT	T1.VSL_CD 
+	      , T1.SKD_VOY_NO 
+	      , T1.SKD_DIR_CD
+              ,	LEAD( T1.VPS_PORT_CD ) OVER( PARTITION BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD ORDER BY T1.CLPT_SEQ)  NEXT_PORT
+              ,	LEAD( T1.YD_CD ) OVER( PARTITION BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD ORDER BY T1.CLPT_SEQ)  NEXT_YD
+	      ,	LEAD( T1.VPS_ETB_DT ) OVER( PARTITION BY T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD ORDER BY T1.CLPT_SEQ)  NEXT_ETB_DT
+              ,	T1.VPS_PORT_CD
+       FROM VSK_VSL_PORT_SKD  T1, 
+            TB_SRC1 T2
+       WHERE 1=1
+       AND  T1.VSL_CD = T2.VSL_CD 
+       AND  T1.SKD_VOY_NO = T2.SKD_VOY_NO
+       AND  T1.SKD_DIR_CD = T2.SKD_DIR_CD
+      ) TT , TB_SRC1 TR
+WHERE 1=1
+AND  TT.VSL_CD = TR.VSL_CD 
+AND  TT.SKD_VOY_NO = TR.SKD_VOY_NO
+AND  TT.SKD_DIR_CD = TR.SKD_DIR_CD
+AND  TT.VPS_PORT_CD  = TR.BAY_LOC
+)
+, TB_PSO_LOAD_TEU AS (
+    SELECT SUM(CASE WHEN SZTP ='DW' THEN '3.02'       
+                  WHEN SZTP ='DX' THEN '3.02'      
+                  WHEN SUBSTR(SZTP, 2,1) = '2' THEN '1.00'      
+                  WHEN SUBSTR(SZTP, 2,1) = '3' THEN '1.12'      
+                  WHEN SUBSTR(SZTP, 2,1) = '4' THEN '2.00'      
+                  WHEN SUBSTR(SZTP, 2,1) = '5' THEN '2.24'      
+                  WHEN SUBSTR(SZTP, 2,1) = '7' THEN '2.51'      
+                  WHEN SUBSTR(SZTP, 2,1) = '8' THEN '2.68'      
+                  WHEN SUBSTR(SZTP, 2,1) = '9' THEN '2.68'      
+                  WHEN CNTR_SIZE = '2' THEN '1.00' -- 위의 조건에 일치 하지 않을 경우를 대비하여 임시로 Rate 할당      
+                  ELSE '2.00' END)  AS TPRATE  
+                  ,B.VSL_CD, B.SKD_VOY_NO, B.SKD_DIR_CD  , B.BAY_LOC   AS VPS_PORT_CD                                  
+        FROM BAY_PLAN A, TB_SRC1 B      
+         WHERE A.FE = 'F'     
+          AND A.VSL_CD    = B.VSL_CD         
+          AND A.VOY_NO   = B.SKD_VOY_NO       
+          AND A.DIR_CD     =  B.SKD_DIR_CD          
+          AND A.PORT_CD  = B.BAY_LOC      
+          AND A.PLAN_TYPE = 'F'
+        GROUP BY B.VSL_CD, B.SKD_VOY_NO, B.SKD_DIR_CD  , B.BAY_LOC 
+)
+
+SELECT DISTINCT T1.VVD
+        , T1.BOUND
+        , T1.VSL_CD
+        , T1.SKD_VOY_NO
+        , T1.SKD_DIR_CD
+        , T1.VNDR_SEQ
+        , T1.BAY_YD
+        , T1.BAY_LOC          AS SCG_CAR_PORT_CD
+        , T1.BAY_CAL
+	    --, CASE WHEN T5.NEXT_PORT = 'EGSUZ' THEN T1.BAY_LOC  ELSE T5.NEXT_PORT END AS RHD_PORT	
+        , T1.VSL_SLAN_CD
+        , T1.VPS_ETA_DT
+        , T1.VPS_ETB_DT
+        , T1.VPS_ETD_DT
+        , T1.DETAIL
+        , T1.YD_CD
+        , T1.VPS_PORT_CD
+        , T1.CLPT_SEQ
+        , T1.BKG_STS
+        , T1.BKG_CRE_DT
+        , T7.CNL_TZ_BKG_PRD_CD
+        , T7.CNL_TZ_BKG_PROC_STS_CD
+        , T7.CNL_BKG_TZ_DT
+        , T7.CNL_OT_SVC_APRO_FLG
+        , T7.CNL_OT_SVC_ARR_DT
+        , T7.CNL_BKG_AMT
+        , T1.SCG_LMT_ACT_RATIO
+        , T1.SCG_LMT_ACT_SPD
+        , T2.SCG_CAR_TIER
+        , T2.SCG_CAR_TEU
+        , T2.SCG_CAR_BOX
+        , T2.SCG_CAR_RATIO
+        , T6.TPRATE         		   AS LOAD_TEU -- T2.LOAD_TEU
+        , ROUND(T2.RHND_CNTR_QTY)      AS RHD_QTY
+        , T3.CURR_CD                   AS CRR_CD
+        , T3.RATE                      AS SCD_RATE
+        , T3.USD_RATE                  AS EXH_RATE
+#if (${port_cd} == 'EGSUZ')
+        , T1.AVR_GROS_PRD
+		, CASE WHEN  ( NVL(T2.SCG_CAR_TIER,0) > 0 AND NVL( T1.AVR_GROS_PRD,0 ) > 0  ) THEN '2' ELSE '3' END AS CALC
+FROM    (
+        SELECT  T1.*
+                , NVL(
+                     (
+                     WITH TB_GC_PRD AS (
+                     SELECT  S.VSL_CD, S.VOY_NO, S.DIR_CD, S.PORT_CD, S.CALL_IND, S.GROSS_GC, S.NEXT_CANAL
+                             , ROW_NUMBER() OVER (PARTITION BY S.VSL_CD, S.DIR_CD, S.PORT_CD ORDER BY S.VOY_NO DESC) AS CALL_SEQ
+                     FROM    TDR_HEADER S
+                     WHERE   1=1
+                     AND     S.NEXT_CANAL        = 'EGSUZ'
+                     AND     NVL(S.GROSS_GC, 0)  > 0
+                     )
+                     SELECT  NVL(ROUND(AVG(S1.GROSS_GC)),0)
+                     FROM    TB_GC_PRD S1
+                     WHERE   1=1
+                     AND     CALL_SEQ       <= 3
+                     AND     S1.VSL_CD      = T1.VSL_CD
+                     AND     S1.DIR_CD      = T1.SKD_DIR_CD
+                     AND     S1.PORT_CD     = T1.BAY_LOC
+                     AND     S1.NEXT_CANAL  = 'EGSUZ'
+                     ) ,
+                    (
+                    WITH TB_GC_PRD AS (
+                    SELECT  S1.VSL_CD, S1.VOY_NO, S1.DIR_CD, S1.PORT_CD, S1.CALL_IND, S1.GROSS_GC, S1.NEXT_CANAL, TO_DATE(S2.VPS_ETD_DT, 'YYYY-MM-DD') AS VPS_ETD_DT
+                            , ROW_NUMBER() OVER (PARTITION BY S1.DIR_CD, S1.PORT_CD ORDER BY S2.VPS_ETD_DT DESC) AS CALL_SEQ
+                    FROM    TDR_HEADER S1,
+                            VSK_VSL_PORT_SKD S2
+                    WHERE   1=1
+                    AND     S1.VSL_CD   = S2.VSL_CD
+                    AND     S1.VOY_NO   = S2.SKD_VOY_NO
+                    AND     S1.DIR_CD   = S2.SKD_DIR_CD
+                    AND     S1.PORT_CD  = S2.VPS_PORT_CD
+                    AND     S1.CALL_IND = S2.CLPT_IND_SEQ
+                    AND     S2.TURN_PORT_IND_CD NOT IN ('D', 'V', 'F')
+                    AND     S1.NEXT_CANAL        = 'EGSUZ'
+                    AND     NVL(S1.GROSS_GC, 0)  > 0
+                    )
+                    SELECT  NVL(ROUND(AVG(S1.GROSS_GC)),0)
+                    FROM    TB_GC_PRD S1
+                    WHERE   1=1
+                    AND     CALL_SEQ       <= 3
+                    AND     S1.DIR_CD      = T1.SKD_DIR_CD
+                    AND     S1.PORT_CD     = T1.BAY_LOC
+                    AND     S1.NEXT_CANAL  = 'EGSUZ'
+                   )                                                                                            ) AS AVR_GROS_PRD
+        FROM    TB_SRC1       T1
+        )             T1,
+#else
+        , T2.VISI_RANGE
+        , T2.UND_ACP_QTY
+	, T2.ALLOWANCE_TEU	AS ALLOWANCE
+	, T2.EXD_ACP_ESTI
+	, T2.EXD_ACP_ACTUAL 
+        , NULL                        AS AVR_GROS_PRD
+FROM    TB_SRC1       T1,
+#end
+        TB_SUZ_SURCHG T2,
+        (SELECT H.YD_CD, H.VNDR_SEQ
+                , H.EFF_FM_DT                           -- 적용시작일
+                , H.EFF_TO_DT                           -- 적용종료일
+                , D.CURR_CD                             -- 통화단위
+                , NVL(DECODE(D.TML_AGMT_VOL_UT_CD, 'C', MAX(C.AGMT_RT), MAX(D.AGMT_UT_RT)), 0)                                        AS RATE           -- 계약 요율
+                , NVL(ROUND(NVL(DECODE(D.TML_AGMT_VOL_UT_CD, 'C', MAX(C.AGMT_RT), MAX(D.AGMT_UT_RT)), 0) / G.USD_LOCL_XCH_RT, 2), 0)  AS USD_RATE	-- USD 환산금액
+        FROM    TES_TML_AGMT_HDR H , TB_SRC1 TT
+                , TES_TML_AGMT_DTL D
+                , TES_TML_AGMT_TP_SZ C
+                , MDM_YARD M
+                , GL_MON_XCH_RT G
+        WHERE   1 = 1
+        AND     H.YD_CD                    = TT.BAY_YD
+        AND     H.TML_AGMT_OFC_CTY_CD      = D.TML_AGMT_OFC_CTY_CD
+        AND     H.TML_AGMT_SEQ             = D.TML_AGMT_SEQ
+        AND     H.TML_AGMT_VER_NO          = D.TML_AGMT_VER_NO
+        AND     H.YD_CD                    = M.YD_CD
+        AND     H.VNDR_SEQ                 = M.N1ST_VNDR_SEQ
+        AND     TT.VPS_ETB_DT            BETWEEN  H.EFF_FM_DT
+                                          AND      H.EFF_TO_DT
+        AND     NVL(H.DELT_FLG, 'N')      <> 'Y'
+        AND     H.TML_AGMT_STS_CD          = 'C'
+        AND     D.LGS_COST_CD              = 'SVRHCD'
+        AND     H.TML_AGMT_VER_NO          = ( SELECT  MAX(TML_AGMT_VER_NO) AS TML_AGMT_VER_NO
+                                               FROM    TES_TML_AGMT_HDR A
+                                                       , MDM_YARD B
+                                               WHERE   1 = 1
+                                               AND     A.YD_CD            = B.YD_CD
+                                               AND     A.VNDR_SEQ         = B.N1ST_VNDR_SEQ
+                                               AND     A.YD_CD            = H.YD_CD
+                                               AND     TT.VPS_ETB_DT BETWEEN A.EFF_FM_DT AND A.EFF_TO_DT
+                                               AND     NVL(A.DELT_FLG, 'N')     <> 'Y'
+                                               AND     A.TML_AGMT_STS_CD        = 'C'
+                                             )
+        AND     D.CURR_CD                  = G.CURR_CD
+        AND     TO_CHAR(TT.VPS_ETB_DT , 'YYYYMM')= G.ACCT_XCH_RT_YRMON
+        AND     G.ACCT_XCH_RT_LVL          = 1
+        AND     D.TML_AGMT_OFC_CTY_CD      = C.TML_AGMT_OFC_CTY_CD (+)
+        AND     D.TML_AGMT_SEQ             = C.TML_AGMT_SEQ        (+)
+        AND     D.TML_AGMT_VER_NO          = C.TML_AGMT_VER_NO     (+)
+        AND     D.TML_AGMT_DTL_SEQ         = C.TML_AGMT_DTL_SEQ    (+)
+        GROUP BY H.YD_CD
+                , H.VNDR_SEQ
+                , H.EFF_FM_DT      -- 적용시작일
+                , H.EFF_TO_DT      -- 적용종료일
+                , D.CURR_CD        -- 통화단위
+                , D.TML_AGMT_VOL_UT_CD
+                , G.USD_LOCL_XCH_RT )T3,
+        MDM_YARD T4,
+	TB_NEXT_PORT T5 , 
+	TB_PSO_LOAD_TEU T6, 
+	VSK_CNL_TZ_BKG T7
+WHERE   1=1
+AND     T1.VSL_CD          = T2.VSL_CD   (+)
+AND     T1.SKD_VOY_NO      = T2.VOY_NO   (+)
+AND     T1.SKD_DIR_CD      = T2.DIR_CD   (+)
+AND     T1.BAY_LOC         = T2.PORT_CD  (+)
+AND     T1.BAY_CAL         = T2.CALL_IND (+)
+AND     T1.BAY_YD          = T3.YD_CD    (+)
+AND     T3.YD_CD           = T4.YD_CD    (+)
+AND     T3.VNDR_SEQ        = T4.N1ST_VNDR_SEQ 	 (+)
+AND     T1.VSL_CD          = T5.VSL_CD   (+)
+AND     T1.SKD_VOY_NO      = T5.SKD_VOY_NO   (+)
+AND     T1.SKD_DIR_CD      = T5.SKD_DIR_CD   (+)
+AND     T1.VSL_CD          = T6.VSL_CD   (+)
+AND     T1.SKD_VOY_NO      = T6.SKD_VOY_NO   (+)
+AND     T1.SKD_DIR_CD      = T6.SKD_DIR_CD   (+)
+AND     T1.BAY_LOC         = T6.VPS_PORT_CD  (+)
+AND     T1.VSL_CD          = T7.VSL_CD(+)
+AND     T1.SKD_VOY_NO      = T7.SKD_VOY_NO   (+)
+AND     T1.SKD_DIR_CD      = T7.SKD_DIR_CD   (+)
+AND     T1.VPS_PORT_CD     = T7.CNL_PORT_CD (+)
+AND     REPLACE(TO_CHAR(TO_DATE(@[start_date], 'YYYY-MM-DD'), 'YYYY-MM'), '-', '')  = T7.CNL_TZ_BKG_YRMON (+)
+--#if (${port_cd} == 'EGSUZ')
+--AND    (NVL(T2.SCG_CAR_TEU,0) - NVL(T1.AVR_GROS_PRD, 0) = 0 OR NVL(T2.SCG_CAR_TEU,0) - NVL(T1.AVR_GROS_PRD,0) < NVL(T2.SCG_CAR_TEU,0) )
+--#end
+--AND    T1.BKG_STS IS NOT NULL
+ORDER BY T1.BOUND, T1.VPS_ETA_DT			]]></sql>
+			<params>
+				<param name="port_cd" type="12" value="" out="N"/>
+				<param name="vsl_slan_cd" type="12" value="" out="N"/>
+				<param name="start_date" type="12" value="" out="N"/>
+				<param name="end_date" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

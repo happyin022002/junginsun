@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="InvoiceIssueDBDAOVIECombineBLNoListRSQL">
+			<desc><![CDATA[(Vietnam) Multi B/L List Select]]></desc>
+			<sql><![CDATA[
+SELECT BL_NO,
+       SAIL_ARR_DT,
+       IO_BND_CD,
+       INV_TYPE,
+       SUBSTR(XMLAGG(XMLELEMENT(A, CHR(13) || CURR_CD) ORDER BY CHG_CD).EXTRACT( '//text()'), 2) CURR_CD,
+       SUBSTR(XMLAGG(XMLELEMENT(A, CHR(13) || CHG_CD) ORDER BY CHG_CD).EXTRACT( '//text()'), 2) CHG_CD,
+       SUBSTR(XMLAGG(XMLELEMENT(A, CHR(13) || CHG_AMT) ORDER BY CHG_CD).EXTRACT( '//text()'), 2) CHG_AMT,
+       SUBSTR(XMLAGG(XMLELEMENT(A, CHR(13) || CUST_CD_VAL_DESC) ORDER BY CHG_CD).EXTRACT( '//text()'), 2) VIE_CHG_CD
+FROM (SELECT AA.BL_SRC_NO BL_NO,
+             AA.SAIL_ARR_DT,
+             BB.CURR_CD,
+             AA.IO_BND_CD,
+             TO_CHAR(BB.CHG_AMT, '999,999,999.99') CHG_AMT,
+             SUM(AA.INV_TTL_LOCL_AMT) INV_TTL_LOCL_AMT,
+             BB.CHG_CD CHG_CD,
+             @[inv_type] INV_TYPE
+       FROM INV_AR_MN AA, 
+            (SELECT A.BL_SRC_NO,
+                    B.CURR_CD,
+                    B.CHG_CD,
+                    SUBSTR(MAX(DECODE(A.REV_TP_CD,'M','A','B')||A.AR_IF_NO),2,11) AR_IF_NO,
+                    SUM(ROUND((B.CHG_AMT), 2)) CHG_AMT
+               FROM (SELECT A.*,
+                            ROWNUM
+                       FROM INV_AR_MN A
+                      WHERE 1=1
+                        --AND A.INV_ISS_FLG ='N'
+                        AND A.AR_OFC_CD = @[ar_ofc_cd]
+#if (${io_bnd_cd} != '')
+		   		        AND A.IO_BND_CD = @[io_bnd_cd]
+#end
+                        AND A.BL_INV_CFM_DT IS NOT NULL
+                        AND EXISTS (SELECT 'X'
+                                      FROM INV_AR_MN
+                                     WHERE 1=1
+                                       AND DECODE(@[dt_opt], 'G', BL_INV_CFM_DT, 'S', SAIL_ARR_DT) BETWEEN @[from_dt] AND @[to_dt]
+                                       AND A.BL_SRC_NO = BL_SRC_NO
+                                       AND A.AR_OFC_CD = AR_OFC_CD)
+                                       AND NVL(A.INV_DELT_DIV_CD, 'N') <> 'Y'
+#if (${vvd_cd} != '')
+           		                       AND A.VSL_CD = SUBSTR(@[vvd_cd],1,4)
+ 		   		                       AND A.SKD_VOY_NO = SUBSTR(@[vvd_cd],5,4)
+		   		                       AND A.SKD_DIR_CD = SUBSTR(@[vvd_cd],9,1)
+#end
+#if (${svc_scp_cd} != '')
+		   		                       AND A.SVC_SCP_CD = @[svc_scp_cd]
+#end
+#if (${port_cd} != '')
+		   		                       AND DECODE(A.IO_BND_CD,'I',A.POL_CD, A.POD_CD ) = @[port_cd]
+#end
+                                       AND A.ACT_CUST_CNT_CD = @[cust_cnt_cd]
+                                       AND A.ACT_CUST_SEQ = TO_NUMBER(@[cust_seq])
+/*
+                                       AND NOT EXISTS (SELECT 'X'
+                                                         FROM MDM_ORGANIZATION
+                                                        WHERE MDM_ORGANIZATION.REP_CUST_CNT_CD = A.ACT_CUST_CNT_CD
+                                                          AND MDM_ORGANIZATION.REP_CUST_SEQ = A.ACT_CUST_SEQ ) 
+*/
+							) A,
+                            INV_AR_CHG B
+                      WHERE A.AR_IF_NO = B.AR_IF_NO
+						AND B.INV_ISS_FLG ='N'
+#if (${inv_type} == 'FRT')
+                  AND A.REV_TP_CD <> 'M'
+                  AND (((B.CHG_CD NOT IN ('DHF','OBS','VDT') OR NVL(B.CURR_CD, ' ') <> 'VND') AND
+                        B.CHG_CD NOT IN ('OTH','DTH', 'DDC','VTT','THC','ORC','DTC','REF','VRT','SLF','VST', 'CLN','VCT', 'VET','VFT', 'TVA')							
+                       )
+                       OR ((B.CHG_CD = 'OTH' AND A.IO_BND_CD = 'I') OR
+                        (B.CHG_CD = 'DTH' AND A.IO_BND_CD = 'O') OR
+                        (B.CHG_CD = 'DDC' AND A.IO_BND_CD = 'O')
+                       )							
+                      )
+                  AND NOT EXISTS(SELECT 1 FROM DUAL WHERE B.CHG_CD = 'DDF'
+                                                      AND A.IO_BND_CD = 'I'
+                                                      AND B.CURR_CD = 'VND')
+				  AND NOT EXISTS(SELECT 1 FROM DUAL WHERE B.CHG_CD = 'EIS' AND A.IO_BND_CD = 'I' )
+                  AND NOT EXISTS(SELECT 1 FROM DUAL WHERE B.CHG_CD = 'MCF' AND A.IO_BND_CD = 'O' AND B.CURR_CD = 'USD')
+                  AND NOT EXISTS(SELECT 1 FROM DUAL WHERE B.CHG_CD IN ('BCC','CFC','PCS','VPT'))
+                  AND NOT EXISTS(SELECT 1 FROM DUAL WHERE B.CHG_CD = 'LBP' AND A.IO_BND_CD = 'O' AND B.CURR_CD = 'VND')
+                  AND NOT EXISTS(SELECT 1 FROM DUAL WHERE B.CHG_CD = 'TAC' AND B.CURR_CD = 'VND')
+#elseif (${inv_type} == 'THC')
+		                AND A.REV_TP_CD <> 'M'
+		                AND ((B.CHG_CD = 'OTH' AND A.IO_BND_CD = 'O') OR
+                            (B.CHG_CD = 'DTH' AND A.IO_BND_CD = 'I') OR
+                            (B.CHG_CD = 'DDC' AND A.IO_BND_CD = 'I') OR 
+                            (B.CHG_CD ='VTT') OR
+                            (B.CHG_CD ='THC') OR
+                            (B.CHG_CD ='ORC'))
+#elseif (${inv_type} == 'DHF')
+ 		                AND (B.CHG_CD IN ('OBS','DHF','VDT') OR
+  		                    (B.CHG_CD = 'DDF' AND A.IO_BND_CD ='I'))
+ 		                AND B.CURR_CD ='VND'
+#elseif (${inv_type} == 'DMR')
+		                AND A.REV_TP_CD = 'M'
+		                AND B.CHG_CD IN ('DMR','DTC')
+#elseif (${inv_type} == 'MNR')
+                        AND A.REV_TP_CD = 'M'
+		                AND B.CHG_CD IN ('RPC','TVA')
+                        AND B.AR_IF_NO IN   (SELECT AR_IF_NO FROM INV_AR_CHG  WHERE AR_IF_NO = B.AR_IF_NO AND CHG_CD = 'RPC')
+#elseif (${inv_type} == 'MRI')
+                        AND A.REV_TP_CD = 'M'
+		                AND ((B.CHG_CD IN ('DHF','OBS','RPC') AND 
+                            NVL(B.CURR_CD, ' ') <> 'VND') OR
+                            (B.CHG_CD  NOT IN ('OTH','DTH','DDC','DHF','OBS',
+                            'DMR', 'DTC', 'RPC','SLF','CLN','VDT','VTT','VST','VCT','PCS','VPT')))
+#elseif (${inv_type} == 'SLF')
+                        AND A.REV_TP_CD <> 'M'
+		                AND B.CHG_CD IN ('SLF','VST')
+#elseif (${inv_type} == 'CLN')
+                        AND A.REV_TP_CD <> 'M'
+		                AND B.CHG_CD IN ('CLN','VCT')
+#elseif (${inv_type} == 'REF')
+-- 2010-07-19 TYPE REF 추가	
+-- 2111-11-22 REF charge가 MRI로 발생되기 때문에 REVENUE TYPE 체크가 의미 없어서 삭제하기로 함
+		                AND B.CHG_CD IN ('REF','VRT')
+					    AND B.CURR_CD = 'USD'
+#elseif (${inv_type} == 'ETC')
+	AND ((B.CHG_CD IN ('EIS','VET') AND A.IO_BND_CD = 'I')
+		  OR (B.CHG_CD IN ('MCF','TVA') AND A.IO_BND_CD = 'O' AND B.CURR_CD = 'USD')
+	      OR (B.CHG_CD IN ('LBP','TVA') AND A.IO_BND_CD = 'O' AND B.CURR_CD = 'VND')
+	      OR (B.CHG_CD IN ('TAC','TVA') AND B.CURR_CD = 'VND')
+	      OR (B.CHG_CD IN ('CFC','VFT','BCC','PCS','VPT'))
+	    )
+#end
+             GROUP BY A.BL_SRC_NO, B.CURR_CD, B.CHG_CD ) BB
+       WHERE AA.AR_IF_NO = BB.AR_IF_NO
+         AND BB.CHG_AMT <> 0
+       GROUP BY AA.BL_SRC_NO, AA.SAIL_ARR_DT, BB.CURR_CD, AA.IO_BND_CD, BB.CHG_AMT, BB.CHG_CD
+      HAVING SUM(AA.INV_TTL_LOCL_AMT) <> 0
+       ORDER BY AA.BL_SRC_NO )X,
+       INV_EDI_INTG_CD_DTL Y
+WHERE X.CHG_CD = Y.HJS_CD_VAL_CTNT(+)
+  AND INTG_CD_ID(+) = 'CD00003'
+  AND CHG_CD NOT IN('VDT', 'VTT')
+ GROUP BY BL_NO, SAIL_ARR_DT, IO_BND_CD, INV_TYPE			]]></sql>
+			<params>
+				<param name="inv_type" type="12" value="FRT" out="N"/>
+				<param name="ar_ofc_cd" type="12" value="1" out="N"/>
+				<param name="io_bnd_cd" type="12" value="1" out="N"/>
+				<param name="dt_opt" type="12" value="1" out="N"/>
+				<param name="from_dt" type="12" value="1" out="N"/>
+				<param name="to_dt" type="12" value="1" out="N"/>
+				<param name="vvd_cd" type="12" value="1" out="N"/>
+				<param name="svc_scp_cd" type="12" value="1" out="N"/>
+				<param name="port_cd" type="12" value="1" out="N"/>
+				<param name="cust_cnt_cd" type="12" value="1" out="N"/>
+				<param name="cust_seq" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

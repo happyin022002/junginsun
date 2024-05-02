@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SpaceAllocationManageDBDAOSearchSpaceAllocationControlOptionDetailRSQL">
+			<desc><![CDATA[SpaceAllocationManageDBDAOSearchSpaceAllocationControlOptionDetailRSQL
+2014.12.08 신자영 [CHM-201433097] Control Option - A/C 및 CDMT추가 건 상세
+2015.01.02 Arie [CHM-201433401]Control Option Registration - Upload기능 추가 요청
+2015.01.22 신자영 [CHM-201533823] Control Option 데이터 보여주는 방식 변경 요청
+2015.01.30 신자영 [CHM-201533908] Control Option 보완
+2015.02.16 박은주 쿼리튜닝(17->0.4)
+2015.02.17 Arie Im [CHM-201534437]Control Option Registration 기능 보완 - del all check, 상단 검색조건 추가
+2015.03.18 김성욱  [CHM-201533908] Control Option 보완
+2015.06.11 김성욱 [CHM-201535211] SPC BKG 연동
+2015.06.24 이혜민 [CHM-201535810] Fixed Rate 계약 정보의 SPC 적용 개발 요청
+2015.07.03 이혜민 [CHM-201536633] Control Option management 보완요청 (Fixed Rate관련)]]></desc>
+			<sql><![CDATA[
+SELECT DTL.TRD_CD
+      ,DTL.SUB_TRD_CD
+      ,DTL.RLANE_CD
+      ,DTL.DIR_CD
+      ,DTL.ALOC_CTRL_TP_CD
+      ,DTL.CTRL_LOC_ACCT_CD
+      ,DECODE(DTL.ALOC_CTRL_TP_CD, 'F', '', NVL(DTL.ALOC_CTRL_DTL_CD, '*'))  AS ALOC_CTRL_DTL_CD
+      ,NVL(DTL.SC_NO, '*') AS SC_NO
+      ,NVL(DTL.RFA_NO, '*') AS RFA_NO
+      ,NVL(
+           (
+            SELECT A.CUST_LGL_ENG_NM
+              FROM PRI_SP_HDR    HD
+                  ,PRI_SP_MN     MN
+                  ,PRI_SP_CTRT_PTY AC
+                  ,MDM_CUSTOMER A
+            WHERE HD.SC_NO        = DTL.CTRL_LOC_ACCT_CD
+              AND MN.PROP_NO      = HD.PROP_NO
+              AND MN.PROP_STS_CD  = 'F'    -- Filed만 B/L적용 가능
+              AND MN.AMDT_SEQ     = (SELECT MAX(AMDT_SEQ)
+                                       FROM PRI_SP_MN N_MN
+                                      WHERE N_MN.PROP_NO      = HD.PROP_NO
+                                        AND N_MN.PROP_STS_CD  = 'F'
+                                     )
+              AND AC.PROP_NO      = MN.PROP_NO
+              AND AC.AMDT_SEQ     = MN.AMDT_SEQ
+              AND AC.PRC_CTRT_PTY_TP_CD = 'C'
+              AND A.CUST_CNT_CD   = AC.CUST_CNT_CD
+              AND A.CUST_SEQ      = AC.CUST_SEQ
+            UNION ALL
+            SELECT A.CUST_LGL_ENG_NM
+              FROM PRI_RP_HDR    HD
+                  ,PRI_RP_MN     MN
+                  ,MDM_CUSTOMER  A
+            WHERE HD.RFA_NO        = DTL.CTRL_LOC_ACCT_CD
+              AND MN.PROP_NO       = HD.PROP_NO
+              AND MN.PROP_STS_CD   = 'A'        /*상수*/
+              AND MN.AMDT_SEQ      = (SELECT MAX(AMDT_SEQ)
+                                        FROM PRI_RP_MN N_MN
+                                       WHERE N_MN.PROP_NO = HD.PROP_NO
+                                         AND N_MN.PROP_STS_CD   = 'A'
+                                     )
+              AND A.CUST_CNT_CD = MN.CTRT_CUST_CNT_CD
+              AND A.CUST_SEQ    = MN.CTRT_CUST_SEQ
+              AND ROWNUM       <= 1
+            ), '') AS CTRT_NM
+        -- name 부분 SC_NO 대신 ALOC_CTRL_DTL_CD로 변경 필요
+      ,CASE WHEN ALOC_CTRL_TP_CD = 'C' 
+            THEN (SELECT CMDT_NM
+                    FROM MDM_COMMODITY
+                   WHERE CMDT_CD = ALOC_CTRL_DTL_CD)
+            WHEN ALOC_CTRL_TP_CD IN ('A','B') 
+            THEN NVL((SELECT CUST_LGL_ENG_NM
+                        FROM MDM_CUSTOMER
+                       WHERE CUST_CNT_CD = SUBSTR(ALOC_CTRL_DTL_CD, 1, 2)
+--                      PK를 가공하고 있어서 속도가 느림 따라서 아래와 같이 변경
+--                         AND LPAD(CUST_SEQ, 6, '0') = SUBSTR(ALOC_CTRL_DTL_CD, 3, 6)
+                         AND CUST_SEQ    = TO_NUMBER(SUBSTR(ALOC_CTRL_DTL_CD, 3, 6))
+                      ), '')
+       ELSE ''
+       END AS ACCT_NM
+	   ,OFC.OFC_CD
+       ,DECODE(DTL.CTRL_FX_RT_FLG, 'Y', 1, 0) CTRL_FX_RT_FLG
+  FROM SPC_ALOC_LANE_CTRL_OPT_DTL DTL
+		,(
+			SELECT ALOC_CTRL_TP_CD ACTC, CTRL_LOC_ACCT_CD, substr(xmlagg(xmlelement(a,',' || ofc_cd) order by ofc_cd).extract('//text()'), 2) OFC_CD
+			FROM SPC_ALOC_LANE_CTRL_OFC
+			WHERE 1 = 1
+			#if (${trade} != '')
+				AND TRD_CD     = @[trade]
+			#end
+			#if (${subtrade} != '')
+				AND SUB_TRD_CD = @[subtrade]
+			#end
+			#if (${lane} != '')
+				AND RLANE_CD   = @[lane]
+			#end
+			#if (${bound} != '')
+				AND DIR_CD     = @[bound]
+			#end
+			GROUP BY ALOC_CTRL_TP_CD, CTRL_LOC_ACCT_CD
+		) OFC
+ WHERE DTL.ALOC_CTRL_TP_CD IN ('A', 'B', 'C', 'E', 'G', 'F') -- A:Account, B: Actual Account, C:Commodity, E:Ecc, G:LOC Group, F:Fixed(Actual Account or Commodity)
+
+#if (${trade} != '')
+   AND DTL.TRD_CD     = @[trade]
+#end
+#if (${subtrade} != '')
+   AND DTL.SUB_TRD_CD = @[subtrade]
+#end
+#if (${lane} != '')
+   AND DTL.RLANE_CD   = @[lane]
+#end
+#if (${bound} != '')
+   AND DTL.DIR_CD     = @[bound]
+#end
+AND DTL.ALOC_CTRL_TP_CD = OFC.ACTC(+) --DECODE(OFC.ACTC, '', DTL.ALOC_CTRL_TP_CD, OFC.ACTC) --OFC.ACTC(+)
+AND DTL.CTRL_LOC_ACCT_CD = OFC.CTRL_LOC_ACCT_CD(+) --DECODE(OFC.CTRL_LOC_ACCT_CD, '', DTL.CTRL_LOC_ACCT_CD, OFC.CTRL_LOC_ACCT_CD) --OFC.CTRL_LOC_ACCT_CD(+)
+ORDER BY TRD_CD
+      ,SUB_TRD_CD
+      ,RLANE_CD
+      ,DIR_CD
+      ,ALOC_CTRL_TP_CD
+      ,CTRL_LOC_ACCT_CD			]]></sql>
+			<params>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="subtrade" type="12" value="" out="N"/>
+				<param name="lane" type="12" value="" out="N"/>
+				<param name="bound" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

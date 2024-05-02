@@ -1,0 +1,1060 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="Eur24ManifestDownloadDBDAOSearchEur24BlManifestListRSQL">
+			<desc><![CDATA[Europe 세관신고 목록 조회
+* History
+2012.06.11 김보배 CHM-201218293] [BKG] ENS 전송대상 오류 수정 요청]]></desc>
+			<sql><![CDATA[
+SELECT  
+
+/* ENS ETA 가 전송날짜 보다 30일 이상 지난 경우 ENS전송 방지 */
+DECODE( ROWNUM, 1,
+        (SELECT CASE WHEN NVL(TO_DATE(ZZ.CSTMS_ESTM_ARR_DT,'YYYY-MM-DD HH24:MI'), TO_DATE(ZZ.INIT_ETA_DT,'YYYY-MM-DD HH24:MI')) 
+                            < GLOBALDATE_PKG.TIME_CONV_FNC('KRPUS',SYSDATE-30,ZZ.EU_1ST_PORT)
+                      THEN 'Y'
+                      ELSE 'N'
+                 END
+            FROM DUAL
+           WHERE 1=1
+             AND ROWNUM = 1)
+) AS TRSM_VAL,
+
+DECODE( ROWNUM, 1,
+        ( SELECT CASE WHEN NVL(MAX(ACT.ACT_ARR_DT),TO_DATE(ZZ.VPS_ETA_DT,'YYYY-MM-DD HH24:MI')) <= GLOBALDATE_PKG.TIME_CONV_FNC('KRPUS', SYSDATE, ZZ.EU_1ST_PORT) THEN 'Y'
+                      ELSE 'N'
+                 END  /* 새로운 POFE에서의 Actual ETA 이후에는 전송 안됨, DOWNLOAD 데이타만 적용 */
+            FROM VSK_ACT_PORT_SKD ACT
+           WHERE VSL_CD      = ZZ.VSL_CD
+             AND SKD_VOY_NO  = ZZ.SKD_VOY_NO
+             AND SKD_DIR_CD  = ZZ.SKD_DIR_CD
+             AND VPS_PORT_CD = ZZ.EU_1ST_PORT
+             AND CLPT_IND_SEQ  = NVL(@[eu_1st_port_clpt_seq],'1')
+			 AND ROWNUM = 1)
+) AS ATA_YN
+
+/* A/N Sending 후 Accepted 된 VVD에 대한 ENS전송 방지 */
+, DECODE( ROWNUM,1, 
+          NVL( ( SELECT 'Y' 
+                   FROM BKG_CSTMS_ADV_EUR_RCV RCV
+                  WHERE 1=1
+                    AND ACK_RCV_STS_CD  = 'A'
+                    AND RCV. RCV_TMS = ( SELECT MAX(RCV_TMS)
+                                           FROM BKG_CSTMS_ADV_EUR_SND A, BKG_CSTMS_ADV_EUR_RCV B
+                                          WHERE A.EUR_EDI_MSG_TP_ID ='ARN'
+                                            AND A.VSL_CD        = ZZ.VSL_CD
+                                            AND A.SKD_VOY_NO    = ZZ.SKD_VOY_NO
+                                            AND A.SKD_DIR_CD    = ZZ.SKD_DIR_CD
+                                            AND A.CSTMS_PORT_CD = ZZ.EU_1ST_PORT
+                                            AND A.MSG_SND_NO    = B.MSG_RCV_NO
+                                            AND (ACK_KND_ID != 'S' OR ACK_RCV_STS_CD != 'A') )
+                    AND ROWNUM =1),'N')
+) AS ARN_YN
+
+, CASE WHEN ROWNUM = 1
+        AND ( NVL(( SELECT 'Y'
+                      FROM  BKG_CSTMS_ADV_EUR_RCV RCV
+                     WHERE 1=1
+                       AND  ACK_RCV_STS_CD  = 'A'
+                       AND RCV. RCV_TMS = (  SELECT MAX(RCV_TMS)
+                                               FROM BKG_CSTMS_ADV_EUR_SND A, BKG_CSTMS_ADV_EUR_RCV B
+                                              WHERE A.EUR_EDI_MSG_TP_ID ='DIV'
+                                                AND A.VSL_CD        = ZZ.VSL_CD
+                                                AND A.SKD_VOY_NO    = ZZ.SKD_VOY_NO
+                                                AND A.SKD_DIR_CD    = ZZ.SKD_DIR_CD
+                                                AND A.CSTMS_PORT_CD = ZZ.EU_1ST_PORT
+                                                AND A.MSG_SND_NO    = B.MSG_RCV_NO
+                                                AND (ACK_KND_ID != 'S' OR ACK_RCV_STS_CD != 'A') )
+                       AND ROWNUM =1),'N') = 'Y'
+              OR NVL(( SELECT 'Y'
+                         FROM BKG_CSTMS_EUR_VSL EVSL
+                        WHERE EVSL.VSL_CD        = ZZ.VSL_CD
+                          AND EVSL.SKD_VOY_NO    = ZZ.SKD_VOY_NO
+                          AND EVSL.SKD_DIR_CD    = ZZ.SKD_DIR_CD
+                          AND EVSL.CSTMS_PORT_CD = ZZ.EU_1ST_PORT
+                          AND DVS_RQST_SMT_FLG   = 'Y'
+                      ) ,'N') = 'Y')
+       THEN 'Y'
+       ELSE 'N'
+   END AS DR_YN
+
+, NVL(( SELECT 'Y'
+         FROM BKG_CSTMS_EUR_BL ENS_BL
+        WHERE 1=1
+          AND ENS_BL.VSL_CD        = ZZ.VSL_CD
+          AND ENS_BL.SKD_VOY_NO    = ZZ.SKD_VOY_NO
+          AND ENS_BL.SKD_DIR_CD    = ZZ.SKD_DIR_CD
+          AND ENS_BL.CSTMS_PORT_CD = SUBSTR(@[p_first_of_multi_pofe_cd],1,5)
+          AND ROWNUM =1 ), 'N') AS DOWN_YN_FIRST_OF_MULTI_POFE
+
+, ZZ.*
+FROM ( 
+
+SELECT COUNT( DISTINCT DECODE( ERR_YN,'Y',BL_NO,NULL ) ) OVER() AS TTL_ERR_BL
+     , DENSE_RANK() OVER (ORDER BY POD,BL_NO) AS DT_SEQ
+     , COUNT(DISTINCT MSG_SND_NO) OVER() AS SENT_BL_CNT
+     , COUNT(DISTINCT DECODE(MSG_SND_NO,NULL,BL_NO,NULL)) OVER() AS UNSENT_BL_CNT
+     , COUNT(DISTINCT DECODE(RESULT2,'A',BL_NO,'AL',BL_NO,NULL)) OVER()   AS A_CNT
+     , COUNT(DISTINCT DECODE(RESULT2,'R',BL_NO,NULL)) OVER()   AS R_CNT
+     , COUNT(DISTINCT DECODE(RESULT2,'DNL',BL_NO,NULL)) OVER() AS DNL_CNT
+     , COUNT(DISTINCT DECODE(RESULT2,'NR',BL_NO,NULL)) OVER()  AS NR_CNT
+     , COUNT(DISTINCT DECODE(RESULT2,'CA',BL_NO,NULL)) OVER()  AS CA_CNT
+--     , COUNT(DISTINCT DECODE(RESULT2,'AL',BL_NO,NULL)) OVER()  AS AL_CNT
+     , COUNT(DISTINCT DECODE(RESULT2,'CC',BL_NO,NULL)) OVER()  AS CC_CNT
+     , COUNT(DISTINCT DECODE(RESULT2,'D',BL_NO,NULL)) OVER()  AS D_CNT
+     , Z.*
+  FROM ( SELECT DECODE( INSTR(SH_NM||SH_AD||SH_CT||SH_CN||SH_ZIP||SH_STR||SH_EORI
+                        ||CNEE_NM||CNEE_AD||CNEE_CT||CNEE_CN||CNEE_ZIP||CNEE_STR||CNEE_EORI
+                        ||NTFY_NM||NTFY_AD||NTFY_CT||NTFY_CN||NTFY_ZIP||NTFY_STR||NTFY_EORI
+                        ||BL_PK||BL_WT||CNTR_PK||CNTR_WT||CM_PK||CM_WT||CM_DS||CM_HTS||CNTR_SEAL,'E'),0,'N','Y') AS ERR_YN
+              , BKG_GET_TOKEN_FNC(PORT_OFC.PORT_OFC_CD_SVC_FLG,1) AS PORT_OFC_CD
+              , BKG_GET_TOKEN_FNC(PORT_OFC.PORT_OFC_CD_SVC_FLG,2) AS ENS_EDI_SVC_FLG
+              , DECODE(ENS_SEND_DT,NULL,'',ENS_SEND_DT||CHR(13)||CHR(10)||'('||ENS_SEND_GMT_DT||')') AS SENT_TIME
+              , DECODE(ACK_RCV_DT,NULL,'',ACK_RCV_DT||CHR(13)||CHR(10)||'('||ACK_RCV_GMT_DT||')') AS RECEIVED_TIME
+              , Y.*
+           FROM ( SELECT CASE WHEN BL_PK1 = 0 OR BL_PK1 != CNTR_PK_SUM THEN DECODE(BB_CGO_FLG,'Y','N','E') ELSE 'Y' END AS BL_PK
+                       , CASE WHEN BL_WT1 = 0 OR BL_WT1 != CNTR_WT_SUM THEN DECODE(BB_CGO_FLG,'Y','N','E') ELSE 'Y' END AS BL_WT
+                       , CASE WHEN CNTR_PK1 = 0 OR CNTR_PK1 != CM_PK_SUM THEN DECODE(BB_CGO_FLG,'Y','N','E') 
+                              WHEN CNTR_PK_LMT_FLG = 'Y' THEN 'E'
+                              ELSE 'Y' 
+                         END AS CNTR_PK
+                       , CASE WHEN CNTR_WT1 = 0 OR CNTR_WT1 != CM_WT_SUM THEN DECODE(BB_CGO_FLG,'Y','N','E') ELSE 'Y' END AS CNTR_WT
+                       , XXX.*
+                    FROM ( SELECT SUM(CNTR_PK1) OVER(PARTITION BY BL_NO) AS  CNTR_PK_SUM
+                                , SUM(CNTR_WT1) OVER(PARTITION BY BL_NO) AS  CNTR_WT_SUM
+                                , SUM(CM_PK1) OVER(PARTITION BY BL_NO,CNTR_CNTR_NO) AS  CM_PK_SUM
+                                , SUM(CM_WT1) OVER(PARTITION BY BL_NO,CNTR_CNTR_NO) AS  CM_WT_SUM
+                                , DECODE(CM_PK1,0,DECODE(BB_CGO_FLG,'Y','N','E'),'Y') AS CM_PK
+                                , DECODE(CM_WT1,0,DECODE(BB_CGO_FLG,'Y','N','E'),'Y') AS CM_WT
+                                , XX.*
+                             FROM ( SELECT DECODE( ( SELECT BKG_NO FROM BKG_VVD WHERE BKG_NO = X.BKG_NO AND SLAN_CD ='RFS' AND ROWNUM = 1),
+                                                   NULL, 'N', 'Y') AS RFS_YN
+                                         , CASE WHEN CNTR_PK1 > 99999 THEN 'Y'
+                                                ELSE 'N'
+                                           END AS CNTR_PK_LMT_FLG
+                                         , NISADM.BKG_GET_TOKEN_FNC(CM_DATA,1) AS CM_PK1
+                                         , NISADM.BKG_GET_TOKEN_FNC(CM_DATA,2) AS CM_WT1
+                                         , DECODE(NISADM.BKG_GET_TOKEN_FNC(CM_DATA,3),0,'N','Y') AS CM_MS
+                                         , DECODE(NVL(NISADM.BKG_GET_TOKEN_FNC(CM_DATA,4),0),0,'E','Y') AS CM_DS
+                                         , DECODE(NVL(NISADM.BKG_GET_TOKEN_FNC(CM_DATA,5),0),0,'N','Y') AS CM_MK
+                                         , CASE WHEN (DECODE(NVL(NISADM.BKG_GET_TOKEN_FNC(CM_DATA,6),0),0,'N','Y') ='N' 
+                                                      OR NVL(NISADM.BKG_GET_TOKEN_FNC(CM_DATA,6),0) != NVL(NISADM.BKG_GET_TOKEN_FNC(CM_DATA,7),0) )
+                                                 AND (SUBSTR(EU_1ST_PORT,1,2) = HTS_CNT_CD OR SUBSTR(POD,1,2) = HTS_CNT_CD OR SUBSTR(DEL,1,2) = HTS_CNT_CD)
+                                                THEN 'E'
+                                                ELSE DECODE(NVL(NISADM.BKG_GET_TOKEN_FNC(CM_DATA,6),0),0,'N','Y')
+                                            END CM_HTS
+                                         , COUNT(DISTINCT BL_NO) OVER() TTL_BL
+                                         , COUNT(DISTINCT CNTR_CNTR_NO) OVER() TTL_CNTR
+                                         
+                                         /*
+                                         Accepted : Accepted ACK를 접수한 경우
+                                         Rejected : Rejected ACK를 접수한 경우
+                                         Do Not Load : Do Not Load ACK를 접수한 경우
+                                         Not Received : 전송되었으나, ACK를 미 수신한 경우
+                                         */
+                                         , CASE WHEN DOWNLOAD_YN = 'N'                          THEN ''
+                                                WHEN ACK = 'A'                                  THEN 'Accepted'   ||DECODE(ACK_KND_ID,'S','(S)')
+                                                WHEN ACK = 'R' AND RESULT_CD ='351'             THEN 'Do Not Load'||DECODE(ACK_KND_ID,'S','(S)')
+                                                WHEN ACK = 'R'                                  THEN 'Rejected'   ||DECODE(ACK_KND_ID,'S','(S)')
+                                                WHEN ACK = 'H'                                  THEN 'Hold'       ||DECODE(ACK_KND_ID,'S','(S)')
+                                                WHEN ACK = 'L'                                  THEN 'Release'    ||DECODE(ACK_KND_ID,'S','(S)')
+                                                WHEN ACK = 'CA'                                 THEN 'Add Info.'  ||DECODE(ACK_KND_ID,'S','(S)')
+                                                WHEN ACK = 'AL'                                 THEN 'Accepted with'||CHR(10)||'loading permission'  ||DECODE(ACK_KND_ID,'S','(S)')
+                                                WHEN ACK = 'R' AND RESULT_CD ='398'             THEN 'Cancellation'    ||DECODE(ACK_KND_ID,'S','(S)')
+                                                WHEN ACK = 'D'                                  THEN 'Relase rejection'||DECODE(ACK_KND_ID,'S','(S)')
+                                                WHEN MSG_SND_NO IS NOT NULL AND RCV IS NULL     THEN 'Not Received'
+                                            END AS ENS_RESULT
+                                            
+                                         , CASE WHEN DOWNLOAD_YN = 'N'                          THEN ''
+                                                WHEN ACK = 'A'                                  THEN 'A'
+                                                WHEN ACK = 'R' AND RESULT_CD ='351'             THEN 'DNL'
+                                                WHEN ACK = 'R'                                  THEN 'R'
+                                                WHEN ACK = 'H'                                  THEN 'H'
+                                                WHEN ACK = 'L'                                  THEN 'L'
+                                                WHEN ACK = 'CA'                                 THEN 'CA'
+                                                WHEN ACK = 'AL'                                 THEN 'AL'
+                                                WHEN ACK = 'R' AND RESULT_CD ='398'             THEN 'CC'
+                                                WHEN ACK = 'D'                                  THEN 'D'
+                                                WHEN MSG_SND_NO IS NOT NULL AND RCV IS NULL     THEN 'NR'
+                                            END AS RESULT2
+                                            
+                                         , DECODE(CUST_TO_ORD_FLG,'Y',DECODE(CNEE_NM1,  'E','N',CNEE_NM1),CNEE_NM1)     AS CNEE_NM
+                                         , DECODE(CUST_TO_ORD_FLG,'Y',DECODE(CNEE_AD1,  'E','N',CNEE_AD1),CNEE_AD1)     AS CNEE_AD
+                                         , DECODE(CUST_TO_ORD_FLG,'Y',DECODE(CNEE_CT1,  'E','N',CNEE_CT1),CNEE_CT1)     AS CNEE_CT
+                                         , DECODE(CUST_TO_ORD_FLG,'Y',DECODE(CNEE_CN1,  'E','N',CNEE_CN1),CNEE_CN1)     AS CNEE_CN
+                                         , DECODE(CUST_TO_ORD_FLG,'Y',DECODE(CNEE_ZIP1, 'E','N',CNEE_ZIP1),CNEE_ZIP1)   AS CNEE_ZIP
+                                         , DECODE(CUST_TO_ORD_FLG,'Y',DECODE(CNEE_STR1, 'E','N',CNEE_STR1),CNEE_STR1)   AS CNEE_STR
+                                         , DECODE(CNEE_EORI1,'VE','E',DECODE(CUST_TO_ORD_FLG,'Y',DECODE(CNEE_EORI1,'E','N',CNEE_EORI1),CNEE_EORI1)) AS CNEE_EORI
+
+                                         , DECODE(CUST_TO_ORD_FLG,'Y',NTFY_NM1,DECODE(NTFY_NM1,  'E','N',NTFY_NM1))     AS NTFY_NM
+                                         , DECODE(CUST_TO_ORD_FLG,'Y',NTFY_AD1,DECODE(NTFY_AD1,  'E','N',NTFY_AD1))     AS NTFY_AD
+                                         , DECODE(CUST_TO_ORD_FLG,'Y',NTFY_CT1,DECODE(NTFY_CT1,  'E','N',NTFY_CT1))     AS NTFY_CT
+                                         , DECODE(CUST_TO_ORD_FLG,'Y',NTFY_CN1,DECODE(NTFY_CN1,  'E','N',NTFY_CN1))     AS NTFY_CN
+                                         , DECODE(CUST_TO_ORD_FLG,'Y',NTFY_ZIP1,DECODE(NTFY_ZIP1, 'E','N',NTFY_ZIP1))   AS NTFY_ZIP
+                                         , DECODE(CUST_TO_ORD_FLG,'Y',NTFY_STR1,DECODE(NTFY_STR1, 'E','N',NTFY_STR1))   AS NTFY_STR
+                                         , DECODE(NTFY_EORI1,'VE','E',DECODE(CUST_TO_ORD_FLG,'Y',NTFY_EORI1,DECODE(NTFY_EORI1,'E','N',NTFY_EORI1)) ) AS NTFY_EORI
+                                         , DECODE(EDI_MRN,NULL,'Original','Amendment') AS BL_STATUS
+                                         , X.*
+                                         , NVL(BKG_GET_TOKEN_FNC((SELECT MAX(LPAD(DOC_PROC_SEQ,5,'0')||','||BD.DOC_PERF_DELT_FLG)
+                                                                   FROM BKG_DOC_PROC_SKD BD
+                                                                      , BKG_CSTMS_ADV_EUR_SND SND
+                                                                  WHERE BD.BKG_NO = SND.BL_NO
+                                                                    AND BD.BKG_DOC_PROC_TP_CD = 'AI_SND'
+                                                                    AND SND.BL_NO = X.BL_NO
+                                                                    AND SND.MSG_SND_NO = X.MSG_SND_NO),2),'Y')  AS UPD_FLG
+                                      FROM (
+                                           
+                                           /* 다운로드 안된 데이타 조회 */
+                                            SELECT
+                                            ACK ,ACK_KND_ID ,ACK_RCV_DT ,ACK_RCV_GMT_DT ,BKG_NO ,BL_MS ,BL_NO ,BL_PK1 ,BL_WT1 ,BPOD ,BPOL ,CM_DATA ,HTS_CNT_CD 
+                                            ,CNEE_AD1 ,CNEE_CN1 ,CNEE_CT1 ,CNEE_EORI1 ,CNEE_NM1 ,CNEE_STR1 ,CNEE_ZIP1 ,CNTR_CNTR_NO ,CNTR_MS ,CNTR_PK1 ,CNTR_SEAL ,CNTR_WT1 
+                                            ,CT ,CUST_TO_ORD_FLG ,DEL ,DOWNLOAD_YN ,EDI_MRN ,KTS_SEND_DT,ENS_SEND_DT ,ENS_SEND_GMT_DT ,EU_1ST_PORT ,EU_1ST_PORT_YD_CD ,EU_1ST_PORT_CLPT_SEQ ,LT ,MSG_SND_NO
+                                            ,NTFY_AD1 ,NTFY_CN1 ,NTFY_CT1 ,NTFY_EORI1 ,NTFY_NM1 ,NTFY_STR1 ,NTFY_ZIP1 ,POD ,POD_CLPT_IND_SEQ ,POL ,POL_CLPT_IND_SEQ ,RCV ,RESULT_CD
+                                            ,SH_AD ,SH_CN ,SH_CT ,SH_EORI ,SH_NM ,SH_STR ,SH_ZIP ,SKD_DIR_CD ,SKD_VOY_NO ,SND_USR_OFC_CD
+                                            ,INIT_ETA_DT ,VPS_ETA_DT ,VPS_ETD_DT ,VSL_CD ,VVD ,RCV_MSG
+                                            ,EDI_RCV_DT ,EDI_RCV_SEQ ,BB_CGO_FLG ,TRSM_BLCK_FLG ,CSTMS_ESTM_ARR_DT
+                                            
+                                            FROM ( SELECT BKG_GET_TOKEN_FNC(RCV,3) AS ACK
+                                                        , BKG_GET_TOKEN_FNC(RCV,5) AS RESULT_CD
+                                                        , TO_CHAR(GLOBALDATE_PKG.TIME_CONV_OFC_FNC('SELSC',TO_DATE(BKG_GET_TOKEN_FNC(RCV,4),'YYYY-MM-DD HH24:MI'), SND_USR_OFC_CD ), 'YYYY-MM-DD HH24:MI')  AS ACK_RCV_DT
+                                                        , TO_CHAR(GLOBALDATE_PKG.TIME_CONV_OFC_FNC('SELSC',TO_DATE(BKG_GET_TOKEN_FNC(RCV,4),'YYYY-MM-DD HH24:MI'), 'GMT'),           'YYYY-MM-DD HH24:MI')  AS ACK_RCV_GMT_DT
+                                                        , BKG_GET_TOKEN_FNC(RCV,6) AS ACK_KND_ID
+                                                        , BKG_GET_TOKEN_FNC(RCV,7) AS RCV_MSG
+                                                        , DECODE(EBL_NO,NULL,'N','Y')AS DOWNLOAD_YN
+                                                        , MVMT_REF_NO AS EDI_MRN
+                                                        , NVL(KTS_SEND_DT1,KTS_SEND_DT2) AS KTS_SEND_DT
+                                                        , BKG_GET_TOKEN_FNC(RCV,1) AS EDI_RCV_DT
+                                                        , BKG_GET_TOKEN_FNC(RCV,2) AS EDI_RCV_SEQ
+                                                        , K.*
+                                                     FROM ( SELECT (SELECT EDI_RCV_DT
+                                                                           ||','||EDI_RCV_SEQ
+                                                                           ||','||ACK_RCV_STS_CD
+                                                                           ||','||TO_CHAR(CRE_DT, 'YYYY-MM-DD HH24:MI')
+                                                                           ||','||EUR_CSTMS_ACK_CD
+                                                                           ||','||ACK_KND_ID
+                                                                           ||','||RJCT_RSN_RMK
+                                                                      FROM  BKG_CSTMS_ADV_EUR_RCV
+                                                                     WHERE RCV_TMS = ( SELECT MAX(RCV_TMS)
+                                                                                         FROM BKG_CSTMS_ADV_EUR_RCV
+                                                                                        WHERE MSG_RCV_NO = BKG_GET_TOKEN_FNC(KKK.SND,1)
+                                                                                          AND (ACK_KND_ID != 'S' OR ACK_RCV_STS_CD != 'A') )
+                                                                   ) AS RCV
+                                                                 , BKG_GET_TOKEN_FNC(KKK.SND,1)  AS MSG_SND_NO
+                                                                 , BKG_GET_TOKEN_FNC(KKK.SND,2)  AS ENS_SEND_DT
+                                                                 , BKG_GET_TOKEN_FNC(KKK.SND,3)  AS ENS_SEND_GMT_DT
+                                                                 , BKG_GET_TOKEN_FNC(KKK.SND,4)  AS SND_USR_OFC_CD
+                                                                 , NVL(BKG_GET_TOKEN_FNC(KKK.SND,5), ( SELECT MVMT_REF_NO
+                                                                                                         FROM BKG_CSTMS_EUR_BL EBL
+                                                                                                        WHERE EBL.MSG_SND_NO = (SELECT MAX(MSG_SND_NO)
+                                                                                                                                  FROM BKG_CSTMS_ADV_EUR_SND
+                                                                                                                                 WHERE BL_NO          = KKK.BL_NO
+                                                                                                                                   AND CSTMS_PORT_CD  = KKK.EU_1ST_PORT
+                                                                                                                                   AND (VSL_CD != KKK.VSL_CD 
+                                                                                                                                        OR SKD_VOY_NO != KKK.SKD_VOY_NO 
+                                                                                                                                        OR SKD_DIR_CD != KKK.SKD_DIR_CD) )
+                                                                                                      ) ) AS MVMT_REF_NO
+                                                                 
+                                                                 /* 해당 BL의 VVD,POFE별 MRN이 없으면 POFE별 MRN을 찾는다. SND_DT도 같이 가져와 다음 인라인절에서 잘라 쓴다.*/
+                                                                 , DECODE(BKG_GET_TOKEN_FNC(KKK.SND,5),NULL,'N','Y') AS BL_MRN_YN
+                                                                 , BKG_GET_TOKEN_FNC(KKK.SND,7) AS KTS_SEND_DT1
+                                                                 , ( SELECT MAX(TO_CHAR(CRE_DT,'YYYYMMDDHH24'))
+                                                                       FROM BKG_CSTMS_ADV_EUR_SND
+                                                                      WHERE BL_NO          = KKK.BL_NO
+                                                                        AND CSTMS_PORT_CD  = KKK.EU_1ST_PORT
+                                                                   ) AS  KTS_SEND_DT2
+                                                                 , BKG_GET_TOKEN_FNC(KKK.SND,6) AS EBL_NO
+                                                                 , BKG_GET_TOKEN_FNC(KKK.SND,8) AS CSTMS_ESTM_ARR_DT
+                                                                 , KKK.*
+                                                              FROM ( SELECT ( SELECT EBL.MSG_SND_NO
+                                                                                     ||','||TO_CHAR(SND.SND_DT, 'YYYY-MM-DD HH24:MI')
+                                                                                     ||','||TO_CHAR(SND.SND_GDT,'YYYY-MM-DD HH24:MI')
+                                                                                     ||','||SND.SND_USR_OFC_CD
+                                                                                     ||','||EBL.MVMT_REF_NO
+                                                                                     ||','||EBL.BL_NO
+                                                                                     ||','||TO_CHAR(SND.CRE_DT,'YYYYMMDDHH24')
+                                                                                     ||','||TO_CHAR(EBL.CSTMS_ESTM_ARR_DT,'YYYY-MM-DD HH24:MI')
+                                                                                FROM BKG_CSTMS_ADV_EUR_SND SND, BKG_CSTMS_EUR_BL EBL
+                                                                               WHERE EBL.MSG_SND_NO    = SND.MSG_SND_NO(+)
+                                                                                 AND EBL.VSL_CD        = KK.VSL_CD
+                                                                                 AND EBL.SKD_VOY_NO    = KK.SKD_VOY_NO
+                                                                                 AND EBL.SKD_DIR_CD    = KK.SKD_DIR_CD
+                                                                                 AND EBL.BL_NO         = KK.BL_NO
+                                                                                 AND EBL.CSTMS_PORT_CD = KK.EU_1ST_PORT
+                                                                            ) AS SND
+                                                                          , KK.*
+                                                                       FROM ( SELECT VVD.VSL_CD || VVD.SKD_VOY_NO || VVD.SKD_DIR_CD AS VVD
+                                                                                   , VVD.VSL_CD
+                                                                                   , VVD.SKD_VOY_NO
+                                                                                   , VVD.SKD_DIR_CD
+                                                                                   
+                                                                                   , BKG.BL_NO  AS BL_NO
+                                                                                   , BKG.BKG_NO AS BKG_NO
+                                                                                   , VVD.POL_CD             AS POL
+                                                                                   , VVD.POL_CLPT_IND_SEQ   AS POL_CLPT_IND_SEQ
+                                                                                   , VVD.POD_CD             AS POD
+                                                                                   , VVD.POD_CLPT_IND_SEQ   AS POD_CLPT_IND_SEQ
+                                                                                        
+                                                                                   , BKG.POL_CD AS BPOL
+                                                                                   , BKG.POD_CD AS BPOD
+                                                                                   , BKG.DEL_CD AS DEL
+                                                                                   
+                                                                                   , BKG_CGO_TP_CD AS CT
+                                                                                   , DECODE(VVD.POL_CD,BKG.POL_CD,'L','T') AS LT
+                                                                                   
+                                                                                   , DECODE(SHPR.CUST_NM,           NULL,'E','Y')	AS SH_NM
+                                                                                   , DECODE(SHPR.CUST_ADDR,			NULL,'E','Y')	AS SH_AD
+                                                                                   , CASE WHEN SHPR.EORI_NO IS NULL AND SHPR.CUST_CTY_NM IS NULL
+                                                                                          THEN 'E'
+                                                                                          WHEN SHPR.CUST_CTY_NM IS NOT NULL
+                                                                                          THEN 'Y'
+                                                                                          ELSE 'N'
+                                                                                      END SH_CT
+                                                                                   , CASE WHEN SHPR.EORI_NO IS NULL AND SHPR.CSTMS_DECL_CNT_CD IS NULL
+                                                                                          THEN 'E'
+                                                                                          WHEN SHPR.CSTMS_DECL_CNT_CD IS NOT NULL
+                                                                                          THEN 'Y'
+                                                                                          ELSE 'N'
+                                                                                      END SH_CN
+                                                                                   , CASE WHEN SHPR.EORI_NO IS NULL AND SHPR.CUST_ZIP_ID IS NULL
+                                                                                          THEN 'E'
+                                                                                          WHEN SHPR.CUST_ZIP_ID IS NOT NULL
+                                                                                          THEN 'Y'
+                                                                                          ELSE 'N'
+                                                                                      END SH_ZIP
+                                                                                   , CASE WHEN SHPR.EORI_NO IS NULL AND SHPR.EUR_CSTMS_ST_NM IS NULL
+                                                                                          THEN 'E'
+                                                                                          WHEN SHPR.EUR_CSTMS_ST_NM IS NOT NULL
+                                                                                          THEN 'Y'
+                                                                                          ELSE 'N'
+                                                                                      END SH_STR
+                                                                                   , CASE WHEN SHPR.EORI_NO IS NOT NULL THEN
+                                                                                          CASE WHEN REGEXP_INSTR(SHPR.EORI_NO,'^[A-Z]{2}([a-zA-Z0-9]{1,15}$)') > 0 AND REGEXP_INSTR(UPPER(SHPR.EORI_NO),'TEST|NONE') < 1
+                                                                                          THEN 'Y' ELSE 'E' END
+                                                                                          WHEN SHPR.EORI_NO IS NULL
+                                                                                           AND (SHPR.CUST_CTY_NM IS NULL
+                                                                                                OR SHPR.CSTMS_DECL_CNT_CD IS NULL
+                                                                                                OR SHPR.CUST_ZIP_ID IS NULL )
+                                                                                          THEN 'E'
+                                                                                          ELSE 'N'
+                                                                                      END SH_EORI
+                                                                                      
+                                                                                   , DECODE(CNEE.CUST_NM,    NULL,'E','Y')	AS CNEE_NM1
+                                                                                   , DECODE(CNEE.CUST_ADDR,  NULL,'E','Y')	AS CNEE_AD1
+                                                                                   , CASE WHEN CNEE.EORI_NO IS NULL AND CNEE.CUST_CTY_NM IS NULL
+                                                                                          THEN 'E'
+                                                                                          WHEN CNEE.CUST_CTY_NM IS NOT NULL
+                                                                                          THEN 'Y'
+                                                                                          ELSE 'N'
+                                                                                      END CNEE_CT1
+                                                                                   , CASE WHEN CNEE.EORI_NO IS NULL AND CNEE.CSTMS_DECL_CNT_CD IS NULL
+                                                                                          THEN 'E'
+                                                                                          WHEN CNEE.CSTMS_DECL_CNT_CD IS NOT NULL
+                                                                                          THEN 'Y'
+                                                                                          ELSE 'N'
+                                                                                      END CNEE_CN1
+                                                                                   , CASE WHEN CNEE.EORI_NO IS NULL AND CNEE.CUST_ZIP_ID IS NULL
+                                                                                          THEN 'E'
+                                                                                          WHEN CNEE.CUST_ZIP_ID IS NOT NULL
+                                                                                          THEN 'Y'
+                                                                                          ELSE 'N'
+                                                                                      END CNEE_ZIP1
+                                                                                   , CASE WHEN CNEE.EORI_NO IS NULL AND CNEE.EUR_CSTMS_ST_NM IS NULL
+                                                                                          THEN 'E'
+                                                                                          WHEN CNEE.EUR_CSTMS_ST_NM IS NOT NULL
+                                                                                          THEN 'Y'
+                                                                                          ELSE 'N'
+                                                                                      END CNEE_STR1
+                                                                                   , CASE WHEN CNEE.EORI_NO IS NOT NULL 
+                                                                                          THEN CASE WHEN REGEXP_INSTR(CNEE.EORI_NO,'^[A-Z]{2}([a-zA-Z0-9]{1,15}$)') > 0 
+                                                                                                     AND REGEXP_INSTR(UPPER(CNEE.EORI_NO),'TEST|NONE') < 1
+                                                                                                    THEN 'Y' 
+                                                                                                    ELSE 'VE' 
+                                                                                                END
+                                                                                          WHEN CNEE.EORI_NO IS NULL
+                                                                                           AND (CNEE.CUST_CTY_NM IS NULL
+                                                                                                OR CNEE.CSTMS_DECL_CNT_CD IS NULL
+                                                                                                OR CNEE.CUST_ZIP_ID IS NULL )
+                                                                                          THEN 'E'
+                                                                                          ELSE 'N'
+                                                                                      END CNEE_EORI1
+                                                                                    
+                                                                                   , DECODE(NTFY.CUST_NM,    NULL,'E','Y')   AS NTFY_NM1
+                                                                                   , DECODE(NTFY.CUST_ADDR,  NULL,'E','Y')   AS NTFY_AD1
+                                                                                   , CASE WHEN NTFY.EORI_NO IS NULL AND NTFY.CUST_CTY_NM IS NULL
+                                                                                          THEN 'E'
+                                                                                          WHEN NTFY.CUST_CTY_NM IS NOT NULL
+                                                                                          THEN 'Y'
+                                                                                          ELSE 'N'
+                                                                                      END NTFY_CT1
+                                                                                   , CASE WHEN NTFY.EORI_NO IS NULL AND NTFY.CSTMS_DECL_CNT_CD IS NULL
+                                                                                          THEN 'E'
+                                                                                          WHEN NTFY.CSTMS_DECL_CNT_CD IS NOT NULL
+                                                                                          THEN 'Y'
+                                                                                          ELSE 'N'
+                                                                                      END NTFY_CN1
+                                                                                   , CASE WHEN NTFY.EORI_NO IS NULL AND NTFY.CUST_ZIP_ID IS NULL
+                                                                                          THEN 'E'
+                                                                                          WHEN NTFY.CUST_ZIP_ID IS NOT NULL
+                                                                                          THEN 'Y'
+                                                                                          ELSE 'N'
+                                                                                      END NTFY_ZIP1
+                                                                                   , CASE WHEN NTFY.EORI_NO IS NULL AND NTFY.EUR_CSTMS_ST_NM IS NULL
+                                                                                          THEN 'E'
+                                                                                          WHEN NTFY.EUR_CSTMS_ST_NM IS NOT NULL
+                                                                                          THEN 'Y'
+                                                                                          ELSE 'N'
+                                                                                      END NTFY_STR1
+                                                                                   , CASE WHEN NTFY.EORI_NO IS NOT NULL 
+                                                                                          THEN CASE WHEN REGEXP_INSTR(NTFY.EORI_NO,'^[A-Z]{2}([a-zA-Z0-9]{1,15}$)') > 0 
+                                                                                                     AND REGEXP_INSTR(UPPER(NTFY.EORI_NO),'TEST|NONE') < 1
+                                                                                                    THEN 'Y' 
+                                                                                                    ELSE 'VE' 
+                                                                                                END
+                                                                                          WHEN NTFY.EORI_NO IS NULL
+                                                                                           AND (NTFY.CUST_CTY_NM IS NULL
+                                                                                                OR NTFY.CSTMS_DECL_CNT_CD IS NULL
+                                                                                                OR NTFY.CUST_ZIP_ID IS NULL)
+                                                                                          THEN 'E'
+                                                                                          ELSE 'N'
+                                                                                      END NTFY_EORI1
+                                                                                      
+                                                                                   , NVL(BD.PCK_QTY,0)  AS BL_PK1
+                                                                                   , NVL(BD.ACT_WGT,0)  AS BL_WT1
+                                                                                   , DECODE(NVL(BD.MEAS_QTY,0), 0,'N','Y')	AS BL_MS
+                                                                                   , BC.CNTR_NO AS CNTR_CNTR_NO
+                                                                                   , NVL((SELECT 'Y'
+                                                                                            FROM BKG_CNTR_SEAL_NO
+                                                                                           WHERE BKG_NO = BC.BKG_NO
+                                                                                             AND CNTR_NO = BC.CNTR_NO
+                                                                                             AND ROWNUM =1), 'E') AS CNTR_SEAL
+                                                                                   , NVL(BC.PCK_QTY,0)	AS CNTR_PK1
+                                                                                   , NVL(BC.CNTR_WGT,0)	AS CNTR_WT1
+                                                                                   , DECODE(NVL(BC.MEAS_QTY,0), 0,'N','Y')	AS CNTR_MS
+                                                                                   , ( SELECT NVL(SUM(PCK_QTY ),0) ||','|| /* PK */
+                                                                                              NVL(SUM(CNTR_MF_WGT),0) ||','|| /* WT */
+                                                                                              NVL(SUM(MEAS_QTY),0)    ||','|| /* MS */
+                                                                                              COUNT(CNTR_MF_GDS_DESC)||','|| /* DS */
+                                                                                              COUNT(CNTR_MF_MK_DESC) ||','|| /* MK */
+                                                                                              COUNT(CMDT_HS_CD)      ||','|| /* HTS*/
+                                                                                              COUNT(CNTR_MF_SEQ)            /* CARGO SEQ */
+                                                                                         FROM BKG_CNTR_MF_DESC CM
+                                                                                        WHERE BKG_NO = BC.BKG_NO
+                                                                                          AND CNTR_NO= BC.CNTR_NO
+                                                                                     ) AS CM_DATA
+                                                                                   , ( SELECT ATTR_CTNT1 
+                                                                                         FROM BKG_CSTMS_CD_CONV_CTNT
+                                                                                        WHERE CNT_CD = 'EU'
+                                                                                          AND CSTMS_DIV_ID = 'EU_HS_CODE_CHECK'
+                                                                                          AND DELT_FLG = 'N')    AS HTS_CNT_CD
+                                                                                   , TO_CHAR(SKD1.VPS_ETD_DT, 'YYYY-MM-DD HH24:MI') AS VPS_ETD_DT
+                                                                                   , SUBSTR(@[p_pod_yard_cd],1,5) AS EU_1ST_PORT
+                                                                                   , @[p_pod_yard_cd] AS EU_1ST_PORT_YD_CD
+                                                                                   , @[eu_1st_port_clpt_seq] AS EU_1ST_PORT_CLPT_SEQ
+                                                                                   , TO_CHAR(SKD2.VPS_ETA_DT, 'YYYY-MM-DD HH24:MI') AS VPS_ETA_DT
+                                                                                   , TO_CHAR(SKD2.INIT_ETA_DT, 'YYYY-MM-DD HH24:MI') AS INIT_ETA_DT
+                                                                                   , BKG.CUST_TO_ORD_FLG
+                                                                                   , BKG.BB_CGO_FLG
+                                                                                   , '' AS TRSM_BLCK_FLG
+                                                                                
+                                                                                FROM BKG_VVD VVD
+                                                                                   , BKG_BOOKING BKG
+                                                                                   , BKG_BL_DOC BD
+                                                                                   , VSK_VSL_PORT_SKD SKD1 -- ENS 인 경우 POL / FI 인 경우 pre EU port
+                                                                                   , VSK_VSL_PORT_SKD SKD2 -- ENS 인 경우 POFE / FI 인 경우 POD
+
+                                                                                   #if(${p_type} == 'ENS')
+                                                                                   , VSK_VSL_PORT_SKD SKD3 -- ENS 인 경우 POD
+                                                                                   #end
+
+                                                                                   , BKG_CUSTOMER SHPR
+                                                                                   , BKG_CUSTOMER CNEE
+                                                                                   , BKG_CUSTOMER NTFY
+                                                                                   , BKG_CONTAINER BC
+                                                                               WHERE 1=1
+                                                                                 AND VVD.BKG_NO = BKG.BKG_NO
+                                                                                 AND BKG.BKG_STS_CD IN ('F', 'W')
+                                                                                 AND BKG.BKG_CGO_TP_CD IN ('F', 'R')
+                                                                                 AND BKG.BL_NO IS NOT NULL
+                                                                                 
+                                                                                 AND BKG.BKG_NO = BD.BKG_NO
+                                                                                 AND BKG.BKG_NO = BC.BKG_NO(+)
+                                                                                 
+                                                                                 AND BKG.BKG_NO = SHPR.BKG_NO (+)
+                                                                                 AND SHPR.BKG_CUST_TP_CD(+) = 'S'
+                                                                                 
+                                                                                 AND BKG.BKG_NO = CNEE.BKG_NO (+)
+                                                                                 AND CNEE.BKG_CUST_TP_CD(+) = 'C'
+                                                                                 
+                                                                                 AND BKG.BKG_NO = NTFY.BKG_NO (+)
+                                                                                 AND NTFY.BKG_CUST_TP_CD(+) = 'N'
+                                                                                 
+                                                                                 AND VVD.VSL_CD         = SKD1.VSL_CD
+                                                                                 AND VVD.SKD_VOY_NO     = SKD1.SKD_VOY_NO
+                                                                                 AND VVD.SKD_DIR_CD     = SKD1.SKD_DIR_CD
+                                                                                 AND VVD.POL_CD         = SKD1.VPS_PORT_CD
+                                                                                 AND VVD.POL_CLPT_IND_SEQ = SKD1.CLPT_IND_SEQ
+                                                                                 
+                                                                                 AND SKD2.VSL_CD        = VVD.VSL_CD
+                                                                                 AND SKD2.SKD_VOY_NO    = VVD.SKD_VOY_NO
+                                                                                 AND SKD2.SKD_DIR_CD    = VVD.SKD_DIR_CD
+                                                                                 AND SKD2.CLPT_IND_SEQ  = NVL(@[eu_1st_port_clpt_seq],'1') 
+                                                                                 
+                                                                                 AND SKD1.CLPT_SEQ < SKD2.CLPT_SEQ
+                                                                                 
+                                                                                 #if(${p_type} == 'ENS')
+                                                                                    AND VVD.VSL_CD         = SKD3.VSL_CD
+                                                                                    AND VVD.SKD_VOY_NO     = SKD3.SKD_VOY_NO
+                                                                                    AND VVD.SKD_DIR_CD     = SKD3.SKD_DIR_CD
+                                                                                    AND VVD.POD_CD         = SKD3.VPS_PORT_CD
+                                                                                    AND VVD.POD_CLPT_IND_SEQ = SKD3.CLPT_IND_SEQ
+                                                                                     
+                                                                                    AND SKD2.CLPT_SEQ  <= SKD3.CLPT_SEQ  -- 1st EU Port 이후에 POD 기항해야함.
+                                                                                 #else
+                                                                                    AND SKD2.VPS_PORT_CD   = VVD.POD_CD -- FI (NEW)
+                                                                                 #end
+                                                                                 
+                                                                                 /* 다운로드 안된 데이타 조회 */
+                                                                                 #if (${p_vvd_cd} != '')
+                                                                                    AND VVD.VSL_CD        = SUBSTR(@[p_vvd_cd],1,4)
+                                                                                    AND VVD.SKD_VOY_NO    = SUBSTR(@[p_vvd_cd],5,4)
+                                                                                    AND VVD.SKD_DIR_CD    = SUBSTR(@[p_vvd_cd],9,1)
+                                                                                 #end
+                                                                                 
+                                                                                 AND VVD.BKG_NO > ' '
+                                                                                 AND VVD.SLAN_CD > ' '
+                                                                                 
+                                                                                 #if (${p_pol_cd} != '')
+                                                                                    AND VVD.POL_CD = @[p_pol_cd]
+                                                                                 #end
+                                                                                 
+                                                                                 #if (${p_pol_yard_cd} != '')
+                                                                                    AND SUBSTR(VVD.POL_YD_CD, -2) = @[p_pol_yard_cd]
+                                                                                 #end
+                                                                                 
+                                                                                 #if (${p_search_pofe_yard_cd} != '')
+                                                                                    AND SKD2.VPS_PORT_CD = SUBSTR(@[p_search_pofe_yard_cd],1,5)
+                                                                                 #end
+                                                                                 
+                                                                                 #if (${p_pod_yard_cd} != '')
+                                                                                    /* DO NOT CHECK*/   
+                                                                                 #end
+                                                                                 
+                                                                                 #if (${p_b_ofc_cd} != '')
+                                                                                    AND BKG.BKG_OFC_CD = @[p_b_ofc_cd]
+                                                                                 #end
+                                                                                 
+                                                                                 #if (${p_error_cd} != '')
+                                                                                 
+                                                                                 #end
+                                                                                 
+                                                                                 #if (${p_s_ofc_cd} != '')
+                                                                                    AND BKG.OB_SLS_OFC_CD  = @[p_s_ofc_cd]
+                                                                                 #end
+                                                                                 
+                                                                                 #if (${p_b_staff} != '')
+                                                                                    AND BKG.DOC_USR_ID = @[p_b_staff]
+                                                                                 #end
+                                                                                 
+                                                                                 #if (${p_bl_no} != '')
+                                                                                    AND BKG.BL_NO = @[p_bl_no]
+                                                                                 #end
+                                                                                 
+                                                                                 #if (${p_lt} != '')
+                                                                                    AND DECODE(VVD.POL_CD,BKG.POL_CD,'L','T')  = @[p_lt]
+                                                                                 #end
+                                                                                 
+                                                                                 /* 다운로드 된 데이타만 조회시, 안된 데이타는 제외하기 위함 */
+                                                                                 #if (${p_data_cd} == 'DL')
+                                                                                    AND 'N' = 'Y'
+                                                                                 #end
+                                                                                 
+                                                                            ) KK
+                                                                   ) KKK
+                                                          ) K
+                                                 )
+                                           WHERE 1=1
+                                           
+                                           /* Ack. Status 조건이 입력 되면 Original/Amendment 부분은 무시한다.
+										     기본적으로 Original가 선택되어있어 Ack. Status가 All인지만 체크한다. */
+                                           
+                                           #if (${p_ack_status} == '')
+                                                #if (${p_ori_amd_cd} == 'O')
+                                                    AND EDI_MRN IS NULL
+                                                #else
+                                                    AND EDI_MRN IS NOT NULL
+                                                #end
+                                           #end
+                                           
+                                           #if (${p_ack_status} == 'A' )
+                                                AND ACK  = 'A'
+                                                 OR ACK  = 'AL'
+                                           #elseif (${p_ack_status} == 'R')
+                                                AND ACK  != 'A' AND ACK  != 'AL' AND ACK IS NOT NULL
+                                           #elseif (${p_ack_status} == 'DNL')
+                                                AND RESULT_CD  = '351'
+                                           #elseif (${p_ack_status} == 'NR')
+                                                AND MSG_SND_NO IS NOT NULL AND RCV IS NULL
+                                           #elseif (${p_ack_status} == 'NA')
+                                                AND MSG_SND_NO IS NULL
+                                           #end
+                                           
+                                           
+                                           
+                                           
+                                           UNION ALL
+                                           
+                                           
+                                           
+                                           
+                                           /* 다운로드 된 데이타 조회 */
+                                            SELECT
+                                            ACK ,ACK_KND_ID ,ACK_RCV_DT ,ACK_RCV_GMT_DT ,BKG_NO ,BL_MS ,BL_NO ,BL_PK1 ,BL_WT1 ,BPOD ,BPOL ,CM_DATA ,HTS_CNT_CD
+                                            ,CNEE_AD1 ,CNEE_CN1 ,CNEE_CT1 ,CNEE_EORI1 ,CNEE_NM1 ,CNEE_STR1 ,CNEE_ZIP1 ,CNTR_CNTR_NO ,CNTR_MS ,CNTR_PK1 ,CNTR_SEAL ,CNTR_WT1 
+                                            ,CT ,CUST_TO_ORD_FLG ,DEL ,DOWNLOAD_YN ,EDI_MRN ,KTS_SEND_DT ,ENS_SEND_DT ,ENS_SEND_GMT_DT ,EU_1ST_PORT ,EU_1ST_PORT_YD_CD ,EU_1ST_PORT_CLPT_SEQ ,LT ,MSG_SND_NO
+                                            ,NTFY_AD1 ,NTFY_CN1 ,NTFY_CT1 ,NTFY_EORI1 ,NTFY_NM1 ,NTFY_STR1 ,NTFY_ZIP1 ,POD ,POD_CLPT_IND_SEQ ,POL ,POL_CLPT_IND_SEQ ,RCV ,RESULT_CD
+                                            ,SH_AD ,SH_CN ,SH_CT ,SH_EORI ,SH_NM ,SH_STR ,SH_ZIP ,SKD_DIR_CD ,SKD_VOY_NO ,SND_USR_OFC_CD
+                                            ,INIT_ETA_DT ,VPS_ETA_DT ,VPS_ETD_DT ,VSL_CD ,VVD ,RCV_MSG
+                                            ,EDI_RCV_DT ,EDI_RCV_SEQ ,BB_CGO_FLG ,NVL(TRSM_BLCK_FLG, 'Y') ,CSTMS_ESTM_ARR_DT
+                                            
+                                            FROM ( SELECT M.*
+                                                     FROM ( SELECT L.*
+                                                                 , BKG_GET_TOKEN_FNC(RCV,3) AS ACK
+                                                                 , BKG_GET_TOKEN_FNC(RCV,5) AS RESULT_CD
+                                                                 , TO_CHAR(GLOBALDATE_PKG.TIME_CONV_OFC_FNC('SELSC',TO_DATE(BKG_GET_TOKEN_FNC(RCV,4),'YYYY-MM-DD HH24:MI'), SND_USR_OFC_CD ), 'YYYY-MM-DD HH24:MI')  AS ACK_RCV_DT
+                                                                 , TO_CHAR(GLOBALDATE_PKG.TIME_CONV_OFC_FNC('SELSC',TO_DATE(BKG_GET_TOKEN_FNC(RCV,4),'YYYY-MM-DD HH24:MI'), 'GMT'),           'YYYY-MM-DD HH24:MI')  AS ACK_RCV_GMT_DT
+                                                                 , BKG_GET_TOKEN_FNC(RCV,6) AS ACK_KND_ID
+                                                                 , BKG_GET_TOKEN_FNC(RCV,7) AS RCV_MSG
+                                                                 , BKG_GET_TOKEN_FNC(RCV,1) AS EDI_RCV_DT
+                                                                 , BKG_GET_TOKEN_FNC(RCV,2) AS EDI_RCV_SEQ
+                                                                 , MVMT_REF_NO AS EDI_MRN
+                                                                 , NVL(KTS_SEND_DT1,KTS_SEND_DT2) AS KTS_SEND_DT
+                                                              FROM ( SELECT 'Y'     AS DOWNLOAD_YN
+                                                                          , BL.VSL_CD || BL.SKD_VOY_NO || BL.SKD_DIR_CD AS VVD
+                                                                          , BL.VSL_CD
+                                                                          , BL.SKD_VOY_NO
+                                                                          , BL.SKD_DIR_CD
+                                                                          
+                                                                          , BL.BL_NO  AS BL_NO
+                                                                          , BKG.BKG_NO AS BKG_NO
+                                                                          , BL.POL_CD           AS POL
+                                                                          , BL.POL_CLPT_IND_SEQ AS POL_CLPT_IND_SEQ
+                                                                          , BL.POD_CD           AS POD
+                                                                          , BL.POD_CLPT_IND_SEQ AS POD_CLPT_IND_SEQ
+                                                                          
+                                                                          , BKG_POL_CD AS BPOL
+                                                                          , BKG_POD_CD AS BPOD
+                                                                          , BL.DEL_CD AS DEL
+                                                                          
+                                                                          , BKG_CGO_TP_CD AS CT
+                                                                          , DECODE(BL.POL_CD,BKG_POL_CD,'L','T') AS LT
+                                                                          
+                                                                          , DECODE(SHPR.CUST_NM,           NULL,'E','Y')	AS SH_NM
+                                                                          , DECODE(SHPR.CUST_ADDR,         NULL,'E','Y')	AS SH_AD
+                                                                          , CASE WHEN SHPR.EORI_NO IS NULL AND SHPR.CUST_CTY_NM IS NULL
+                                                                                 THEN 'E'
+                                                                                 WHEN SHPR.CUST_CTY_NM IS NOT NULL
+                                                                                 THEN 'Y'
+                                                                                 ELSE 'N'
+                                                                             END SH_CT
+                                                                          , CASE WHEN SHPR.EORI_NO IS NULL AND SHPR.CSTMS_DECL_CNT_CD IS NULL
+                                                                                 THEN 'E'
+                                                                                 WHEN SHPR.CSTMS_DECL_CNT_CD IS NOT NULL
+                                                                                 THEN 'Y'
+                                                                                 ELSE 'N'
+                                                                             END SH_CN
+                                                                          , CASE WHEN SHPR.EORI_NO IS NULL AND SHPR.CUST_ZIP_ID IS NULL
+                                                                                 THEN 'E'
+                                                                                 WHEN SHPR.CUST_ZIP_ID IS NOT NULL
+                                                                                 THEN 'Y'
+                                                                                 ELSE 'N'
+                                                                             END SH_ZIP
+                                                                          , CASE WHEN SHPR.EORI_NO IS NULL AND SHPR.EUR_CSTMS_ST_NM IS NULL
+                                                                                 THEN 'E'
+                                                                                 WHEN SHPR.EUR_CSTMS_ST_NM IS NOT NULL
+                                                                                 THEN 'Y'
+                                                                                 ELSE 'N'
+                                                                             END SH_STR
+                                                                          , CASE WHEN SHPR.EORI_NO IS NOT NULL 
+                                                                                 THEN CASE WHEN REGEXP_INSTR(SHPR.EORI_NO,'^[A-Z]{2}([a-zA-Z0-9]{1,15}$)') > 0 
+                                                                                            AND REGEXP_INSTR(UPPER(SHPR.EORI_NO),'TEST|NONE') < 1
+                                                                                           THEN 'Y' 
+                                                                                           ELSE 'E' 
+                                                                                       END
+                                                                                 WHEN SHPR.EORI_NO IS NULL
+                                                                                  AND (SHPR.CUST_CTY_NM IS NULL
+                                                                                       OR SHPR.CSTMS_DECL_CNT_CD IS NULL
+                                                                                       OR SHPR.CUST_ZIP_ID IS NULL )
+                                                                                 THEN 'E'
+                                                                                 ELSE 'N'
+                                                                             END SH_EORI
+                                                                             
+                                                                          , DECODE(CNEE.CUST_NM,           NULL,'E','Y')	AS CNEE_NM1
+                                                                          , DECODE(CNEE.CUST_ADDR,         NULL,'E','Y')	AS CNEE_AD1
+                                                                          , CASE WHEN CNEE.EORI_NO IS NULL AND CNEE.CUST_CTY_NM IS NULL
+                                                                                 THEN 'E'
+                                                                                 WHEN CNEE.CUST_CTY_NM IS NOT NULL
+                                                                                 THEN 'Y'
+                                                                                 ELSE 'N'
+                                                                             END CNEE_CT1
+                                                                          , CASE WHEN CNEE.EORI_NO IS NULL AND CNEE.CSTMS_DECL_CNT_CD IS NULL
+                                                                                 THEN 'E'
+                                                                                 WHEN CNEE.CSTMS_DECL_CNT_CD IS NOT NULL
+                                                                                 THEN 'Y'
+                                                                                 ELSE 'N'
+                                                                             END CNEE_CN1
+                                                                          , CASE WHEN CNEE.EORI_NO IS NULL AND CNEE.CUST_ZIP_ID IS NULL
+                                                                                 THEN 'E'
+                                                                                 WHEN CNEE.CUST_ZIP_ID IS NOT NULL
+                                                                                 THEN 'Y'
+                                                                                 ELSE 'N'
+                                                                             END CNEE_ZIP1
+                                                                          , CASE WHEN CNEE.EORI_NO IS NULL AND CNEE.EUR_CSTMS_ST_NM IS NULL
+                                                                                 THEN 'E'
+                                                                                 WHEN CNEE.EUR_CSTMS_ST_NM IS NOT NULL
+                                                                                 THEN 'Y'
+                                                                                 ELSE 'N'
+                                                                             END CNEE_STR1
+                                                                          , CASE WHEN CNEE.EORI_NO IS NOT NULL 
+                                                                                 THEN CASE WHEN REGEXP_INSTR(CNEE.EORI_NO,'^[A-Z]{2}([a-zA-Z0-9]{1,15}$)') > 0 
+                                                                                            AND REGEXP_INSTR(UPPER(CNEE.EORI_NO),'TEST|NONE') < 1
+                                                                                           THEN 'Y' 
+                                                                                           ELSE 'VE' 
+                                                                                       END
+                                                                                 WHEN CNEE.EORI_NO IS NULL
+                                                                                  AND (CNEE.CUST_CTY_NM IS NULL
+                                                                                       OR CNEE.CSTMS_DECL_CNT_CD IS NULL
+                                                                                       OR CNEE.CUST_ZIP_ID IS NULL )
+                                                                                 THEN 'E'
+                                                                                 ELSE 'N'
+                                                                             END CNEE_EORI1
+                                                                             
+                                                                          , DECODE(NTFY.CUST_NM,           NULL,'E','Y')	AS NTFY_NM1
+                                                                          , DECODE(NTFY.CUST_ADDR,         NULL,'E','Y')	AS NTFY_AD1
+                                                                          , CASE WHEN NTFY.EORI_NO IS NULL AND NTFY.CUST_CTY_NM IS NULL
+                                                                                 THEN 'E'
+                                                                                 WHEN NTFY.CUST_CTY_NM IS NOT NULL
+                                                                                 THEN 'Y'
+                                                                                 ELSE 'N'
+                                                                             END NTFY_CT1
+                                                                          , CASE WHEN NTFY.EORI_NO IS NULL AND NTFY.CSTMS_DECL_CNT_CD IS NULL
+                                                                                 THEN 'E'
+                                                                                 WHEN NTFY.CSTMS_DECL_CNT_CD IS NOT NULL
+                                                                                 THEN 'Y'
+                                                                                 ELSE 'N'
+                                                                             END NTFY_CN1
+                                                                          , CASE WHEN NTFY.EORI_NO IS NULL AND NTFY.CUST_ZIP_ID IS NULL
+                                                                                 THEN 'E'
+                                                                                 WHEN NTFY.CUST_ZIP_ID IS NOT NULL
+                                                                                 THEN 'Y'
+                                                                                 ELSE 'N'
+                                                                             END NTFY_ZIP1
+                                                                          , CASE WHEN NTFY.EORI_NO IS NULL AND NTFY.EUR_CSTMS_ST_NM IS NULL
+                                                                                 THEN 'E'
+                                                                                 WHEN NTFY.EUR_CSTMS_ST_NM IS NOT NULL
+                                                                                 THEN 'Y'
+                                                                                 ELSE 'N'
+                                                                             END NTFY_STR1
+                                                                          , CASE WHEN NTFY.EORI_NO IS NOT NULL 
+                                                                                 THEN CASE WHEN REGEXP_INSTR(NTFY.EORI_NO,'^[A-Z]{2}([a-zA-Z0-9]{1,15}$)') > 0 
+                                                                                            AND REGEXP_INSTR(UPPER(NTFY.EORI_NO),'TEST|NONE') < 1
+                                                                                           THEN 'Y' 
+                                                                                           ELSE 'VE' 
+                                                                                       END
+                                                                                 WHEN NTFY.EORI_NO IS NULL
+                                                                                  AND (NTFY.CUST_CTY_NM IS NULL
+                                                                                       OR NTFY.CSTMS_DECL_CNT_CD IS NULL
+                                                                                       OR NTFY.CUST_ZIP_ID IS NULL )
+                                                                                 THEN 'E'
+                                                                                 ELSE 'N'
+                                                                             END NTFY_EORI1
+                                                                             
+                                                                          , NVL(BL.PCK_QTY,0)	AS BL_PK1
+                                                                          , NVL(BL.ACT_WGT,0)	AS BL_WT1
+                                                                          , DECODE(NVL(BL.MEAS_QTY,0), 0,'N','Y')	AS BL_MS
+                                                                          , BC.CNTR_NO AS CNTR_CNTR_NO
+                                                                          , NVL((SELECT 'Y'
+                                                                                   FROM BKG_CSTMS_EUR_SEAL_NO
+                                                                                  WHERE VSL_CD        = BL.VSL_CD
+                                                                                    AND SKD_VOY_NO    = BL.SKD_VOY_NO
+                                                                                    AND SKD_DIR_CD    = BL.SKD_DIR_CD
+                                                                                    AND BL_NO         = BL.BL_NO
+                                                                                    AND CSTMS_PORT_CD = BL.CSTMS_PORT_CD
+                                                                                    AND CNTR_NO       = BC.CNTR_NO
+                                                                                    AND ROWNUM =1), 'E') AS CNTR_SEAL
+                                                                          , NVL(BC.PCK_QTY,0)	AS CNTR_PK1
+                                                                          , NVL(BC.ACT_WGT,0)	AS CNTR_WT1
+                                                                          , DECODE(NVL(BC.MEAS_QTY,0), 0,'N','Y')	AS CNTR_MS
+                                                                          , ( SELECT NVL(SUM(PCK_QTY ),0)    ||','|| /* PK */
+                                                                                     NVL(SUM(CNTR_MF_WGT),0) ||','|| /* WT */
+                                                                                     NVL(SUM(MEAS_QTY),0)    ||','|| /* MS */
+                                                                                     COUNT(CNTR_MF_GDS_DESC)||','|| /* DS */
+                                                                                     COUNT(CNTR_MF_MK_DESC) ||','|| /* MK */
+                                                                                     COUNT(CMDT_HS_CD)      ||','|| /* HTS*/
+                                                                                     COUNT(CNTR_CGO_SEQ)            /* CARGO SEQ */
+                                                                                FROM BKG_CSTMS_EUR_CNTR_MF CM
+                                                                               WHERE VSL_CD        = BL.VSL_CD
+                                                                                 AND SKD_VOY_NO    = BL.SKD_VOY_NO
+                                                                                 AND SKD_DIR_CD    = BL.SKD_DIR_CD
+                                                                                 AND BL_NO         = BL.BL_NO
+                                                                                 AND CSTMS_PORT_CD = BL.CSTMS_PORT_CD
+                                                                                 AND CNTR_NO       = BC.CNTR_NO
+                                                                            ) AS CM_DATA
+                                                                          , ( SELECT ATTR_CTNT1
+                                                                                FROM BKG_CSTMS_CD_CONV_CTNT
+                                                                               WHERE CNT_CD = 'EU'
+                                                                                 AND CSTMS_DIV_ID = 'EU_HS_CODE_CHECK'
+                                                                                 AND DELT_FLG = 'N')    AS HTS_CNT_CD
+                                                                          , NVL(MVMT_REF_NO, ( SELECT MVMT_REF_NO
+                                                                                                 FROM BKG_CSTMS_EUR_BL EBL
+                                                                                                WHERE EBL.MSG_SND_NO = (SELECT MAX(MSG_SND_NO)
+                                                                                                                          FROM BKG_CSTMS_ADV_EUR_SND
+                                                                                                                         WHERE BL_NO          = BL.BL_NO
+                                                                                                                           AND CSTMS_PORT_CD  = BL.CSTMS_PORT_CD
+                                                                                                                           AND (VSL_CD != BL.VSL_CD 
+                                                                                                                                OR SKD_VOY_NO != BL.SKD_VOY_NO 
+                                                                                                                                OR SKD_DIR_CD != BL.SKD_DIR_CD)
+                                                                                                                       )
+                                                                                              )) AS MVMT_REF_NO
+                                                                          , DECODE(MVMT_REF_NO, NULL, 'N', 'Y') AS BL_MRN_YN
+                                                                          , TO_CHAR(SND.CRE_DT, 'YYYYMMDDHH24') AS KTS_SEND_DT1
+                                                                          
+                                                                          , (SELECT MAX(TO_CHAR(CRE_DT, 'YYYYMMDDHH24'))
+                                                                               FROM BKG_CSTMS_ADV_EUR_SND
+                                                                              WHERE BL_NO          = BL.BL_NO
+                                                                                AND CSTMS_PORT_CD  = BL.CSTMS_PORT_CD
+                                                                            ) AS KTS_SEND_DT2
+                                                                          
+                                                                          , ( SELECT TO_CHAR(VPS_ETD_DT, 'YYYY-MM-DD HH24:MI')
+                                                                                FROM VSK_VSL_PORT_SKD
+                                                                               WHERE VSL_CD       = BL.VSL_CD
+                                                                                 AND SKD_VOY_NO   = BL.SKD_VOY_NO
+                                                                                 AND SKD_DIR_CD   = BL.SKD_DIR_CD
+                                                                                 AND VPS_PORT_CD  = BL.POL_CD
+                                                                                 AND CLPT_IND_SEQ = NVL(@[eu_1st_port_clpt_seq],'1')
+                                                                            ) AS VPS_ETD_DT
+                                                                          
+                                                                          , BL.CSTMS_PORT_CD AS EU_1ST_PORT
+                                                                          , BL.CSTMS_YD_CD   AS EU_1ST_PORT_YD_CD
+                                                                          , BL.CSTMS_CLPT_IND_SEQ  AS EU_1ST_PORT_CLPT_SEQ
+                                                                          
+                                                                          , ( SELECT TO_CHAR(VPS_ETA_DT, 'YYYY-MM-DD HH24:MI')
+                                                                                FROM VSK_VSL_PORT_SKD
+                                                                               WHERE VSL_CD       = BL.VSL_CD
+                                                                                 AND SKD_VOY_NO   = BL.SKD_VOY_NO
+                                                                                 AND SKD_DIR_CD   = BL.SKD_DIR_CD
+                                                                                 AND VPS_PORT_CD  = BL.CSTMS_PORT_CD
+                                                                                 AND CLPT_IND_SEQ = NVL(@[eu_1st_port_clpt_seq],'1')
+                                                                            ) AS VPS_ETA_DT
+
+                                                                          , ( SELECT TO_CHAR(INIT_ETA_DT, 'YYYY-MM-DD HH24:MI')
+                                                                                FROM VSK_VSL_PORT_SKD
+                                                                               WHERE VSL_CD       = BL.VSL_CD
+                                                                                 AND SKD_VOY_NO   = BL.SKD_VOY_NO
+                                                                                 AND SKD_DIR_CD   = BL.SKD_DIR_CD
+                                                                                 AND VPS_PORT_CD  = BL.CSTMS_PORT_CD
+                                                                                 AND CLPT_IND_SEQ = NVL(@[eu_1st_port_clpt_seq],'1')
+                                                                            ) AS INIT_ETA_DT
+                                                                          
+                                                                          , TO_CHAR(SND.SND_DT, 'YYYY-MM-DD HH24:MI') AS ENS_SEND_DT
+                                                                          , TO_CHAR(SND.SND_GDT ,'YYYY-MM-DD HH24:MI')AS ENS_SEND_GMT_DT
+                                                                          , ( SELECT EDI_RCV_DT
+                                                                                     ||','||EDI_RCV_SEQ
+                                                                                     ||','||ACK_RCV_STS_CD
+                                                                                     ||','||TO_CHAR(CRE_DT, 'YYYY-MM-DD HH24:MI')
+                                                                                     ||','||EUR_CSTMS_ACK_CD
+                                                                                     ||','||ACK_KND_ID
+                                                                                     ||','||RJCT_RSN_RMK
+                                                                                FROM BKG_CSTMS_ADV_EUR_RCV
+                                                                               WHERE RCV_TMS = ( SELECT MAX(RCV_TMS)
+                                                                                                   FROM BKG_CSTMS_ADV_EUR_RCV
+                                                                                                  WHERE MSG_RCV_NO = SND.MSG_SND_NO
+                                                                                                    AND (ACK_KND_ID != 'S' OR ACK_RCV_STS_CD != 'A')
+                                                                                               )
+                                                                            ) AS  RCV
+                                                                          
+                                                                          , SND.SND_USR_OFC_CD
+                                                                          , BL.MSG_SND_NO   AS MSG_SND_NO
+                                                                          , BKG.CUST_TO_ORD_FLG
+                                                                          , BKG.BB_CGO_FLG
+                                                                          , (SELECT 'N' 
+                                                                               FROM BKG_VVD BKV 
+                                                                              WHERE 1=1
+                                                                                AND BKV.BKG_NO     = BKG.BKG_NO
+                                                                                AND BKV.VSL_CD     = BL.VSL_CD
+                                                                                AND BKV.SKD_VOY_NO = BL.SKD_VOY_NO
+                                                                                AND BKV.SKD_DIR_CD = BL.SKD_DIR_CD
+                                                                                AND BKV.POL_CD     = BL.POL_CD
+                                                                                AND BKV.POD_CD     = BL.POD_CD
+                                                                            ) AS TRSM_BLCK_FLG
+                                                                           
+                                                                          , TO_CHAR(BL.CSTMS_ESTM_ARR_DT,'YYYY-MM-DD HH24:MI') AS CSTMS_ESTM_ARR_DT
+                                                                            
+                                                                       FROM BKG_CSTMS_EUR_BL BL
+                                                                          , BKG_BOOKING BKG
+                                                                          , BKG_CSTMS_EUR_CUST SHPR
+                                                                          , BKG_CSTMS_EUR_CUST CNEE
+                                                                          , BKG_CSTMS_EUR_CUST NTFY
+                                                                          , BKG_CSTMS_EUR_CNTR BC
+                                                                          , BKG_CSTMS_ADV_EUR_SND SND
+                                                                      WHERE 1=1
+                                                                        AND BL.BL_NO        = BKG.BL_NO
+                                                                        AND BKG.BKG_STS_CD IN ('F', 'W')
+                                                                        AND BL.VSL_CD        = SHPR.VSL_CD(+)
+                                                                        AND BL.SKD_VOY_NO    = SHPR.SKD_VOY_NO(+)
+                                                                        AND BL.SKD_DIR_CD    = SHPR.SKD_DIR_CD(+)
+                                                                        AND BL.BL_NO         = SHPR.BL_NO(+)
+                                                                        AND BL.CSTMS_PORT_CD = SHPR.CSTMS_PORT_CD(+)
+                                                                        AND 'S'              = SHPR.BKG_CUST_TP_CD(+)
+                                                                        
+                                                                        AND BL.VSL_CD        = CNEE.VSL_CD(+)
+                                                                        AND BL.SKD_VOY_NO    = CNEE.SKD_VOY_NO(+)
+                                                                        AND BL.SKD_DIR_CD    = CNEE.SKD_DIR_CD(+)
+                                                                        AND BL.BL_NO         = CNEE.BL_NO(+)
+                                                                        AND BL.CSTMS_PORT_CD = CNEE.CSTMS_PORT_CD(+)
+                                                                        AND 'C'              = CNEE.BKG_CUST_TP_CD(+)
+                                                                        
+                                                                        AND BL.VSL_CD        = NTFY.VSL_CD(+)
+                                                                        AND BL.SKD_VOY_NO    = NTFY.SKD_VOY_NO(+)
+                                                                        AND BL.SKD_DIR_CD    = NTFY.SKD_DIR_CD(+)
+                                                                        AND BL.BL_NO         = NTFY.BL_NO(+)
+                                                                        AND BL.CSTMS_PORT_CD = NTFY.CSTMS_PORT_CD(+)
+                                                                        AND NTFY.BKG_CUST_TP_CD(+) = 'N'
+                                                                        
+                                                                        AND BL.VSL_CD        = BC.VSL_CD(+)
+                                                                        AND BL.SKD_VOY_NO    = BC.SKD_VOY_NO(+)
+                                                                        AND BL.SKD_DIR_CD    = BC.SKD_DIR_CD(+)
+                                                                        AND BL.BL_NO         = BC.BL_NO(+)
+                                                                        AND BL.CSTMS_PORT_CD = BC.CSTMS_PORT_CD(+)
+                                                                        
+                                                                        AND BL.MSG_SND_NO    = SND.MSG_SND_NO(+)
+                                                                        
+                                                                        #if (${p_vvd_cd} != '')
+                                                                            AND BL.VSL_CD        = SUBSTR(@[p_vvd_cd],1,4)
+                                                                            AND BL.SKD_VOY_NO    = SUBSTR(@[p_vvd_cd],5,4)
+                                                                            AND BL.SKD_DIR_CD    = SUBSTR(@[p_vvd_cd],9,1)
+                                                                        #end
+                                                                        
+                                                                        #if (${p_pol_cd} != '')
+                                                                            AND BL.POL_CD = @[p_pol_cd]
+                                                                        #end
+                                                                        
+                                                                        #if (${p_pol_yard_cd} != '')
+                                                                            AND SUBSTR(BL.POL_YD_CD,6) = @[p_pol_yard_cd]
+                                                                        #end
+                                                                        
+                                                                        #if (${p_pod_cd} != '')
+                                                                            AND BL.CSTMS_PORT_CD = SUBSTR(@[p_pod_yard_cd],1,5)
+                                                                        #end
+                                                                        
+                                                                        #if (${p_pod_yard_cd} != '')
+                                                                            /* DO NOT CHECK*/
+                                                                        #end
+                                                                        
+                                                                        #if (${p_b_ofc_cd} != '')
+                                                                            AND BKG.BKG_OFC_CD = @[p_b_ofc_cd]
+                                                                        #end
+                                                                        
+                                                                        #if (${p_s_ofc_cd} != '')
+                                                                            AND BKG.OB_SLS_OFC_CD  = @[p_s_ofc_cd]
+                                                                        #end
+                                                                        
+                                                                        #if (${p_b_staff} != '')
+                                                                            AND BKG.DOC_USR_ID = @[p_b_staff]
+                                                                        #end
+                                                                        
+                                                                        /* Ack. Status 조건이 입력 되면 Original/Amendment 부분은 무시한다.
+																		기본적으로 Original가 선택되어있어 Ack. Status가 All인지만 체크한다. */
+                                                                        #if (${p_ack_status} == 'NR' )
+                                                                            /* Ack. Status is Not Received SND IS NOT NULL && RCV IS NULL */
+                                                                            AND SND.MSG_SND_NO IS NOT NULL
+                                                                        #elseif(${p_ack_status} == 'NA' )
+                                                                            /* Ack. Status is N/A */
+                                                                            AND SND.MSG_SND_NO IS NULL
+                                                                        #end
+                                                                        
+                                                                        #if (${p_bl_no} != '')
+                                                                            AND BL.BL_NO = @[p_bl_no]
+                                                                        #end
+                                                                        
+                                                                        #if (${p_lt} != '')
+                                                                            AND DECODE(BL.POL_CD,BKG_POL_CD,'L','T')  = @[p_lt]
+                                                                        #end
+                                                                        
+                                                                        /* BL데이타 조회시 다운로드된 데이타는 사용하지 않고 BL데이타를 이용한다.*/
+                                                                        #if (${p_data_cd} != 'DL')
+                                                                            AND 'N' = 'Y'
+                                                                        #end
+                                                                        
+                                                                   ) L
+                                                             
+                                                             WHERE 1=1
+                                                             
+                                                             #if (${p_ack_status} == '')
+                                                                #if (${p_ori_amd_cd} == 'O')
+                                                                    AND MVMT_REF_NO IS NULL
+                                                                #else
+                                                                    AND MVMT_REF_NO IS NOT NULL
+                                                                #end
+                                                             #end
+                                                             
+                                                          ) M
+                                                    
+                                                    WHERE 1 = 1
+                                                    
+                                                    #if (${p_ack_status} == 'A' )
+                                                        AND ACK  = 'A'
+                                                         OR ACK  = 'AL'
+                                                    #elseif (${p_ack_status} == 'R')
+                                                        AND ACK  != 'A' AND ACK  != 'AL' AND ACK IS NOT NULL
+                                                    #elseif (${p_ack_status} == 'DNL')
+                                                        AND RESULT_CD  = '351'
+                                                    #elseif (${p_ack_status} == 'NR')
+                                                        AND RCV IS NULL
+                                                    #end
+                                                    
+                                                 )
+                                                 
+                                                 /* UNION ALL END */
+                                                 
+                                           ) X
+                                  ) XX
+                         ) XXX
+                ) Y
+              , ( SELECT ( SELECT EUR_CSTMS_OFC_ID||','||ENS_EDI_SVC_FLG
+                             FROM BKG_CSTMS_EUR_CD_STUP
+                            WHERE PORT_CD = @[p_pod_cd]
+                              AND TML_CD IN ('ALL', @[p_pod_yard_cd])
+                              AND ROWNUM =1
+                         ) AS PORT_OFC_CD_SVC_FLG
+                    FROM DUAL
+                ) PORT_OFC
+       ) Z
+ WHERE 1=1
+ 
+ #if (${p_error_cd} != '')
+    AND ERR_YN ='Y'
+ #end
+ #if (${to_snd_flg} == 'Y')
+     AND UPD_FLG = 'N'
+ #end
+
+ORDER BY POD, BL_NO, CNTR_CNTR_NO
+) ZZ			]]></sql>
+			<params>
+				<param name="eu_1st_port_clpt_seq" type="12" value="" out="N"/>
+				<param name="p_first_of_multi_pofe_cd" type="12" value="" out="N"/>
+				<param name="p_pod_yard_cd" type="12" value="" out="N"/>
+				<param name="p_vvd_cd" type="12" value="" out="N"/>
+				<param name="p_pol_cd" type="12" value="" out="N"/>
+				<param name="p_pol_yard_cd" type="12" value="" out="N"/>
+				<param name="p_search_pofe_yard_cd" type="12" value="" out="N"/>
+				<param name="p_b_ofc_cd" type="12" value="" out="N"/>
+				<param name="p_s_ofc_cd" type="12" value="" out="N"/>
+				<param name="p_b_staff" type="12" value="" out="N"/>
+				<param name="p_bl_no" type="12" value="" out="N"/>
+				<param name="p_lt" type="12" value="" out="N"/>
+				<param name="p_pod_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

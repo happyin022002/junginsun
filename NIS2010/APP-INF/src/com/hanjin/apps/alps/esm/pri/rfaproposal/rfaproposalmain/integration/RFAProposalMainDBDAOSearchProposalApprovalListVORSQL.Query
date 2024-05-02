@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="RFAProposalMainDBDAOSearchProposalApprovalListVORSQL">
+			<desc><![CDATA[RFAProposalMainDBDAO + SearchProposalApprovalListVORSQL]]></desc>
+			<sql><![CDATA[
+SELECT  
+     -----------------------------------------------------------------------------------------------------------------------
+     -- RFA NO 
+     -----------------------------------------------------------------------------------------------------------------------  
+		HDR.RFA_NO                                                                           AS RFA_NO
+      , TO_CHAR(SYSDATE, 'YYYY-MM-DD HH24:MI')												 AS SRCH_DT				--조회 시점
+      , MN.AMDT_SEQ                                                                          AS AMDT_SEQ
+      , MN.PROP_NO                                                                           AS PROP_NO
+	  , MN.PROP_PROG_SEQ																	 AS PROP_PROG_SEQ
+     -----------------------------------------------------------------------------------------------------------------------
+     -- Status
+     -----------------------------------------------------------------------------------------------------------------------  
+      , MN.PROP_STS_CD                                                      			 	 AS PROP_STS_CD
+      , (SELECT INTG_CD_VAL_DP_DESC
+           FROM COM_INTG_CD_DTL
+          WHERE INTG_CD_VAL_CTNT = MN.PROP_STS_CD
+            AND INTG_CD_ID = 'CD01722')                                                      AS PROP_STS_NM
+     -----------------------------------------------------------------------------------------------------------------------
+     -- Customer
+     ----------------------------------------------------------------------------------------------------------------------- 
+      , (SELECT INTG_CD_VAL_DESC 
+           FROM COM_INTG_CD_DTL 
+          WHERE INTG_CD_VAL_CTNT = MN.PRC_CTRT_CUST_TP_CD 
+            AND INTG_CD_ID = 'CD00697') 													 AS PRC_CTRT_CUST_TP_NM
+	  , MN.CTRT_CUST_CNT_CD																	 AS CTRT_CUST_CNT_CD
+      , MN.CTRT_CUST_SEQ											                         AS CTRT_CUST_SEQ
+      , MN.CTRT_CUST_CNT_CD||LPAD(TO_CHAR(MN.CTRT_CUST_SEQ),6,'0')                           AS CTRT_CUST_CD
+      , (SELECT CUST_LGL_ENG_NM
+          FROM MDM_CUSTOMER
+         WHERE CUST_CNT_CD = MN.CTRT_CUST_CNT_CD
+           AND CUST_SEQ = MN.CTRT_CUST_SEQ )                                                 AS CTRT_CUST_NM
+     -----------------------------------------------------------------------------------------------------------------------
+     -- Request
+     ----------------------------------------------------------------------------------------------------------------------- 
+       , (SELECT SREP_CD
+          FROM MDM_SLS_REP
+         WHERE EMPE_CD = (SELECT PROG_USR_ID
+                  FROM PRI_RP_PROG
+                 WHERE PROP_NO = MN.PROP_NO
+                   AND AMDT_SEQ = MN.AMDT_SEQ
+                   AND PROP_PROG_SEQ = MN.PROP_PROG_SEQ - 1 
+				   AND PROP_STS_CD = 'Q')
+           AND SREP_STS_CD = 'N' 
+           AND ROWNUM = 1)                                                                   AS PROP_SREP_CD
+     , (
+         SELECT PROG_OFC_CD
+           FROM PRI_RP_PROG
+          WHERE PROP_NO = MN.PROP_NO
+            AND AMDT_SEQ = MN.AMDT_SEQ
+            AND PROP_PROG_SEQ = MN.PROP_PROG_SEQ - 1 
+			AND PROP_STS_CD = 'Q')                                       					AS PROP_OFC_CD 
+     ,TO_CHAR( (
+         SELECT PROG_DT
+           FROM PRI_RP_PROG
+          WHERE PROP_NO = MN.PROP_NO
+            AND AMDT_SEQ = MN.AMDT_SEQ
+            AND PROP_PROG_SEQ = MN.PROP_PROG_SEQ - 1
+			AND PROP_STS_CD = 'Q'                                                      
+                )  ,'YYYYMMDD')                                                              AS PROP_RQST_DT 
+     -----------------------------------------------------------------------------------------------------------------------
+     -- Approval
+     ----------------------------------------------------------------------------------------------------------------------- 
+     , MN.PROG_USR_ID                                                                        AS PROP_APRO_STAFF_CD
+     , (SELECT C.USR_NM
+          FROM COM_USER C
+         WHERE C.USR_ID = MN.PROG_USR_ID)                                                    AS PROP_APRO_STAFF_NM
+     , MN.PROG_OFC_CD                                                                        AS PROP_APRO_OFC_CD
+     , TO_CHAR (MN.PROG_DT, 'YYYYMMDD')                                                      AS PROP_APRO_DT       
+     -----------------------------------------------------------------------------------------------------------------------
+     -- SVC Scope
+     ----------------------------------------------------------------------------------------------------------------------- 
+
+	 , PRI_UTILS_PKG.JOIN_ROWS_VAR_FUNC (CURSOR(SELECT DISTINCT SCP.SVC_SCP_CD
+                                  				  FROM PRI_RP_SCP_MN SCP
+                                 				 WHERE SCP.PROP_NO = MN.PROP_NO
+  								   				   AND SCP.AMDT_SEQ = MN.AMDT_SEQ  ) , ', ') AS SVC_SCP_CD 
+
+     -----------------------------------------------------------------------------------------------------------------------
+     -- Date
+     -----------------------------------------------------------------------------------------------------------------------   
+      , TO_CHAR (MN.EFF_DT, 'YYYYMMDD')                                                   	 AS EFF_DT
+      , TO_CHAR (MN.EXP_DT, 'YYYYMMDD')                                                      AS EXP_DT
+      , TO_CHAR (MN.CRE_DT, 'YYYYMMDD')                                                      AS CRE_DT
+	  ----------------------------------------------------------------------------------------------------  
+	  -- PARAM VO 
+	  ----------------------------------------------------------------------------------------------------  
+	  ,@[dt_type] 																			 AS DT_TYPE		-- PARAM VO 
+	  ----------------------------------------------------------------------------------------------------
+  FROM PRI_RP_HDR HDR     
+      , (
+            SELECT MN.*
+              FROM 
+                  (
+                    SELECT MN.*
+                          , PROG.PROP_PROG_SEQ
+                          , PROG.PROG_USR_ID
+                          , PROG.PROG_OFC_CD
+                          , PROG.PROG_DT
+                          , ROW_NUMBER () OVER(PARTITION BY PROG.PROP_NO, PROG.AMDT_SEQ ORDER BY PROG.PROP_NO, PROG.AMDT_SEQ , PROG.PROP_PROG_SEQ DESC) AS RNUM
+                      FROM (
+                            SELECT MN.*
+                              FROM PRI_RP_MN MN
+                             WHERE 1 = 1
+-------------------------------------------------------------------------------------------------------  기간 조회 시작
+							#if (${dt_type} == 'APRO')
+                               AND MN.PROP_APRO_DT <= TO_DATE(@[exp_dt], 'YYYY-MM-DD') + 0.99999
+                               AND MN.PROP_APRO_DT >= TO_DATE(@[eff_dt], 'YYYY-MM-DD') 
+							#end
+-------------------------------------------------------------------------------------------------------  기간 조회 종료
+                               AND MN.PROP_STS_CD IN ('A','R')             -- 현재 계약중 승인 건
+                               AND MN.PROP_APRO_DT IS NOT NULL
+                               AND MN.RFA_CTRT_TP_CD IN ('C','S')	-- G (Guideline 제외)
+                            ) MN
+                         , PRI_RP_PROG PROG
+                     WHERE MN.PROP_NO = PROG.PROP_NO
+                       AND MN.AMDT_SEQ = PROG.AMDT_SEQ
+                       AND PROG.PROP_STS_CD IN ('A','R')           -- 다건의 승인 건
+                   ) MN
+               WHERE RNUM < 2      -- 현재 계약의 승인 건 중 다건 중 최근 승인 건
+         ) MN
+WHERE HDR.PROP_NO 		= MN.PROP_NO
+-------------------------------------------------------------------------------------------------------  조회 조건 추가 시작
+
+#if (${rfa_no} != '')
+	AND   HDR.RFA_NO = @[rfa_no]						-- RFA No
+#end
+#if (${prop_no} != '')
+	AND   MN.PROP_NO = @[prop_no]						-- Proposal No
+#end
+#if (${prop_sts_cd} != '')
+	AND MN.PROP_STS_CD = @[prop_sts_cd]					-- Status code
+#end
+#if (${prop_ofc_cd} != '')
+	AND (SELECT PROG_OFC_CD
+           FROM PRI_RP_PROG
+          WHERE PROP_NO = MN.PROP_NO
+            AND AMDT_SEQ = MN.AMDT_SEQ
+            AND PROP_PROG_SEQ = MN.PROP_PROG_SEQ - 1 ) = @[prop_ofc_cd]		-- Request Office
+#end
+#if (${prop_srep_cd} != '')
+    AND (SELECT SREP_CD
+           FROM MDM_SLS_REP
+          WHERE EMPE_CD = (SELECT PROG_USR_ID
+                  FROM PRI_RP_PROG
+                 WHERE PROP_NO = MN.PROP_NO
+                   AND AMDT_SEQ = MN.AMDT_SEQ
+                   AND PROP_PROG_SEQ = MN.PROP_PROG_SEQ - 1 ) 
+            AND ROWNUM = 1)  = @[prop_srep_cd]        						-- Sales Rep.
+#end
+#if (${prop_apro_staff_cd} != '')
+	AND MN.PROG_USR_ID IN (SELECT USR_ID FROM COM_USER WHERE UPPER(USR_NM) LIKE UPPER('%'||@[prop_apro_staff_cd]||'%'))		-- PROP_APRO_STAFF_CD 
+#end
+#if (${prop_apro_ofc_cd} != '')
+	AND MN.PROG_OFC_CD = @[prop_apro_ofc_cd]			-- Approval Office
+#end
+#if (${ctrt_cust_cnt_cd} != '' && ${ctrt_cust_seq} != '') 
+	AND MN.CTRT_CUST_CNT_CD = @[ctrt_cust_cnt_cd] 		-- Customer
+	AND MN.CTRT_CUST_SEQ    = @[ctrt_cust_seq]    		-- Customer
+#end
+-------------------------------------------------------------------------------------------------------  조회 조건 추가 끝
+  ORDER BY MN.PROP_NO
+         , MN.AMDT_SEQ			]]></sql>
+			<params>
+				<param name="dt_type" type="12" value="" out="N"/>
+				<param name="exp_dt" type="12" value="" out="N"/>
+				<param name="eff_dt" type="12" value="" out="N"/>
+				<param name="rfa_no" type="12" value="" out="N"/>
+				<param name="prop_no" type="12" value="" out="N"/>
+				<param name="prop_sts_cd" type="12" value="" out="N"/>
+				<param name="prop_ofc_cd" type="12" value="" out="N"/>
+				<param name="prop_srep_cd" type="12" value="" out="N"/>
+				<param name="prop_apro_staff_cd" type="12" value="" out="N"/>
+				<param name="prop_apro_ofc_cd" type="12" value="" out="N"/>
+				<param name="ctrt_cust_cnt_cd" type="12" value="" out="N"/>
+				<param name="ctrt_cust_seq" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

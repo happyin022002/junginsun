@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CostSetUpDBDAOCreateVSLMarketRtCSQL">
+			<desc><![CDATA[용선료 시장가 차액 생성]]></desc>
+			<sql><![CDATA[
+--================================================================================
+-- 파라미터
+-- 1. 유저id
+-- 2. yyyywk
+--================================================================================
+MERGE INTO COA_MNL_COST_STUP A
+USING (
+ SELECT cost_yrmon
+      , cost_wk
+      , trd_cd
+      , 'CNTMR' rlane_cd
+      , 'O' ioc_cd
+      , 'M' dir_cd
+      , 'OT' sub_trd_cd
+      , SUM(chrg_dhir_diff_amt) otr_expn_amt
+   FROM (
+         SELECT b.cost_yrmon
+              , cost_wk
+              , a.trd_cd
+              , a.slan_cd
+              , a.vsl_cd
+              , a.count_dt
+              , b.diff_amt
+              , (a.count_dt * b.diff_amt) chrg_dhir_diff_amt
+           FROM (
+                 -- IES->AES, IMS->EMS 로 귀속
+                 -- 주차에 해당하는 VESSEL의 운항 일수를 구한다.
+                 SELECT a.slan_cd
+                      , a.vsl_cd
+                      , DECODE(a.trd_cd, 'IES', 'AES', 'IMS', 'EMS', a.trd_cd) trd_cd
+                      , (b.cost_yr||b.eq_wk) cost_yrmon
+                      , b.cost_wk
+                      , (CASE WHEN a.end_dt < b.sls_to_dt THEN to_date(a.end_dt, 'YYYYMMDD')
+                              ELSE to_date(b.sls_to_dt, 'YYYYMMDD') END) - 
+                        (CASE WHEN a.start_dt > b.sls_fm_dt THEN to_date(a.start_dt, 'YYYYMMDD')
+                              ELSE to_date(b.sls_fm_dt, 'YYYYMMDD') END ) +1 count_dt
+                   FROM (
+                        -- start, end date 는 정오를 기준으로 start date가 정오를 넘을 경우 +1 일
+                         SELECT slan_cd
+                              , vsl_cd
+                              , trd_cd
+                              , vps_etb_dt
+                              , vps_etd_dt
+                              , CASE
+                                        WHEN vps_etb_dt > to_date(TO_CHAR(vps_etb_dt, 'YYYYMMDD')||'1200', 'YYYYMMDDHH24MI')
+                                        THEN TO_CHAR(vps_etb_dt + 1, 'YYYYMMDD')
+                                        ELSE TO_CHAR(vps_etb_dt, 'YYYYMMDD')
+                                END AS start_dt
+                              , CASE
+                                        WHEN vps_etd_dt > to_date(TO_CHAR(vps_etd_dt, 'YYYYMMDD')||'1200', 'YYYYMMDDHH24MI')
+                                        THEN TO_CHAR(vps_etd_dt, 'YYYYMMDD')
+                                        ELSE TO_CHAR(vps_etd_dt - 1, 'YYYYMMDD')
+                                END AS end_dt
+                           FROM (
+                                        -- service lane별 vessel의 start, end date를 가져온다.
+                                         SELECT A.slan_cd
+                                              , A.vsl_cd
+                                              , B.trd_cd
+                                              , MIN(A.vps_etb_dt) vps_etb_dt
+                                              , MAX(A.vps_etd_dt) vps_etd_dt
+                                           FROM vsk_vsl_port_skd A
+                                              , coa_lane_rgst B
+                                          WHERE A.slan_cd = B.slan_cd
+                                            AND A.turn_port_ind_cd NOT IN ('V', 'D')
+                                            AND NVL(B.delt_flg, 'N') = 'N'
+                                            AND NVL(B.trnk_ipt_flg, 'N') = 'N'
+                                            AND B.mkt_rt_flg = 'Y'
+                                            --   AND a.vsl_cd='HNPR'
+                                       GROUP BY A.slan_cd
+                                              , A.vsl_cd
+                                              , B.trd_cd
+                                )
+                        ) a
+                      , coa_wk_prd b
+                  WHERE b.cost_yr = SUBSTR(@[cost_yrweek],1,4)
+                    AND b.cost_wk = SUBSTR(@[cost_yrweek],5,2)--20
+                    AND a.start_dt <= b.sls_to_dt
+                    AND a.end_dt >= b.sls_fm_dt
+                ) a
+              , (
+                 SELECT cost_yrmon
+                      , vsl_cd
+                      , SUM (NVL(a.hir_rt, 0) / DECODE (a.curr_cd, 'USD', 1, NULL, 1, NVL (b.usd_locl_xch_rt, 0))) dhir_amt -- 용선료 실적
+                      , MIN(chrg_dhir_amt) chrg_dhir_amt  -- 용선료 시장가
+                      , MIN(chrg_dhir_amt) - SUM (NVL(a.hir_rt, 0) / DECODE (a.curr_cd, 'USD', 1, NULL, 1, NVL (b.usd_locl_xch_rt, 0))) diff_amt
+                   FROM
+                        (
+                         SELECT cost_yrmon
+                              , vsl_cd
+                              , DECODE(no, 1, n1st_hir_rt, n2nd_hir_rt) hir_rt
+                              , DECODE(no, 1, n1st_curr_cd, n2nd_curr_cd) curr_cd
+                              , chrg_dhir_amt
+                           FROM
+                                (
+                                 SELECT cost_yrmon
+                                      , vsl_cd
+                                      , n1st_hir_rt
+                                      , n1st_curr_cd
+                                      , n2nd_hir_rt
+                                      , n2nd_curr_cd
+                                      , chrg_dhir_amt
+                                      , DECODE(n2nd_curr_cd, NULL, 1, 2) seq
+                                   FROM
+                                        (
+                                                 SELECT c1.cost_yrmon
+                                                      , c1.vsl_cd
+                                                      , c2.n1st_hir_rt
+                                                      , c2.n1st_curr_cd
+                                                      , c2.n2nd_hir_rt
+                                                      , c2.n2nd_curr_cd
+                                                      , NVL (c1.chrg_dhir_amt, 0) chrg_dhir_amt
+                                                   FROM coa_chrg_vsl_dly_hir c1
+                                                      , coa_vsl_chrg_if c2
+                                                  WHERE c1.cost_yrmon = c2.cost_yrmon(+)
+                                                    AND c1.vsl_cd = c2.vsl_cd(+)
+                                        )
+                                )
+                              , (
+                                         SELECT cpy_no no
+                                           FROM com_cpy_no
+                                          WHERE cpy_no BETWEEN 1 AND 2
+                                )
+                          WHERE seq >= no
+                        )
+                        a
+                      , gl_mon_xch_rt b
+                  WHERE a.curr_cd = b.curr_cd(+)
+                    AND b.acct_xch_rt_lvl(+) = '1'
+                    AND b.acct_xch_rt_yrmon(+) = a.cost_yrmon
+               GROUP BY cost_yrmon
+                      , vsl_cd
+                ) b
+          WHERE a.vsl_cd = b.vsl_cd
+            AND a.cost_yrmon = b.cost_yrmon
+        )
+GROUP BY cost_yrmon
+      , cost_wk
+      , trd_cd
+     
+) b 
+ON (        a.cost_yrmon = b.cost_yrmon 
+        AND a.cost_wk = b.cost_wk 
+        AND a.trd_cd = b.trd_cd 
+        AND a.rlane_cd = b.rlane_cd )
+WHEN MATCHED THEN 
+        UPDATE SET a.otr_expn_amt = b.otr_expn_amt
+                 , a.upd_dt = SYSDATE
+                 , a.upd_usr_id = @[user_id]
+WHEN NOT MATCHED THEN 
+        INSERT (  a.cost_yrmon
+                , a.cost_wk
+                , a.trd_cd
+                , a.rlane_cd
+                , a.ioc_cd
+                , a.dir_cd
+                , a.sub_trd_cd
+                , a.otr_expn_amt
+                , a.cre_usr_id
+                , a.cre_dt
+                , a.upd_usr_id
+                , a.upd_dt)
+        VALUES (  b.cost_yrmon
+                , b.cost_wk
+                , b.trd_cd
+                , b.rlane_cd
+                , b.ioc_cd
+                , b.dir_cd
+                , b.sub_trd_cd
+                , b.otr_expn_amt
+                , @[user_id]
+                , SYSDATE
+                , @[user_id]
+                , SYSDATE)
+			]]></sql>
+			<params>
+				<param name="cost_yrweek" type="12" value="" out="N"/>
+				<param name="user_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

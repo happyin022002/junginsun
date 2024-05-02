@@ -1,0 +1,421 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PayableEstimateAuditDBDAOcalculationPayableEstimateAuditRSQL">
+			<desc><![CDATA[임차료에 대한 추정 실적 계산 합니다.
+2010.09.03 양봉준   [CHM-201005796-01] 추정비용 실적집계하는 로직 수정, 승인된 Charge에 대해서만 집계되도록 수정함 LSE_PAY_RNTL_CHG 테이블의 CNTR_AUD_STS_CD ='A' 조건 추가
+2010.09.10 남궁진호[CHM-201005908-01]  LP Term 정보 조회시 Estimate 금액이 잘못 산출되는 현상 보완, ACCOUNT CODE를 지정하여 처리함]]></desc>
+			<sql><![CDATA[
+SELECT  0 AS SEQ
+      , @[period_dt] AS ACTUAL_MONTH
+      , 'LSE' AS SYS_NAME
+      , IF_RGST_NO
+      , REV_MONTH
+      , ACCT_CODE
+      , AGMT_NO
+      , AGMT_CTY_CD
+      , AGMT_SEQ
+      , 'CNTR' AS BIZ_UNIT
+      , TP_SZ
+      , EST_QTY
+      , ESTIMATED_COST
+      , ACTUAL_COST
+      , ACCURAL_AMT
+      , VSL_CD||SKD_VOY_NO||SKD_DIR_CD||REV_DIR_CD AS REV_VVD
+      , 'KRSEL' AS LOC_CD
+      , VSL_CD
+      , SKD_VOY_NO
+      , SKD_DIR_CD
+      , REV_DIR_CD
+      , TO_CHAR(SYSDATE,'YYYY-MM-DD') AS CRE_DT
+      , TO_CHAR(SYSDATE,'YYYY-MM-DD') AS UPD_DT
+FROM   (SELECT  REV_MONTH
+              , ACCT_CODE
+              , TP_SZ
+              , VSL_CD
+              , SKD_VOY_NO
+              , SKD_DIR_CD
+              , REV_DIR_CD
+              , CRR_CD
+              , IF_RGST_NO
+              , MAX(AGMT_NO) AS AGMT_NO
+              , MAX(AGMT_CTY_CD) AS AGMT_CTY_CD
+              , MAX(AGMT_SEQ) AS AGMT_SEQ
+              , SUM(EST_QTY)        AS EST_QTY
+              , SUM(ESTIMATED_COST) AS ESTIMATED_COST
+              , SUM(INV_AMT) AS ACTUAL_COST
+              , CASE WHEN SUM(ESTIMATED_COST) - SUM(INV_AMT) < 0 THEN 0
+                     ELSE SUM(ESTIMATED_COST) - SUM(INV_AMT)
+                END AS ACCURAL_AMT
+        FROM   (SELECT  TO_CHAR(TO_DATE(SKD_VOY_NO, 'YYMM'), 'YYYYMM') REV_MONTH
+                      , '510811' ACCT_CODE
+                      , AGMT_CTY_CD || LTRIM(TO_CHAR(AGMT_SEQ, '000000')) AGMT_NO
+                      , AGMT_CTY_CD AGMT_CTY_CD
+                      , AGMT_SEQ AGMT_SEQ
+                      , CNTR_TPSZ_CD TP_SZ
+                      , OP_LSE_QTY EST_QTY
+                      , VSL_CD VSL_CD
+                      , SKD_VOY_NO SKD_VOY_NO
+                      , SKD_DIR_CD SKD_DIR_CD
+                      , REV_DIR_CD REV_DIR_CD
+                      , 'USD' CRR_CD
+                      , SUM(PAY_AMT) ESTIMATED_COST
+                      , 0 INV_AMT
+                      , IF_RGST_NO
+                FROM    LSE_OP_LSE
+                WHERE   OP_LSE_STS_CD <> 'D'
+                AND     ISS_YRMON BETWEEN @[period_stdt] AND @[period_eddt]
+                GROUP BY TO_CHAR(TO_DATE(SKD_VOY_NO, 'YYMM'), 'YYYYMM'), 
+                         AGMT_CTY_CD || LTRIM(TO_CHAR(AGMT_SEQ, '000000')), AGMT_CTY_CD, AGMT_SEQ, 
+                         CNTR_TPSZ_CD, OP_LSE_QTY, IF_RGST_NO, VSL_CD||SKD_VOY_NO||SKD_DIR_CD||REV_DIR_CD, 
+                         VSL_CD, SKD_VOY_NO, SKD_DIR_CD, REV_DIR_CD
+                UNION ALL
+                SELECT  A.CHG_COST_YRMON AS REV_MONTH
+                      , NVL(A.ACCT_CD, B.ACCT_CD) AS ACCT_CODE
+                      , A.AGMT_CTY_CD || LTRIM(TO_CHAR(A.AGMT_SEQ, '000000')) AS AGMT_NO
+                      , A.AGMT_CTY_CD  AS AGMT_CTY_CD
+                      , A.AGMT_SEQ     AS AGMT_SEQ
+                      , A.CNTR_TPSZ_CD AS TP_SZ
+                      , EST_QTY
+                      , 'CNTC' VSL_CD
+                      , SUBSTR(A.CHG_COST_YRMON, 3,4) AS SKD_VOY_NO
+                      , 'M' SKD_DIR_CD
+                      , 'M' REV_DIR_CD
+                      , 'USD' CRR_CD
+                      , ESTIMATED_COST
+                      , 0 INV_AMT
+                      , NVL(A.IF_RGST_NO, A.AGMT_SEQ) IF_RGST_NO
+                FROM   (SELECT  A.CHG_COST_YRMON
+                              , A.LSE_PAY_CHG_TP_CD
+                              , A.LSTM_CD
+                              , A.AGMT_CTY_CD
+                              , A.AGMT_SEQ
+                              , A.CNTR_TPSZ_CD
+                              , C.ACCT_CD
+                              , C.COST_CD
+                              , COUNT(CNTR_NO) EST_QTY
+                              , SUM(A.TTL_COST_AMT + A.CR_AMT) ESTIMATED_COST
+                              , A.IF_RGST_NO
+                        FROM   (SELECT  A.IF_RGST_NO
+                                      , A.CHG_COST_YRMON
+                                      , A.LSTM_CD
+                                      , A.AGMT_CTY_CD
+                                      , A.AGMT_SEQ
+                                      , B.CNTR_NO, B.LSE_PAY_CHG_TP_CD, B.CNTR_TPSZ_CD,
+                                        B.CR_AMT, B.TTL_COST_AMT
+                                FROM    LSE_PAY_RNTL_CHG     A
+                                      , LSE_PAY_RNTL_CHG_DTL B
+                                WHERE   A.AGMT_CTY_CD   = B.AGMT_CTY_CD
+                                AND     A.AGMT_SEQ      = B.AGMT_SEQ
+                                AND     A.CHG_SEQ       = B.CHG_SEQ
+                                AND     A.CHG_COST_YRMON BETWEEN @[period_stdt] AND @[period_eddt]
+                               ) A
+                              ,(SELECT  LSE_RCV_CHG_TP_CD, ACCT_CD, LSTM_CD, COST_CD
+                                FROM    LSE_RNTL_COST_ACCT_ORD WHERE LSTM_CD = 'XX'
+                                UNION ALL
+                                SELECT  LSE_RCV_CHG_TP_CD, ACCT_CD, 'BX', COST_CD
+                                FROM    LSE_RNTL_COST_ACCT_ORD WHERE LSTM_CD = 'XX'
+                                UNION ALL
+                                SELECT  LSE_RCV_CHG_TP_CD, ACCT_CD, LSTM_CD, COST_CD
+                                FROM   (SELECT  A.LSE_RCV_CHG_TP_CD,
+                                                A.LSTM_CD AS ZZZ,
+                                                A.ACCT_CD AS ACCT_CD,
+                                                A.COST_CD,
+                                                B.LSTM_CD AS LSTM_CD
+                                        FROM    LSE_RNTL_COST_ACCT_ORD A,
+                                                MST_LSE_TERM B
+                                        WHERE   A.LSTM_CD IN('XX', B.LSTM_CD)
+                                        )
+                                WHERE  (LSE_RCV_CHG_TP_CD, ZZZ, LSTM_CD) NOT IN (SELECT A.LSE_RCV_CHG_TP_CD, 'XX', B.LSTM_CD
+                                                                                 FROM   LSE_RNTL_COST_ACCT_ORD A,
+                                                                                        MST_LSE_TERM B
+                                                                                 WHERE  A.LSTM_CD = B.LSTM_CD)
+                                ) C
+                        WHERE   A.LSTM_CD           = C.LSTM_CD          (+)
+                        AND     A.LSE_PAY_CHG_TP_CD = C.LSE_RCV_CHG_TP_CD(+)
+                        AND     A.IF_RGST_NO IS NULL
+                        GROUP BY A.LSE_PAY_CHG_TP_CD, C.ACCT_CD, C.COST_CD
+                               , A.CHG_COST_YRMON, A.AGMT_CTY_CD, A.AGMT_SEQ
+                               , A.LSTM_CD, A.CNTR_TPSZ_CD, A.IF_RGST_NO
+                        ) A,
+                        LSE_RNTL_COST_ACCT_ORD B
+                WHERE  NVL2(A.ACCT_CD, A.LSE_PAY_CHG_TP_CD, 'XXX')= B.LSE_RCV_CHG_TP_CD(+)
+                AND    CASE WHEN A.ACCT_CD IS NULL AND A.LSTM_CD IN('ST','LT') THEN A.LSTM_CD
+                            ELSE 'XX' END = B.LSTM_CD(+)
+                UNION ALL
+                SELECT  A.REV_MONTH
+                      , B.ACCT_CD AS ACCT_CODE
+                      , A.AGMT_NO
+                      , A.AGMT_CTY_CD
+                      , A.AGMT_SEQ
+                      , A.TP_SZ
+                      , A.EST_QTY
+                      , A.VSL_CD
+                      , A.SKD_VOY_NO
+                      , A.SKD_DIR_CD
+                      , A.REV_DIR_CD
+                      , A.CRR_CD
+                      , A.ESTIMATED_COST
+                      , A.INV_AMT
+                      , A.IF_RGST_NO
+                FROM   (SELECT  ROW_NUMBER() OVER(PARTITION BY A.IF_RGST_NO ORDER BY A.CHG_COST_YRMON, 
+                                A.LSE_PAY_CHG_TP_CD, A.LSTM_CD, A.CNTR_TPSZ_CD) AS IF_RGST_SEQ
+                              , A.CHG_COST_YRMON AS REV_MONTH
+                              , A.LSE_PAY_CHG_TP_CD
+                              , A.LSTM_CD
+                              , A.AGMT_CTY_CD || LTRIM(TO_CHAR(A.AGMT_SEQ, '000000')) AS AGMT_NO
+                              , A.AGMT_CTY_CD  AS AGMT_CTY_CD
+                              , A.AGMT_SEQ     AS AGMT_SEQ
+                              , A.CNTR_TPSZ_CD AS TP_SZ
+                              , EST_QTY
+                              , 'CNTC' VSL_CD
+                              , SUBSTR(A.CHG_COST_YRMON, 3,4) AS SKD_VOY_NO
+                              , 'M' SKD_DIR_CD
+                              , 'M' REV_DIR_CD
+                              , 'USD' CRR_CD
+                              , ESTIMATED_COST
+                              , 0 INV_AMT
+                              , NVL(A.IF_RGST_NO, A.AGMT_SEQ) IF_RGST_NO 
+                        FROM   (SELECT  CHG_COST_YRMON,
+                                        LSE_PAY_CHG_TP_CD,
+                                        LSTM_CD,
+                                        AGMT_CTY_CD,
+                                        AGMT_SEQ,
+                                        CNTR_TPSZ_CD,
+                                        EST_QTY,
+                                        DSCR_COST_AMT,
+                                        CR_AMT,
+                                        ESTIMATED_COST,
+                                        IF_RGST_NO,
+                                        CNT_RGST_SEQ,
+                                        MAX_RGST_SEQ
+                                FROM   (SELECT  A.CHG_COST_YRMON
+                                              , B.LSE_PAY_CHG_TP_CD
+                                              , A.LSTM_CD
+                                              , A.AGMT_CTY_CD
+                                              , A.AGMT_SEQ
+                                              , B.CNTR_TPSZ_CD
+                                              , COUNT(CNTR_NO) EST_QTY
+                                              , SUM(B.DSCR_COST_AMT) DSCR_COST_AMT
+                                              , SUM(B.CR_AMT) CR_AMT
+                                              , SUM(B.DSCR_COST_AMT + B.CR_AMT ) ESTIMATED_COST
+                                              , A.IF_RGST_NO
+                                              , COUNT(A.IF_RGST_NO) OVER(PARTITION BY A.IF_RGST_NO) CNT_RGST_SEQ
+                                              , MAX(C.MAX_RGST_SEQ) MAX_RGST_SEQ
+                                        FROM    LSE_PAY_RNTL_CHG A
+                                              , LSE_PAY_RNTL_CHG_DTL B
+                                              ,(SELECT  A.INV_RGST_NO, MAX(B.INV_RGST_SEQ) MAX_RGST_SEQ
+                                                FROM    AP_PAY_INV A
+                                                      , AP_PAY_INV_DTL B
+                                                WHERE   A.INV_RGST_NO    = B.INV_RGST_NO
+                                                AND     A.INV_SUB_SYS_CD = 'LSE'
+                                                AND     A.DELT_FLG       = 'N'
+                                                AND     A.INV_STS_CD  IN ('P','D')
+                                                AND     B.VSL_CD         = 'CNTC'
+                                                AND     B.SKD_DIR_CD     = 'M'
+                                                AND     B.REV_DIR_CD     = 'M'
+                                                AND     B.SKD_VOY_NO BETWEEN SUBSTR(@[period_stdt], 3,4) AND SUBSTR(@[period_eddt], 3,4)                                                
+                                                GROUP BY A.INV_RGST_NO) C 
+                                        WHERE   A.AGMT_CTY_CD     = B.AGMT_CTY_CD
+                                        AND     A.AGMT_SEQ        = B.AGMT_SEQ
+                                        AND     A.CHG_SEQ         = B.CHG_SEQ
+                                        AND     A.IF_RGST_NO      = C.INV_RGST_NO
+                                        AND     B.CNTR_AUD_STS_CD = 'A'
+                                        AND     A.IF_RGST_NO IS NOT NULL
+                                        AND     A.CHG_COST_YRMON BETWEEN @[period_stdt] AND @[period_eddt]
+                                        GROUP BY B.LSE_PAY_CHG_TP_CD
+                                               , A.CHG_COST_YRMON, A.AGMT_CTY_CD, A.AGMT_SEQ
+                                               , A.LSTM_CD, B.CNTR_TPSZ_CD, A.IF_RGST_NO
+                                        ) A
+                                WHERE   1 = 1
+                                AND     A.CNT_RGST_SEQ <= A.MAX_RGST_SEQ
+                                OR     (CASE WHEN A.CNT_RGST_SEQ > A.MAX_RGST_SEQ THEN A.DSCR_COST_AMT END > 0
+                                OR      CASE WHEN A.CNT_RGST_SEQ > A.MAX_RGST_SEQ THEN A.CR_AMT        END < 0)
+                                )  A
+                        ) A,
+                       (SELECT  B.INV_RGST_SEQ AS IF_RGST_SEQ
+                              , B.ACCT_CD
+                              , B.CNTR_TPSZ_CD TPSZ
+                              , B.INV_RGST_NO AS IF_RGST_NO
+                              , B.VSL_CD
+                              , B.SKD_DIR_CD
+                              , B.REV_DIR_CD
+                              , A.INV_CURR_CD CRR_CD
+                              , SUM(B.INV_AMT) INV_AMT
+                        FROM    AP_PAY_INV     A
+                              , AP_PAY_INV_DTL B
+                        WHERE   A.INV_RGST_NO    = B.INV_RGST_NO
+                        AND     A.INV_SUB_SYS_CD = 'LSE'
+                        AND     A.DELT_FLG       = 'N'
+                        AND     A.INV_STS_CD IN ('P','D')
+                        AND     B.VSL_CD         = 'CNTC'                        
+                        AND     B.SKD_DIR_CD     = 'M'
+                        AND     B.REV_DIR_CD     = 'M'
+                        AND     B.SKD_VOY_NO BETWEEN SUBSTR(@[period_stdt], 3,4) AND SUBSTR(@[period_eddt], 3,4)
+                        GROUP BY B.ACCT_CD, B.VSL_CD, B.SKD_DIR_CD, B.REV_DIR_CD, 
+                                 B.CNTR_TPSZ_CD, A.INV_CURR_CD, B.INV_RGST_NO, B.INV_RGST_SEQ
+                        ) B
+                WHERE   A.IF_RGST_NO = B.IF_RGST_NO
+                AND     A.IF_RGST_SEQ = B.IF_RGST_SEQ
+                UNION ALL
+                SELECT  C.REV_MONTH
+                      , B.ACCT_CD
+                      , NULL AGMT_NO
+                      , NULL AGMT_CTY_CD
+                      , NULL AGMT_SEQ
+                      , B.CNTR_TPSZ_CD TPSZ
+                      , 0 EST_QTY
+                      , B.VSL_CD
+                      , SUBSTR(C.REV_MONTH, 3, 4) AS SKD_VOYAGE_NO
+                      , B.SKD_DIR_CD
+                      , B.REV_DIR_CD
+                      , A.INV_CURR_CD CRR_CD
+                      , 0 ESTIMATED_COST
+                      , SUM(B.INV_AMT) INV_AMT
+                      , B.INV_RGST_NO IF_RGST_NO
+                FROM    AP_PAY_INV A
+                      , AP_PAY_INV_DTL B
+                      ,(SELECT  DISTINCT IF_RGST_NO, CHG_COST_YRMON AS REV_MONTH
+                        FROM    LSE_PAY_RNTL_CHG
+                        UNION ALL
+                        SELECT	DISTINCT IF_RGST_NO, TO_CHAR(TO_DATE(SKD_VOY_NO, 'YYMM'), 'YYYYMM') AS REV_MONTH
+                        FROM    LSE_OP_LSE
+                        ) C
+                WHERE   B.INV_RGST_NO 	 = A.INV_RGST_NO
+                AND     B.INV_RGST_NO    = C.IF_RGST_NO
+                AND     A.INV_SUB_SYS_CD = 'LSE'
+                AND     A.DELT_FLG       = 'N'
+                AND     A.INV_STS_CD IN ('P','D')
+                AND     B.VSL_CD         = 'CNTC'                
+                AND     B.SKD_DIR_CD     = 'M'
+                AND     B.REV_DIR_CD     = 'M'
+                AND     B.SKD_VOY_NO BETWEEN SUBSTR(@[period_stdt], 3, 4) AND SUBSTR(@[period_eddt], 3, 4)                
+                GROUP BY C.REV_MONTH, B.ACCT_CD, B.VSL_CD, SUBSTR(C.REV_MONTH, 3, 4), 
+                         B.SKD_DIR_CD, B.REV_DIR_CD, B.CNTR_TPSZ_CD, A.INV_CURR_CD, B.INV_RGST_NO
+                UNION ALL
+                SELECT  A.REV_MONTH
+                      , B.ACCT_CD AS ACCT_CODE
+                      , A.AGMT_NO
+                      , A.AGMT_CTY_CD
+                      , A.AGMT_SEQ
+                      , A.TP_SZ
+                      , A.EST_QTY
+                      , A.VSL_CD
+                      , A.SKD_VOY_NO
+                      , A.SKD_DIR_CD
+                      , A.REV_DIR_CD
+                      , A.CRR_CD
+                      , A.ESTIMATED_COST
+                      , A.INV_AMT
+                      , A.IF_RGST_NO
+                FROM   (SELECT  ROW_NUMBER() OVER(PARTITION BY A.IF_RGST_NO ORDER BY A.CHG_COST_YRMON, 
+                                A.LSE_PAY_CHG_TP_CD, A.LSTM_CD, A.CNTR_TPSZ_CD) AS IF_RGST_SEQ
+                              , A.CHG_COST_YRMON AS REV_MONTH
+                              , A.LSE_PAY_CHG_TP_CD
+                              , A.LSTM_CD
+                              , A.AGMT_CTY_CD || LTRIM(TO_CHAR(A.AGMT_SEQ, '000000')) AS AGMT_NO
+                              , A.AGMT_CTY_CD  AS AGMT_CTY_CD
+                              , A.AGMT_SEQ     AS AGMT_SEQ
+                              , A.CNTR_TPSZ_CD AS TP_SZ
+                              , EST_QTY
+                              , 'CNTC' VSL_CD
+                              , SUBSTR(A.CHG_COST_YRMON, 3,4) AS SKD_VOY_NO
+                              , 'M' SKD_DIR_CD
+                              , 'M' REV_DIR_CD
+                              , 'USD' CRR_CD
+                              , ESTIMATED_COST
+                              , 0 INV_AMT
+                              , NVL(A.IF_RGST_NO, A.AGMT_SEQ) IF_RGST_NO 
+                        FROM   (SELECT  CHG_COST_YRMON,
+                                        LSE_PAY_CHG_TP_CD,
+                                        LSTM_CD,
+                                        AGMT_CTY_CD,
+                                        AGMT_SEQ,
+                                        CNTR_TPSZ_CD,
+                                        EST_QTY,
+                                        DSCR_COST_AMT,
+                                        CR_AMT,
+                                        ESTIMATED_COST,
+                                        IF_RGST_NO,
+                                        CNT_RGST_SEQ,
+                                        MAX_RGST_SEQ
+                                FROM   (SELECT  A.CHG_COST_YRMON
+                                              , B.LSE_PAY_CHG_TP_CD
+                                              , A.LSTM_CD
+                                              , A.AGMT_CTY_CD
+                                              , A.AGMT_SEQ
+                                              , B.CNTR_TPSZ_CD
+                                              , COUNT(CNTR_NO) EST_QTY
+                                              , SUM(B.DSCR_COST_AMT) DSCR_COST_AMT
+                                              , SUM(B.CR_AMT) CR_AMT
+                                              , SUM(B.DSCR_COST_AMT + B.CR_AMT ) ESTIMATED_COST
+                                              , A.IF_RGST_NO
+                                              , COUNT(A.IF_RGST_NO) OVER(PARTITION BY A.IF_RGST_NO) CNT_RGST_SEQ
+                                              , MAX(C.MAX_RGST_SEQ) MAX_RGST_SEQ
+                                        FROM    LSE_PAY_RNTL_CHG A
+                                              , LSE_PAY_RNTL_CHG_DTL B
+                                              ,(SELECT  A.INV_RGST_NO, MAX(B.INV_RGST_SEQ) MAX_RGST_SEQ
+                                                FROM    AP_PAY_INV A
+                                                      , AP_PAY_INV_DTL B
+                                                WHERE   A.INV_RGST_NO    = B.INV_RGST_NO
+                                                AND     A.INV_SUB_SYS_CD = 'LSE'
+                                                AND     A.DELT_FLG       = 'N'
+                                                AND     A.INV_STS_CD  IN ('C','A')
+                                                AND     B.VSL_CD         = 'CNTC'
+                                                AND     B.SKD_DIR_CD     = 'M'
+                                                AND     B.REV_DIR_CD     = 'M'
+                                                AND     B.SKD_VOY_NO BETWEEN SUBSTR(@[period_stdt], 3,4) AND SUBSTR(@[period_eddt], 3,4)                                                
+                                                GROUP BY A.INV_RGST_NO) C 
+                                        WHERE   A.AGMT_CTY_CD     = B.AGMT_CTY_CD
+                                        AND     A.AGMT_SEQ        = B.AGMT_SEQ
+                                        AND     A.CHG_SEQ         = B.CHG_SEQ
+                                        AND     A.IF_RGST_NO      = C.INV_RGST_NO
+                                        AND     B.CNTR_AUD_STS_CD = 'A'
+                                        AND     A.IF_RGST_NO IS NOT NULL
+                                        AND     A.CHG_COST_YRMON BETWEEN @[period_stdt] AND @[period_eddt]
+                                        GROUP BY B.LSE_PAY_CHG_TP_CD
+                                               , A.CHG_COST_YRMON, A.AGMT_CTY_CD, A.AGMT_SEQ
+                                               , A.LSTM_CD, B.CNTR_TPSZ_CD, A.IF_RGST_NO
+                                        ) A
+                                WHERE   1 = 1
+                                AND     A.CNT_RGST_SEQ <= A.MAX_RGST_SEQ
+                                OR     (CASE WHEN A.CNT_RGST_SEQ > A.MAX_RGST_SEQ THEN A.DSCR_COST_AMT END > 0
+                                OR      CASE WHEN A.CNT_RGST_SEQ > A.MAX_RGST_SEQ THEN A.CR_AMT        END < 0)
+                                )  A
+                        ) A,
+                       (SELECT  B.INV_RGST_SEQ AS IF_RGST_SEQ
+                              , B.ACCT_CD
+                              , B.CNTR_TPSZ_CD TPSZ
+                              , B.INV_RGST_NO AS IF_RGST_NO
+                              , B.VSL_CD
+                              , B.SKD_DIR_CD
+                              , B.REV_DIR_CD
+                              , A.INV_CURR_CD CRR_CD
+                              , SUM(B.INV_AMT) INV_AMT
+                        FROM    AP_PAY_INV     A
+                              , AP_PAY_INV_DTL B
+                        WHERE   A.INV_RGST_NO    = B.INV_RGST_NO
+                        AND     A.INV_SUB_SYS_CD = 'LSE'
+                        AND     A.DELT_FLG       = 'N'
+                        AND     A.INV_STS_CD IN ('C','A')
+                        AND     B.VSL_CD         = 'CNTC'                        
+                        AND     B.SKD_DIR_CD     = 'M'
+                        AND     B.REV_DIR_CD     = 'M'
+                        AND     B.SKD_VOY_NO BETWEEN SUBSTR(@[period_stdt], 3,4) AND SUBSTR(@[period_eddt], 3,4)
+                        GROUP BY B.ACCT_CD, B.VSL_CD, B.SKD_DIR_CD, B.REV_DIR_CD, 
+                                 B.CNTR_TPSZ_CD, A.INV_CURR_CD, B.INV_RGST_NO, B.INV_RGST_SEQ
+                        ) B
+                WHERE   A.IF_RGST_NO = B.IF_RGST_NO
+                AND     A.IF_RGST_SEQ = B.IF_RGST_SEQ
+                )
+        GROUP BY REV_MONTH, ACCT_CODE, TP_SZ, VSL_CD, SKD_VOY_NO, 
+                 SKD_DIR_CD, REV_DIR_CD, CRR_CD, IF_RGST_NO
+		)			]]></sql>
+			<params>
+				<param name="period_dt" type="12" value="" out="N"/>
+				<param name="period_stdt" type="12" value="" out="N"/>
+				<param name="period_eddt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

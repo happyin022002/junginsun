@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CostManageDBDAOSearchBasicCmcbCoaUcPfmcRSQL">
+			<desc><![CDATA[Basic CMCB_COA UC PFMC List를 조회한다.
+
+2014.06.30 PEJ 쿼리튜닝(NO_MERGE 힌트 추가) 
+2015.02.12 이혜민 [CHM-201533940] Sector CMCB 화면 내 COA UC PFMC 팝업 조회로직 변경
+                                                      sctr_lane_ofc내 act_flg 조건 삭제 (active 상관없이 Pol-Pod Active 기준으로)
+2015.06.15 김용습 [CHM-201536164] 주간 MAS Open에 따른 타모듈 프로그램 적용 요청
+2015.07.17 김용습 [CHM-201536875] [CSR 전환건] SQM의 CM Cost 산출 및 조회 로직 보완
+2015.08.20 김용습 [CHM-201536994] Split24-[그룹사 표준 코드 시행] SML 프로그램 대응 및 데이타 마이그레이션 작업 요청
+2016.01.07 SUBSTR(CNTR_TPSZ_CD, -1), 2 -> SUBSTR(CNTR_TPSZ_CD, -1), '2'로 변경]]></desc>
+			<sql><![CDATA[
+WITH MAS_DATA AS
+(SELECT BSE_TP_CD
+      ,BSE_YR
+      ,BSE_QTR_CD
+      ,OFC_VW_CD
+      ,RLANE_CD
+      ,DIR_CD
+      ,TRD_CD
+      ,SUB_TRD_CD
+      ,POL_CD
+      ,POD_CD
+--      ,SUM(LOD_QTY) AS LOD_QTY
+--      ,SUM(REV)     AS REV
+--      ,SUM(PA_CM_COST_TTL_AMT) AS PA_CM_COST_TTL_AMT
+--      ,SUM(RA_CM_COST_TTL_AMT) AS RA_CM_COST_TTL_AMT
+      ,ROUND(DECODE(SUM(NVL(LOD_QTY,0)), 0, 0, SUM(NVL(PA_CM_COST_TTL_AMT,0))/SUM(NVL(LOD_QTY,0)))) AS PA_CM_UC_AMT
+      ,ROUND(DECODE(SUM(NVL(LOD_QTY,0)), 0, 0, SUM(NVL(RA_CM_COST_TTL_AMT,0))/SUM(NVL(LOD_QTY,0)))) AS RA_CM_UC_AMT
+      ,POL_CALL_SEQ
+      ,POD_CALL_SEQ
+  FROM (
+        SELECT B2.BSE_TP_CD
+              ,B2.BSE_YR
+              ,B2.BSE_QTR_CD
+              ,B2.OFC_VW_CD
+              ,B2.TRD_CD
+              ,B2.SUB_TRD_CD
+              ,B2.RLANE_CD
+              ,B2.DIR_CD
+              ,B1.CTRT_RGN_OFC
+              ,B1.SLS_RGN_OFC
+              ,B1.CTRT_OFC_CD
+              ,B1.SLS_OFC_CD
+              ,B1.VVD
+              ,B2.POL_CD
+              ,B2.POD_CD
+              ,B1.LOD_QTY
+              ,B1.REV
+              ,B1.RA_CM_COST_TTL_AMT
+              ,B1.PA_CM_COST_TTL_AMT
+              ,B2.POL_CALL_SEQ
+              ,B2.POD_CALL_SEQ
+          FROM (
+                  SELECT /*+ NO_MERGE */ 
+                         TRD_CD
+                        ,SUB_TRD_CD
+                        ,RLANE_CD
+                        ,DIR_CD
+                        ,(SELECT N2ND_PRNT_OFC_CD FROM SQM_ORGANIZATION_V WHERE OFC_CD = CTRT_OFC_CD) CTRT_RHQ_OFC
+                        ,CASE WHEN    CTRT_OFC_CD = 'NYCRA'
+                                   OR CTRT_OFC_CD = 'HAMRU'
+                                   OR CTRT_OFC_CD = 'SINRS'
+                                   OR CTRT_OFC_CD = 'SHARC' THEN SUBSTR(CTRT_OFC_CD, 1, 3)||'SC'
+                                                            ELSE (SELECT N4TH_PRNT_OFC_CD FROM SQM_ORGANIZATION_V WHERE OFC_CD = CTRT_OFC_CD)
+                          END AS CTRT_RGN_OFC
+                        ,(SELECT N2ND_PRNT_OFC_CD FROM SQM_ORGANIZATION_V WHERE OFC_CD = SLS_OFC_CD) SLS_RHQ_OFC
+                        ,CASE WHEN    SLS_OFC_CD = 'NYCRA'
+                                   OR SLS_OFC_CD = 'HAMRU'
+                                   OR SLS_OFC_CD = 'SINRS'
+                                   OR SLS_OFC_CD = 'SHARC' THEN SUBSTR(SLS_OFC_CD, 1, 3)||'SC'
+                                                           ELSE (SELECT N4TH_PRNT_OFC_CD FROM SQM_ORGANIZATION_V WHERE OFC_CD = SLS_OFC_CD)
+                          END AS SLS_RGN_OFC
+                        ,CTRT_OFC_CD
+                        ,SLS_OFC_CD
+                        ,COST_WK
+                        ,VSL_CD||SKD_VOY_NO||DIR_CD AS VVD
+                        ,DECODE(SUBSTR(CNTR_TPSZ_CD, -1), '2', BKG_QTY, BKG_QTY * 2) AS LOD_QTY
+                        ,NVL(BKG_REV, 0) + NVL(BKG_OFT_REV, 0) + NVL(BKG_MISC_REV, 0) + NVL(SCR_CHG_REV, 0) AS REV
+                        ,BKG_POL_CD
+                        ,BKG_POD_CD
+                        ,(RA_CM_COST_TTL_AMT - DMDT_COM_AMT) AS RA_CM_COST_TTL_AMT
+                        ,(PA_CM_COST_TTL_AMT - DMDT_COM_AMT) AS PA_CM_COST_TTL_AMT
+                    FROM MAS_BKG_EXPN_DTL_WK
+                   WHERE SUBSTR(SLS_YRMON, 1, 4)||COST_WK BETWEEN @[f_fm_wk] AND @[f_to_wk]
+                     AND DELT_FLG      = 'N'
+                     AND BKG_STS_CD    IN ('F','S','W')
+                     AND BKG_CGO_TP_CD <> 'P'
+                     AND BL_NO_TP      IN ('M','0')
+                     AND RLANE_CD      = @[f_rlane_cd]
+               ) B1
+              ,SQM_SCTR_LANE_OFC B2
+         WHERE B2.BSE_TP_CD    = @[f_bse_tp_cd]
+           AND B2.BSE_YR       = @[f_bse_yr]
+           AND B2.BSE_QTR_CD   = DECODE(@[f_bse_tp_cd], 'Y', '00', @[f_bse_qtr_cd])
+           AND B2.OFC_VW_CD = 'L'
+           AND B2.TRD_CD       = B1.TRD_CD
+           AND B2.SUB_TRD_CD   = B1.SUB_TRD_CD
+           AND B2.RLANE_CD     = B1.RLANE_CD
+           AND B2.DIR_CD       = B1.DIR_CD
+           AND B2.POL_CD       = B1.BKG_POL_CD
+           AND B2.POD_CD       = B1.BKG_POD_CD
+           AND B2.RGN_OFC_CD   = DECODE(B2.OFC_VW_CD, 'C', B1.CTRT_RGN_OFC, 'L', B1.SLS_RGN_OFC)
+           AND B1.CTRT_RHQ_OFC IS NOT NULL
+           AND B1.SLS_RHQ_OFC  IS NOT NULL
+--           AND B2.SQM_ACT_FLG  = 'Y'
+       )
+ GROUP BY BSE_TP_CD
+         ,BSE_YR
+         ,BSE_QTR_CD
+         ,OFC_VW_CD
+         ,TRD_CD
+         ,SUB_TRD_CD
+         ,RLANE_CD
+         ,DIR_CD
+         ,POL_CD
+         ,POD_CD
+         ,POL_CALL_SEQ
+         ,POD_CALL_SEQ
+)
+SELECT A2.BSE_TP_CD
+       ,A2.BSE_YR
+       ,A2.BSE_QTR_CD
+       ,A2.TRD_CD
+       ,A2.SUB_TRD_CD
+       ,A2.RLANE_CD
+       ,A2.DIR_CD
+       ,A2.POL_CD
+       ,A2.POD_CD
+      ,(SELECT INTG_CD_VAL_DP_DESC
+		FROM COM_INTG_CD_DTL
+		WHERE INTG_CD_ID = 'CD03218'
+		AND INTG_CD_VAL_CTNT = A3.IAS_RGN_CD) IAS_RGN_CD
+       ,NVL(A1.PA_CM_UC_AMT, 0) AS MAS_PA_CM_UC_AMT
+       ,NVL(A1.RA_CM_UC_AMT, 0) AS MAS_RA_CM_UC_AMT
+       ,NVL(A2.PA_CM_UC_AMT, 0) - NVL(A1.PA_CM_UC_AMT, 0) AS PA_CM_UC_AMT
+       ,NVL(A2.RA_CM_UC_AMT, 0) - NVL(A1.RA_CM_UC_AMT, 0) AS RA_CM_UC_AMT
+       ,A1.POL_CALL_SEQ
+       ,A1.POD_CALL_SEQ
+FROM MAS_DATA A1, SQM_SCTR_PAIR_COST A2, MAS_LANE_RGST A3
+WHERE 1=1
+AND A2.BSE_TP_CD    = @[f_bse_tp_cd]
+AND A2.BSE_YR       = @[f_bse_yr]
+AND A2.BSE_QTR_CD   = DECODE(@[f_bse_tp_cd], 'Y', '00', @[f_bse_qtr_cd])
+AND A2.SUB_TRD_CD   = @[f_sub_trd_cd]
+AND A2.RLANE_CD     = @[f_rlane_cd]
+AND A2.DIR_CD       = @[f_dir_cd]
+#if (${f_pol_cd} != '' && ${f_pol_cd} != 'All')
+AND A2.POL_CD       = @[f_pol_cd]
+#end
+#if (${f_pod_cd} != '' && ${f_pod_cd} != 'All')
+AND A2.POD_CD       = @[f_pod_cd]
+#end
+#if (${f_ias_rgn_cd} != '' && ${f_ias_rgn_cd} != 'All')
+AND A3.IAS_RGN_CD = @[f_ias_rgn_cd]
+#end
+AND A2.TRD_CD = A3.TRD_CD
+AND A2.SUB_TRD_CD = A3.SUB_TRD_CD
+AND A2.RLANE_CD = A3.RLANE_CD
+AND A2.DIR_CD = A3.DIR_CD
+AND A1.DIR_CD(+) = A2.DIR_CD
+AND A1.POL_CD(+) = A2.POL_CD
+AND A1.POD_CD(+) = A2.POD_CD
+ORDER BY A2.DIR_CD, A2.POL_CD, A2.POD_CD			]]></sql>
+			<params>
+				<param name="f_fm_wk" type="12" value="" out="N"/>
+				<param name="f_to_wk" type="12" value="" out="N"/>
+				<param name="f_rlane_cd" type="12" value="" out="N"/>
+				<param name="f_bse_tp_cd" type="12" value="" out="N"/>
+				<param name="f_bse_yr" type="12" value="" out="N"/>
+				<param name="f_bse_qtr_cd" type="12" value="" out="N"/>
+				<param name="f_sub_trd_cd" type="12" value="" out="N"/>
+				<param name="f_dir_cd" type="12" value="" out="N"/>
+				<param name="f_pol_cd" type="12" value="" out="N"/>
+				<param name="f_pod_cd" type="12" value="" out="N"/>
+				<param name="f_ias_rgn_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

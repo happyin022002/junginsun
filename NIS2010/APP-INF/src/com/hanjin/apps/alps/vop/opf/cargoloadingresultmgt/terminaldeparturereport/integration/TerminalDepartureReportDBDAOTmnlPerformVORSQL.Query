@@ -1,0 +1,562 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TerminalDepartureReportDBDAOTmnlPerformVORSQL">
+			<desc><![CDATA[   2015.08.17 김기원 CHM-201537021  조직코드 변경
+2016.04.28 Arie Im CHM-201641178 아프리카 대륙 구주지역본부/동서남아지역본부 구분 로직 추가]]></desc>
+			<sql><![CDATA[
+SELECT DECODE(C2,3,'S.Total',RHQ)  AS RHQ,
+       DECODE(C2,4,'S.Total',PORT) AS PORT,
+       DECODE(C2,4,'',YARD) AS YARD,
+       DECODE(C2,4,'',3,'',LANE) AS LANE,
+       '' AS MONTH,
+       TDR_QTY,
+       TOT_MVS,
+       WORK_GROSS,
+       GANG_GROSS,
+       TMNL_PROD,
+       GANG_PROD,
+       AVG_CLAN,
+       BERTH_PROD
+FROM   (SELECT DECODE(C2,1,'Total',2,'Average per TDR',RHQ) AS RHQ, 
+              C2,
+              DECODE(PORT,'N',DECODE(C2,1,'',2,'Average per TDR',RHQ),NVL(PORT,DECODE(C2,3,'','')))  AS PORT,
+              DECODE(YARD,'N',DECODE(C2,1,'',2,'',RHQ),NVL(YARD,DECODE(C2,3,'','')))  AS YARD,
+              DECODE(LANE,'N',DECODE(C2,1,'',2,'',RHQ),NVL(LANE,DECODE(C2,3,'','')))  AS LANE,
+              DECODE(C2,2,'',TDR_QTY) AS TDR_QTY,
+              TOT_MVS,
+              WORK_GROSS,
+              GANG_GROSS,
+              TMNL_PROD,
+              GANG_PROD,
+              AVG_CLAN,
+              BERTH_PROD
+       FROM   
+       ( 
+         /* Q1 */
+         SELECT RHQ,
+                PORT,
+                YARD,
+                LANE,
+                DECODE(C3,1,3,DECODE(C4,1,4,C2)) AS C2,
+                TDR_QTY,
+                TOT_MVS,
+                WORK_GROSS,
+                GANG_GROSS,
+                DECODE(WORK_GROSS,0,0,ROUND(TOT_MVS/WORK_GROSS,2))     TMNL_PROD,
+                DECODE(GANG_GROSS,0,0,ROUND(TOT_MVS/GANG_GROSS,2))     GANG_PROD,
+                DECODE(WORK_GROSS,0,0,ROUND(GANG_GROSS/WORK_GROSS,2))  AVG_CLAN,
+                BERTH_PROD
+                --ROUND(TOT_MVS/DECODE(WORK_GROSS,0,1,WORK_GROSS),2)    TMNL_PROD,
+                --ROUND(TOT_MVS/DECODE(GANG_GROSS,0,1,GANG_GROSS),2)    GANG_PROD,
+                --ROUND(GANG_GROSS/DECODE(WORK_GROSS,0,1,WORK_GROSS),2) AVG_CLAN
+         FROM   
+         ( 
+           SELECT /*+ ORDERED */ R.POR_RHQ                   RHQ,
+                  V.VPS_PORT_CD                              PORT,
+                  V.YD_CD                                    YARD,
+                  V.SLAN_CD                                  LANE,
+                  GROUPING(R.POR_RHQ) P, GROUPING(V.VPS_PORT_CD) V, GROUPING(V.YD_CD) Y, GROUPING(V.SLAN_CD) L,
+                  CASE
+                  WHEN GROUPING(R.POR_RHQ)=0 AND GROUPING(V.VPS_PORT_CD)=0 AND GROUPING(V.YD_CD)=0 AND GROUPING(V.SLAN_CD)=0 THEN 1
+                  ELSE 0
+                  END C1,
+                  CASE
+                  WHEN GROUPING(R.POR_RHQ)=0 AND GROUPING(V.VPS_PORT_CD)=1 AND GROUPING(V.YD_CD)=1 AND GROUPING(V.SLAN_CD)=1 THEN 1
+                  ELSE 0
+                  END C3,
+                  CASE
+                  WHEN GROUPING(R.POR_RHQ)=0 AND GROUPING(V.VPS_PORT_CD)=0 AND GROUPING(V.YD_CD)=1 AND GROUPING(V.SLAN_CD)=1 THEN 1
+                  ELSE 0
+                  END C4,
+                  CASE
+                  WHEN GROUPING(R.POR_RHQ)=1 AND GROUPING(V.VPS_PORT_CD)=1 AND GROUPING(V.YD_CD)=1 AND GROUPING(V.SLAN_CD)=1 THEN 1
+                  ELSE 0
+                  END C2,
+                  NVL(COUNT(T.VSL_CD||T.VOY_NO||T.DIR_CD),0) TDR_QTY,
+                  NVL(SUM(T.MVS),0)                          TOT_MVS,
+                  ROUND(SUM(NVL(TO_NUMBER(SUBSTR(T.GROSS_WORK,1,INSTR(T.GROSS_WORK,':')-1))+
+                  TO_NUMBER(SUBSTR(T.GROSS_WORK,INSTR(T.GROSS_WORK,':')+1)/60),0)),2) WORK_GROSS,
+                  ROUND(SUM(NVL(TO_NUMBER(SUBSTR(T.GROSS_GANG,1,INSTR(T.GROSS_GANG,':')-1))+
+                  TO_NUMBER(SUBSTR(T.GROSS_GANG,INSTR(T.GROSS_GANG,':')+1)/60),0)),2) GANG_GROSS,
+                  ROUND(AVG(CASE WHEN NVL((A.ACT_DEP_DT - A.ACT_BRTH_DT),0) = 0 
+                                    THEN T.MVS
+                                    ELSE NVL(T.MVS,0)/(NVL((A.ACT_DEP_DT - A.ACT_BRTH_DT),0) * 24)
+                               END
+                              ),2)  BERTH_PROD
+           FROM TDR_HEADER T, VSK_VSL_PORT_SKD V, VSK_ACT_PORT_SKD A,
+                MDM_VSL_SVC_LANE L, OPF_TML_DEP_RPT_DTL D,
+                ( 
+                 SELECT distinct NVL(B.VSL_CD,A.VSL_CD) VSL_CD, NVL(B.CRR_CD,A.CRR_CD) CRR_CD,
+                         NVL(B.EFF_DT, A.EFF_DT) EFF_DT,
+                         NVL(B.EXP_DT, A.EXP_DT) EXP_DT
+                  FROM   (
+                           SELECT DECODE(V.VSL_CD,NULL,C.VSL_CD,V.VSL_CD)               VSL_CD,
+                                  DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                  TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                  TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+
+                           FROM   FMS_CONTRACT C, FMS_ID_VSL V
+                           WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                           AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                           AND    C.FLET_CTRT_NO = V.FLET_CTRT_NO(+)
+                           AND    V.USE_FLG(+) = 'Y'
+                           AND    C.FLET_CTRT_TP_CD = 'TI'
+                           AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                    OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                    OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                           UNION ALL
+                           SELECT C.VSL_CD     VSL_CD,
+                                  DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                  TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                  TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                           FROM   FMS_CONTRACT C
+                           WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                           AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                           AND    C.FLET_CTRT_TP_CD = 'TI'
+                           AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                    OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                    OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                         ) A,
+                         ( 
+                           SELECT DECODE(V.VSL_CD,NULL,C.VSL_CD,V.VSL_CD)               VSL_CD,
+                                  DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                  TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                  TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                           FROM   FMS_CONTRACT C, FMS_ID_VSL V
+                           WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                           AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                           AND    C.FLET_CTRT_NO = V.FLET_CTRT_NO(+)
+                           AND    V.USE_FLG(+) = 'Y'
+                           AND    C.FLET_CTRT_TP_CD = 'TO'
+                           AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                    OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                    OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                           UNION ALL
+                           SELECT C.VSL_CD     VSL_CD,
+                                  DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                  TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                  TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                           FROM   FMS_CONTRACT C
+                           WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                           AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                           AND    C.FLET_CTRT_TP_CD = 'TO'
+                           AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                    OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                    OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                         ) B   
+                 WHERE A.VSL_CD = B.VSL_CD(+)
+                 UNION ALL
+                 SELECT distinct NVL(B.VSL_CD,A.VSL_CD) VSL_CD, NVL(B.CRR_CD,A.CRR_CD) CRR_CD,
+                        NVL(B.EFF_DT, A.EFF_DT) EFF_DT,
+                        NVL(B.EXP_DT, A.EXP_DT) EXP_DT
+                 FROM   (
+                          SELECT DECODE(V.VSL_CD,NULL,C.VSL_CD,V.VSL_CD)               VSL_CD,
+                                 DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                 TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                 TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                          FROM   FMS_CONTRACT C, FMS_ID_VSL V
+                          WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                          AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                          AND    C.FLET_CTRT_NO = V.FLET_CTRT_NO(+)
+                          AND    V.USE_FLG(+) = 'Y'
+                          AND    C.FLET_CTRT_TP_CD = 'OW'
+                          AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                   OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                   OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                          UNION ALL
+                          SELECT C.VSL_CD     VSL_CD,
+                                 DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                 TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                 TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                          FROM   FMS_CONTRACT C
+                          WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                          AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                          AND    C.FLET_CTRT_TP_CD = 'OW'
+                          AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                   OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                   OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                         ) A,
+                          ( SELECT DECODE(V.VSL_CD,NULL,C.VSL_CD,V.VSL_CD)               VSL_CD,
+                                 DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                 TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                 TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                          FROM   FMS_CONTRACT C, FMS_ID_VSL V
+                          WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                          AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                          AND    C.FLET_CTRT_NO = V.FLET_CTRT_NO(+)
+                          AND    V.USE_FLG(+) = 'Y'
+                          AND    C.FLET_CTRT_TP_CD = 'TO'
+                          AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                   OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                   OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                          UNION ALL
+                          SELECT C.VSL_CD     VSL_CD,
+                                 DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                               TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                               TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                          FROM   FMS_CONTRACT C
+                          WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                          AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                          AND    C.FLET_CTRT_TP_CD = 'TO'
+                          AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                   OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                   OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                         ) B   
+                 WHERE A.VSL_CD = B.VSL_CD(+)
+                ) C,
+                ( 
+                  SELECT  LOC_CD, POR_RHQ, TP, VOP_PORT_FLG
+                  FROM    
+                   ( 
+--                    SELECT LOC_CD, 'HAMRU' POR_RHQ, DECODE(VOP_PORT_RHQ_CD,NULL,'A','B') TP, VOP_PORT_FLG
+--                    FROM   MDM_LOCATION
+--                    WHERE  DECODE(CONTI_CD, 'F', 'E', CONTI_CD) = 'E'
+--                    AND    NVL(DELT_FLG, 'N') = 'N'
+--                    AND    CALL_PORT_FLG      = 'Y'
+--                    --2010.07.28 EGAIS는 SINRS로 
+--					--2010.08.16 ZADUR는 HAMRU에서 SINRS으로 소속 변경됨
+--                    AND    LOC_CD NOT IN ('EGAIS','ZADUR','RUVVO')                  
+--                    UNION ALL
+--                    SELECT LOC_CD, 'NYCRA' POR_RHQ, DECODE(VOP_PORT_RHQ_CD,NULL,'A','B') TP, VOP_PORT_FLG
+--                    FROM   MDM_LOCATION
+--                    WHERE  CONTI_CD           = 'M'
+--                    AND    NVL(DELT_FLG, 'N') = 'N'
+--                    AND    CALL_PORT_FLG      = 'Y'
+--                    UNION ALL
+--                    SELECT LOC_CD, DECODE(SCONTI_CD, 'AF', DECODE(CNT_CD,'KR','SELIB','JP','TYOIB','SHARC'), 'SINRS') POR_RHQ,
+--                           DECODE(VOP_PORT_RHQ_CD,NULL,'A','B') TP, VOP_PORT_FLG
+--                    FROM   MDM_LOCATION
+--                    --2010.07.28 EGAIS는 SINRS로 
+--					--2010.08.16 ZADUR는 HAMRU에서 SINRS으로 소속 변경됨
+--                    WHERE  (CONTI_CD          = 'A' OR LOC_CD = 'EGAIS' OR LOC_CD = 'ZADUR')
+--                    AND    NVL(DELT_FLG, 'N') = 'N'
+--                    AND    CALL_PORT_FLG      = 'Y' 
+--					UNION ALL
+--					SELECT LOC_CD, 'VVOIA' POR_RHQ, DECODE(VOP_PORT_RHQ_CD,NULL,'A','B') TP, VOP_PORT_FLG
+--                    FROM   MDM_LOCATION
+--                    WHERE  CONTI_CD = 'E'
+--                    AND    NVL(DELT_FLG, 'N') = 'N'
+--                    AND    CALL_PORT_FLG = 'Y'
+--                    AND    LOC_CD = 'RUVVO'
+                    SELECT L.LOC_CD, O.OFC_N3RD_LVL_CD POR_RHQ, DECODE(L.VOP_PORT_RHQ_CD,NULL,'A','B') TP, L.VOP_PORT_FLG FROM MDM_LOCATION L, MAS_OFC_LVL O WHERE L.EQ_CTRL_OFC_CD = O.OFC_CD AND L.CALL_PORT_FLG = 'Y' AND L.DELT_FLG = 'N' AND O.OFC_APLY_TO_YRMON ='999912' AND O.OFC_LVL < 9
+
+                    )
+                    WHERE   POR_RHQ = DECODE(SUBSTR(@[rhq], 1, 3), 'ALL', POR_RHQ, @[rhq]) 
+                  ) R
+                  WHERE  T.VSL_CD       = V.VSL_CD
+                  AND    T.VOY_NO       = V.SKD_VOY_NO
+                  AND    T.DIR_CD       = V.SKD_DIR_CD
+                  AND    T.PORT_CD      = V.VPS_PORT_CD
+                  AND    T.CALL_IND     = V.CLPT_IND_SEQ
+                  AND    V.VSL_CD       = A.VSL_CD
+                  AND    V.SKD_VOY_NO   = A.SKD_VOY_NO
+                  AND    V.SKD_DIR_CD   = A.SKD_DIR_CD
+                  AND    V.VPS_PORT_CD  = A.VPS_PORT_CD
+                  AND    V.CLPT_IND_SEQ = A.CLPT_IND_SEQ
+                  AND    V.SLAN_CD      = L.VSL_SLAN_CD
+                  AND    V.VSL_CD       = C.VSL_CD(+)
+                  AND    V.VPS_PORT_CD  = R.LOC_CD
+                  AND    T.VSL_CD       = D.VSL_CD(+)
+                  AND    T.VOY_NO       = D.SKD_VOY_NO(+)
+                  AND    T.DIR_CD       = D.SKD_DIR_CD(+)
+                  AND    T.PORT_CD      = D.CLPT_CD(+)
+                  AND    T.CALL_IND     = D.CLPT_IND_SEQ(+)
+                  AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(A.ACT_DEP_DT, 'yyyymm') AND TO_CHAR(A.ACT_DEP_DT, 'yyyymm')  --:fm_dt
+                           OR REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(A.ACT_DEP_DT, 'yyyymm') AND TO_CHAR(A.ACT_DEP_DT, 'yyyymm')  --:to_dt
+                           OR ( TO_CHAR(A.ACT_DEP_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(A.ACT_DEP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+#if (${loc_cd} != '' && ${yd_cd} == 'All')
+                  AND    V.YD_CD        LIKE @[loc_cd]||'%' 
+#end
+#if (${loc_cd} != '' && ${yd_cd} != 'All')
+                  AND    V.YD_CD        LIKE @[loc_cd]||@[yd_cd]||'%' 
+#end                          
+                  AND    R.POR_RHQ      = DECODE(@[rhq], 'ALL', R.POR_RHQ, @[rhq])
+#if (${target_lanes} != 'ALL')
+                  AND    L.TML_PROD_RPT_FLG LIKE @[target_lanes]||'%'                                                --Target Lanes Only 일경우 'Y', ALL일 경우 NULL
+#end
+#if (${target_ports} != 'ALL')
+                  AND    R.TP           LIKE @[target_ports]||'%'                                                    --Target Ports Only 일경우 'B', ALL일 경우 NULL
+                  AND    R.VOP_PORT_FLG = 'Y'
+#end
+#if (${tml_prod_rpt_rsn_cd} != '')
+                  AND    DECODE(D.TML_PROD_RPT_RSN_CD,NULL,'Y','N') = DECODE(@[tml_prod_rpt_rsn_cd],'N','Y','N')       --1Exclude fm TPR이 Check되었을 경우 'Y', Check되지 않았을 경우 'N'
+#else
+                  AND    DECODE(D.TML_PROD_RPT_RSN_CD,NULL,'Y','N') = DECODE('N','N','Y','N')       --2Exclude fm TPR이 Check되었을 경우 'Y', Check되지 않았을 경우 'N'
+#end
+
+#if (${slan_cd} != 'ALL')
+                  AND    V.SLAN_CD      LIKE @[slan_cd]||'%'
+#end
+                  AND    DECODE(@[carr_cd], NULL, 'N', DECODE(
+                               CASE
+                               WHEN TO_DATE(C.EFF_DT,'YYYYMMDD') <= TO_DATE(TO_CHAR(A.ACT_DEP_DT,'YYYYMMDD'),'YYYYMMDD')
+                                    AND TO_DATE(C.EXP_DT,'YYYYMMDD') >= TO_DATE(TO_CHAR(A.ACT_DEP_DT,'YYYYMMDD'),'YYYYMMDD') THEN C.CRR_CD
+                               ELSE DECODE(C.CRR_CD,'SML','OTH',NULL,'OTH','SML')
+                               END, 'SML', 'SML', 'O')) = DECODE( @[carr_cd], NULL, 'N', 'SML', 'SML', 'O', 'O', '')
+                        GROUP BY CUBE( R.POR_RHQ, V.VPS_PORT_CD, V.YD_CD, V.SLAN_CD )               
+       )
+       WHERE C1 = 1 OR C2 = 1 OR C3 = 1 OR C4 = 1
+       /* Q1 */
+       UNION ALL
+       /* Q2 */
+       SELECT 'AVG' RHQ,
+              'N'   PORT,
+              'N'   LANE,
+              'N'   YARD,
+              2    C2,
+              0    TDR_QTY,
+              ROUND(TOT_MVS/TDR_QTY,2),
+              ROUND(WORK_GROSS/TDR_QTY,2),
+              ROUND(GANG_GROSS/TDR_QTY,2),
+              DECODE(WORK_GROSS,0,0,ROUND((TOT_MVS/TDR_QTY) / (WORK_GROSS/TDR_QTY), 2))     TMNL_PROD,
+              DECODE(GANG_GROSS,0,0,ROUND((TOT_MVS/TDR_QTY) / (GANG_GROSS/TDR_QTY), 2))     GANG_PROD,
+              --ROUND((TOT_MVS/TDR_QTY) / DECODE((WORK_GROSS/TDR_QTY), 0, 1, (WORK_GROSS/TDR_QTY)), 2)             TMNL_PROD,
+              --ROUND((TOT_MVS/TDR_QTY) / DECODE((GANG_GROSS/TDR_QTY), 0, 1, (GANG_GROSS/TDR_QTY)), 2)             GANG_PROD,
+              CASE
+                WHEN TOT_MVS=0 OR TDR_QTY=0 OR WORK_GROSS=0 OR GANG_GROSS=0 THEN 0
+                ELSE ROUND(((TOT_MVS/TDR_QTY) / (WORK_GROSS/TDR_QTY)) / ((TOT_MVS/TDR_QTY) / (GANG_GROSS/TDR_QTY)),2) 
+              END AVG_CLAN,
+              BERTH_PROD
+       FROM   
+       ( 
+         SELECT /*+ ORDERED */
+                NVL(COUNT(T.VSL_CD||T.VOY_NO||T.DIR_CD),0) TDR_QTY,
+                NVL(SUM(T.MVS),0)                          TOT_MVS,
+                ROUND(SUM(NVL(TO_NUMBER(SUBSTR(T.GROSS_WORK,1,INSTR(T.GROSS_WORK,':')-1))+
+                TO_NUMBER(SUBSTR(T.GROSS_WORK,INSTR(T.GROSS_WORK,':')+1)/60),0)),2) WORK_GROSS,
+                ROUND(SUM(NVL(TO_NUMBER(SUBSTR(T.GROSS_GANG,1,INSTR(T.GROSS_GANG,':')-1))+
+                TO_NUMBER(SUBSTR(T.GROSS_GANG,INSTR(T.GROSS_GANG,':')+1)/60),0)),2) GANG_GROSS,
+                ROUND(AVG(CASE WHEN NVL((A.ACT_DEP_DT - A.ACT_BRTH_DT),0) = 0 
+                                    THEN T.MVS
+                                    ELSE NVL(T.MVS,0)/(NVL((A.ACT_DEP_DT - A.ACT_BRTH_DT),0) * 24)
+                               END
+                              ),2)  BERTH_PROD
+         FROM TDR_HEADER T, VSK_VSL_PORT_SKD V, VSK_ACT_PORT_SKD A,
+              MDM_VSL_SVC_LANE L, OPF_TML_DEP_RPT_DTL D,
+         ( 
+                 SELECT distinct NVL(B.VSL_CD,A.VSL_CD) VSL_CD, NVL(B.CRR_CD,A.CRR_CD) CRR_CD,
+                                       NVL(B.EFF_DT, A.EFF_DT) EFF_DT,
+                                       NVL(B.EXP_DT, A.EXP_DT) EXP_DT
+                  FROM   (
+                           SELECT DECODE(V.VSL_CD,NULL,C.VSL_CD,V.VSL_CD)               VSL_CD,
+                                  DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                               TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                               TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                           FROM   FMS_CONTRACT C, FMS_ID_VSL V
+                           WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                           AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                           AND    C.FLET_CTRT_NO = V.FLET_CTRT_NO(+)
+                           AND    V.USE_FLG(+) = 'Y'
+                           AND    C.FLET_CTRT_TP_CD = 'TI'
+                           AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                    OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                    OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                           UNION ALL
+                           SELECT C.VSL_CD     VSL_CD,
+                                  DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                               TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                               TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                           FROM   FMS_CONTRACT C
+                           WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                           AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                           AND    C.FLET_CTRT_TP_CD = 'TI'
+                           AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                    OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                    OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                         ) A,
+                         ( 
+                           SELECT DECODE(V.VSL_CD,NULL,C.VSL_CD,V.VSL_CD)               VSL_CD,
+                                  DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                               TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                               TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                           FROM   FMS_CONTRACT C, FMS_ID_VSL V
+                           WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                           AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                           AND    C.FLET_CTRT_NO = V.FLET_CTRT_NO(+)
+                           AND    V.USE_FLG(+) = 'Y'
+                           AND    C.FLET_CTRT_TP_CD = 'TO'
+                           AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                    OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                    OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                           UNION ALL
+                           SELECT C.VSL_CD     VSL_CD,
+                                  DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                               TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                               TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                           FROM   FMS_CONTRACT C
+                           WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                           AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                           AND    C.FLET_CTRT_TP_CD = 'TO'
+                           AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                    OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                    OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                         ) B   
+                 WHERE A.VSL_CD = B.VSL_CD(+)
+                 UNION ALL
+                 SELECT distinct NVL(B.VSL_CD,A.VSL_CD) VSL_CD, NVL(B.CRR_CD,A.CRR_CD) CRR_CD,
+                                       NVL(B.EFF_DT, A.EFF_DT) EFF_DT,
+                                       NVL(B.EXP_DT, A.EXP_DT) EXP_DT
+                 FROM   (
+                          SELECT DECODE(V.VSL_CD,NULL,C.VSL_CD,V.VSL_CD)               VSL_CD,
+                                 DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                  TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                  TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                          FROM   FMS_CONTRACT C, FMS_ID_VSL V
+                          WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                          AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                          AND    C.FLET_CTRT_NO = V.FLET_CTRT_NO(+)
+                          AND    V.USE_FLG(+) = 'Y'
+                          AND    C.FLET_CTRT_TP_CD = 'OW'
+                          AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                   OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                   OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                          UNION ALL
+                          SELECT C.VSL_CD     VSL_CD,
+                                 DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                  TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                  TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                          FROM   FMS_CONTRACT C
+                          WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                          AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                          AND    C.FLET_CTRT_TP_CD = 'OW'
+                          AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                   OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                   OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                         ) A,
+                          ( SELECT DECODE(V.VSL_CD,NULL,C.VSL_CD,V.VSL_CD)               VSL_CD,
+                                 DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                  TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                  TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                          FROM   FMS_CONTRACT C, FMS_ID_VSL V
+                          WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                          AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                          AND    C.FLET_CTRT_NO = V.FLET_CTRT_NO(+)
+                          AND    V.USE_FLG(+) = 'Y'
+                          AND    C.FLET_CTRT_TP_CD = 'TO'
+                          AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                   OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                   OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                          UNION ALL
+                          SELECT C.VSL_CD     VSL_CD,
+                                 DECODE(C.FLET_CTRT_TP_CD,'OW','SML','TI','SML','OTH') CRR_CD,
+                                  TO_CHAR(C.EFF_DT,'YYYYMMDD') EFF_DT,
+                                  TO_CHAR(C.EXP_DT,'YYYYMMDD') EXP_DT
+                          FROM   FMS_CONTRACT C
+                          WHERE  NVL(C.DELT_FLG,'N') = 'N'
+                          AND    C.FLET_CTRT_FACT_CD = 'ACT'
+                          AND    C.FLET_CTRT_TP_CD = 'TO'
+                          AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:fm_dt
+                                   OR  REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(C.EFF_DT, 'yyyymm') AND TO_CHAR(C.EXP_DT, 'yyyymm')  --:to_dt
+                                   OR  ( TO_CHAR(C.EFF_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(C.EXP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+                         ) B   
+                 WHERE A.VSL_CD = B.VSL_CD(+)
+         ) C,
+         ( 
+           SELECT  LOC_CD, POR_RHQ, TP, VOP_PORT_FLG
+           FROM    ( 
+--                     SELECT LOC_CD, 'HAMRU' POR_RHQ, DECODE(VOP_PORT_RHQ_CD,NULL,'A','B') TP, VOP_PORT_FLG
+--                     FROM   MDM_LOCATION
+--                     WHERE  DECODE(CONTI_CD, 'F', 'E', CONTI_CD) = 'E'
+--                     AND    NVL(DELT_FLG, 'N') = 'N'
+--                     AND    CALL_PORT_FLG      = 'Y'
+--                     --2010.07.28 EGAIS는 SINRS로
+--					 --2010.08.16 ZADUR는 HAMRU에서 SINRS으로 소속 변경됨
+--                     AND    LOC_CD            NOT IN ('EGAIS','ZADUR','RUVVO')
+--                     UNION ALL
+--                     SELECT LOC_CD, 'NYCRA' POR_RHQ, DECODE(VOP_PORT_RHQ_CD,NULL,'A','B') TP, VOP_PORT_FLG
+--                     FROM   MDM_LOCATION
+--                     WHERE  CONTI_CD           = 'M'
+--                     AND    NVL(DELT_FLG, 'N') = 'N'
+--                     AND    CALL_PORT_FLG      = 'Y'
+--                     UNION ALL
+--                     SELECT LOC_CD, DECODE(SCONTI_CD, 'AF', DECODE(CNT_CD,'KR','SELIB','JP','TYOIB','SHARC'), 'SINRS') POR_RHQ,
+--                            DECODE(VOP_PORT_RHQ_CD,NULL,'A','B') TP, VOP_PORT_FLG
+--                     FROM   MDM_LOCATION
+--                     --2010.07.28 EGAIS는 SINRS로
+--					 --2010.08.16 ZADUR는 HAMRU에서 SINRS으로 소속 변경됨
+--                     WHERE  (CONTI_CD          = 'A' OR LOC_CD = 'EGAIS' OR LOC_CD = 'ZADUR')
+--                     AND    NVL(DELT_FLG, 'N') = 'N'
+--                     AND    CALL_PORT_FLG      = 'Y' 
+--					UNION ALL
+--					SELECT LOC_CD, 'VVOIA' POR_RHQ, DECODE(VOP_PORT_RHQ_CD,NULL,'A','B') TP, VOP_PORT_FLG
+--                    FROM   MDM_LOCATION
+--                    WHERE  CONTI_CD = 'E'
+--                    AND    NVL(DELT_FLG, 'N') = 'N'
+--                    AND    CALL_PORT_FLG = 'Y'
+--                    AND    LOC_CD = 'RUVVO'
+                    SELECT L.LOC_CD, O.OFC_N3RD_LVL_CD POR_RHQ, DECODE(L.VOP_PORT_RHQ_CD,NULL,'A','B') TP, L.VOP_PORT_FLG FROM MDM_LOCATION L, MAS_OFC_LVL O WHERE L.EQ_CTRL_OFC_CD = O.OFC_CD AND L.CALL_PORT_FLG = 'Y' AND L.DELT_FLG = 'N' AND O.OFC_APLY_TO_YRMON ='999912' AND O.OFC_LVL < 9
+
+					)
+           WHERE   POR_RHQ = DECODE(SUBSTR(@[rhq], 1, 3), 'ALL', POR_RHQ, @[rhq]) 
+         ) R
+         WHERE  T.VSL_CD       = V.VSL_CD
+         AND    T.VOY_NO       = V.SKD_VOY_NO
+         AND    T.DIR_CD       = V.SKD_DIR_CD
+         AND    T.PORT_CD      = V.VPS_PORT_CD
+         AND    T.CALL_IND     = V.CLPT_IND_SEQ
+         AND    V.VSL_CD       = A.VSL_CD
+         AND    V.SKD_VOY_NO   = A.SKD_VOY_NO
+         AND    V.SKD_DIR_CD   = A.SKD_DIR_CD
+         AND    V.VPS_PORT_CD  = A.VPS_PORT_CD
+         AND    V.CLPT_IND_SEQ = A.CLPT_IND_SEQ
+         AND    V.SLAN_CD      = L.VSL_SLAN_CD
+         AND    V.VSL_CD       = C.VSL_CD(+)
+         AND    V.VPS_PORT_CD  = R.LOC_CD
+         AND    T.VSL_CD       = D.VSL_CD(+)
+         AND    T.VOY_NO       = D.SKD_VOY_NO(+)
+         AND    T.DIR_CD       = D.SKD_DIR_CD(+)
+         AND    T.PORT_CD      = D.CLPT_CD(+)
+         AND    T.CALL_IND     = D.CLPT_IND_SEQ(+)
+         AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(A.ACT_DEP_DT, 'yyyymm') AND TO_CHAR(A.ACT_DEP_DT, 'yyyymm')  --:fm_dt
+                  OR REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(A.ACT_DEP_DT, 'yyyymm') AND TO_CHAR(A.ACT_DEP_DT, 'yyyymm')  --:to_dt
+                  OR ( TO_CHAR(A.ACT_DEP_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(A.ACT_DEP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+#if (${loc_cd} != '' && ${yd_cd} == 'All')
+         AND    V.YD_CD        LIKE @[loc_cd]||'%' 
+#end
+#if (${loc_cd} != '' && ${yd_cd} != 'All')
+         AND    V.YD_CD        LIKE @[loc_cd]||@[yd_cd]||'%' 
+#end
+         AND    R.POR_RHQ      = DECODE(@[rhq], 'ALL', R.POR_RHQ, @[rhq])
+#if (${target_lanes} != 'ALL')
+         AND    L.TML_PROD_RPT_FLG LIKE @[target_lanes]||'%'                                                --Target Lanes Only 일경우 'Y', ALL일 경우 NULL
+#end
+#if (${target_ports} != 'ALL')
+         AND    R.TP           LIKE @[target_ports]||'%'                                                    --Target Ports Only 일경우 'B', ALL일 경우 NULL
+         AND    R.VOP_PORT_FLG = 'Y'
+#end
+#if (${tml_prod_rpt_rsn_cd} != '')
+         AND    DECODE(D.TML_PROD_RPT_RSN_CD,NULL,'Y','N') = DECODE(@[tml_prod_rpt_rsn_cd],'N','Y','N')       --Exclude fm TPR이 Check되었을 경우 'Y', Check되지 않았을 경우 'N'
+#else
+         AND    DECODE(D.TML_PROD_RPT_RSN_CD,NULL,'Y','N') = DECODE('N','N','Y','N')       --Exclude fm TPR이 Check되었을 경우 'Y', Check되지 않았을 경우 'N'
+#end
+         AND    DECODE(@[carr_cd], NULL, 'N', DECODE(
+                               CASE
+                               WHEN TO_DATE(C.EFF_DT,'YYYYMMDD') <= TO_DATE(TO_CHAR(A.ACT_DEP_DT,'YYYYMMDD'),'YYYYMMDD')
+                                    AND TO_DATE(C.EXP_DT,'YYYYMMDD') >= TO_DATE(TO_CHAR(A.ACT_DEP_DT,'YYYYMMDD'),'YYYYMMDD') THEN C.CRR_CD
+                               ELSE DECODE(C.CRR_CD,'SML','OTH',NULL,'OTH','SML')
+                               END, 'SML', 'SML', 'O')) = DECODE(@[carr_cd], NULL, 'N', 'SML', 'SML', 'O', 'O', '')
+#if (${slan_cd} != 'ALL')
+         AND    V.SLAN_CD      LIKE @[slan_cd]||'%'
+#end
+         GROUP BY 1
+       )
+       /* Q2 */   
+     )
+     ORDER BY DECODE(C2,1,'YYYYY',2,'ZZZZZ',3,RHQ||'Z',RHQ), DECODE(C2,4,PORT||'Z',PORT), YARD, LANE
+)			]]></sql>
+			<params>
+				<param name="from_date" type="12" value="" out="N"/>
+				<param name="to_date" type="12" value="" out="N"/>
+				<param name="rhq" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="yd_cd" type="12" value="" out="N"/>
+				<param name="target_lanes" type="12" value="" out="N"/>
+				<param name="target_ports" type="12" value="" out="N"/>
+				<param name="tml_prod_rpt_rsn_cd" type="12" value="" out="N"/>
+				<param name="slan_cd" type="12" value="" out="N"/>
+				<param name="carr_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

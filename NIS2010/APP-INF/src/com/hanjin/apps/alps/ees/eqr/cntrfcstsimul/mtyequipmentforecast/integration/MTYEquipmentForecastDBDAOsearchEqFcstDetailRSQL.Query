@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="MTYEquipmentForecastDBDAOsearchEqFcstDetailRSQL">
+			<desc><![CDATA[Sales Projection Detail]]></desc>
+			<sql><![CDATA[
+WITH DUMMY_DATA AS
+(
+        SELECT A.FCAST_YRWK WEEK
+              ,A.BSE_DT  -- 20141202 신규추가          
+              ,A.CNTR_PKUP_SCC_CD
+              ,A.RLANE_CD   
+              ,A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD VVD
+              ,A.SLS_OFC_CD
+              ,A.POL_ECC_CD
+              ,A.POL_ETB_DT
+              ,A.FCAST_TTL_QTY
+              ,SUM(NVL(A.D2_FCAST_QTY,0)+NVL(A.D4_FCAST_QTY,0)+NVL(A.D5_FCAST_QTY,0)+NVL(A.D7_FCAST_QTY,0)) TOTAL_QTY
+              ,SUM(NVL(A.D2_FCAST_QTY,0)) D2_QTY
+              ,SUM(NVL(A.D4_FCAST_QTY,0)) D4_QTY
+              ,SUM(NVL(A.D5_FCAST_QTY,0)) D5_QTY
+              ,SUM(NVL(A.D7_FCAST_QTY,0)) D7_QTY
+              
+              ,A.AVG_TT_DYS 
+              ,A.D2_FCAST_RTO 
+              ,A.D4_FCAST_RTO
+              ,A.D5_FCAST_RTO
+              ,A.D7_FCAST_RTO           
+              ,A.OTR_FCAST_RTO
+              ,A.RN ROW_SEQ  -- 20141202 신규추가
+        FROM
+        (
+            -- 20141211 수정
+            --SELECT ROW_NUMBER() OVER(PARTITION BY A.FCAST_YRWK, A.RLANE_CD, A.SLS_OFC_CD, A.POL_ECC_CD, A.CNTR_PKUP_SCC_CD, A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD ORDER BY A.BSE_DT DESC  ) AS RN
+            SELECT /*+ NO_MERGE(B) */ DENSE_RANK() OVER(PARTITION BY A.RLANE_CD, A.SLS_OFC_CD, A.POL_ECC_CD, A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD ORDER BY A.BSE_DT DESC  ) AS RN
+                  ,A.FCAST_YRWK
+                  ,A.RLANE_CD
+                  ,A.SLS_OFC_CD
+                  ,A.POL_ECC_CD
+                  ,A.CNTR_PKUP_SCC_CD
+                  ,A.VSL_CD
+                  ,A.SKD_VOY_NO
+                  ,A.SKD_DIR_CD              
+                  ,A.BSE_DT
+                  ,A.POL_ETB_DT
+                  ,A.AVG_TT_DYS
+                  ,A.FCAST_TTL_QTY
+                  
+                  ,A.D2_FCAST_QTY
+                  ,A.D4_FCAST_QTY
+                  ,A.D5_FCAST_QTY
+                  ,A.D7_FCAST_QTY
+                  
+                  ,A.D2_FCAST_RTO
+                  ,A.D4_FCAST_RTO
+                  ,A.D5_FCAST_RTO
+                  ,A.D7_FCAST_RTO
+                  ,A.OTR_FCAST_RTO
+                  ,A.EQ_FCAST_RTO_LVL_CD -- 20141216 신규추가
+            FROM  EQR_CTRL_OB_FCAST_SNAP A
+                 ,(
+                     SELECT DISTINCT RLANE_CD, SLS_OFC_CD, POL_ECC_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD
+                     FROM EQR_CTRL_OB_FCAST_SNAP 
+                     WHERE FCAST_YRWK BETWEEN @[fm_week] AND @[to_week]
+		         #if(${rlane_cd} != '')
+		             AND   RLANE_CD = @[rlane_cd]
+		         #end
+                     AND   EQ_FCAST_RTO_LVL_CD NOT IN (0, 9)
+                  ) B            
+            -- 20141216 신규추가
+            WHERE A.RLANE_CD   = B.RLANE_CD  
+            AND   A.SLS_OFC_CD = B.SLS_OFC_CD
+            AND   A.POL_ECC_CD = B.POL_ECC_CD
+            AND   A.VSL_CD     = B.VSL_CD 
+            AND   A.SKD_VOY_NO = B.SKD_VOY_NO
+            AND   A.SKD_DIR_CD = B.SKD_DIR_CD  
+
+            AND   A.EQ_FCAST_RTO_LVL_CD NOT IN (0, 9) -- 0 은 RATIO와 연결되지 않음. 
+
+        ) A
+        -- 20141216 수정 
+        ,(
+              SELECT DISTINCT A.SCC_CD
+              FROM MDM_EQ_ORZ_CHT A
+              #if(${loc_grp_cd} == 'S')
+                 WHERE A.SCC_CD = @[loc_cd]  -- E:ECC, L:LCC, S:SCC 
+              #elseif(${loc_grp_cd} == 'E')
+                 WHERE A.ECC_CD = @[loc_cd]  -- E:ECC, L:LCC, S:SCC 
+              #elseif(${loc_grp_cd} == 'L')
+                 WHERE A.LCC_CD = @[loc_cd]  -- E:ECC, L:LCC, S:SCC 
+              #end
+        ) C
+        -- 20141202 신규추가
+#if(${create_chk_box} != 'Y')
+        WHERE A.RN = 1   -- 모든데이터가 같고 BSE_DT 만 다른 것중 마지막 BSE_DT 를 꺼냅니다. (Create Date 체크 안되어 있으면)
+#else
+        WHERE (A.RN = 1 OR A.RN BETWEEN @[fm_date] AND @[to_date])    -- Create Date 에 체크되면
+#end
+
+        AND A.FCAST_YRWK BETWEEN @[fm_week] AND @[to_week]  -- 팝업오픈 조건값
+        -- 20141215 신규추가
+#if(${rlane_cd} != '')
+        AND   A.RLANE_CD = @[rlane_cd]
+#end
+        AND   A.EQ_FCAST_RTO_LVL_CD NOT IN (0, 9) -- 0 은 RATIO와 연결되지 않음.
+        AND   A.CNTR_PKUP_SCC_CD = C.SCC_CD
+
+        GROUP BY A.FCAST_YRWK
+              ,A.BSE_DT  -- 20141202 신규추가
+              ,A.CNTR_PKUP_SCC_CD
+              ,A.RLANE_CD
+              ,A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD
+              ,A.SLS_OFC_CD
+              ,A.POL_ECC_CD
+              ,A.POL_ETB_DT
+              ,A.FCAST_TTL_QTY
+              ,A.AVG_TT_DYS
+              ,A.D2_FCAST_RTO
+              ,A.D4_FCAST_RTO
+              ,A.D5_FCAST_RTO
+              ,A.D7_FCAST_RTO
+              ,A.OTR_FCAST_RTO
+              ,A.RN   -- 20141202 신규추가
+)
+
+SELECT WEEK
+      ,BSE_DT -- 20141202 신규추가
+      ,CNTR_PKUP_SCC_CD
+      ,RLANE_CD
+      ,VVD
+      ,SLS_OFC_CD
+      ,POL_ECC_CD
+      ,POL_ETB_DT
+      ,FCAST_TTL_QTY -- SALES PROJECTION
+      ,TOTAL_QTY     -- TOTAL BOX
+      ,D2_QTY
+      ,D4_QTY
+      ,D5_QTY
+      ,D7_QTY
+      ,AVG_TT_DYS    -- TURN TIME
+      ,D2_FCAST_RTO
+      ,D4_FCAST_RTO
+      ,D5_FCAST_RTO
+      ,D7_FCAST_RTO
+FROM
+(      
+    SELECT 1 RN
+          ,WEEK
+          ,BSE_DT 
+          ,CNTR_PKUP_SCC_CD
+          ,RLANE_CD
+          ,VVD
+          ,SLS_OFC_CD
+          ,POL_ECC_CD
+          ,POL_ETB_DT
+          ,FCAST_TTL_QTY -- SALES PROJECTION
+          ,TOTAL_QTY     -- TOTAL BOX
+          ,D2_QTY
+          ,D4_QTY
+          ,D5_QTY
+          ,D7_QTY
+          ,AVG_TT_DYS    -- TURN TIME
+          ,D2_FCAST_RTO
+          ,D4_FCAST_RTO
+          ,D5_FCAST_RTO
+          ,D7_FCAST_RTO
+    FROM DUMMY_DATA    
+       
+    UNION ALL  
+    SELECT 1 RN
+          ,WEEK||' TOTAL'
+          ,NULL BSE_DT
+          ,NULL CNTR_PKUP_SCC_CD
+          ,NULL RLANE_CD
+          ,NULL VVD
+          ,NULL SLS_OFC_CD
+          ,NULL POL_ECC_CD
+          ,NULL POL_ETB_DT
+          ,NULL FCAST_TTL_QTY -- SALES PROJECTION
+          ,SUM(TOTAL_QTY)     -- TOTAL BOX
+          ,SUM(D2_QTY)
+          ,SUM(D4_QTY)
+          ,SUM(D5_QTY)
+          ,SUM(D7_QTY)
+          ,NULL AVG_TT_DYS    -- TURN TIME
+          ,NULL D2_FCAST_RTO
+          ,NULL D4_FCAST_RTO
+          ,NULL D5_FCAST_RTO
+          ,NULL D7_FCAST_RTO
+    FROM DUMMY_DATA
+    WHERE ROW_SEQ = 1
+    GROUP BY WEEK
+    
+    UNION ALL  
+    SELECT 0 RN
+          ,'TOTAL'
+          ,NULL BSE_DT
+          ,NULL CNTR_PKUP_SCC_CD
+          ,NULL RLANE_CD
+          ,NULL VVD
+          ,NULL SLS_OFC_CD
+          ,NULL POL_ECC_CD
+          ,NULL POL_ETB_DT
+          ,NULL FCAST_TTL_QTY -- SALES PROJECTION
+          ,SUM(TOTAL_QTY)     -- TOTAL BOX
+          ,SUM(D2_QTY)
+          ,SUM(D4_QTY)
+          ,SUM(D5_QTY)
+          ,SUM(D7_QTY)
+          ,NULL AVG_TT_DYS    -- TURN TIME
+          ,NULL D2_FCAST_RTO
+          ,NULL D4_FCAST_RTO
+          ,NULL D5_FCAST_RTO
+          ,NULL D7_FCAST_RTO
+    FROM DUMMY_DATA
+    WHERE ROW_SEQ = 1
+)
+-- 20141202 신규추가
+ORDER BY RN||WEEK, CNTR_PKUP_SCC_CD, RLANE_CD, VVD, SLS_OFC_CD, POL_ECC_CD, BSE_DT -- Create Check Box 체크되면 표시			]]></sql>
+			<params>
+				<param name="fm_week" type="12" value="" out="N"/>
+				<param name="to_week" type="12" value="" out="N"/>
+				<param name="rlane_cd" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="KRPUS" out="N"/>
+				<param name="fm_date" type="12" value="" out="N"/>
+				<param name="to_date" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

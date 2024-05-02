@@ -1,0 +1,142 @@
+/*=========================================================
+*Copyright(c) 2010 CyberLogitec
+*@FileName : GeneralBookingReceiptDBDAOSearchSvcScopeRSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2010.01.29
+*@LastModifier : 류대영
+*@LastVersion : 1.0
+* 2010.01.29 류대영
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.bkg.bookingconduct.generalbookingconduct.generalbookingreceipt.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author Dae-Young RYU
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class GeneralBookingReceiptDBDAOSearchSvcScopeRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * SVC_SCP_CD 를 조회한다.
+	  * </pre>
+	  */
+	public GeneralBookingReceiptDBDAOSearchSvcScopeRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("del_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("trnk_lane_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("por_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.esm.bkg.bookingconduct.generalbookingconduct.generalbookingreceipt.integration").append("\n"); 
+		query.append("FileName : GeneralBookingReceiptDBDAOSearchSvcScopeRSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT distinct CASE WHEN CNT.CNT = 1" ).append("\n"); 
+		query.append("THEN SINGLE.svcScpCd" ).append("\n"); 
+		query.append("ELSE MULTI.svcScpCd end SVC_SCP_CD" ).append("\n"); 
+		query.append("FROM (SELECT count(*)  CNT" ).append("\n"); 
+		query.append("FROM MDM_svc_scp_lmt org" ).append("\n"); 
+		query.append(", MDM_svc_scp_lmt dest" ).append("\n"); 
+		query.append(", mdm_location por" ).append("\n"); 
+		query.append(", mdm_location del" ).append("\n"); 
+		query.append("WHERE por.loc_cd      = @[por_cd]" ).append("\n"); 
+		query.append("AND del.loc_cd      = @[del_cd]" ).append("\n"); 
+		query.append("AND org.rgn_cd           = por.rgn_cd" ).append("\n"); 
+		query.append("AND org.ORG_DEST_CD      = 'O'" ).append("\n"); 
+		query.append("AND org.SVC_SCP_IND_FLG  = 'Y'" ).append("\n"); 
+		query.append("AND dest.rgn_cd          = del.rgn_cd" ).append("\n"); 
+		query.append("AND dest.ORG_DEST_CD     = 'D'" ).append("\n"); 
+		query.append("AND dest.SVC_SCP_IND_FLG = 'Y'" ).append("\n"); 
+		query.append("AND org.svc_scp_cd       = dest.svc_scp_cd" ).append("\n"); 
+		query.append("and org.delt_flg         = 'N'" ).append("\n"); 
+		query.append("and dest.delt_flg        = 'N') CNT" ).append("\n"); 
+		query.append(", (SELECT Max(org.svc_scp_cd) svcScpCd" ).append("\n"); 
+		query.append("FROM MDM_svc_scp_lmt org" ).append("\n"); 
+		query.append(", MDM_svc_scp_lmt dest" ).append("\n"); 
+		query.append(", MDM_svc_scp_lane L" ).append("\n"); 
+		query.append(", mdm_location por" ).append("\n"); 
+		query.append(", mdm_location del" ).append("\n"); 
+		query.append("WHERE por.loc_cd      = @[por_cd]" ).append("\n"); 
+		query.append("AND del.loc_cd      = @[del_cd]" ).append("\n"); 
+		query.append("AND org.rgn_cd           = por.rgn_cd" ).append("\n"); 
+		query.append("AND org.ORG_DEST_CD      = 'O'" ).append("\n"); 
+		query.append("AND org.SVC_SCP_IND_FLG  = 'Y'" ).append("\n"); 
+		query.append("and org.delt_flg         = 'N'" ).append("\n"); 
+		query.append("AND dest.rgn_cd          = del.rgn_cd" ).append("\n"); 
+		query.append("AND dest.ORG_DEST_CD     = 'D'" ).append("\n"); 
+		query.append("AND dest.SVC_SCP_IND_FLG = 'Y'" ).append("\n"); 
+		query.append("and dest.delt_flg        = 'N'" ).append("\n"); 
+		query.append("and org.svc_scp_cd       = l.SVC_SCP_CD" ).append("\n"); 
+		query.append("AND org.svc_scp_cd       = dest.svc_scp_cd" ).append("\n"); 
+		query.append("and org.svc_scp_cd       = l.SVC_SCP_CD" ).append("\n"); 
+		query.append("and dest.svc_scp_cd      = l.SVC_SCP_CD" ).append("\n"); 
+		query.append("and l.vsl_slan_cd        = @[trnk_lane_cd]) MULTI" ).append("\n"); 
+		query.append(", (SELECT org.svc_scp_cd svcScpCd" ).append("\n"); 
+		query.append("FROM MDM_svc_scp_lmt org" ).append("\n"); 
+		query.append(", MDM_svc_scp_lmt dest" ).append("\n"); 
+		query.append(", mdm_location por" ).append("\n"); 
+		query.append(", mdm_location del" ).append("\n"); 
+		query.append("WHERE por.loc_cd      = @[por_cd]" ).append("\n"); 
+		query.append("AND del.loc_cd      = @[del_cd]" ).append("\n"); 
+		query.append("AND org.rgn_cd           = por.rgn_cd" ).append("\n"); 
+		query.append("AND org.ORG_DEST_CD      = 'O'" ).append("\n"); 
+		query.append("AND org.SVC_SCP_IND_FLG  = 'Y'" ).append("\n"); 
+		query.append("AND dest.rgn_cd          = del.rgn_cd" ).append("\n"); 
+		query.append("AND dest.ORG_DEST_CD     = 'D'" ).append("\n"); 
+		query.append("AND dest.SVC_SCP_IND_FLG = 'Y'" ).append("\n"); 
+		query.append("AND org.svc_scp_cd       = dest.svc_scp_cd" ).append("\n"); 
+		query.append("and org.delt_flg         = 'N'" ).append("\n"); 
+		query.append("and dest.delt_flg        = 'N') SINGLE" ).append("\n"); 
+
+	}
+}

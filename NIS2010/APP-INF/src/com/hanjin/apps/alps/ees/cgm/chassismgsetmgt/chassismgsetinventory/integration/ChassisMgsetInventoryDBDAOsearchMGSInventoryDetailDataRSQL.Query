@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ChassisMgsetInventoryDBDAOsearchMGSInventoryDetailDataRSQL">
+			<desc><![CDATA[[EES_CGM_2075] M.G.Set Inventory Detail : Retrieve]]></desc>
+			<sql><![CDATA[
+WITH HEAD AS
+(
+    SELECT A.EQ_NO
+         , A.EQ_TPSZ_CD
+         , A.AGMT_LSTM_CD
+         , A.AGMT_OFC_CTY_CD || LPAD(A.AGMT_SEQ, 6, '0') as AGMT_NO
+         , DECODE(A.ACIAC_DIV_CD, 'A', 'Y', 'N') AS ACIAC_DIV_CD
+         , NVL(A.DMG_FLG, 'N') AS DMG_FLG
+         , NVL(A.DISP_FLG, 'N') AS DISP_FLG
+         , A.CHSS_MVMT_DT
+    FROM CGM_EQUIPMENT A
+    WHERE A.EQ_KND_CD = 'G'
+
+    #if(${eq_no} != '')
+    AND A.EQ_NO in ($eq_no)
+    #end
+)
+
+-- MAIN QUERY
+SELECT A.EQ_NO
+      ,MAS_LOC_FNC(CASE WHEN A.ATCH_DTCH = 'Attached' THEN A.LST_YD
+                        WHEN A.ATCH_DTCH = 'Detached' THEN A.DTCH_YD_CD
+                         END, 'SCC') AS SCC_CD
+      ,MAS_LOC_FNC(CASE WHEN A.ATCH_DTCH = 'Attached' THEN A.LST_YD
+                        WHEN A.ATCH_DTCH = 'Detached' THEN A.DTCH_YD_CD
+                         END, 'LCC') AS LCC_CD
+      ,A.EQ_TPSZ_CD
+      ,A.AGMT_LSTM_CD
+      ,A.AGMT_NO
+      ,A.ACIAC_DIV_CD
+      ,A.DMG_FLG
+      ,A.DISP_FLG
+      ,A.ATCH_DTCH
+      ,CASE WHEN A.ATCH_DTCH = 'Attached' THEN A.LST_YD
+            WHEN A.ATCH_DTCH = 'Detached' THEN A.DTCH_YD_CD
+       END LST_YD
+      -- Last Status Date
+      ,CASE WHEN A.ATCH_DTCH = 'Attached' THEN TO_CHAR(A.STS_UPD_DT, 'YYYYMMDD')
+            WHEN A.ATCH_DTCH = 'Detached' THEN A.DTCH_DT_YMD
+       END STS_UPD_DT
+      ,CASE WHEN A.ATCH_DTCH = 'Attached' THEN ROUND(SYSDATE - A.STS_UPD_DT)
+            WHEN A.ATCH_DTCH = 'Detached' THEN ROUND(SYSDATE - to_date(A.DTCH_DT_YMD || DTCH_DT_HD, 'yyyymmddhh24mi'))
+       END STAY_DYS
+      ,A.CNTR_CHSS
+       -- LAST MOVEMENT
+      ,CASE WHEN A.ATCH_DTCH = 'Attached' AND A.EQ_TPSZ_CD = 'CLG' THEN (SELECT X.CNMV_STS_CD      FROM MST_CONTAINER X WHERE X.CNTR_NO = A.CNTR_CHSS) --CNMV_DT
+            WHEN A.ATCH_DTCH = 'Attached' AND A.EQ_TPSZ_CD = 'UMG' THEN (SELECT X.CHSS_MVMT_STS_CD FROM CGM_EQUIPMENT X WHERE X.EQ_NO   = A.CNTR_CHSS)
+       END CHSS_MVMT_STS_CD  
+       -- LAST MOVMENT DATE
+      ,CASE WHEN A.ATCH_DTCH = 'Attached' AND A.EQ_TPSZ_CD = 'CLG' THEN (SELECT X.CNMV_DT      FROM MST_CONTAINER X WHERE X.CNTR_NO = A.CNTR_CHSS) --CNMV_DT
+            WHEN A.ATCH_DTCH = 'Attached' AND A.EQ_TPSZ_CD = 'UMG' THEN (SELECT X.CHSS_MVMT_DT FROM CGM_EQUIPMENT X WHERE X.EQ_NO   = A.CNTR_CHSS)
+       END CHSS_MVMT_DT   
+      ,A.ATCH_DT_YMD
+      ,A.ATCH_DT_HD
+      ,A.ATCH_YD_CD
+      ,A.DTCH_DT_YMD
+      ,A.DTCH_DT_HD
+      ,A.DTCH_YD_CD
+      ,A.UPD_DT_YMD
+      ,A.UPD_DT_HD
+      ,U.OFC_CD
+      ,NVL(U.USR_NM, A.UPD_USR_ID) as USR_NM
+
+FROM
+(
+    SELECT DECODE(TO_CHAR(D.DTCH_DT, 'YYYY'), '8888', D.ATCH_DT, D.DTCH_DT) LAST_DT, ROW_NUMBER() OVER(PARTITION BY A.EQ_NO  ORDER BY DECODE(TO_CHAR(D.DTCH_DT, 'YYYY'), '8888', D.ATCH_DT, D.DTCH_DT) DESC) RN  
+          ,A.EQ_NO
+          ,A.EQ_TPSZ_CD
+          ,A.AGMT_LSTM_CD
+          ,A.AGMT_NO
+          ,A.ACIAC_DIV_CD
+          ,A.DMG_FLG
+          ,A.DISP_FLG
+          ,DECODE(D.DTCH_YD_CD , null, DECODE(D.ATCH_YD_CD, NULL, '', 'Attached'), 'Detached') as ATCH_DTCH
+          -- LAST_YARD
+          ,CASE WHEN A.EQ_TPSZ_CD = 'CLG' THEN (SELECT X.CRNT_YD_CD FROM MST_CONTAINER X WHERE X.CNTR_NO = DECODE(A.EQ_TPSZ_CD, 'CLG', D.CNTR_NO, 'UMG', D.CHSS_NO))
+                WHEN A.EQ_TPSZ_CD = 'UMG' THEN (SELECT X.CRNT_YD_CD FROM CGM_EQUIPMENT X WHERE X.EQ_NO   = DECODE(A.EQ_TPSZ_CD, 'CLG', D.CNTR_NO, 'UMG', D.CHSS_NO))
+           END LST_YD
+          -- Last Status Date
+          ,CASE WHEN A.EQ_TPSZ_CD = 'CLG' THEN (SELECT X.CNMV_DT      FROM MST_CONTAINER X WHERE X.CNTR_NO = DECODE(A.EQ_TPSZ_CD, 'CLG', D.CNTR_NO, 'UMG', D.CHSS_NO))
+                WHEN A.EQ_TPSZ_CD = 'UMG' THEN (SELECT X.CHSS_MVMT_DT FROM CGM_EQUIPMENT X WHERE X.EQ_NO   = DECODE(A.EQ_TPSZ_CD, 'CLG', D.CNTR_NO, 'UMG', D.CHSS_NO))
+           END STS_UPD_DT
+          ,DECODE(A.EQ_TPSZ_CD, 'CLG', D.CNTR_NO, 'UMG', D.CHSS_NO) CNTR_CHSS
+          ,DECODE(D.ATCH_DT, null, '', TO_DATE('88881231','YYYYMMDD'), '', TO_CHAR(D.ATCH_DT,'YYYYMMDD')) AS ATCH_DT_YMD
+          ,DECODE(D.ATCH_DT, null, '', TO_DATE('88881231','YYYYMMDD'), '', TO_CHAR(D.ATCH_DT,'HH24MI')) AS ATCH_DT_HD
+          ,NVL(D.ATCH_YD_CD, '') AS ATCH_YD_CD
+          ,DECODE (D.DTCH_DT, null, '', TO_DATE('88881231','YYYYMMDD'), '', TO_CHAR(D.DTCH_DT,'YYYYMMDD')) AS DTCH_DT_YMD
+          ,DECODE (D.DTCH_DT, null, '', TO_DATE('88881231','YYYYMMDD'), '', TO_CHAR(D.DTCH_DT,'HH24MI')) AS DTCH_DT_HD
+          ,NVL(D.DTCH_YD_CD, '') AS DTCH_YD_CD
+          ,TO_CHAR(D.UPD_DT,'YYYYMMDD') AS UPD_DT_YMD
+          ,TO_CHAR(D.UPD_DT,'HH24MI') AS UPD_DT_HD
+          ,D.UPD_USR_ID
+    FROM HEAD A
+        ,CGM_EQ_ATCH_DTCH_HIS D
+    WHERE A.EQ_NO = D.EQ_NO(+)   -- outer join 
+
+) A , COM_USER U
+WHERE  A.RN = 1
+AND A.UPD_USR_ID = U.USR_ID(+)
+#if (${loc_list} != '')
+  #if (${loc_cd} == 'R')
+AND MAS_LOC_FNC(A.LST_YD, 'RCC') in ($loc_list)
+  #elseif (${loc_cd} == 'L')
+AND MAS_LOC_FNC(A.LST_YD, 'LCC') in ($loc_list)
+  #elseif (${loc_cd} == 'E')
+AND MAS_LOC_FNC(A.LST_YD, 'ECC') in ($loc_list)
+  #elseif (${loc_cd} == 'S')
+AND MAS_LOC_FNC(A.LST_YD, 'SCC') in ($loc_list)
+  #elseif (${loc_cd} == 'Y')
+AND A.LST_YD in ($loc_list)
+  #end
+#end
+
+#if (${aciac_div_cd} != '')
+AND A.ACIAC_DIV_CD = @[aciac_div_cd]
+#end
+
+#if (${eq_tpsz_cd} != '')
+AND A.EQ_TPSZ_CD = @[eq_tpsz_cd]
+#end
+
+#if (${atch_dtch} != '')
+AND A.ATCH_DTCH = @[atch_dtch]
+#end
+
+#if (${sty_dys_ov} != '')
+AND ROUND(sysdate - A.STS_UPD_DT) >= @[sty_dys_ov]
+#end			]]></sql>
+			<params>
+				<param name="aciac_div_cd" type="12" value="" out="N"/>
+				<param name="eq_tpsz_cd" type="12" value="" out="N"/>
+				<param name="atch_dtch" type="12" value="" out="N"/>
+				<param name="sty_dys_ov" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

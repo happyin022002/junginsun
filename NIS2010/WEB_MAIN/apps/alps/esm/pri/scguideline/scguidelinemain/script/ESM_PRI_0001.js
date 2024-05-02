@@ -1,0 +1,1194 @@
+/*=========================================================
+ *Copyright(c) 2009 CyberLogitec
+ *@FileName : ui_pri_0001.js
+ *@FileTitle : Guideline Creation
+ *Open Issues :
+ *Change history :
+ *@LastModifyDate : 2009.04.15
+ *@LastModifier : 박성수
+ *@LastVersion : 1.0
+ * 2009.04.15 박성수
+ * 1.0 Creation
+=========================================================*/
+/****************************************************************************************
+ 이벤트 구분 코드: [초기화]INIT=0; [입력]ADD=1; [조회]SEARCH=2; [리스트조회]SEARCHLIST=3;
+ [수정]MODIFY=4; [삭제]REMOVE=5; [리스트삭제]REMOVELIST=6 [다중처리]MULTI=7
+ 기타 여분의 문자상수  COMMAND01=11; ~ COMMAND20=30;
+ ***************************************************************************************/
+
+	/*------------------다음 코드는 JSDoc을 잘 만들기 위해서 추가된 코드임 ------------------*/
+	/**
+	 * @fileoverview 업무에서 공통으로 사용하는 자바스크립트파일로 달력 관련 함수가 정의되어 있다.
+	 * @author 한진해운
+	 */
+	
+	/**
+	 * @extends
+	 * @class Guideline Creation : Guideline Creation 생성을 위한 화면에서 사용하는 업무 스크립트를
+	 *        정의한다.
+	 */
+	function ESM_PRI_0001() {
+		this.processButtonClick = tprocessButtonClick;
+		this.setSheetObject = setSheetObject;
+		this.loadPage = loadPage;
+		this.initSheet = initSheet;
+		this.initControl = initControl;
+		this.doActionIBSheet = doActionIBSheet;
+		this.setTabObject = setTabObject;
+		this.setComboObject = setComboObject;
+		this.validateForm = validateForm;
+	}
+	
+	/* 개발자 작업 */
+	
+	// 공통전역변수
+	var tabObjects = new Array();
+	var tabCnt = 0;
+	var beforetab = 1;
+	
+	var sheetObjects = new Array();
+	var sheetCnt = 0;
+	
+	var comboObjects = new Array();
+	var comboCnt = 0;
+	
+	var tabLoad = new Array();
+	tabLoad[0] = 0;
+	tabLoad[1] = 0;
+	
+	// 탭들속의 하위데이타의 갯수가 몇개인지 카운트. 1이상이어야만 Confirm을 할수 있다.
+	var subDataCnt = 0;
+	// 권한이 있는 사용자인지 여부
+	var isAproUsr = false;
+	
+	var selectedGlineSeq = null;
+	
+	var ICON_URL_EXIST = "http://" + location.hostname + ":" + location.port + "/hanjin/img/tab_icon2.gif";
+	var ICON_URL_NOT_EXIST = "http://" + location.hostname + ":" + location.port + "/hanjin/img/tab_icon1.gif";
+	
+	// 버튼클릭이벤트를 받아 처리하는 이벤트핸들러 정의 */
+	document.onclick = processButtonClick;
+	
+	/**
+	 * 버튼 네임으로 구분하여 프로세스를 분기처리하는 이벤트핸들러 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     processButtonClick();
+	 * </pre>
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function processButtonClick() {
+		/** *** 탭당 시트가 2개 이상인 경우엔 추가 시트변수 지정하여 사용한 **** */
+		var sheetObject1 = sheetObjects[0];
+	
+		/** **************************************************** */
+		var formObject = document.form;
+	
+		try {
+			var srcName = window.event.srcElement.getAttribute("name");
+            if (srcName != null && srcName != "" && srcName.indexOf("btn") == 0) {
+            	if (getButtonTable(srcName).disabled) {
+            		return false;
+            	}
+            }
+	
+			switch (srcName) {
+	
+			case "btn_retrieve":
+				doActionIBSheet(sheetObjects[0],document.form,IBSEARCH);
+				if (tabObjects[0].SelectedIndex == 0) {
+					tab1_OnChange(tabObjects[0], 0);
+				} else {
+					tabObjects[0].SelectedIndex = 0;
+				}
+				break;
+	
+			case "btn_new":
+				doActionIBSheet(sheetObjects[0],document.form,IBCREATE);
+				break;
+	
+			case "btn_save":
+				doActionIBSheet(sheetObjects[0],document.form,IBSAVE);
+				break;
+				
+			case "btn_confirm":
+				doActionIBSheet(sheetObjects[0],document.form,IBSEARCH_ASYNC01);
+				break;
+	
+			case "btn_confirmcancel":
+				doActionIBSheet(sheetObjects[0],document.form,IBSEARCH_ASYNC02);
+				break;
+				
+			case "btn_delete":
+				doActionIBSheet(sheetObjects[0],document.form,IBDELETE);
+				break;
+	
+			case "btn_copy":
+				if (validateForm(sheetObjects[0],document.form,IBCOPYROW)) {
+					var sUrl = "/hanjin/ESM_PRI_0006.do?" + FormQueryString(document.form);
+					//ComOpenWindowCenter(sUrl, "ESM_PRI_0006", 720, 243, true);
+					ComOpenWindowCenter(sUrl, "ESM_PRI_0006", 720, 275, true); //for test
+				}
+
+				break;
+				
+            case "btns_calendar": //달력버튼
+    			if (comboObjects[0].Code == "") {
+    				ComShowCodeMessage('PRI08002');
+    				return false;
+    			}
+
+                var cal = new ComCalendarFromTo();
+                cal.select(formObject.eff_dt_hidden, formObject.exp_dt, 'yyyy-MM-dd');
+                break;
+	
+			} // end switch
+		} catch (e) {
+			if (e == "[object Error]") {
+				ComShowMessage(OBJECT_ERROR);
+			} else {
+				ComShowMessage(e);
+			}
+		}
+	}
+	
+	/**
+	 * IBSheet Object를 배열로 등록 <br>
+	 * 향후 다른 항목들을 일괄처리할 필요가 있을 때 배열로 담는 프로세스를 추가할 수 있다 <br>
+	 * 배열은 소스 상단에 정의 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     setSheetObject(sheetObj);
+	 * </pre>
+	 * @param {ibsheet} sheet_obj 필수 IBSheet Object
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function setSheetObject(sheet_obj) {
+		sheetObjects[sheetCnt++] = sheet_obj;
+	}
+	
+	/**
+	 * IBTab Object를 배열로 등록 <br>
+	 * 향후 다른 항목들을 일괄처리할 필요가 있을 때 배열로 담는 프로세스를 추가할 수 있다 <br>
+	 * 배열은 소스 상단에 정의 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     setTabObject(tab_obj);
+	 * </pre>
+	 * @param {ibtab} tab_obj 필수 IBTab Object
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.04.17
+	 */
+	function setTabObject(tab_obj) {
+		tabObjects[tabCnt++] = tab_obj;
+	}
+	
+	/**
+	 * IBCombo Object를 배열로 등록 <br>
+	 * 향후 다른 항목들을 일괄처리할 필요가 있을 때 배열로 담는 프로세스를 추가할 수 있다 <br>
+	 * 배열은 소스 상단에 정의 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     setComboObject(combo_obj);
+	 * </pre>
+	 * @param {ibcombo} combo_obj 필수 IBCombo Object
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function setComboObject(combo_obj){
+		comboObjects[comboCnt++] = combo_obj;
+	}
+	
+	/**
+	 * Sheet 기본 설정 및 초기화 <br>
+	 * body 태그의 onLoad 이벤트핸들러 구현 <br>
+	 * 화면을 브라우저에서 로딩한 후에 선처리해야 하는 기능을 추가한다. <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     loadPage();
+	 * </pre>
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function loadPage() {
+		for (var i = 0; i < sheetObjects.length; i++) {
+			initSheet(sheetObjects[i], i + 1);
+		}
+	
+		for (var k = 0; k < tabObjects.length; k++) {
+			initTab(tabObjects[k], k + 1);
+		}
+		
+	    for(var k = 0; k < comboObjects.length; k++){
+	        initCombo(comboObjects[k], k + 1);
+	    }
+		
+		doActionIBSheet(sheetObjects[0], document.form, IBSEARCH_ASYNC10);
+		
+		axon_event.addListenerForm('beforeactivate', 'obj_activate', document.form);
+		axon_event.addListenerForm('beforedeactivate', 'obj_deactivate', document.form);
+		axon_event.addListenerFormat('keypress', 'obj_keypress', document.form);
+		
+		toggleButtons("CLEAR");
+	}
+	
+	/**
+	 * OnKeyPress event를 처리한다. <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     obj_keypress();
+	 * </pre>
+	 * @param 없음
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.04.17
+	 */
+	function obj_keypress() {
+		switch (event.srcElement.dataformat) {
+		case "float":
+				ComKeyOnlyNumber(event.srcElement, ".");
+				break;
+		default:
+			ComKeyOnlyNumber(event.srcElement);
+			break;
+		}
+	}
+
+	/**
+	 * OnBeforeActivate   event를 처리한다. <br>
+	 * Calendar에서 선택한 값이 세팅된 후, exp_dt에 포커스가 주어진다.
+	 * 이 이벤트를 이용하여 아래처럼 combo Object에 선택된 값을 세팅해준다.
+	 * 
+	 * @param 없음
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.04.17
+	 */
+	function obj_activate() {
+		var formObject = document.form;
+	    var srcName = event.srcElement.getAttribute("name");
+	    
+	    if (srcName == "exp_dt" && formObject.exp_dt.value != "" && formObject.eff_dt_hidden.value != "") {
+	    	// 달력에서 eff_dt_hidden, exp_dt에 값이 세팅된다.
+	    	var effDt = formObject.eff_dt_hidden.value;
+	    	var expDt = formObject.exp_dt.value;
+	    	
+	    	formObject.eff_dt.value = formObject.eff_dt_hidden.value;
+    		comboObjects[1].SetText(selectedGlineSeq, 0, effDt); 
+			comboObjects[1].SetText(selectedGlineSeq, 1, expDt);
+			comboObjects[1].SetText(selectedGlineSeq, 2, effDt);	// Hidden 컬럼.
+			
+			formObject.eff_dt_hidden.value = "";
+			
+	    	ComClearSeparator (event.srcElement);
+	    }
+	}
+	
+	/**
+	 * Onbeforedeactivate  event를 처리한다. <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     obj_deactivate()
+	 * </pre>
+	 * @param 없음
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.04.17
+	 */
+	function obj_deactivate() {
+	    ComChkObjValid(event.srcElement);
+	}
+	
+	/**
+	 * Sheet관련 프로세스 처리 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     doActionIBSheet(sheetObj, document.form, IBSEARCH)
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {form} formObj 필수 html form object
+	 * @param {int} sAction 필수 프로세스 플래그 상수
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function doActionIBSheet(sheetObj, formObj, sAction) {
+        try {
+            if (window.event == null || window.event.srcElement == null || window.event.srcElement.getAttribute("suppressWait") != "Y") {
+                ComOpenWait(true);
+            }
+	            
+			sheetObj.ShowDebugMsg = false;
+			switch (sAction) {
+			
+			case IBSEARCH_ASYNC20: // 화면 로딩시 Tab Count 조회
+				formObj.f_cmd.value = SEARCH10;
+				subDataCnt = 0;
+				var sXml = sheetObj.GetSearchXml("ESM_PRI_0001GS.do", FormQueryString(formObj));
+				var arrTabCnt = ComPriXml2Array(sXml, "sls_ref_cnt|grp_loc_cnt|grp_cmdt_cnt|arb_cnt|rate_cnt|goh_cnt|ctrt_cluz_cnt");
+				if (arrTabCnt != null && arrTabCnt.length > 0) {
+					for (var i = 0; i < arrTabCnt[0].length; i++) {
+						subDataCnt += parseInt(arrTabCnt[0][i]);
+						if (parseInt(arrTabCnt[0][i]) > 0) {
+							tabObjects[0].ImageUrl(i) = ICON_URL_EXIST;
+						} else {
+							tabObjects[0].ImageUrl(i) = ICON_URL_NOT_EXIST;
+						}
+					}
+				}
+				break;
+			
+			case IBSEARCH_ASYNC10: // 화면 로딩시 Service Scope 조회
+				comboObjects[0].RemoveAll();
+				
+				formObj.f_cmd.value = SEARCH01;
+				var sXml = sheetObj.GetSearchXml("PRICommonGS.do", FormQueryString(formObj));
+				ComPriXml2ComboItem(sXml, formObj.svc_scp_cd, "cd", "cd|nm");
+				break;
+				
+			case IBSEARCH_ASYNC11: // Service Scope 선택시, Duration조회
+				formObj.f_cmd.value = COMMAND15;
+				var sParam = FormQueryString(formObj) + "&prc_ctrt_tp_cd=S&svc_scp_cd=" + comboObjects[0].Code + "&usr_id=" + formObj.usr_id.value;
+				var sXml = sheetObj.GetSearchXml("PRICommonGS.do", sParam);
+				var arrAuth = ComPriXml2Array(sXml, "prc_ctrt_tp_cd|svc_scp_cd|usr_id");
+				
+				if (arrAuth != null && arrAuth.length > 0) {
+					isAproUsr = true;
+				} else {
+					isAproUsr = false;
+				}
+				
+				comboObjects[1].RemoveAll();
+				comboObjects[1].InsertItem(0, "||", "X");
+				comboObjects[1].Code = "X";
+				
+				formObj.f_cmd.value = SEARCH02;
+				var sXml = sheetObj.GetSearchXml("ESM_PRI_0001GS.do", FormQueryString(formObj));
+				ComPriXml2ComboItem(sXml, formObj.gline_seq, "gline_seq", "eff_dt|exp_dt|eff_dt", false);
+				
+				toggleButtons("NEW");
+				break;
+			
+			case IBSEARCH: // 조회
+				if (!validateForm(sheetObjects[0],document.form,sAction)) {
+					ComShowCodeMessage('PRI08001');
+					return false;
+				}
+			
+				if (comboObjects[1].Code == "X") {
+					return false;
+				}
+				
+				formObj.cfm_flg.value = "";
+				formObj.cre_dt.value = "";
+				formObj.cre_usr_nm.value = "";
+				formObj.cre_ofc_cd.value = "";
+				
+				formObj.f_cmd.value = SEARCH01;
+				var sXml = sheetObj.GetSearchXml("ESM_PRI_0001GS.do", FormQueryString(formObj));
+				var arrData = ComPriXml2Array(sXml, "cfm_flg|cre_dt|cre_usr_nm|cre_ofc_cd|sales_cnt|loc_cnt|cmdt_cnt|arb_cnt|rate_cnt|goh_cnt|ctrt_cnt");
+				
+				if (arrData != null && arrData.length > 0) {
+					formObj.cfm_flg.value = arrData[0][0];
+					formObj.cre_dt.value = arrData[0][1];
+					formObj.cre_usr_nm.value = arrData[0][2];
+					formObj.cre_ofc_cd.value = arrData[0][3];
+					
+					enableAllTabPages();
+					
+					subDataCnt = 0;
+					for (var i = 4; i < arrData[0].length; i++) {
+						subDataCnt += parseInt(arrData[0][i]);
+					}
+					
+					if (formObj.cfm_flg.value != ""
+						&& formObj.cfm_flg.value.toUpperCase() == "YES") {
+						toggleButtons("CONF_YES");
+					} else {
+						toggleButtons("CONF_NO");
+					}
+				}
+				
+				break;
+				
+			case IBCREATE: // New
+				if (!validateForm(sheetObjects[0],document.form,sAction)) {
+					return false;
+				}
+				
+				comboObjects[0].Index = -1;
+				formObj.svc_scp_nm.value = "";
+				comboObjects[1].RemoveAll();
+				//comboObjects[1].InsertItem(0, "||", "X");
+				//comboObjects[1].Index = 0;
+				//comboObjects[1].Code = "X";
+				clearAllTabPages();
+				
+				toggleButtons("CLEAR");
+				
+				break;
+		
+			case IBSAVE: // Save
+				if (!validateForm(sheetObjects[0],document.form,sAction)) {
+					return false;
+				}
+				if (!ComPriConfirmSave()) {
+					return false;
+				}
+				
+				var prevEffDt = comboObjects[1].Text;
+				
+				formObj.f_cmd.value = MULTI01;
+				var sXml = sheetObj.GetSaveXml("ESM_PRI_0001GS.do", FormQueryString(formObj));
+				sheetObjects[0].LoadSaveXml(sXml);
+				
+				if (sXml.indexOf("ERROR") >= 0) {
+					return false;
+				}
+				
+				// 저장후 Duration부분 combo를 재조회 한다.
+				formObj.f_cmd.value = SEARCH02;
+				sXml = sheetObj.GetSearchXml("ESM_PRI_0001GS.do", FormQueryString(formObj));
+				ComPriXml2ComboItem(sXml, formObj.gline_seq, "gline_seq", "eff_dt|exp_dt|eff_dt");
+				comboObjects[1].InsertItem(0, "||", "X");
+				
+				// 이전 선택되어 있던 row의 코드값을 찾아...
+				var code = comboObjects[1].FindIndex(prevEffDt, 0);
+				
+				// 해당행으로 이동한다. 없을경우는 0번row로 디폴트 세팅.
+				if (code == null || code == "" || code == "X") {
+					comboObjects[1].Index = 0;
+				} else {
+					comboObjects[1].Code = code;
+					
+					gline_seq_OnChange(comboObjects[1], code, comboObjects[1].GetText(code, 1));
+				}
+				
+				break;
+				
+			case IBSEARCH_ASYNC01: // Confirm
+				if (!validateForm(sheetObjects[0],document.form,sAction)) {
+					return false;
+				}
+				if (!ComPriConfirmConfirm()) {
+					return false;
+				}
+				
+				formObj.f_cmd.value = MULTI02;
+				var sXml = sheetObj.GetSaveXml("ESM_PRI_0001GS.do", FormQueryString(formObj));
+				sheetObjects[0].LoadSaveXml(sXml);
+				doActionIBSheet(sheetObjects[0],document.form,IBSEARCH);
+				break;
+				
+			case IBSEARCH_ASYNC02: // Cancel Confirm
+				if (!validateForm(sheetObjects[0],document.form,sAction)) {
+					return false;
+				}
+				if (!ComPriConfirmCancelConfirm()) {
+					return false;
+				}
+				
+				formObj.f_cmd.value = MULTI03;
+				var sXml = sheetObj.GetSaveXml("ESM_PRI_0001GS.do", FormQueryString(formObj));
+				sheetObjects[0].LoadSaveXml(sXml);
+				doActionIBSheet(sheetObjects[0],document.form,IBSEARCH);
+				break;
+				
+			case IBDELETE: // Delete
+				if (!validateForm(sheetObjects[0],document.form,sAction)) {
+					return false;
+				}
+				if (!ComPriConfirmDeleteAll()) {
+					return false;
+				}
+				
+				formObj.f_cmd.value = MULTI04;
+				var sXml = sheetObj.GetSaveXml("ESM_PRI_0001GS.do", FormQueryString(formObj));
+				sheetObjects[0].LoadSaveXml(sXml);
+				doActionIBSheet(sheetObjects[0],document.form,IBSEARCH_ASYNC11);
+				break;
+	
+			}
+        } catch (e) {
+            if (e == "[object Error]") {
+                ComShowMessage(OBJECT_ERROR);
+            } else {
+                ComShowMessage(e);
+            }
+        } finally {
+        	ComOpenWait(false);
+        }
+	}
+	
+	/**
+	 * 시트 초기설정값, 헤더 정의 <br>
+	 * 시트가 다수일 경우 시트 수만큼 case를 추가하여 시트 초기화모듈을 구성한다 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     initSheet(sheetObj,1);
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {int} sheetNo 필수 IBSheet Object 태그의 아이디에 붙인 일련번호
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function initSheet(sheetObj, sheetNo) {
+	
+		var cnt = 0;
+		var sheetID = sheetObj.id;
+		switch (sheetID) {
+		
+		case "sheet1":
+			with (sheetObj) {
+				// Host정보 설정[필수][HostIp, Port, PagePath]
+				if (location.hostname != "")
+					InitHostInfo(location.hostname, location.port, page_path);
+				
+				// 행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+				InitRowInfo(1, 1, 3, 100);
+				
+				// 컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+				InitColumnInfo(1, 0, 0, true);
+	
+				// 해더에서 처리할 수 있는 각종 기능을 설정한다
+				InitHeadMode(true, true, true, true, false, false)
+	
+				var HeadTitle = "status";
+	
+				// 해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+				InitHeadRow(0, HeadTitle, true);
+	
+				// 데이터속성 [ROW, COL, DATATYPE, WIDTH, DATAALIGN, COLMERGE, SAVENAME,
+				// KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT,
+				// INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK,
+				// SAVESTATUS, FORMATFIX]
+				InitDataProperty(0, cnt++, dtHiddenStatus, 30, daCenter, false, "ibflag");
+				
+				Visible = false;
+			}
+			break;
+		}
+	}
+	
+	/**
+	 * Tab 기본 설정 탭의 항목을 설정한다.  <br>
+	 * Tab이 다수일 경우 Tab 수만큼 case를 추가하여 Tab의 초기화모듈을 구성한다 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     initTab(tabObj,1);
+	 * </pre>
+	 * @param {tabObj} tabObj 필수 IBTab Object
+	 * @param {int} tabNo 필수 IBTab Object 태그의 아이디에 붙인 일련번호
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.04.17
+	 */
+	function initTab(tabObj, tabNo) {
+		switch (tabNo) {
+		case 1:
+			with (tabObj) {
+	
+				var cnt = 0;
+				InsertTab(cnt++, "Sales", 0);
+				InsertTab(cnt++, "Location Group ", 1);
+				InsertTab(cnt++, "Commodity Group ", 2);
+				InsertTab(cnt++, "Arbitrary", 3);
+				InsertTab(cnt++, "Rate", 4);
+				InsertTab(cnt++, "G.O.H", 5);
+				InsertTab(cnt++, "Contract Clause", 6);
+				
+				ShowIcon = true;
+				UseLargeIcon = false;
+				
+				ImageUrl(0) = ICON_URL_NOT_EXIST;
+				ImageUrl(1) = ICON_URL_NOT_EXIST;
+				ImageUrl(2) = ICON_URL_NOT_EXIST;
+				ImageUrl(3) = ICON_URL_NOT_EXIST;
+				ImageUrl(4) = ICON_URL_NOT_EXIST;
+				ImageUrl(5) = ICON_URL_NOT_EXIST;
+				ImageUrl(6) = ICON_URL_NOT_EXIST;
+				
+			}
+			break;
+		}
+	}
+	
+	
+	/**
+	 * 콤보 초기설정값 정의 <br>
+	 * 콤보가 다수일 경우 콤보 수만큼 case를 추가하여 콤보 초기화모듈을 구성한다 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     initCombo(comboObj, comboNo);
+	 * </pre>
+	 * @param {ibcombo} sheetObj 필수 IBSheet Object
+	 * @param {int} ComboNo 필수 IBCombo Object 태그의 아이디에 붙인 일련번호
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function initCombo(comboObj, comboNo) {
+	    switch(comboObj.id) {
+	        case "svc_scp_cd":
+	            with(comboObj) {
+	            	DropHeight = 260;
+	            	MultiSelect = false;
+	            	MaxSelect = 1;
+	            	UseAutoComplete = true;
+	            	
+	            	IMEMode = 0;
+	            	ValidChar(2, 0);
+	            }
+	            break;
+	        
+	        case "gline_seq":
+	            with(comboObj) {
+	            	DropHeight = 260;
+	            	MultiSelect = false;
+	            	MaxSelect = 1;
+	            	UseAutoComplete = false;
+	            	
+	            	// 마지막 컬럼은 hidden(size = 0)으로 처리.
+	            	SetColWidth("80|100|0");
+	            	
+	            	IMEMode = 0;
+	            	ValidChar(2, 1);
+	            }
+	            break;
+	    }
+	}
+	
+	/**
+	 * 화면 폼입력값에 대한 유효성검증 프로세스 처리 <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *     if (validateForm(sheetObj,document.form,IBSAVE)) {
+	 *         로직처리;
+	 *     }
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {form} formObj 필수 html form object
+	 * @param {int} sAction 필수 프로세스 플래그 상수
+	 * @returns bool <br>
+	 *          true  : 폼입력값이 유효할 경우<br>
+	 *          false : 폼입력값이 유효하지 않을 경우
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function validateForm(sheetObj, formObj, sAction) {
+		switch (sAction) {
+		case IBSEARCH: // 조회
+			if (comboObjects[0].Code == "" || comboObjects[1].Code == "") {
+				return false;
+			}
+			return true;
+			break;
+			
+		case IBCREATE: // New
+			return true;
+			break;
+	
+		case IBSAVE: // Save
+			if (!ComChkValid(formObj)) {
+				return false;
+			}
+			if (comboObjects[0].Code == "") {
+				return false;
+			}
+			if (formObj.eff_dt.value == "") {
+				return false;
+			}
+			if (formObj.exp_dt.value == "") {
+				return false;
+			}
+			if (formObj.cfm_flg.value.toUpperCase() == "YES") {
+				return false;
+			}
+			if (formObj.eff_dt.value > formObj.exp_dt.value) {
+				ComShowCodeMessage('PRI00305', '[Duration]');
+				return false;
+			}
+			return true;
+			break;
+	
+		case IBSEARCH_ASYNC01: // Confirm
+			if (comboObjects[0].Code == "" || comboObjects[1].Code == "") {
+				return false;
+			}
+			if (formObj.cfm_flg.value.toUpperCase() == "YES") {
+				return false;
+			}
+			if (subDataCnt <= 0) {
+				ComShowCodeMessage("PRI08005");
+				return false;
+			}
+			
+			return true;
+			break;
+			
+		case IBSEARCH_ASYNC02: // Cancel Confirm
+			if (comboObjects[0].Code == "" || comboObjects[1].Code == "") {
+				return false;
+			}
+			if (formObj.cfm_flg.value.toUpperCase() != "YES") {
+				return false;
+			}
+			return true;
+			break;
+			
+		case IBDELETE: // Delete
+			if (comboObjects[0].Code == "" || comboObjects[1].Code == "") {
+				return false;
+			}
+			if (formObj.cfm_flg.value.toUpperCase() == "YES") {
+				return false;
+			}
+			return true;
+			break;
+			
+		case IBCOPYROW: // Copy
+			if (comboObjects[0].Code == "" || comboObjects[1].Code == "") {
+				return false;
+			}
+			return true;
+			break;
+			
+		}
+	}
+	
+	/**
+	 * OnSaveEnd 이벤트 발생시 호출되는 function <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 * 
+	 * </pre>
+	 * @param {ibsheet} sheetObj 필수 IBSheet Object
+	 * @param {string} ErrMsg 필수 서버에서 넘어온 메세지
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function sheet1_OnSaveEnd(sheetObj, ErrMsg) {
+		if (ErrMsg == "") {
+			if (document.form.f_cmd.value == MULTI01) {
+				ComPriSaveCompleted();
+			} else if (document.form.f_cmd.value == MULTI02) {
+				ComPriConfirmCompleted();
+			} else if (document.form.f_cmd.value == MULTI03) {
+				ComPriCancelConfirmCompleted();
+			} else if (document.form.f_cmd.value == MULTI04) {
+				ComPriDeleteCompleted();
+			}
+		}
+	}
+	
+	/**
+	 * OnChange 이벤트 발생시 호출되는 function <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *
+	 * </pre>
+	 * @param {ibcombo} comboObj 필수 IBSheet Combo Object
+	 * @param {int} code 필수 Onclick 이벤트가 발생한 해당  code
+	 * @param {int} text 필수 화면에 표시된 글자
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function tab1_OnChange(tabObj, tabIndex) {
+		if (beforetab != tabIndex) {
+		    var objs = document.all.item("tabLayer");
+
+		    objs[tabIndex].style.display = "inline";
+		    objs[beforetab].style.display = "none";
+		    
+		    //objs[beforetab].style.zIndex = objs[nItem].style.zIndex -1 ;
+		}
+
+	    beforetab = tabIndex;
+	    
+	    loadTabPage(tabIndex);
+	}
+	
+	function loadTabPage(tabIndex) {
+		var formObj = document.form;
+		var sSvcScpCd = comboObjects[0].Code;
+		var sGlineSeq = comboObjects[1].Code;
+		
+		if (tabIndex == null || tabIndex == "") {
+			tabIndex = tabObjects[0].SelectedIndex;
+		}
+		
+		var objTabWindow = document.getElementById("t" + (tabIndex + 1) + "frame").contentWindow;
+		
+		if (objTabWindow.location.href == "" || objTabWindow.location.href == "about:blank") {
+			var sUrl = "";
+			switch (tabIndex) {
+			case 0:
+				sUrl = "ESM_PRI_0001_01.do"; 
+				break;
+			case 1:
+				sUrl = "ESM_PRI_0001_02.do"; 
+				break;
+			case 2:
+				sUrl = "ESM_PRI_0001_03.do"; 
+				break;
+			case 3:
+				sUrl = "ESM_PRI_0001_04.do"; 
+				break;
+			case 4:
+				sUrl = "ESM_PRI_0001_06.do"; 
+				break;
+			case 5:
+				sUrl = "ESM_PRI_0001_05.do"; 
+				break;
+			case 6:
+				sUrl = "ESM_PRI_0001_07.do"; 
+				break;
+			}
+			objTabWindow.location.href = sUrl;
+			return true;
+		}
+		
+		if (sSvcScpCd != null && sSvcScpCd != "" && sGlineSeq != null && sGlineSeq != "" && parseInt(sGlineSeq) > 0) {
+			// iframe내로 직접 포커스가 이동되면, comboObjects[1]의 값이 리셋된다.
+			document.form.exp_dt.focus();
+			objTabWindow.tabLoadSheet(sSvcScpCd, sGlineSeq, isAproUsr && document.form.cfm_flg.value.toUpperCase() != "YES");
+		}
+		
+	}
+	
+	function clearAllTabPages() {
+		for (var i = 0; i < tabObjects[0].GetCount(); i++) {
+			tabObjects[0].ImageUrl(i) = ICON_URL_NOT_EXIST;
+			if (document.getElementById("t" + (i + 1) + "frame").contentWindow.tabClearSheet) {
+				document.getElementById("t" + (i + 1) + "frame").contentWindow.tabClearSheet();
+			}
+		}
+	}
+	
+	function enableAllTabPages(flag) {
+		if (flag == null || flag == "") {
+			if (isAproUsr && document.form.cfm_flg.value.toUpperCase() != "YES") {
+				flag = true;
+			} else {
+				flag = false;
+			}
+		}
+		
+		for (var i = 0; i < tabObjects[0].GetCount(); i++) {
+			if (document.getElementById("t" + (i + 1) + "frame").contentWindow.tabEnableSheet) {
+				document.getElementById("t" + (i + 1) + "frame").contentWindow.tabEnableSheet(flag);
+			}
+		}
+	}
+	
+	/**
+	 * OnChange 이벤트 발생시 호출되는 function <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *
+	 * </pre>
+	 * @param {ibcombo} comboObj 필수 IBSheet Combo Object
+	 * @param {int} code 필수 Onclick 이벤트가 발생한 해당  code
+	 * @param {int} text 필수 화면에 표시된 글자
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function svc_scp_cd_OnChange(comboObj, code, text) {
+		var formObj = document.form;
+		
+		var arrText = text.split("|");
+		// SVC_SCP 바뀌면 svc_scp_nm세팅하고 Duration 재조회.
+		if (arrText != null && arrText.length > 1) {
+			formObj.svc_scp_nm.value = comboObj.GetText(code, 1);
+			selectedGlineSeq = null;
+			doActionIBSheet(sheetObjects[0], document.form, IBSEARCH_ASYNC11);
+		}
+	}
+	
+	function svc_scp_cd_OnKeyUp(comboObj, KeyCode, Shift) {
+		var svcScpCdTxt = comboObj.Text;
+		
+		// 3자(Scope의 길이)이상 입력하면 focus out.
+		if (svcScpCdTxt.length > 3) {
+			document.form.svc_scp_nm.focus();
+		}
+	}
+	
+	function svc_scp_cd_OnClear(comboObj) {
+		var formObject = document.form;
+		formObject.svc_scp_nm.value = "";
+		
+		comboObj.Index = -1;
+	}
+	
+	/**
+	 * 포커스를 잃을 때 이벤트가 발생하는 이벤트이다.<br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *    ssvc_scp_cd_OnBlur(comboObj);
+	 * </pre>
+	 * @param   {IBMultiCombo} comboObj 필수 IBMultiCombo Object
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function svc_scp_cd_OnBlur(comboObj) {
+		var formObj = document.form;
+		
+		var code = comboObj.FindIndex(comboObj.Code, 0);
+		
+		// 키보드입력을 통해 SVC_SCP 바꾸고 focus out했을때 Duration 재조회
+		if (code != null && code != "") {
+			var text = comboObj.GetText(code, 1);
+			if (text != null && text != "" && text != formObj.svc_scp_nm.value) {
+				formObj.svc_scp_nm.value = comboObj.GetText(code, 1);
+				doActionIBSheet(sheetObjects[0], document.form, IBSEARCH_ASYNC11);
+			}
+		}
+	}
+	
+	/**
+	 * OnChange 이벤트 발생시 호출되는 function <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *
+	 * </pre>
+	 * @param {ibcombo} comboObj 필수 IBSheet Combo Object
+	 * @param {int} code 필수 Onclick 이벤트가 발생한 해당  code
+	 * @param {int} text 필수 화면에 표시된 글자
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function gline_seq_OnChange(comboObj, code, text) {
+		var formObj = document.form;
+		
+		selectedGlineSeq = code;
+		
+		if (code == "" || text == "") {
+			return;
+		}
+		
+		var effText = comboObj.GetText(code, 0);
+		var expText = comboObj.GetText(code, 1);
+		
+		formObj.eff_dt.value = effText;
+		formObj.exp_dt.value = expText;
+		
+		if (code == null || code == "" || code == "X") {
+			return true;
+		}
+		
+		doActionIBSheet(sheetObjects[0], document.form, IBSEARCH);
+		
+		if (tabObjects[0].SelectedIndex == 0) {
+			tab1_OnChange(tabObjects[0], 0);
+		} else {
+			tabObjects[0].SelectedIndex = 0;
+		}
+		
+		setTabStyle();
+	}
+	
+	function gline_seq_OnClear(comboObj) {
+		var formObj = document.form;
+		
+		comboObj.Code = "X";
+		formObj.eff_dt.value = "";
+		formObj.exp_dt.value = "";
+		formObj.cfm_flg.value = "";
+		formObj.cre_dt.value = "";
+		formObj.cre_usr_nm.value = "";
+		formObj.cre_ofc_cd.value = "";
+		
+		clearAllTabPages();
+	}
+	
+	
+	function gline_seq_OnKeyUp(comboObj, KeyCode, Shift) {
+		var selEffDt = comboObj.Text;
+		
+		// 숫자 외의 것이 있다면(문자가 입력된것이 있다면), ""로 relace하고 다시 세팅.
+		if (selEffDt.search(/[^0-9]/gi) >= 0) {
+			selEffDt = selEffDt.replace(/[^0-9]/gi, "");
+			comboObj.SetText(selectedGlineSeq, 2, selEffDt);
+		}
+		
+		// 날짜 8자 입력하면 focus out.
+		if (selEffDt.length == 8) {
+			comboObj.SetText(selectedGlineSeq, 2, selEffDt);
+			document.form.exp_dt.focus();
+		}
+	}
+	
+
+	function gline_seq_OnFocus(comboObj) {
+		var selEffDt = comboObj.Text;
+		
+		// 날짜부분의 하이픈 제거.
+		if (selEffDt != null && selEffDt != "") {
+			selEffDt = selEffDt.replace(/-/gi, "");
+			comboObj.SetText(selectedGlineSeq, 2, selEffDt);
+		}
+	}
+	
+	/**
+	 * 포커스를 잃을 때 이벤트가 발생하는 이벤트이다.<br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 *    ssvc_scp_cd_OnBlur(comboObj);
+	 * </pre>
+	 * @param   {IBMultiCombo} comboObj 필수 IBMultiCombo Object
+	 * @return 없음
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function gline_seq_OnBlur(comboObj) {
+		var selEffDt = comboObj.Text;
+		
+		if (selEffDt == null || selEffDt == "" || selEffDt == undefined) {
+			return false;
+		}
+		
+		// 올바른 날짜가 맞다면, 하이픈 다시 넣어주기.
+		if (ComIsDate(selEffDt)) {
+			selEffDt = selEffDt.replace(/-/gi, "");
+			selEffDt = selEffDt.substring(0, 4) + "-" + selEffDt.substring(4, 6) + "-" + selEffDt.substring(6, 8); 
+			
+			document.form.eff_dt.value = selEffDt;
+			
+			comboObj.SetText(selectedGlineSeq, 2, selEffDt);
+		} else {
+			ComShowCodeMessage("COM12134", "Effective Date");
+			document.form.gline_seq.focus();
+			return false;
+		}
+	}
+	
+	/**
+	 * 화면의 모든 버튼들의 Enable/Disable을 처리하는 함수. <br>
+	 * <br><b>Example :</b>
+	 * <pre>
+	 * </pre>
+	 * @param {string} mode 필수 사용자 권한이나 모드
+	 * @author 박성수
+	 * @version 2009.05.01
+	 */
+	function toggleButtons(mode) {
+		switch (mode) {
+		case "CLEAR":
+			disableButton("btn_retrieve");
+			enableButton("btn_new");
+			disableButton("btn_save");
+			disableButton("btn_confirm");
+			disableButton("btn_confirmcancel");
+			disableButton("btn_delete");
+			disableButton("btn_copy");
+			break;
+		case "INIT":
+			enableButton("btn_retrieve");
+			enableButton("btn_new");
+			enableButton("btn_save");
+			enableButton("btn_confirm");
+			enableButton("btn_confirmcancel");
+			enableButton("btn_delete");
+			enableButton("btn_copy");
+			break;
+		case "NEW":
+			disableButton("btn_retrieve");
+			enableButton("btn_new");
+			enableButton("btn_save");
+			disableButton("btn_confirm");
+			disableButton("btn_confirmcancel");
+			disableButton("btn_delete");
+			disableButton("btn_copy");
+			break;
+		case "CONF_YES":
+			enableButton("btn_retrieve");
+			enableButton("btn_new");
+			disableButton("btn_save");
+			disableButton("btn_confirm");
+			enableButton("btn_confirmcancel");
+			disableButton("btn_delete");
+			enableButton("btn_copy");
+			break;
+		case "CONF_NO":
+			enableButton("btn_retrieve");
+			enableButton("btn_new");
+			enableButton("btn_save");
+			enableButton("btn_confirm");
+			disableButton("btn_confirmcancel");
+			enableButton("btn_delete");
+			enableButton("btn_copy");
+			break;
+		}
+		
+		if (!isAproUsr) {
+			//enableButton("btn_retrieve");
+			disableButton("btn_new");
+			disableButton("btn_save");
+			disableButton("btn_confirm");
+			disableButton("btn_confirmcancel");
+			disableButton("btn_delete");
+			disableButton("btn_copy");
+		}
+	}
+
+	
+	function getSvcScpCd() {
+		return comboObjects[0].Code;
+	}
+	
+	function getGlineSeq() {
+		return comboObjects[1].Code;
+	}
+	
+	function getEffDt() {
+		return document.form.eff_dt.value;
+	}
+
+	function getExpDt() {
+		return document.form.exp_dt.value;
+	}
+	
+	function getCfmFlg() {
+		var formObj = document.form;
+		
+		if (formObj.cfm_flg.value != "" && formObj.cfm_flg.value.toUpperCase() == "YES") {
+			return "Y";
+		} else {
+			return "N"
+		}
+	}
+	
+	function setTabStyle() {
+		doActionIBSheet(sheetObjects[0], document.form, IBSEARCH_ASYNC20);
+	}
+	
+	// Copy화면에서 Copy후 재조회 할때 호출하는 함수.
+	function reloadPostCopy(svcScpCd, glineSeq) {
+		var formObj = document.form;
+		
+		if (svcScpCd == null || svcScpCd == "" || glineSeq == null || glineSeq == "") {
+			return false;
+		}
+		
+		comboObjects[0].Code2 = svcScpCd;
+		svc_scp_cd_OnChange(comboObjects[0], svcScpCd, comboObjects[0].GetText(svcScpCd, 0) + "|" + comboObjects[0].GetText(svcScpCd, 1));
+		svc_scp_cd_OnBlur(comboObjects[0]);
+		
+		comboObjects[1].Code = glineSeq;
+	}
+	
+/* 개발자 작업 끝 */

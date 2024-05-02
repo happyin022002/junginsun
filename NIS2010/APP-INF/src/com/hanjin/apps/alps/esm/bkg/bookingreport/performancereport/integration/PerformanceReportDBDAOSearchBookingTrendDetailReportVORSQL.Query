@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PerformanceReportDBDAOSearchBookingTrendDetailReportVORSQL">
+			<desc><![CDATA[Daily Booking Trend by Customer Detail
+2010.10.08 김영철 [CHM-201006186-01] 
+  1. 조회조건으로 Contract Office및  Sales Rep.조건 추가
+  2. Direct Down Load(B/L Detail) List상에 Contract Office및 Contract Sales Rep. 추가반영 및 일부항목 Label수정
+  3. Load기준 FEU로 조회시 환산오류 수정.
+2015.06.08 COA_BKG_REV_DTL ==>MAS_BKG_REV_DTL 변경]]></desc>
+			<sql><![CDATA[
+WITH TEMP_T AS (
+----------------------------------------------------------------------------------------------------------------
+SELECT GIJUN.VSL_CD || GIJUN.SKD_VOY_NO || GIJUN.SKD_DIR_CD AS VVD_CD
+        ,GIJUN.VSL_CD
+        ,GIJUN.SKD_VOY_NO
+        ,GIJUN.SKD_DIR_CD
+        ,GIJUN.SLAN_CD AS VVD_SLAN_CD
+	    ,BK.VSL_CD || BK.SKD_VOY_NO || BK.SKD_DIR_CD AS TRNK_VVD_CD
+        ,BK.SLAN_CD
+        ,BK.POR_CD
+        ,BK.POL_CD
+        ,BK.POD_CD
+        ,BV.POD_CD POD_CD_TRUNK
+        ,BK.DEL_CD
+        ,TO_CHAR(GIJUN.VPS_ETD_DT,'YYYY-MM-DD') AS VPS_ETD_DT
+        ,GIJUN.VPS_ETD_WK
+        ,BK.BKG_NO
+        ,BK.BL_NO
+        ,BK.BKG_STS_CD   ---
+        ,BC.CUST_CNT_CD
+        ,BC.CUST_SEQ
+        ,BC.CUST_CNT_CD || LPAD(BC.CUST_SEQ, 6, '0') AS CUST_CD
+        ,MC.CUST_LGL_ENG_NM AS CUST_NM
+        ,MC.CUST_STS_CD
+        ,TO_CHAR(BK.BKG_CRE_DT,'YYYY-MM-DD') AS BKG_CRE_DT
+        ,TO_CHAR(BK.BKG_CRE_DT,'WW') BKG_CRE_WK
+        ,TO_CHAR(BK.BKG_CXL_DT,'YYYY-MM-DD') AS BKG_CXL_DT
+        ,TO_CHAR(BK.BKG_CXL_DT,'WW') BKG_CXL_WK
+        ,BK.OB_SREP_CD
+		,BK.OB_SLS_OFC_CD
+		,BK.BKG_OFC_CD 
+		,BK.SC_NO
+		,BK.RFA_NO
+		,BK.TAA_NO
+		,BK.CTRT_OFC_CD
+		,BK.CTRT_SREP_CD
+        ,BK.CMDT_CD
+        ,(SELECT MC.CMDT_NM FROM MDM_COMMODITY MC WHERE MC.CMDT_CD = BK.CMDT_CD) CMDT_NM
+        ,BK.INTER_RMK
+        ,BK.XTER_RMK
+        ,(SELECT SUM(((NVL(BKG_OFT_REV,0)+NVL(BKG_MISC_REV,0)+NVL(SCR_CHG_REV,0)+NVL(BKG_REV,0)) - NVL(ESTM_CM_COST_AMT,0)) * DECODE(SUBSTR(CNTR_TPSZ_CD,-1),'2',2,1)) FROM MAS_BKG_REV_DTL WHERE BK.bkg_NO =BKG_NO) CM
+        ,(SELECT SUM(DECODE(SUBSTR(QT.CNTR_TPSZ_CD,-1),'2', QT.OP_CNTR_QTY ,0 ))
+        FROM BKG_QUANTITY QT 
+        WHERE 1=1
+        AND   QT.BKG_NO = BK.BKG_NO
+        ) AS C_TEU
+        ,(SELECT SUM(DECODE(SUBSTR(QT.CNTR_TPSZ_CD,-1),'2', 0, QT.OP_CNTR_QTY  ))
+        FROM BKG_QUANTITY QT
+        WHERE 1=1
+        AND   QT.BKG_NO = BK.BKG_NO
+        ) AS C_FEU
+		,bkg_join_fnc(CURSOR(SELECT  QT.CNTR_TPSZ_CD || '-' || QT.OP_CNTR_QTY
+		FROM BKG_QUANTITY QT
+		WHERE 1=1
+		AND   QT.BKG_NO = BK.BKG_NO
+		)) AS CNTR_TP_SZ
+
+FROM   BKG_BOOKING BK
+,BKG_CUSTOMER BC
+,MDM_CUSTOMER MC
+,BKG_VVD      BV
+,(SELECT  
+#if (${vvd} != '')
+	/*+ Rule */
+#end
+				BK.BKG_NO
+                ,VVD.SLAN_CD
+        		,VVD.VSL_CD || VVD.SKD_VOY_NO || VVD.SKD_DIR_CD AS VVD
+				,VVD.VSL_CD
+        		,VVD.SKD_VOY_NO
+        		,VVD.SKD_DIR_CD
+				,VVD.POL_CD
+				,VVD.POD_CD
+        		,SKD.VPS_ETD_DT VPS_ETD_DT
+        		,TO_CHAR(SKD.VPS_ETD_DT,'WW') VPS_ETD_WK
+    	FROM VSK_VSL_PORT_SKD SKD, BKG_VVD VVD
+    	,    BKG_BOOKING BK
+
+        
+#if (${vvd} != '')
+
+              ,(SELECT COLUMN_VALUE AS VVD_CD FROM table(BKG_SPLIT_FNC(@[vvd],','))) TEMP 
+#end
+        WHERE 1=1
+    	AND   VVD.BKG_NO = BK.BKG_NO
+    	AND   VVD.VSL_PRE_PST_CD || VVD.VSL_SEQ =   (SELECT MIN(BV.VSL_PRE_PST_CD || BV.VSL_SEQ) 
+                                                  	FROM   BKG_VVD BV
+                                                  	WHERE  BV.BKG_NO = VVD.BKG_NO)
+        AND BK.BKG_CGO_TP_CD = 'F' 
+		AND  SKD.VPS_PORT_CD = VVD.POL_CD
+        AND  SKD.VSL_CD = VVD.VSL_CD
+        AND  SKD.SKD_VOY_NO = VVD.SKD_VOY_NO
+        AND  SKD.SKD_DIR_CD = VVD.SKD_DIR_CD
+        AND  SKD.CLPT_IND_SEQ = VVD.POL_CLPT_IND_SEQ
+		AND VVD.BKG_NO = BK.BKG_NO     
+        AND VVD.POL_CD = BK.POL_CD 
+
+		#if (${chk_cxl_bkg_only} == 'Y') 
+		AND BK.BKG_STS_CD  = 'X'
+		#end
+	  
+#if (${pol_etd_fr_dt} != ''  ) 
+		#if (${pol_etd_fr_dt} != '')
+		   AND SKD.VPS_ETD_DT >=  TO_DATE(@[pol_etd_fr_dt],'YYYY-MM-DD' )
+		#end
+		#if (${pol_etd_to_dt} != '')
+		   AND SKD.VPS_ETD_DT <=  TO_DATE(@[pol_etd_to_dt],'YYYY-MM-DD' ) +0.99999
+		#end
+				
+#end            
+#if (${bkg_cxl_fr_dt} != '')
+      	  #if (${bkg_cxl_fr_dt} != '') 
+		   AND BK.BKG_CXL_DT >= TO_DATE(@[bkg_cxl_fr_dt],'YYYY-MM-DD' )          
+		  #end
+		  #if (${bkg_cxl_to_dt} != '') 
+           AND BK.BKG_CXL_DT <= TO_DATE(@[bkg_cxl_to_dt],'YYYY-MM-DD' ) + 0.99999
+          #end    
+#end
+#if (${vvd} != '')
+          AND VVD.VSL_CD    =  SUBSTR(TEMP.VVD_CD,1,4)    
+      	  AND VVD.SKD_VOY_NO = SUBSTR(TEMP.VVD_CD,5,4)
+      	  AND VVD.SKD_DIR_CD = SUBSTR(TEMP.VVD_CD,9,1)
+#end
+#if (${pol_cd} != '')
+          AND VVD.POL_CD = @[pol_cd]
+#end	
+
+) GIJUN
+WHERE  1=1
+AND    GIJUN.BKG_NO = BK.BKG_NO
+AND    NVL(BK.BL_NO_TP, 'M') IN ('0', 'M')
+AND    BK.BKG_NO = BC.BKG_NO
+AND    BC.BKG_CUST_TP_CD = 'S'
+AND    BC.CUST_CNT_CD = MC.CUST_CNT_CD(+)
+AND    BC.CUST_SEQ    = MC.CUST_SEQ(+)
+AND    BK.BKG_NO      = BV.BKG_NO
+AND    BV.VSL_PRE_PST_CD = 'T'
+#if (${pod_cd} != '')
+          AND TRIM(BV.POD_CD) = @[pod_cd]
+#end
+
+#if (${bkg_ofc_cd} != '' && ${bkg_ofc_sub} == '')
+AND    BK.BKG_OFC_CD = @[bkg_ofc_cd]
+#elseif (${bkg_ofc_cd} != '' && ${bkg_ofc_sub} != '')
+AND    BK.BKG_OFC_CD IN (SELECT OFC_N8TH_LVL_CD 
+                           FROM DMT_OFC_LVL_V
+                          WHERE @[bkg_ofc_cd] IN (OFC_N1ST_LVL_CD, OFC_N2ND_LVL_CD, OFC_N3RD_LVL_CD, OFC_N4TH_LVL_CD,
+                                                  OFC_N5TH_LVL_CD, OFC_N6TH_LVL_CD, OFC_N7TH_LVL_CD, OFC_N8TH_LVL_CD))
+#end
+#if (${ob_sls_ofc_cd} != '' && ${ob_sls_ofc_sub} == '')
+AND    BK.OB_SLS_OFC_CD = @[ob_sls_ofc_cd]
+#elseif (${ob_sls_ofc_cd} != '' && ${ob_sls_ofc_sub} != '')
+AND    BK.OB_SLS_OFC_CD IN (SELECT OFC_N8TH_LVL_CD 
+                              FROM DMT_OFC_LVL_V
+                             WHERE @[ob_sls_ofc_cd] IN (OFC_N1ST_LVL_CD, OFC_N2ND_LVL_CD, OFC_N3RD_LVL_CD, OFC_N4TH_LVL_CD,
+                                                        OFC_N5TH_LVL_CD, OFC_N6TH_LVL_CD, OFC_N7TH_LVL_CD, OFC_N8TH_LVL_CD))
+#end 
+#if (${ob_srep_cd} != '')
+AND    BK.OB_SREP_CD = @[ob_srep_cd]
+#end 
+
+#if (${ctrt_ofc_cd} != '' && ${ctrt_ofc_sub} == '')
+AND    BK.CTRT_OFC_CD = @[ctrt_ofc_cd]
+#elseif (${ctrt_ofc_cd} != '' && ${ctrt_ofc_sub} != '')
+AND    BK.CTRT_OFC_CD IN (SELECT OFC_N8TH_LVL_CD 
+                              FROM DMT_OFC_LVL_V
+                             WHERE @[ctrt_ofc_cd] IN (OFC_N1ST_LVL_CD, OFC_N2ND_LVL_CD, OFC_N3RD_LVL_CD, OFC_N4TH_LVL_CD,
+                                                        OFC_N5TH_LVL_CD, OFC_N6TH_LVL_CD, OFC_N7TH_LVL_CD, OFC_N8TH_LVL_CD))
+#end 
+#if (${ctrt_srep_cd} != '')
+AND    BK.ctrt_SREP_CD = @[ctrt_srep_cd]
+#end 
+
+#if (${cust_cd} != '')
+AND BC.CUST_CNT_CD || BC.CUST_SEQ = SUBSTR(@[cust_cd],1,2)||TO_NUMBER(SUBSTR(@[cust_cd],3))
+#end
+
+)
+----------------------------------------------------------------------------------------------------------------
+SELECT T.BKG_NO
+    ,T.BL_NO
+    ,T.BKG_STS_CD
+    ,T.VVD_CD AS VVD
+    ,T.TRNK_VVD_CD
+    ,T.SLAN_CD
+    ,T.VVD_SLAN_CD
+    ,T.VSL_CD
+    ,T.SKD_VOY_NO
+    ,T.SKD_DIR_CD
+    ,T.POR_CD
+    ,T.POL_CD
+    ,T.POD_CD
+    ,T.DEL_CD
+    ,T.POD_CD_TRUNK
+    ,T.VPS_ETD_DT AS ETD_DT
+	,T.VPS_ETD_WK AS ETD_WK
+    ,T.CUST_CNT_CD
+    ,T.CUST_SEQ
+    ,T.CUST_CD
+    ,T.CUST_NM
+    ,T.CUST_STS_CD
+    ,T.BKG_CRE_DT
+    ,T.BKG_CRE_WK
+    ,T.BKG_CXL_DT
+    ,T.BKG_CXL_WK
+    ,T.OB_SREP_CD
+    ,T.CMDT_CD
+    ,T.CMDT_NM
+    ,T.INTER_RMK
+    ,T.XTER_RMK
+    ,T.CM
+#if(${unit_op} =='TEU')
+    ,(T.C_TEU + T.C_FEU*2) LOAD
+#else
+	,(T.C_TEU/2 + T.C_FEU) LOAD
+#end
+#if(${unit_op} =='TEU')
+    ,ROUND((T.CM / (T.C_TEU + (T.C_FEU*2))),2) CMPB
+#else
+	,ROUND((T.CM / ((T.C_TEU/2) + T.C_FEU)),2) CMPB
+#end
+    ,T.C_TEU
+    ,T.C_FEU
+    ,T.CNTR_TP_SZ
+	,T.OB_SLS_OFC_CD
+	,T.BKG_OFC_CD AS S_BKG_OFC_CD
+	,T.SC_NO
+	,T.RFA_NO
+	,T.TAA_NO
+	,T.CTRT_OFC_CD
+	,T.CTRT_SREP_CD
+FROM TEMP_T T
+ORDER BY T.CMDT_NM,T.BKG_STS_CD,T.SLAN_CD,T.VPS_ETD_DT,T.VVD_CD			]]></sql>
+			<params>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="pol_etd_fr_dt" type="12" value="" out="N"/>
+				<param name="pol_etd_to_dt" type="12" value="" out="N"/>
+				<param name="bkg_cxl_fr_dt" type="12" value="" out="N"/>
+				<param name="bkg_cxl_to_dt" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="bkg_ofc_cd" type="12" value="" out="N"/>
+				<param name="ob_sls_ofc_cd" type="12" value="" out="N"/>
+				<param name="ob_srep_cd" type="12" value="" out="N"/>
+				<param name="ctrt_ofc_cd" type="12" value="" out="N"/>
+				<param name="ctrt_srep_cd" type="12" value="" out="N"/>
+				<param name="cust_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ChassisMgsetInvoiceDBDAOSearchSCExceptionRSQL">
+			<desc><![CDATA[S/C Exception Data를 조회한다.
+
+* 첫행의 타이틀에 갈 SCC 값 세팅 하는 조건 
+* 마지막행의 qty 값 세팅 하는 조건 
+
+2015.12.18 [CHM-201539416] SC EXEPTION 화면 변경 : Effective Date, Expire Date 추가]]></desc>
+			<sql><![CDATA[
+WITH LV_EXP_LIST AS
+(
+SELECT 
+       P.SC_NO,
+       (SELECT Z.CUST_CNT_CD||Z.CUST_SEQ
+        FROM  PRI_SP_CTRT_PTY Z , MDM_CUSTOMER M
+        WHERE P.PROP_NO = Z.PROP_NO
+        AND   Z.PRC_CTRT_PTY_TP_CD='C'
+        AND   Z.CUST_CNT_CD = M.CUST_CNT_CD
+        AND   Z.CUST_SEQ = M.CUST_SEQ
+        AND   ROWNUM=1
+       ) SC_CUST_NO,
+       /* CHM-201539416 수정 추가 */
+       A.EFF_DT,
+       A.EXP_DT,
+       /* CHM-201539416 수정 추가 */
+       A.LOC_CD,
+       A.CUST_CNT_CD,
+       A.CUST_SEQ,
+       NVL((SELECT M.CUST_CNT_CD||M.CUST_SEQ||'('||M.CUST_LGL_ENG_NM||')'  FROM MDM_CUSTOMER M WHERE A.CUST_CNT_CD =M.CUST_CNT_CD AND A.CUST_SEQ = M.CUST_SEQ),'Cust*')||'/'||
+       NVL(A.CHSS_CNTR_CGO_TP_CD,'Cgo*')||'/'||
+       NVL((SELECT M.CMDT_CD||'('||M.CMDT_NM||')' FROM MDM_COMMODITY M WHERE A.CMDT_CD = M.CMDT_CD),'Cmdt*')||
+       DECODE(A.USA_SC_EXPT_RMK,NULL,'','/'||A.USA_SC_EXPT_RMK) AS SPCL_INFO,
+       DECODE(NVL(A.CUST_CNT_CD,'*')||NVL(A.CHSS_CNTR_CGO_TP_CD,'*')||NVL(A.CMDT_CD,'*')||DECODE(NVL(A.FT_DYS, 0), 0, '*'),'****','Y','N') ALL_FLG,
+       A.USA_SC_EXPT_RMK,
+       NVL(V.FT_FLG, 'N') FT_FLG,
+       DECODE(NVL(A.FT_DYS, 0), 0, '', '-Freetime(' || A.FT_DYS || 'Days)') FT_DYS
+FROM CGM_SC_EXPT_LIST A , PRI_SP_HDR P , CGM_SC_EXPT_VER V
+WHERE  A.PROP_NO = P.PROP_NO(+)
+and    A.PROP_NO = V.PROP_NO
+AND    A.SC_EXPT_VER_SEQ = V.SC_EXPT_VER_SEQ
+AND    V.CHSS_EXPT_VER_STS_CD = 'L'
+AND    (TO_DATE(@[sc_fm_dt], 'YYYY-MM-DD') BETWEEN V.EFF_DT AND V.EXP_DT OR TO_DATE(@[sc_to_dt], 'YYYY-MM-DD') BETWEEN V.EFF_DT AND V.EXP_DT)
+#if (${loc_cd} != '') 
+AND    A.LOC_CD IN (	
+    #foreach($loc_cd_num IN ${loc_cd})
+    	#if($velocityCount < $loc_cd.size()) 
+    	'$loc_cd_num', 
+    	#else 
+    	'$loc_cd_num' 
+    	#end 
+    #end
+)
+#end
+#if (${sc_no} != '') 
+AND	P.SC_NO IN (	
+    #foreach($sc_no_num IN ${sc_no})
+    	#if($velocityCount < $sc_no.size()) 
+    	'$sc_no_num', 
+    	#else 
+    	'$sc_no_num' 
+    	#end 
+    #end
+)
+#end
+)
+, LV_EXP_LIST2 AS
+(
+SELECT A.SC_NO,
+       A.SC_CUST_NO,
+       A.LOC_CD,
+       /* CHM-201539416 수정 추가 */
+       A.EFF_DT,
+       A.EXP_DT,
+       /* CHM-201539416 수정 추가 */
+       A.FT_FLG,
+       WM_CONCAT(DECODE(A.ALL_FLG,'Y',A.SC_NO||DECODE(A.USA_SC_EXPT_RMK,NULL,'','/'||A.USA_SC_EXPT_RMK),A.SC_NO||'-'||A.SPCL_INFO||A.FT_DYS||'')) DSP_INFO
+FROM LV_EXP_LIST A
+WHERE A.SC_NO IS NOT NULL
+/* CHM-201539416 수정 추가 */
+GROUP BY A.SC_NO,A.SC_CUST_NO,A.LOC_CD,A.EFF_DT,A.EXP_DT, A.FT_FLG
+/* CHM-201539416 수정 추가 */
+)
+
+,LV_SCC_LIST AS
+(
+SELECT 
+#if (${scc_sort_tp} == 'A')
+      RANK() OVER (PARTITION BY 1 ORDER BY LOC_CD ASC) SCC_SEQ,
+#else
+     RANK() OVER (PARTITION BY 1 ORDER BY LOC_SC_TCNT DESC, LOC_CD ASC)SCC_SEQ,
+#end
+       LOC_CD,
+       LOC_SC_TCNT
+FROM(
+    SELECT LOC_CD ,COUNT(DISTINCT SC_NO) AS LOC_SC_TCNT
+    FROM LV_EXP_LIST
+    GROUP BY LOC_CD
+    )
+)
+,LV_EXP_LIST3 AS
+(
+SELECT A.SC_NO,
+       A.SC_CUST_NO,
+       /* CHM-201539416 수정 추가 */
+       A.EFF_DT,
+       A.EXP_DT,
+       /* CHM-201539416 수정 추가 */
+       A.LOC_CD,
+       A.DSP_INFO,
+       A.FT_FLG
+FROM LV_EXP_LIST2 A
+UNION ALL
+SELECT '1' AS SC_NO,
+        '1'  AS SC_CUST_NO,
+        /* CHM-201539416 수정 추가 */
+        sysdate AS EFF_DT,
+        sysdate AS EXP_DT,
+        /* CHM-201539416 수정 추가 */
+        B.LOC_CD,
+        B.LOC_CD AS DSP_INFO,
+        '' FT_FLG
+FROM DUAL A , LV_SCC_LIST B
+UNION ALL
+SELECT 'zzzzzz' AS SC_NO,
+        'zz'  AS SC_CUST_NO,
+        /* CHM-201539416 수정 추가 */
+        sysdate AS EFF_DT,
+        sysdate AS EXP_DT,
+        /* CHM-201539416 수정 추가 */
+        B.LOC_CD,
+        TO_CHAR(B.LOC_SC_TCNT) AS DSP_INFO,
+        '' FT_FLG
+FROM DUAL A , LV_SCC_LIST B
+)
+
+SELECT 
+      A.SC_NO,
+      A.SC_CUST_NO,
+      (SELECT M.CUST_LGL_ENG_NM  FROM MDM_CUSTOMER M WHERE SUBSTR(A.SC_CUST_NO,1,2) =M.CUST_CNT_CD AND SUBSTR(A.SC_CUST_NO,3) = M.CUST_SEQ) AS SC_CUST_NM,
+      /* CHM-201539416 수정 추가 */
+      to_char(A.EFF_DT, 'yyyymmdd') AS EFF_DT,
+      to_char(A.EXP_DT, 'yyyymmdd') AS EXP_DT,
+      /* CHM-201539416 수정 추가 */
+      COUNT(*) SC_LOC_TCNT,
+      A.FT_FLG,
+      MAX(DECODE(C.SCC_SEQ,1 ,A.DSP_INFO)) SCC1,
+      MAX(DECODE(C.SCC_SEQ,2 ,A.DSP_INFO)) SCC2,
+      MAX(DECODE(C.SCC_SEQ,3 ,A.DSP_INFO)) SCC3,
+      MAX(DECODE(C.SCC_SEQ,4 ,A.DSP_INFO)) SCC4,
+      MAX(DECODE(C.SCC_SEQ,5 ,A.DSP_INFO)) SCC5,
+      MAX(DECODE(C.SCC_SEQ,6 ,A.DSP_INFO)) SCC6,
+      MAX(DECODE(C.SCC_SEQ,7 ,A.DSP_INFO)) SCC7,
+      MAX(DECODE(C.SCC_SEQ,8 ,A.DSP_INFO)) SCC8,
+      MAX(DECODE(C.SCC_SEQ,9 ,A.DSP_INFO)) SCC9,
+      MAX(DECODE(C.SCC_SEQ,10,A.DSP_INFO)) SCC10,
+      MAX(DECODE(C.SCC_SEQ,11,A.DSP_INFO)) SCC11,
+      MAX(DECODE(C.SCC_SEQ,12,A.DSP_INFO)) SCC12,
+      MAX(DECODE(C.SCC_SEQ,13,A.DSP_INFO)) SCC13,
+      MAX(DECODE(C.SCC_SEQ,14,A.DSP_INFO)) SCC14,
+      MAX(DECODE(C.SCC_SEQ,15,A.DSP_INFO)) SCC15,
+      MAX(DECODE(C.SCC_SEQ,16,A.DSP_INFO)) SCC16,
+      MAX(DECODE(C.SCC_SEQ,17,A.DSP_INFO)) SCC17,
+      MAX(DECODE(C.SCC_SEQ,18,A.DSP_INFO)) SCC18,
+      MAX(DECODE(C.SCC_SEQ,19,A.DSP_INFO)) SCC19,
+      MAX(DECODE(C.SCC_SEQ,20,A.DSP_INFO)) SCC20,
+      MAX(DECODE(C.SCC_SEQ,21,A.DSP_INFO)) SCC21,
+      MAX(DECODE(C.SCC_SEQ,22,A.DSP_INFO)) SCC22,
+      MAX(DECODE(C.SCC_SEQ,23,A.DSP_INFO)) SCC23,
+      MAX(DECODE(C.SCC_SEQ,24,A.DSP_INFO)) SCC24,
+      MAX(DECODE(C.SCC_SEQ,25,A.DSP_INFO)) SCC25,
+      MAX(DECODE(C.SCC_SEQ,26,A.DSP_INFO)) SCC26,
+      MAX(DECODE(C.SCC_SEQ,27,A.DSP_INFO)) SCC27,
+      MAX(DECODE(C.SCC_SEQ,28,A.DSP_INFO)) SCC28,
+      MAX(DECODE(C.SCC_SEQ,29,A.DSP_INFO)) SCC29,
+      MAX(DECODE(C.SCC_SEQ,30,A.DSP_INFO)) SCC30,
+      MAX(DECODE(C.SCC_SEQ,31,A.DSP_INFO)) SCC31,
+      MAX(DECODE(C.SCC_SEQ,32,A.DSP_INFO)) SCC32,
+      MAX(DECODE(C.SCC_SEQ,33,A.DSP_INFO)) SCC33,
+      MAX(DECODE(C.SCC_SEQ,34,A.DSP_INFO)) SCC34,
+      MAX(DECODE(C.SCC_SEQ,35,A.DSP_INFO)) SCC35,
+      MAX(DECODE(C.SCC_SEQ,36,A.DSP_INFO)) SCC36,
+      MAX(DECODE(C.SCC_SEQ,37,A.DSP_INFO)) SCC37,
+      MAX(DECODE(C.SCC_SEQ,38,A.DSP_INFO)) SCC38,
+      MAX(DECODE(C.SCC_SEQ,39,A.DSP_INFO)) SCC39,
+      MAX(DECODE(C.SCC_SEQ,40,A.DSP_INFO)) SCC40,
+      MAX(DECODE(C.SCC_SEQ,41,A.DSP_INFO)) SCC41,
+      MAX(DECODE(C.SCC_SEQ,42,A.DSP_INFO)) SCC42,
+      MAX(DECODE(C.SCC_SEQ,43,A.DSP_INFO)) SCC43,
+      MAX(DECODE(C.SCC_SEQ,44,A.DSP_INFO)) SCC44,
+      MAX(DECODE(C.SCC_SEQ,45,A.DSP_INFO)) SCC45,
+      MAX(DECODE(C.SCC_SEQ,46,A.DSP_INFO)) SCC46,
+      MAX(DECODE(C.SCC_SEQ,47,A.DSP_INFO)) SCC47,
+      MAX(DECODE(C.SCC_SEQ,48,A.DSP_INFO)) SCC48,
+      MAX(DECODE(C.SCC_SEQ,49,A.DSP_INFO)) SCC49,
+      MAX(DECODE(C.SCC_SEQ,50,A.DSP_INFO)) SCC50,
+      MAX(DECODE(C.SCC_SEQ,51,A.DSP_INFO)) SCC51,
+      MAX(DECODE(C.SCC_SEQ,52,A.DSP_INFO)) SCC52,
+      MAX(DECODE(C.SCC_SEQ,53,A.DSP_INFO)) SCC53,
+      MAX(DECODE(C.SCC_SEQ,54,A.DSP_INFO)) SCC54,
+      MAX(DECODE(C.SCC_SEQ,55,A.DSP_INFO)) SCC55,
+      MAX(DECODE(C.SCC_SEQ,56,A.DSP_INFO)) SCC56,
+      MAX(DECODE(C.SCC_SEQ,57,A.DSP_INFO)) SCC57,
+      MAX(DECODE(C.SCC_SEQ,58,A.DSP_INFO)) SCC58,
+      MAX(DECODE(C.SCC_SEQ,59,A.DSP_INFO)) SCC59,
+      MAX(DECODE(C.SCC_SEQ,60,A.DSP_INFO)) SCC60,        
+      MAX(DECODE(C.SCC_SEQ,61,A.DSP_INFO)) SCC61, 
+      MAX(DECODE(C.SCC_SEQ,62,A.DSP_INFO)) SCC62,      
+      MAX(DECODE(C.SCC_SEQ,63,A.DSP_INFO)) SCC63,
+      MAX(DECODE(C.SCC_SEQ,64,A.DSP_INFO)) SCC64,
+      MAX(DECODE(C.SCC_SEQ,65,A.DSP_INFO)) SCC65                                                   
+FROM  LV_EXP_LIST3 A, LV_SCC_LIST C
+WHERE 1=1
+AND   A.LOC_CD = C.LOC_CD
+/* CHM-201539416 수정 추가 */
+GROUP BY A.SC_NO,A.SC_CUST_NO,A.EFF_DT,A.EXP_DT,A.FT_FLG
+/* CHM-201539416 수정 추가 */
+ORDER BY DECODE(SC_NO,'1',999999,'zzzzzz',-1,SC_LOC_TCNT) DESC, A.SC_NO,A.SC_CUST_NO			]]></sql>
+			<params>
+				<param name="sc_fm_dt" type="12" value="" out="N"/>
+				<param name="sc_to_dt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TesAdvanceAuditDBDAOSearchFreeDayAudRSQL">
+			<desc><![CDATA[Storage Invoice의 FreeDay를 심사한다.]]></desc>
+			<sql><![CDATA[
+SELECT	  INV_NO
+		, VNDR_SEQ
+		, TO_CHAR(MAX(INV_CFM_DT), 'YYYYMMDDHH24MISS') INV_CFM_DT
+		, MAX(FM_PRD_DT) AS FM_PRD_DT
+		, MAX(TO_PRD_DT) AS TO_PRD_DT     
+		, MAX(TML_INV_TP_CD) AS TML_INV_TP_CD
+		, MAX(YD_CD) AS YD_CD
+		, TO_CHAR(MAX(ISS_DT), 'YYYYMMDDHH24MISS') ISS_DT
+		, MAX(EAS_EXPN_AUD_PKG.GET_RHQ_OFC_CD(INV_OFC_CD)) AS RHQ_CD
+		, MAX(INV_OFC_CD) AS INV_OFC_CD
+		, MAX(COST_OFC_CD) AS COST_OFC_CD
+		, MAX(CURR_CD) AS CURR_CD
+		, SUM(INV_AMT) AS INV_AMT
+		, CASE WHEN MIN(AMT_AUTO_AUD_CD) = 'C' THEN 'Y' END AS AMT_AUD_TGT_FLG
+		, SUM(EXPN_AUD_ESTM_AMT) AS EXPN_AUD_ESTM_AMT
+		, COUNT(DISTINCT ERR_LGS_COST_CD) AS AUD_LGS_COST_CD_QTY
+		, (SELECT	WM_CONCAT(DISTINCT X.DSCR_IND_CD)
+			FROM	TES_TML_SO_CNTR_LIST X
+			WHERE	X.TML_SO_OFC_CTY_CD	= AAAAA.TML_SO_OFC_CTY_CD
+			AND		X.TML_SO_SEQ        = AAAAA.TML_SO_SEQ
+			AND		(X.VRFY_RSLT_IND_CD	= 'CO' AND X.MODI_FLG = 'Y')
+			) AS VRFY_RSLT_CD_CTNT -- VERIFY RESULT
+		, MIN(BAT_VOL_RSLT_CD) AS BAT_VOL_RSLT_CD
+		, MIN(BAT_AMT_RSLT_CD) AS BAT_AMT_RSLT_CD
+		, MIN(BAT_ESTM_VOL_RSLT_CD) AS BAT_ESTM_VOL_RSLT_CD
+		, CASE WHEN MAX(CALC_TP_CD) = 'A' THEN 'S' -- Auto일 경우 항상 Coincidence
+				-- CHM-201642319 TES Auto Audit 수정 요청 ( 2016-07-08)
+				WHEN MAX(AMT_AUTO_AUD_CD) = 'O' THEN 'O' -- Auto Audit Target Flag 'N', Diff Ratio Non
+				WHEN MIN(AMT_AUTO_AUD_CD) IN ('F', 'C')  AND SUM(EXPN_AUD_ESTM_AMT) > SUM(INV_AMT) THEN 'F'
+				WHEN MIN(AMT_AUTO_AUD_CD) IN ('F', 'C') AND DECODE(SUM(EXPN_AUD_ESTM_AMT), 0, NULL, ROUND(((SUM(INV_AMT) - SUM(EXPN_AUD_ESTM_AMT)) / DECODE(SUM(EXPN_AUD_ESTM_AMT), 0, 1, SUM(EXPN_AUD_ESTM_AMT))) * 100, 1)) <= MIN(EXPN_MAX_PRMT_RTO)
+					THEN LEAST('F', MIN(VRFY_RSLT_AUD_CD))
+					ELSE (CASE WHEN MIN(VRFY_RSLT_AUD_CD) = 'S'
+									THEN (CASE WHEN MAX(DECODE(AMT_AUTO_AUD_CD, 'O', 'A',AMT_AUTO_AUD_CD)) = 'A' THEN 'O'
+													ELSE MIN(DECODE(AMT_AUTO_AUD_CD, 'O', 'Z', AMT_AUTO_AUD_CD))
+										  END)
+									ELSE LEAST(MIN(AMT_AUTO_AUD_CD), MIN(VRFY_RSLT_AUD_CD)) 
+						  END)
+		  END AS AUTO_EXPN_AUD_STS_CD
+		, COUNT(1) AS AUD_DTL_TGT_QTY
+		, WM_CONCAT(DISTINCT CALC_TP_CD) AS CALC_TP_CD_CTNT
+		, SUM(DECODE(BAT_VOL_RSLT_CD, 'F', 1, 0)) AS BAT_VOL_RSLT_CD_QTY
+		, SUM(DECODE(BAT_AMT_RSLT_CD, 'F', 1, 0)) AS BAT_AMT_RSLT_CD_QTY
+		, SUM(DECODE(BAT_ESTM_VOL_RSLT_CD, 'F', 1, 0)) AS BAT_ESTM_VOL_RSLT_CD_QTY
+FROM	(
+        SELECT	AAAA.*
+				, CASE  -- CHM-201642319 TES Auto Audit 수정 요청 ( 2016-07-08)
+						WHEN EXPN_MAX_PRMT_RTO IS NULL THEN 'O' -- Auto Audit Target Flag 'N', Diff Ratio Non
+						WHEN INV_AMT - EXPN_AUD_ESTM_AMT < 0 THEN 'F' -- 마이너스 금액은 잠재적인 심사대상
+						WHEN EXPN_MAX_PRMT_RTO >= ((INV_AMT - EXPN_AUD_ESTM_AMT) / DECODE(EXPN_AUD_ESTM_AMT,0,1,EXPN_AUD_ESTM_AMT) ) * 100 -- 허용범위내(%)
+							THEN (CASE WHEN CALC_TP_CD = 'A' AND (((INV_AMT - EXPN_AUD_ESTM_AMT) / DECODE(EXPN_AUD_ESTM_AMT,0,1,EXPN_AUD_ESTM_AMT) ) * 100 BETWEEN 0 AND 1) THEN 'S' -- Auto는 1%이내일 경우 심사대상에서 제외
+										WHEN CALC_TP_CD = 'M' AND (((INV_AMT - EXPN_AUD_ESTM_AMT) / DECODE(EXPN_AUD_ESTM_AMT,0,1,EXPN_AUD_ESTM_AMT) ) * 100 BETWEEN 0 AND 3) THEN 'S' -- Manual은 3%이내일 경우 심사대상에서 제외
+											ELSE 'F'
+								  END)
+						WHEN EXPN_MAX_PRMT_RTO < ((INV_AMT - EXPN_AUD_ESTM_AMT) / DECODE(EXPN_AUD_ESTM_AMT,0,1,EXPN_AUD_ESTM_AMT) ) * 100 THEN 'C' -- 설정된 허용범위를 초과화면 심사대상
+						WHEN N3MON_TOT_VOL IS NULL OR N3MON_TOT_AMT IS NULL OR ESTM_VOL IS NULL THEN 'F'
+							ELSE 'O' -- Ratio가 등록되지 않아 비교값이 없는 경우
+				  END AS AMT_AUTO_AUD_CD
+				, CASE WHEN VRFY_RSLT_CD_CTNT IS NOT NULL THEN 'F' ELSE 'S'
+				  END AS VRFY_RSLT_AUD_CD        
+				, CASE WHEN (CASE WHEN EXPN_MAX_PRMT_RTO < ((INV_AMT - EXPN_AUD_ESTM_AMT) / DECODE(EXPN_AUD_ESTM_AMT,0,1,EXPN_AUD_ESTM_AMT) ) * 100 THEN 'Y' END) = 'Y' THEN LGS_COST_CD
+						WHEN VRFY_RSLT_CD_CTNT IS NOT NULL THEN LGS_COST_CD
+				  END AS ERR_LGS_COST_CD
+				, (CASE WHEN N3MON_TOT_VOL IS NOT NULL THEN 'S' ELSE 'F' END) AS BAT_VOL_RSLT_CD
+				, (CASE WHEN N3MON_TOT_AMT IS NOT NULL THEN 'S' ELSE 'F' END) AS BAT_AMT_RSLT_CD
+				, (CASE WHEN ESTM_VOL IS NOT NULL THEN 'S' ELSE 'F' END) AS BAT_ESTM_VOL_RSLT_CD 
+		FROM	(
+				SELECT	 AAA.*
+						, DECODE(CALC_TP_CD, 'A', CTRT_RT, ROUND(N3MON_TOT_AMT / DECODE(N3MON_TOT_VOL,0,1,N3MON_TOT_VOL), 2)) * NVL(INV_XCH_RT, 1) * ESTM_VOL  AS EXPN_AUD_ESTM_AMT
+				FROM	(
+						SELECT	AA.*
+								, (SELECT SUM(CASE WHEN AA.STO_DYS_IND_CD = 'IO' AND AA.CNTR_TPSZ_CD = '20FT' THEN X.CNTR_20FT_OVR_DYS
+													WHEN AA.STO_DYS_IND_CD = 'IO' AND AA.CNTR_TPSZ_CD = '40FT' THEN X.CNTR_40FT_OVR_DYS
+													WHEN AA.STO_DYS_IND_CD = 'IO' AND AA.CNTR_TPSZ_CD = '45FT' THEN X.CNTR_45FT_OVR_DYS
+													WHEN AA.STO_DYS_IND_CD = 'IO' AND AA.CNTR_TPSZ_CD = '40HC' THEN X.CNTR_40FT_HC_OVR_DYS
+													WHEN AA.STO_DYS_IND_CD = 'IO' AND AA.CNTR_TPSZ_CD = 'ALL' THEN X.OVR_DYS
+													WHEN AA.STO_DYS_IND_CD = 'DT' AND AA.CNTR_TPSZ_CD = '20FT' THEN X.CNTR_20FT_OVR_QTY
+													WHEN AA.STO_DYS_IND_CD = 'DT' AND AA.CNTR_TPSZ_CD = '40FT' THEN X.CNTR_40FT_OVR_QTY
+													WHEN AA.STO_DYS_IND_CD = 'DT' AND AA.CNTR_TPSZ_CD = '45FT' THEN X.CNTR_45FT_OVR_QTY
+													WHEN AA.STO_DYS_IND_CD = 'DT' AND AA.CNTR_TPSZ_CD = '40HC' THEN X.CNTR_40FT_HC_OVR_QTY
+													WHEN AA.STO_DYS_IND_CD = 'DT' AND AA.CNTR_TPSZ_CD = 'ALL' THEN X.CNTR_OVR_QTY
+												END)
+									FROM	EAS_TML_STO_TTL_QTY X
+									WHERE	1	= 1
+									AND		X.TML_AUD_YRMON          = @[prd_ym]
+									AND		X.YD_CD                  = AA.YD_CD
+									AND		X.FULL_MTY_CD            = AA.CNTR_STY_CD
+									AND		CASE WHEN AA.STO_DYS_IND_CD = 'IO' THEN 'O'
+												WHEN AA.STO_DYS_IND_CD  = 'DT' THEN 'A'
+											END = 
+											CASE WHEN AA.STO_DYS_IND_CD = 'IO' THEN X.STO_AUD_QTY_CLSS_CD
+												WHEN AA.STO_DYS_IND_CD = 'DT' AND X.STO_AUD_QTY_CLSS_CD IN ('T', 'I') THEN 'A'
+											END
+									AND		NVL(X.DCGO_FLG, 'N') = NVL(AA.DCGO_IND_FLG, 'N')
+								  ) AS N3MON_TOT_VOL
+								, (SELECT CASE WHEN AA.CNTR_TPSZ_CD = '20FT' THEN X.CNTR_20FT_AMT
+												WHEN AA.CNTR_TPSZ_CD = '40FT' THEN X.CNTR_40FT_AMT
+												WHEN AA.CNTR_TPSZ_CD = '45FT' THEN X.CNTR_45FT_AMT
+												WHEN AA.CNTR_TPSZ_CD = '40HC' THEN X.CNTR_40FT_HC_AMT
+												WHEN AA.CNTR_TPSZ_CD = 'ALL'  THEN X.CNTR_TTL_AMT
+											END
+									FROM	EAS_TML_STO_TTL_AMT X
+									WHERE	1	= 1
+									AND		X.TML_AUD_YRMON         = @[prd_ym]
+									AND		X.YD_CD                 = AA.YD_CD
+									AND		X.TML_INV_TP_CD			= AA.TML_INV_TP_CD
+									AND		X.CALC_COST_GRP_CD		= 'SD'
+									AND		X.LGS_COST_CD		    = AA.LGS_COST_CD
+									AND		CASE WHEN X.EXPN_AUD_CRTE_CGO_TP_CD IN ('Y', 'R') THEN 'Y' 
+												WHEN X.EXPN_AUD_CRTE_CGO_TP_CD = 'D' THEN 'D' 
+											END = 
+											CASE WHEN AA.DCGO_IND_FLG = 'Y' THEN 'D' ELSE 'Y' END
+									AND		X.CURR_CD				= AA.CURR_CD
+								  ) AS N3MON_TOT_AMT
+								, (SELECT SUM(CASE WHEN AA.STO_DYS_IND_CD = 'IO' AND AA.CNTR_TPSZ_CD = '20FT' THEN X.CNTR_20FT_OVR_DYS
+													WHEN AA.STO_DYS_IND_CD = 'IO' AND AA.CNTR_TPSZ_CD = '40FT' THEN X.CNTR_40FT_OVR_DYS
+													WHEN AA.STO_DYS_IND_CD = 'IO' AND AA.CNTR_TPSZ_CD = '45FT' THEN X.CNTR_45FT_OVR_DYS
+													WHEN AA.STO_DYS_IND_CD = 'IO' AND AA.CNTR_TPSZ_CD = '40HC' THEN X.CNTR_40FT_HC_OVR_DYS
+													WHEN AA.STO_DYS_IND_CD = 'IO' AND AA.CNTR_TPSZ_CD = 'ALL' THEN X.OVR_DYS
+													WHEN AA.STO_DYS_IND_CD = 'DT' AND AA.CNTR_TPSZ_CD = '20FT' THEN X.CNTR_20FT_OVR_QTY
+													WHEN AA.STO_DYS_IND_CD = 'DT' AND AA.CNTR_TPSZ_CD = '40FT' THEN X.CNTR_40FT_OVR_QTY
+													WHEN AA.STO_DYS_IND_CD = 'DT' AND AA.CNTR_TPSZ_CD = '45FT' THEN X.CNTR_45FT_OVR_QTY
+													WHEN AA.STO_DYS_IND_CD = 'DT' AND AA.CNTR_TPSZ_CD = '40HC' THEN X.CNTR_40FT_HC_OVR_QTY
+													WHEN AA.STO_DYS_IND_CD = 'DT' AND AA.CNTR_TPSZ_CD = 'ALL' THEN X.CNTR_OVR_QTY
+											END)
+									FROM	EAS_TML_STO_YD_DLY_QTY X
+									WHERE	1	= 1
+									AND		X.YD_CD						= AA.YD_CD
+									AND		X.FULL_MTY_CD 				= AA.CNTR_STY_CD
+									AND		CASE WHEN AA.STO_DYS_IND_CD = 'IO' THEN 'O'
+												WHEN AA.STO_DYS_IND_CD  = 'DT' THEN 'A'
+											END =
+											CASE WHEN AA.STO_DYS_IND_CD = 'IO' THEN X.STO_AUD_QTY_CLSS_CD
+												WHEN AA.STO_DYS_IND_CD	= 'DT' AND X.STO_AUD_QTY_CLSS_CD IN ('T', 'I') THEN 'A'
+											END
+									AND		NVL(X.DCGO_FLG, 'N')		= NVL(AA.DCGO_IND_FLG, 'N')
+									AND		X.CNMV_DT BETWEEN @[fm_prd_dt] AND @[to_prd_dt]
+									) - NVL(FREE_DY_XCLD_DYS,0) AS ESTM_VOL
+								, (SELECT WM_CONCAT(DISTINCT X.DSCR_IND_CD)
+									FROM	TES_TML_SO_CNTR_LIST X
+									WHERE	X.TML_SO_OFC_CTY_CD			= AA.TML_SO_OFC_CTY_CD
+									AND		X.TML_SO_SEQ        		= AA.TML_SO_SEQ
+									AND		X.CNTR_STY_CD				= AA.CNTR_STY_CD
+									AND		NVL(X.DCGO_CLSS_CD, 'N')	= NVL(AA.DCGO_IND_FLG, 'N')
+									AND		(X.VRFY_RSLT_IND_CD	= 'CO' AND X.MODI_FLG = 'Y')
+								  ) AS VRFY_RSLT_CD_CTNT -- VERIFY RESULT                 
+						FROM (
+								SELECT  H.INV_NO
+										, H.VNDR_SEQ
+										, D.CALC_TP_CD
+										, D.LGS_COST_CD
+										, CASE WHEN SUBSTR(D.CNTR_TPSZ_CD, 2, 1) = '2' OR SUBSTR(D.CNTR_TPSZ_CD, 2, 1) = '3' THEN '20FT'
+												WHEN SUBSTR(D.CNTR_TPSZ_CD, 2, 1) = '5' THEN '40HC'
+												WHEN SUBSTR(D.CNTR_TPSZ_CD, 2, 1) = '7' THEN '45FT'
+												WHEN SUBSTR(D.CNTR_TPSZ_CD, 2, 1) NOT IN  ('2', '3', '5', '7') THEN '40FT'
+													ELSE 'ALL'
+										  END AS CNTR_TPSZ_CD
+										, DECODE(NVL(D.DCGO_IND_CD, 'N'), 'N', 'N', 'Y') AS DCGO_IND_FLG
+										, MAX(SC.CNTR_STY_CD) AS CNTR_STY_CD
+										, MAX(H.YD_CD) YD_CD
+										, H.FM_PRD_DT
+										, H.TO_PRD_DT
+										, COUNT(1)AS  CNTR_VOL
+										, MAX(D.REV_YRMON) AS REV_YRMON
+										, SUM(D.STAY_DYS) AS STAY_DYS
+										, SUM(D.FREE_DYS) AS FREE_DYS
+										, SUM(D.PAY_DYS) AS PAY_DYS
+										, SUM(D.FREE_DY_XCLD_DYS) AS FREE_DY_XCLD_DYS
+										, SUM(D.OVR_DYS) AS OVR_DYS
+										, MAX(D.VOL_TR_UT_CD) AS VOL_TR_UT_CD
+										, MAX(D.CTRT_RT) AS CTRT_RT
+										, MAX(H.CURR_CD) AS CURR_CD
+										, MAX(D.INV_XCH_RT) AS INV_XCH_RT
+										, SUM(D.INV_AMT) AS INV_AMT
+										, SUM(D.CALC_AMT) AS CALC_AMT
+										, MAX(D.CALC_RMK) AS CALC_RMK
+										, (CASE WHEN MAX(AC.EXPN_AUD_TGT_FLG) = 'N' THEN NULL ELSE MAX(AC.EXPN_MAX_PRMT_RTO) END) AS EXPN_MAX_PRMT_RTO
+										, MAX(H.TML_SO_OFC_CTY_CD) AS TML_SO_OFC_CTY_CD
+										, MAX(H.TML_SO_SEQ) AS TML_SO_SEQ
+										, MAX(H.INV_CFM_DT) AS INV_CFM_DT
+										, MAX(H.TML_INV_TP_CD) AS TML_INV_TP_CD
+										, MAX(H.ISS_DT) AS ISS_DT
+										, MAX(H.INV_OFC_CD) AS INV_OFC_CD
+										, MAX(H.COST_OFC_CD) AS COST_OFC_CD
+										, MAX(TO_CHAR(ADD_MONTHS(TO_DATE(H.FM_PRD_DT, 'YYYYMMDD'),-1), 'YYYYMM')) AS PRD_YM
+										, MAX(STO_DYS_IND_CD) AS STO_DYS_IND_CD
+								FROM	TES_TML_SO_HDR H 
+										, TES_TML_SO_DTL D
+										, TES_TML_SO_COST SC
+										, EAS_TML_AUTO_AUD_CRTE AC
+								WHERE	1	= 1
+								AND		H.TML_SO_OFC_CTY_CD	= D.TML_SO_OFC_CTY_CD
+								AND		H.TML_SO_SEQ		= D.TML_SO_SEQ
+								AND		D.LGS_COST_CD		= SC.LGS_COST_CD
+								AND		D.LGS_COST_CD		= AC.LGS_COST_CD
+								AND		AC.AUD_OFC_CD		= EAS_EXPN_AUD_PKG.GET_RHQ_OFC_CD(H.INV_OFC_CD)
+								AND     NVL(H.DELT_FLG, 'N')<> 'Y'
+								AND     H.TML_INV_STS_CD 	<> 'R'
+								AND     H.TML_INV_RJCT_STS_CD <> 'RJ'
+								AND		SC.EAS_AUD_FLG		= 'Y'
+								AND		H.TML_INV_TP_CD		= @[tml_inv_tp_cd]
+								AND		D.CALC_COST_GRP_CD	= 'SD'
+								AND		H.VNDR_SEQ			= @[vndr_seq]
+								AND		H.INV_NO			= @[inv_no]
+								GROUP BY  H.INV_NO
+										, H.VNDR_SEQ
+										, D.CALC_TP_CD
+										, D.LGS_COST_CD
+										, CASE WHEN SUBSTR(D.CNTR_TPSZ_CD, 2, 1) = '2' OR SUBSTR(D.CNTR_TPSZ_CD, 2, 1) = '3' THEN '20FT'
+												WHEN SUBSTR(D.CNTR_TPSZ_CD, 2, 1) = '5' THEN '40HC'
+												WHEN SUBSTR(D.CNTR_TPSZ_CD, 2, 1) = '7' THEN '45FT'
+												WHEN SUBSTR(D.CNTR_TPSZ_CD, 2, 1) NOT IN  ('2', '3', '5', '7') THEN '40FT'
+													ELSE 'ALL'
+											END
+										, DECODE(NVL(D.DCGO_IND_CD, 'N'), 'N', 'N', 'Y')
+										, H.FM_PRD_DT
+										, H.TO_PRD_DT
+                                ) AA
+                      ) AAA
+               ) AAAA
+        ) AAAAA
+GROUP BY INV_NO
+		, VNDR_SEQ
+		, TML_SO_OFC_CTY_CD
+		, TML_SO_SEQ			]]></sql>
+			<params>
+				<param name="prd_ym" type="12" value="" out="N"/>
+				<param name="fm_prd_dt" type="12" value="" out="N"/>
+				<param name="to_prd_dt" type="12" value="" out="N"/>
+				<param name="tml_inv_tp_cd" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="12" value="" out="N"/>
+				<param name="inv_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

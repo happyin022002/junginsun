@@ -1,0 +1,195 @@
+﻿
+var sheetObjects = new Array();
+var sheetCnt = 0;
+
+/* 버튼클릭이벤트를 받아 처리하는 이벤트핸들러 정의 */
+document.onclick = processButtonClick;
+
+/* 버튼 네임으로 구분하여 프로세스를 분기처리하는 이벤트핸들러 */
+function processButtonClick(){
+	 /***** 탭당 시트가 2개 이상인 경우엔 추가 시트변수 지정하여 사용한 *****/
+	 var sheetObject = sheetObjects[0];
+	 /*******************************************************/
+	 var formObject = document.form;
+
+	try {
+		var srcName = window.event.srcElement.getAttribute("name");
+
+		switch(srcName) {
+
+			case "btn_save":
+				doActionIBSheet(sheetObject,formObject,IBSAVE);
+				break;
+
+			case "btn_downexcel":
+				doActionIBSheet(sheetObject,formObject,IBDOWNEXCEL);
+				break;
+
+		} // end switch
+	}catch(e) {
+		if( e == "[object Error]") {
+			ComShowMessage(ComGetMsg('COM12111')) ;
+		} else {
+			ComShowMessage(e);
+		}
+	}
+}
+
+/**
+ * IBSheet Object를 배열로 등록
+ * 향후 다른 항목들을 일괄처리할 필요가 있을 때 배열로 담는 프로세스를 추가할 수 있다
+ * 배열은 소스 상단에 정의
+ */
+function setSheetObject(sheet_obj){
+
+   sheetObjects[sheetCnt++] = sheet_obj;
+
+
+}
+
+/**
+ * Sheet 기본 설정 및 초기화
+ * body 태그의 onLoad 이벤트핸들러 구현
+ * 화면을 브라우저에서 로딩한 후에 선처리해야 하는 기능을 추가한다
+ */
+function loadPage() {
+
+	for(i=0;i<sheetObjects.length;i++){
+
+	//khlee-시작 환경 설정 함수 이름 변경
+		ComConfigSheet(sheetObjects[i]);
+
+		initSheet(sheetObjects[i],i+1);
+	//khlee-마지막 환경 설정 함수 추가
+			ComEndConfigSheet(sheetObjects[i]);
+		}
+
+
+	}
+
+/**
+ * 시트 초기설정값, 헤더 정의
+ * param : sheetObj ==> 시트오브젝트, sheetNo ==> 시트오브젝트 태그의 아이디에 붙인 일련번호
+ * 시트가 다수일 경우 시트 수만큼 case를 추가하여 시트 초기화모듈을 구성한다
+ */
+function initSheet(sheetObj,sheetNo) {
+
+	var cnt = 0;
+
+	switch(sheetNo) {
+		case 1:	  //IBSheet1 init
+			with (sheetObj) {
+				//전체 너비 설정
+				SheetWidth = mainTable.clientWidth;
+
+				//Host정보 설정[필수][HostIp, Port, PagePath]
+				if (location.hostname != "") InitHostInfo(location.hostname, location.port, page_path);
+
+				//전체Merge 종류 [선택, Default msNone]
+				MergeSheet = msHeaderOnly;
+
+				//전체Edit 허용 여부 [선택, Default false]
+				Editable = true;
+
+				//행정보설정[필수][HEADROWS,DATAROWS,VIEWROWS,ONEPAGEROWS=100]
+				InitRowInfo( 1, 1, 9, 100);
+
+				//컬럼정보설정[필수][COLS,FROZENCOL,LEFTHEADCOLS=0,FROZENMOVE=false]
+				InitColumnInfo(11, 4, 0, true);
+
+				// 해더에서 처리할 수 있는 각종 기능을 설정한다
+				InitHeadMode(true, true, false, true, false,false)
+
+				var HeadTitle = "STS|SEQ|Activity\nType|Activity\nCode|Activity Name|Scheduling\nSource|Standard EDI\nStatus Code|Customer\nVisibility|SPED Visibility\nTolerance(Hour)|SPED Visibility\nService Category|Active Flag" ;
+
+				//해더행정보[필수][ROW,HEADTEXT,ROWMERGE=false, HIDDEN=false]
+				InitHeadRow(0, HeadTitle, true);
+
+				//데이터속성	[ROW, COL,  DATATYPE,			WIDTH, DATAALIGN, COLMERGE, SAVENAME,  				  KEYFIELD, CALCULOGIC, DATAFORMAT, POINTCOUNT, UPDATEEDIT, INSERTEDIT, EDITLEN, FULLINPUT, SORTENABLE, TOOLTIP, ALLCHECK, SAVESTATUS, FORMATFIX]
+				InitDataProperty(0, cnt++ , dtHiddenStatus,	  0,	daCenter,	false,	"ibflag",					false,		  "",	   dfNone,   	0,		false,		false);
+				InitDataProperty(0, cnt++ , dtSeq,	 		 30,	daCenter,	false,	"seq",					false,		  "",	   dfNone,   	0,		false,		false);
+				InitDataProperty(0, cnt++ , dtData,			120,	daCenter,	false,	"act_tp_nm",				false,		  "",	   dfNone,   	0,		false,		false);
+				InitDataProperty(0, cnt++ , dtData,			 80,	daCenter,	false,	"act_cd",					false,		  "",	   dfNone,   	0,		false,		false);
+				InitDataProperty(0, cnt++ , dtData,			180,	daLeft,		false,	"act_nm",					false,		  "",	   dfNone,	 	0,		false,		false);
+				InitDataProperty(0, cnt++ , dtCombo,		 80,	daCenter,	false,	"cop_skd_lgc_no",			false,		  "",	   dfNone,   	0,		true,		false);
+				InitDataProperty(0, cnt++ , dtData,			100,	daCenter,	false,	"act_stnd_edi_sts_cd",	false,		  "",	   dfNone,   	0,		true,		true,		 5);
+				InitDataProperty(0, cnt++ , dtCombo,		 80,	daCenter,	false,	"cust_vis_flg",			true,		  "",	   dfNone,   	0,		true,		true);
+				InitDataProperty(0, cnt++ , dtData,			 110,	daRight,	false,	"vndr_ev_tol_hrs",				true,		  "",	   dfNullInteger,   0,		true,		true);
+				InitDataProperty(0, cnt++ , dtCombo,		 120,	daCenter,	false,	"vndr_ev_svc_cate_cd",			true,		  "",	   dfNone,   	0,		true,		true);
+				InitDataProperty(0, cnt++ , dtCombo,		 80,	daCenter,	false,	"act_flg",				true,		  "",	   dfNone,	 	0,		true,		true);
+				
+				InitDataValid(0, 6, vtEngOther, "1234567890/") ;
+
+				//콤보항목설정[ROW, COL, COMBO-TEXT, COMBO-CODE, DEFAULT-TEXT]
+				InitDataCombo (0, "cop_skd_lgc_no" 	, " |" + skdLgcText, " |" + skdLgcCode);
+				
+				InitDataCombo (0, "cust_vis_flg"   	, "Basic|Extended|N/A", "B|E|N");
+				InitDataCombo (0, "vndr_ev_svc_cate_cd"    , "Internal|Rail|Terminal(ODCY)|Truck|Water", "I|R|O|T|W");
+				InitDataCombo (0, "act_flg"        	, "Y|N", "Y|N");
+
+				
+				style.height = GetSheetHeight(17) ;
+			}
+			break;
+		}
+	}
+
+function doActionIBSheet(sheetObj,formObj,sAction) {
+	sheetObj.ShowDebugMsg = false;
+
+	switch(sAction) {
+
+	   case IBSEARCH:	  //조회
+			formObj.f_cmd.value = SEARCHLIST;
+			sheetObj.DoSearch4Post("ESD_SCE_0022GS.do", SceFrmQryString(formObj));
+
+			break;
+		case IBSAVE:
+
+			/* 유저의 요청으로  20071012에 막음*/
+			/*
+			if(validateForm(sheetObj,formObj,sAction)){
+		  		formObj.f_cmd.value = MODIFY;
+				sheetObj.DoSave("ESD_SCE_0022GS.do", SceFrmQryString(formObj));
+			}
+			*/
+			break;
+
+	   case IBDOWNEXCEL:
+			sheetObj.Down2Excel(-1, false, false, true);
+			break;
+		}
+	}
+
+
+/**
+ * 화면 폼입력값에 대한 유효성검증 프로세스 처리
+ */
+function validateForm(sheetObj,formObj,sAction){
+	switch (sAction) {
+		case IBSAVE:
+			
+			break;
+
+		default:
+			break;
+	}
+	
+	return true;
+}
+
+function sheet1_OnChange(sheetObj, row, col){
+	var colName = sheetObj.ColSaveName(col) ;
+	
+	//if(colName=="r_act_sts_mapg_cd" || colName=="r_act_stnd_edi_sts_cd"){
+	if(colName=="act_stnd_edi_sts_cd"){
+		sheetObj.CellValue2(row, col) = sheetObj.CellValue(row, col).toUpperCase() ;
+	}		
+}
+
+function sheet1_OnSaveEnd(sheetObj, errMsg){
+	if(errMsg==""){
+		doActionIBSheet(sheetObj, document.form, IBSEARCH) ;
+		ComShowMessage(ComGetMsg('SCE90005')) ;
+	}	
+}

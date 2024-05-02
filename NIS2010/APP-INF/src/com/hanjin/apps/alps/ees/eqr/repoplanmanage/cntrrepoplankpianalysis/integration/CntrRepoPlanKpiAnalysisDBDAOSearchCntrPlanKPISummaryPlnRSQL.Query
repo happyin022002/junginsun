@@ -1,0 +1,1968 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CntrRepoPlanKpiAnalysisDBDAOSearchCntrPlanKPISummaryPlnRSQL">
+			<desc><![CDATA[<EES_EQR_0071 컨테이너 이송 계획 KPI 요약 조회>
+PORT별 재고대비 운송모드별 실행 KPI 데이터 조회 (Pln)
+
+<Change History>
+1	2009.09.21	Lee ByoungHun	최초작성]]></desc>
+			<sql><![CDATA[
+#if (${radiototrcc} == 'T')
+    SELECT
+        '' ECC_CD
+        , REPO_PLN_ID
+        , SUM(UTILIZATION) UTILIZATION
+        , SUM(MTY) MTY
+        , SUM(ONHIRE) ONHIRE
+        , SUM(OFFHIRE) OFFHIRE
+        , SUM(LF) LF
+        , SUM(MB) MB
+        , SUM(RCOST) RCOST
+    FROM
+    (
+#end
+SELECT
+    RCC_CD ECC_CD
+    ,REPO_PLN_ID
+    ,'' UTILIZATION
+    ,SUM(DECODE ( DIV , 'MTY' , CNTR_QTY ))   MTY
+    ,SUM(DECODE ( DIV , 'ONH' , CNTR_QTY ))   ONHIRE
+    ,SUM(DECODE ( DIV , 'OFH' , CNTR_QTY ))   OFFHIRE
+    ,'' LF
+    ,'' MB
+    ,SUM(DECODE ( DIV , 'COST' , CNTR_QTY )) RCOST
+FROM
+(
+    -- planwk = fmwk and planwk = towk 이면 EQR_INVT_SNAP 만 조회
+    -- towk <> plan wk : queryPlnMty3 실행.(단. 항상 planwk = fmwk 임. 화면단에서 수정불가로 처리.)
+    #if (${yyyyww} == ${plnFrom} && ${yyyyww} == ${plnTo})
+        SELECT
+            (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = T.ECC_CD) RCC_CD
+            , @[repo_pln_id]  REPO_PLN_ID
+            , SUM(T.CNTR_VOL_QTY)  CNTR_QTY
+            , 'MTY' DIV
+        FROM
+            EQR_INVT_SNAP T
+        WHERE
+            T.SNAP_DT BETWEEN (SELECT WK_ST_DT FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[plnFrom])
+            AND (SELECT WK_END_DT FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[plnFrom])
+            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+        GROUP BY ECC_CD
+    #end
+    #if (${yyyyww} != ${plnTo})
+        --------------------------------------------------------------------------------<MTY>
+        SELECT
+            RCC_CD
+            , REPO_PLN_ID
+            , TRUNC(SUM(CNTR_QTY) / @[data0],1) CNTR_QTY
+            , DIV
+        FROM
+        (--------------------- MTY 최외곽.
+            --//[plan wk] plan 주차는 EQR_INVT_SNAP를 읽고,
+            SELECT
+                RCC_CD
+                , REPO_PLN_ID
+                , SUM(CNTR_QTY) CNTR_QTY
+                , DIV
+            FROM(
+                SELECT
+                    (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = T.ECC_CD) RCC_CD
+                    , @[repo_pln_id]  REPO_PLN_ID
+                    , SUM(T.CNTR_VOL_QTY)  CNTR_QTY
+                    , 'MTY' DIV
+                FROM
+                    EQR_INVT_SNAP T
+                WHERE
+                    T.SNAP_DT = (SELECT WK_ST_DT FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[plnFrom])
+                    AND CNTR_TPSZ_CD IN(SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                GROUP BY ECC_CD
+            )
+            GROUP BY RCC_CD, REPO_PLN_ID, DIV
+
+            UNION ALL
+
+            --//[planWk+1] plan 주차이후주차는 전주차의 balance값을 계산.
+            SELECT
+                RCC_CD --AS ECC_CD
+                , REPO_PLN_ID
+                ,NVL(SUM(DECODE(ITEM, 'InitialVol',CNTR_QTY)),0)
+                - NVL(SUM(DECODE(ITEM, 'DemandVol',CNTR_QTY)),0)
+                - NVL(SUM(DECODE(ITEM, 'RepoOutVol',CNTR_QTY)),0)
+                - NVL(SUM(DECODE(ITEM, 'OffHireVol',CNTR_QTY)),0)
+                + NVL(SUM(DECODE(ITEM, 'IBGenerationVol',CNTR_QTY)),0)
+                + NVL(SUM(DECODE(ITEM, 'RepoInVol',CNTR_QTY)),0)
+                + NVL(SUM(DECODE(ITEM, 'OnHireVol',CNTR_QTY)),0)
+                + NVL(SUM(DECODE(ITEM, 'ETCVol',CNTR_QTY)),0) CNTR_QTY
+                ,'MTY' DIV
+            FROM(
+                SELECT
+                    REPO_PLN_ID
+                    , RCC_CD
+                    , ITEM
+                    , CNTR_QTY
+                    ,ROW_NUMBER() OVER (PARTITION BY RCC_CD, ITEM ORDER BY ROWNUM) RUMM
+                FROM
+                (
+                    SELECT
+                        REPO_PLN_ID
+                        , RCC_CD
+                        , SUM(CNTR_QTY) CNTR_QTY
+                        , 'InitialVol' ITEM
+                    FROM
+                    (
+                        SELECT
+                            @[repo_pln_id] REPO_PLN_ID
+                            ,(SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                            , SUM(CNTR_VOL_QTY) CNTR_QTY
+                        FROM
+                            EQR_INVT_SNAP PLN
+                        WHERE
+                            SNAP_DT = (SELECT WK_ST_DT FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[plnFrom])
+                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                        GROUP BY PLN.ECC_CD
+                    )
+                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                    UNION ALL
+
+                    SELECT
+                        REPO_PLN_ID
+                        , RCC_CD
+                        , SUM(CNTR_QTY) CNTR_QTY
+                        , 'DemandVol' ITEM
+                    FROM
+                    (
+                        SELECT
+                            @[repo_pln_id] REPO_PLN_ID
+                            ,(SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                            , SUM(CNTR_VOL_QTY)  CNTR_QTY
+                        FROM
+                            EQR_OB_FCAST PLN
+                        WHERE
+                            SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id])
+                            AND FCAST_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                        GROUP BY PLN.FM_ECC_CD
+                    )
+                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                    UNION ALL
+
+                    SELECT
+                        REPO_PLN_ID
+                        , RCC_CD
+                        , SUM(CNTR_QTY) CNTR_QTY
+                        , 'RepoOutVol' ITEM
+                    FROM
+                    (
+                        -------EQR_VSL_LODG_DCHG_PLN
+                        SELECT
+                            PLN.REPO_PLN_ID
+                            ,(SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                        FROM
+                            EQR_VSL_LODG_DCHG_PLN PLN
+                            , EQR_VSL_LODG_DCHG_PLN_QTY QTY
+                        WHERE
+                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                            AND TO_CHAR(FM_ETD_DT,'YYYYMMDD')  BETWEEN
+                            (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_0])
+                            AND
+                            (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_0])
+                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            #if (${transshippln} == 'E')
+                                AND LDIS_TS_FLG <> 'Y'
+                            #end
+                            #if (${transshippln} == 'O')
+                                AND LDIS_TS_FLG = 'Y'
+                            #end
+                        GROUP BY PLN.REPO_PLN_ID, FM_ECC_CD
+
+                        UNION ALL
+
+                        -------EQR_INLND_TRSP_PLN
+                        SELECT
+                            PLN.REPO_PLN_ID
+                            ,(SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                        FROM
+                            EQR_INLND_TRSP_PLN PLN
+                            , EQR_INLND_TRSP_PLN_QTY QTY
+                        WHERE
+                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                            AND FM_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                        GROUP BY PLN.REPO_PLN_ID, FM_ECC_CD
+                    )
+                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                    UNION ALL
+
+                    SELECT
+                        REPO_PLN_ID
+                        , RCC_CD
+                        , SUM(CNTR_QTY) CNTR_QTY
+                        , 'OffHireVol' ITEM
+                    FROM
+                    (
+                        SELECT
+                            PLN.REPO_PLN_ID
+                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                        FROM
+                            EQR_ONF_HIR_PLN PLN
+                            , EQR_ONF_HIR_PLN_QTY QTY
+                        WHERE
+                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                            AND ONF_HIR_DIV_CD = 'F'
+                            AND PLN.PLN_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                        GROUP BY PLN.REPO_PLN_ID, PLN.ECC_CD
+                    )
+                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                    UNION ALL
+
+                    SELECT
+                        REPO_PLN_ID
+                        , RCC_CD
+                        , SUM(CNTR_QTY) CNTR_QTY
+                        , 'IBGenerationVol' ITEM
+                    FROM
+                    (
+                        SELECT
+                            @[repo_pln_id] REPO_PLN_ID
+                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                            , SUM(CNTR_VOL_QTY) CNTR_QTY
+                        FROM
+                            EQR_IB_BKG_FCAST PLN
+                        WHERE
+                            SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id])
+                            AND FCAST_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                        GROUP BY TO_ECC_CD
+                    )
+                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                    UNION ALL
+
+                    SELECT
+                        REPO_PLN_ID
+                        , RCC_CD
+                        , SUM(CNTR_QTY) CNTR_QTY
+                        , 'RepoInVol' ITEM
+                    FROM
+                    (
+                        --EQR_VSL_LODG_DCHG_PLN--------------
+                        SELECT
+                            PLN.REPO_PLN_ID
+                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                            , SUM(CNTR_QTY) AS CNTR_QTY
+                        FROM
+                            EQR_VSL_LODG_DCHG_PLN PLN
+                            , EQR_VSL_LODG_DCHG_PLN_QTY QTY
+                        WHERE
+                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                            AND TO_CHAR(TO_ETB_DT,'YYYYMMDD')  BETWEEN
+                            (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_0])
+                            AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_0])
+                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            #if (${transshippln} == 'E')
+                                AND LDIS_TS_FLG <> 'Y'
+                            #end
+                            #if (${transshippln} == 'O')
+                                AND LDIS_TS_FLG = 'Y'
+                            #end
+                        GROUP BY PLN.REPO_PLN_ID, TO_ECC_CD
+
+                        UNION ALL
+
+                        --EQR_INLND_TRSP_PLN--------------
+                        SELECT
+                            PLN.REPO_PLN_ID
+                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                            , SUM(CNTR_QTY) AS CNTR_QTY
+                        FROM
+                            EQR_INLND_TRSP_PLN PLN
+                            , EQR_INLND_TRSP_PLN_QTY QTY
+                        WHERE
+                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                            AND TO_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                        GROUP BY PLN.REPO_PLN_ID, TO_ECC_CD
+                    )
+                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                    UNION ALL
+
+                    SELECT
+                        REPO_PLN_ID
+                        , RCC_CD
+                        , SUM(CNTR_QTY) CNTR_QTY
+                        , 'OnHireVol' ITEM
+                    FROM
+                    (
+                        SELECT
+                            PLN.REPO_PLN_ID
+                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                            , SUM(CNTR_QTY) AS CNTR_QTY
+                        FROM
+                            EQR_ONF_HIR_PLN PLN
+                            , EQR_ONF_HIR_PLN_QTY QTY
+                        WHERE
+                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                            AND ONF_HIR_DIV_CD = 'O'
+                            AND PLN.PLN_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                        GROUP BY PLN.REPO_PLN_ID, PLN.ECC_CD
+                    )
+                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                    UNION ALL
+
+                    SELECT
+                        REPO_PLN_ID
+                        , RCC_CD
+                        , SUM(CNTR_QTY) CNTR_QTY
+                        , 'ETCVol' ITEM
+                    FROM
+                    (
+                        SELECT
+                            REPO_PLN_ID
+                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                            , SUM(CNTR_QTY) AS CNTR_QTY
+                        FROM
+                            EQR_ADD_PLN PLN
+                        WHERE
+                            REPO_PLN_ID = @[repo_pln_id]
+                            AND PLN_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                        GROUP BY REPO_PLN_ID, PLN.ECC_CD
+                    )
+                    GROUP BY  REPO_PLN_ID, RCC_CD
+                )
+                WHERE RCC_CD IS NOT NULL -- 8개 RCC 만 출력.
+            )
+            GROUP BY  RUMM , REPO_PLN_ID, RCC_CD
+
+            #if (${weekStrArrSize} >= 2)
+                UNION ALL
+
+                --//[planWk+2] plan 주차이후주차는 전주차의 balance값을 계산.
+                SELECT
+                    RCC_CD --AS ECC_CD
+                    , REPO_PLN_ID
+                    ,NVL(SUM(DECODE(ITEM, 'InitialVol',CNTR_QTY)),0)
+                    - NVL(SUM(DECODE(ITEM, 'DemandVol',CNTR_QTY)),0)
+                    - NVL(SUM(DECODE(ITEM, 'RepoOutVol',CNTR_QTY)),0)
+                    - NVL(SUM(DECODE(ITEM, 'OffHireVol',CNTR_QTY)),0)
+                    + NVL(SUM(DECODE(ITEM, 'IBGenerationVol',CNTR_QTY)),0)
+                    + NVL(SUM(DECODE(ITEM, 'RepoInVol',CNTR_QTY)),0)
+                    + NVL(SUM(DECODE(ITEM, 'OnHireVol',CNTR_QTY)),0)
+                    + NVL(SUM(DECODE(ITEM, 'ETCVol',CNTR_QTY)),0) CNTR_QTY
+                    ,'MTY' DIV
+                FROM(
+                    SELECT
+                        REPO_PLN_ID
+                        , RCC_CD
+                        , ITEM
+                        , CNTR_QTY
+                        , ROW_NUMBER() OVER (PARTITION BY RCC_CD, ITEM ORDER BY ROWNUM) RUMM
+                    FROM
+                    (
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'InitialVol' ITEM
+                        FROM
+                        (
+                            --> 전주차[planWk+1] balance Start ----------------------------
+                            --//[planWk+1] plan 주차이후주차는 전주차의 balance값을 계산.
+                            SELECT
+                                RCC_CD --AS ECC_CD
+                                , REPO_PLN_ID
+                                ,NVL(SUM(DECODE(ITEM, 'InitialVol',CNTR_QTY)),0)
+                                - NVL(SUM(DECODE(ITEM, 'DemandVol',CNTR_QTY)),0)
+                                - NVL(SUM(DECODE(ITEM, 'RepoOutVol',CNTR_QTY)),0)
+                                - NVL(SUM(DECODE(ITEM, 'OffHireVol',CNTR_QTY)),0)
+                                + NVL(SUM(DECODE(ITEM, 'IBGenerationVol',CNTR_QTY)),0)
+                                + NVL(SUM(DECODE(ITEM, 'RepoInVol',CNTR_QTY)),0)
+                                + NVL(SUM(DECODE(ITEM, 'OnHireVol',CNTR_QTY)),0)
+                                + NVL(SUM(DECODE(ITEM, 'ETCVol',CNTR_QTY)),0) CNTR_QTY
+                                ,'MTY' DIV
+                            FROM(
+                                SELECT
+                                    REPO_PLN_ID
+                                    , RCC_CD
+                                    , ITEM
+                                    , CNTR_QTY
+                                    ,ROW_NUMBER() OVER (PARTITION BY RCC_CD, ITEM ORDER BY ROWNUM) RUMM
+                                FROM
+                                (
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'InitialVol' ITEM
+                                    FROM
+                                    (
+                                        SELECT
+                                            @[repo_pln_id] REPO_PLN_ID
+                                            ,(SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                            , SUM(CNTR_VOL_QTY) CNTR_QTY
+                                        FROM
+                                            EQR_INVT_SNAP PLN
+                                        WHERE
+                                            SNAP_DT = (SELECT WK_ST_DT FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[plnFrom])
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY PLN.ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'DemandVol' ITEM
+                                    FROM
+                                    (
+                                        SELECT
+                                            @[repo_pln_id] REPO_PLN_ID
+                                            ,(SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                            , SUM(CNTR_VOL_QTY)  CNTR_QTY
+                                        FROM
+                                            EQR_OB_FCAST PLN
+                                        WHERE
+                                            SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id])
+                                            AND FCAST_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY PLN.FM_ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'RepoOutVol' ITEM
+                                    FROM
+                                    (
+                                        -------EQR_VSL_LODG_DCHG_PLN
+                                        SELECT
+                                            PLN.REPO_PLN_ID
+                                            ,(SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) CNTR_QTY
+                                        FROM
+                                            EQR_VSL_LODG_DCHG_PLN PLN
+                                            , EQR_VSL_LODG_DCHG_PLN_QTY QTY
+                                        WHERE
+                                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                            AND TO_CHAR(FM_ETD_DT,'YYYYMMDD')  BETWEEN
+                                            (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_0])
+                                            AND
+                                            (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_0])
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                            #if (${transshippln} == 'E')
+                                                AND LDIS_TS_FLG <> 'Y'
+                                            #end
+                                            #if (${transshippln} == 'O')
+                                                AND LDIS_TS_FLG = 'Y'
+                                            #end
+                                        GROUP BY PLN.REPO_PLN_ID, FM_ECC_CD
+
+                                        UNION ALL
+
+                                        -------EQR_INLND_TRSP_PLN
+                                        SELECT
+                                            PLN.REPO_PLN_ID
+                                            ,(SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) CNTR_QTY
+                                        FROM
+                                            EQR_INLND_TRSP_PLN PLN
+                                            , EQR_INLND_TRSP_PLN_QTY QTY
+                                        WHERE
+                                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                            AND FM_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY PLN.REPO_PLN_ID, FM_ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'OffHireVol' ITEM
+                                    FROM
+                                    (
+                                        SELECT
+                                            PLN.REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) CNTR_QTY
+                                        FROM
+                                            EQR_ONF_HIR_PLN PLN
+                                            , EQR_ONF_HIR_PLN_QTY QTY
+                                        WHERE
+                                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                            AND ONF_HIR_DIV_CD = 'F'
+                                            AND PLN.PLN_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY PLN.REPO_PLN_ID, PLN.ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'IBGenerationVol' ITEM
+                                    FROM
+                                    (
+                                        SELECT
+                                            @[repo_pln_id] REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                            , SUM(CNTR_VOL_QTY) CNTR_QTY
+                                        FROM
+                                            EQR_IB_BKG_FCAST PLN
+                                        WHERE
+                                            SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id])
+                                            AND FCAST_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY TO_ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'RepoInVol' ITEM
+                                    FROM
+                                    (
+                                        --EQR_VSL_LODG_DCHG_PLN--------------
+                                        SELECT
+                                            PLN.REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) AS CNTR_QTY
+                                        FROM
+                                            EQR_VSL_LODG_DCHG_PLN PLN
+                                            , EQR_VSL_LODG_DCHG_PLN_QTY QTY
+                                        WHERE
+                                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                            AND TO_CHAR(TO_ETB_DT,'YYYYMMDD')  BETWEEN
+                                            (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_0])
+                                            AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_0])
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                            #if (${transshippln} == 'E')
+                                                AND LDIS_TS_FLG <> 'Y'
+                                            #end
+                                            #if (${transshippln} == 'O')
+                                                AND LDIS_TS_FLG = 'Y'
+                                            #end
+                                        GROUP BY PLN.REPO_PLN_ID, TO_ECC_CD
+
+                                        UNION ALL
+
+                                        --EQR_INLND_TRSP_PLN--------------
+                                        SELECT
+                                            PLN.REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) AS CNTR_QTY
+                                        FROM
+                                            EQR_INLND_TRSP_PLN PLN
+                                            , EQR_INLND_TRSP_PLN_QTY QTY
+                                        WHERE
+                                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                            AND TO_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY PLN.REPO_PLN_ID, TO_ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'OnHireVol' ITEM
+                                    FROM
+                                    (
+                                        SELECT
+                                            PLN.REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) AS CNTR_QTY
+                                        FROM
+                                            EQR_ONF_HIR_PLN PLN
+                                            , EQR_ONF_HIR_PLN_QTY QTY
+                                        WHERE
+                                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                            AND ONF_HIR_DIV_CD = 'O'
+                                            AND PLN.PLN_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY PLN.REPO_PLN_ID, PLN.ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'ETCVol' ITEM
+                                    FROM
+                                    (
+                                        SELECT
+                                            REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) AS CNTR_QTY
+                                        FROM
+                                            EQR_ADD_PLN PLN
+                                        WHERE
+                                            REPO_PLN_ID = @[repo_pln_id]
+                                            AND PLN_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY REPO_PLN_ID, PLN.ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+                                )
+                                WHERE RCC_CD IS NOT NULL -- 8개 RCC 만 출력.
+                            )
+                            GROUP BY  RUMM , REPO_PLN_ID, RCC_CD
+                            --> 전주차[planWk+1] balance End   ----------------------------
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'DemandVol' ITEM
+                        FROM
+                        (
+                            SELECT
+                                @[repo_pln_id] REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                , SUM(CNTR_VOL_QTY)  CNTR_QTY
+                            FROM
+                                EQR_OB_FCAST PLN
+                            WHERE
+                                SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id])
+                                AND FCAST_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY PLN.FM_ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'RepoOutVol' ITEM
+                        FROM
+                        (
+                            -------EQR_VSL_LODG_DCHG_PLN
+                            SELECT
+                                PLN.REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) CNTR_QTY
+                            FROM
+                                EQR_VSL_LODG_DCHG_PLN PLN
+                                , EQR_VSL_LODG_DCHG_PLN_QTY QTY
+                            WHERE
+                                PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                AND TO_CHAR(FM_ETD_DT,'YYYYMMDD')  BETWEEN
+                                (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_1])
+                                AND
+                                (SELECT  TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_1])
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                #if (${transshippln} == 'E')
+                                    AND LDIS_TS_FLG <> 'Y'
+                                #end
+                                #if (${transshippln} == 'O')
+                                    AND LDIS_TS_FLG = 'Y'
+                                #end
+                            GROUP BY PLN.REPO_PLN_ID, FM_ECC_CD
+
+                            UNION ALL
+
+                            -------EQR_INLND_TRSP_PLN
+                            SELECT
+                                PLN.REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) CNTR_QTY
+                            FROM
+                                EQR_INLND_TRSP_PLN PLN
+                                , EQR_INLND_TRSP_PLN_QTY QTY
+                            WHERE
+                                PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                AND FM_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY PLN.REPO_PLN_ID, FM_ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'OffHireVol' ITEM
+                        FROM
+                        (
+                            SELECT
+                                PLN.REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) CNTR_QTY
+                            FROM
+                                EQR_ONF_HIR_PLN PLN
+                                , EQR_ONF_HIR_PLN_QTY QTY
+                            WHERE
+                                PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                AND ONF_HIR_DIV_CD = 'F'
+                                AND PLN.PLN_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY PLN.REPO_PLN_ID, PLN.ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'IBGenerationVol' ITEM
+                        FROM
+                        (
+                            SELECT
+                                @[repo_pln_id] REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                , SUM(CNTR_VOL_QTY) CNTR_QTY
+                            FROM
+                                EQR_IB_BKG_FCAST PLN
+                            WHERE
+                                SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id])
+                                AND FCAST_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY TO_ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'RepoInVol' ITEM
+                        FROM
+                        (
+                            --EQR_VSL_LODG_DCHG_PLN--------------
+                            SELECT
+                                PLN.REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) AS CNTR_QTY
+                            FROM
+                                EQR_VSL_LODG_DCHG_PLN PLN
+                                , EQR_VSL_LODG_DCHG_PLN_QTY QTY
+                            WHERE
+                                PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                AND TO_CHAR(TO_ETB_DT,'YYYYMMDD')  BETWEEN
+                                (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_1])
+                                AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_1])
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                #if (${transshippln} == 'E')
+                                    AND LDIS_TS_FLG <> 'Y'
+                                #end
+                                #if (${transshippln} == 'O')
+                                    AND LDIS_TS_FLG = 'Y'
+                                #end
+                            GROUP BY PLN.REPO_PLN_ID, TO_ECC_CD
+
+                            UNION ALL
+
+                            --EQR_INLND_TRSP_PLN--------------
+                            SELECT
+                                PLN.REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) AS CNTR_QTY
+                            FROM
+                                EQR_INLND_TRSP_PLN PLN
+                                , EQR_INLND_TRSP_PLN_QTY QTY
+                            WHERE
+                                PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                AND TO_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY PLN.REPO_PLN_ID, TO_ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'OnHireVol' ITEM
+                        FROM
+                        (
+                            SELECT
+                                PLN.REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) AS CNTR_QTY
+                            FROM
+                                EQR_ONF_HIR_PLN PLN
+                                , EQR_ONF_HIR_PLN_QTY QTY
+                            WHERE
+                                PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                AND ONF_HIR_DIV_CD = 'O'
+                                AND PLN.PLN_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY PLN.REPO_PLN_ID, PLN.ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'ETCVol' ITEM
+                        FROM
+                        (
+                            SELECT
+                                REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) AS CNTR_QTY
+                            FROM
+                                EQR_ADD_PLN PLN
+                            WHERE
+                                REPO_PLN_ID = @[repo_pln_id]
+                                AND PLN_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY REPO_PLN_ID, PLN.ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+                    )
+                    WHERE RCC_CD IS NOT NULL -- 8개 RCC 만 출력.
+                )
+                GROUP BY  RUMM , REPO_PLN_ID, RCC_CD
+                --//[planWk+2]
+            #end
+
+            #if (${weekStrArrSize} >= 3)
+                UNION ALL
+
+                --//[planWk+3] plan 주차이후주차는 전주차의 balance값을 계산.
+                SELECT
+                    RCC_CD --AS ECC_CD
+                    , REPO_PLN_ID
+                    ,NVL(SUM(DECODE(ITEM, 'InitialVol',CNTR_QTY)),0)
+                    - NVL(SUM(DECODE(ITEM, 'DemandVol',CNTR_QTY)),0)
+                    - NVL(SUM(DECODE(ITEM, 'RepoOutVol',CNTR_QTY)),0)
+                    - NVL(SUM(DECODE(ITEM, 'OffHireVol',CNTR_QTY)),0)
+                    + NVL(SUM(DECODE(ITEM, 'IBGenerationVol',CNTR_QTY)),0)
+                    + NVL(SUM(DECODE(ITEM, 'RepoInVol',CNTR_QTY)),0)
+                    + NVL(SUM(DECODE(ITEM, 'OnHireVol',CNTR_QTY)),0)
+                    + NVL(SUM(DECODE(ITEM, 'ETCVol',CNTR_QTY)),0) CNTR_QTY
+                    ,'MTY' DIV
+                FROM(
+                    SELECT
+                        REPO_PLN_ID
+                        , RCC_CD
+                        , ITEM
+                        , CNTR_QTY
+                        , ROW_NUMBER() OVER (PARTITION BY RCC_CD, ITEM ORDER BY ROWNUM) RUMM
+                    FROM
+                    (
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'InitialVol' ITEM
+                        FROM
+                        (
+                            --> 전주차[planWk+2] balance Start ----------------------------
+                            --//[planWk+2] plan 주차이후주차는 전주차의 balance값을 계산.
+                            SELECT
+                                RCC_CD --AS ECC_CD
+                                , REPO_PLN_ID
+                                ,NVL(SUM(DECODE(ITEM, 'InitialVol',CNTR_QTY)),0)
+                                - NVL(SUM(DECODE(ITEM, 'DemandVol',CNTR_QTY)),0)
+                                - NVL(SUM(DECODE(ITEM, 'RepoOutVol',CNTR_QTY)),0)
+                                - NVL(SUM(DECODE(ITEM, 'OffHireVol',CNTR_QTY)),0)
+                                + NVL(SUM(DECODE(ITEM, 'IBGenerationVol',CNTR_QTY)),0)
+                                + NVL(SUM(DECODE(ITEM, 'RepoInVol',CNTR_QTY)),0)
+                                + NVL(SUM(DECODE(ITEM, 'OnHireVol',CNTR_QTY)),0)
+                                + NVL(SUM(DECODE(ITEM, 'ETCVol',CNTR_QTY)),0) CNTR_QTY
+                                ,'MTY' DIV
+                            FROM(
+                                SELECT
+                                    REPO_PLN_ID
+                                    , RCC_CD
+                                    , ITEM
+                                    , CNTR_QTY
+                                    , ROW_NUMBER() OVER (PARTITION BY RCC_CD, ITEM ORDER BY ROWNUM) RUMM
+                                FROM
+                                (
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'InitialVol' ITEM
+                                    FROM
+                                    (
+                                        --> 전주차[planWk+1] balance Start ----------------------------
+                                        --//[planWk+1] plan 주차이후주차는 전주차의 balance값을 계산.
+                                        SELECT
+                                            RCC_CD --AS ECC_CD
+                                            , REPO_PLN_ID
+                                            ,NVL(SUM(DECODE(ITEM, 'InitialVol',CNTR_QTY)),0)
+                                            - NVL(SUM(DECODE(ITEM, 'DemandVol',CNTR_QTY)),0)
+                                            - NVL(SUM(DECODE(ITEM, 'RepoOutVol',CNTR_QTY)),0)
+                                            - NVL(SUM(DECODE(ITEM, 'OffHireVol',CNTR_QTY)),0)
+                                            + NVL(SUM(DECODE(ITEM, 'IBGenerationVol',CNTR_QTY)),0)
+                                            + NVL(SUM(DECODE(ITEM, 'RepoInVol',CNTR_QTY)),0)
+                                            + NVL(SUM(DECODE(ITEM, 'OnHireVol',CNTR_QTY)),0)
+                                            + NVL(SUM(DECODE(ITEM, 'ETCVol',CNTR_QTY)),0) CNTR_QTY
+                                            ,'MTY' DIV
+                                        FROM(
+                                            SELECT
+                                                REPO_PLN_ID
+                                                , RCC_CD
+                                                , ITEM
+                                                , CNTR_QTY
+                                                ,ROW_NUMBER() OVER (PARTITION BY RCC_CD, ITEM ORDER BY ROWNUM) RUMM
+                                            FROM
+                                            (
+                                                SELECT
+                                                    REPO_PLN_ID
+                                                    , RCC_CD
+                                                    , SUM(CNTR_QTY) CNTR_QTY
+                                                    , 'InitialVol' ITEM
+                                                FROM
+                                                (
+                                                    SELECT
+                                                        @[repo_pln_id] REPO_PLN_ID
+                                                        ,(SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                                        , SUM(CNTR_VOL_QTY) CNTR_QTY
+                                                    FROM
+                                                        EQR_INVT_SNAP PLN
+                                                    WHERE
+                                                        SNAP_DT = (SELECT WK_ST_DT FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[plnFrom])
+                                                        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                                    GROUP BY PLN.ECC_CD
+                                                )
+                                                GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                                UNION ALL
+
+                                                SELECT
+                                                    REPO_PLN_ID
+                                                    , RCC_CD
+                                                    , SUM(CNTR_QTY) CNTR_QTY
+                                                    , 'DemandVol' ITEM
+                                                FROM
+                                                (
+                                                    SELECT
+                                                        @[repo_pln_id] REPO_PLN_ID
+                                                        ,(SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                                        , SUM(CNTR_VOL_QTY)  CNTR_QTY
+                                                    FROM
+                                                        EQR_OB_FCAST PLN
+                                                    WHERE
+                                                        SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id])
+                                                        AND FCAST_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                                        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                                    GROUP BY PLN.FM_ECC_CD
+                                                )
+                                                GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                                UNION ALL
+
+                                                SELECT
+                                                    REPO_PLN_ID
+                                                    , RCC_CD
+                                                    , SUM(CNTR_QTY) CNTR_QTY
+                                                    , 'RepoOutVol' ITEM
+                                                FROM
+                                                (
+                                                    -------EQR_VSL_LODG_DCHG_PLN
+                                                    SELECT
+                                                        PLN.REPO_PLN_ID
+                                                        ,(SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                                        , SUM(CNTR_QTY) CNTR_QTY
+                                                    FROM
+                                                        EQR_VSL_LODG_DCHG_PLN PLN
+                                                        , EQR_VSL_LODG_DCHG_PLN_QTY QTY
+                                                    WHERE
+                                                        PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                                        AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                                        AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                                        AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                                        AND TO_CHAR(FM_ETD_DT,'YYYYMMDD')  BETWEEN
+                                                        (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_0])
+                                                        AND
+                                                        (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_0])
+                                                        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                                        #if (${transshippln} == 'E')
+                                                            AND LDIS_TS_FLG <> 'Y'
+                                                        #end
+                                                        #if (${transshippln} == 'O')
+                                                            AND LDIS_TS_FLG = 'Y'
+                                                        #end
+                                                    GROUP BY PLN.REPO_PLN_ID, FM_ECC_CD
+
+                                                    UNION ALL
+
+                                                    -------EQR_INLND_TRSP_PLN
+                                                    SELECT
+                                                        PLN.REPO_PLN_ID
+                                                        ,(SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                                        , SUM(CNTR_QTY) CNTR_QTY
+                                                    FROM
+                                                        EQR_INLND_TRSP_PLN PLN
+                                                        , EQR_INLND_TRSP_PLN_QTY QTY
+                                                    WHERE
+                                                        PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                                        AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                                        AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                                        AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                                        AND FM_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                                        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                                    GROUP BY PLN.REPO_PLN_ID, FM_ECC_CD
+                                                )
+                                                GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                                UNION ALL
+
+                                                SELECT
+                                                    REPO_PLN_ID
+                                                    , RCC_CD
+                                                    , SUM(CNTR_QTY) CNTR_QTY
+                                                    , 'OffHireVol' ITEM
+                                                FROM
+                                                (
+                                                    SELECT
+                                                        PLN.REPO_PLN_ID
+                                                        , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                                        , SUM(CNTR_QTY) CNTR_QTY
+                                                    FROM
+                                                        EQR_ONF_HIR_PLN PLN
+                                                        , EQR_ONF_HIR_PLN_QTY QTY
+                                                    WHERE
+                                                        PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                                        AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                                        AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                                        AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                                        AND ONF_HIR_DIV_CD = 'F'
+                                                        AND PLN.PLN_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                                        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                                    GROUP BY PLN.REPO_PLN_ID, PLN.ECC_CD
+                                                )
+                                                GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                                UNION ALL
+
+                                                SELECT
+                                                    REPO_PLN_ID
+                                                    , RCC_CD
+                                                    , SUM(CNTR_QTY) CNTR_QTY
+                                                    , 'IBGenerationVol' ITEM
+                                                FROM
+                                                (
+                                                    SELECT
+                                                        @[repo_pln_id] REPO_PLN_ID
+                                                        , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                                        , SUM(CNTR_VOL_QTY) CNTR_QTY
+                                                    FROM
+                                                        EQR_IB_BKG_FCAST PLN
+                                                    WHERE
+                                                        SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id])
+                                                        AND FCAST_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                                        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                                    GROUP BY TO_ECC_CD
+                                                )
+                                                GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                                UNION ALL
+
+                                                SELECT
+                                                    REPO_PLN_ID
+                                                    , RCC_CD
+                                                    , SUM(CNTR_QTY) CNTR_QTY
+                                                    , 'RepoInVol' ITEM
+                                                FROM
+                                                (
+                                                    --EQR_VSL_LODG_DCHG_PLN--------------
+                                                    SELECT
+                                                        PLN.REPO_PLN_ID
+                                                        , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                                        , SUM(CNTR_QTY) AS CNTR_QTY
+                                                    FROM
+                                                        EQR_VSL_LODG_DCHG_PLN PLN
+                                                        , EQR_VSL_LODG_DCHG_PLN_QTY QTY
+                                                    WHERE
+                                                        PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                                        AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                                        AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                                        AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                                        AND TO_CHAR(TO_ETB_DT,'YYYYMMDD')  BETWEEN
+                                                        (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_0])
+                                                        AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_0])
+                                                        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                                        #if (${transshippln} == 'E')
+                                                            AND LDIS_TS_FLG <> 'Y'
+                                                        #end
+                                                        #if (${transshippln} == 'O')
+                                                            AND LDIS_TS_FLG = 'Y'
+                                                        #end
+                                                    GROUP BY PLN.REPO_PLN_ID, TO_ECC_CD
+
+                                                    UNION ALL
+
+                                                    --EQR_INLND_TRSP_PLN--------------
+                                                    SELECT
+                                                        PLN.REPO_PLN_ID
+                                                        , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                                        , SUM(CNTR_QTY) AS CNTR_QTY
+                                                    FROM
+                                                        EQR_INLND_TRSP_PLN PLN
+                                                        , EQR_INLND_TRSP_PLN_QTY QTY
+                                                    WHERE
+                                                        PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                                        AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                                        AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                                        AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                                        AND TO_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                                        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                                    GROUP BY PLN.REPO_PLN_ID, TO_ECC_CD
+                                                )
+                                                GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                                UNION ALL
+
+                                                SELECT
+                                                    REPO_PLN_ID
+                                                    , RCC_CD
+                                                    , SUM(CNTR_QTY) CNTR_QTY
+                                                    , 'OnHireVol' ITEM
+                                                FROM
+                                                (
+                                                    SELECT
+                                                        PLN.REPO_PLN_ID
+                                                        , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                                        , SUM(CNTR_QTY) AS CNTR_QTY
+                                                    FROM
+                                                        EQR_ONF_HIR_PLN PLN
+                                                        , EQR_ONF_HIR_PLN_QTY QTY
+                                                    WHERE
+                                                        PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                                        AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                                        AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                                        AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                                        AND ONF_HIR_DIV_CD = 'O'
+                                                        AND PLN.PLN_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                                        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                                    GROUP BY PLN.REPO_PLN_ID, PLN.ECC_CD
+                                                )
+                                                GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                                UNION ALL
+
+                                                SELECT
+                                                    REPO_PLN_ID
+                                                    , RCC_CD
+                                                    , SUM(CNTR_QTY) CNTR_QTY
+                                                    , 'ETCVol' ITEM
+                                                FROM
+                                                (
+                                                    SELECT
+                                                        REPO_PLN_ID
+                                                        , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                                        , SUM(CNTR_QTY) AS CNTR_QTY
+                                                    FROM
+                                                        EQR_ADD_PLN PLN
+                                                    WHERE
+                                                        REPO_PLN_ID = @[repo_pln_id]
+                                                        AND PLN_YRWK BETWEEN @[weekStrArr_1_0] AND @[weekStrArr_1_0]
+                                                        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                                    GROUP BY REPO_PLN_ID, PLN.ECC_CD
+                                                )
+                                                GROUP BY  REPO_PLN_ID, RCC_CD
+                                            )
+                                            WHERE RCC_CD IS NOT NULL -- 8개 RCC 만 출력.
+                                        )
+                                        GROUP BY  RUMM , REPO_PLN_ID, RCC_CD
+                                        --> 전주차[planWk+1] balance End   ----------------------------
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'DemandVol' ITEM
+                                    FROM
+                                    (
+                                        SELECT
+                                            @[repo_pln_id] REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                            , SUM(CNTR_VOL_QTY)  CNTR_QTY
+                                        FROM
+                                            EQR_OB_FCAST PLN
+                                        WHERE
+                                            SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id])
+                                            AND FCAST_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY PLN.FM_ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'RepoOutVol' ITEM
+                                    FROM
+                                    (
+                                        -------EQR_VSL_LODG_DCHG_PLN
+                                        SELECT
+                                            PLN.REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) CNTR_QTY
+                                        FROM
+                                            EQR_VSL_LODG_DCHG_PLN PLN
+                                            , EQR_VSL_LODG_DCHG_PLN_QTY QTY
+                                        WHERE
+                                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                            AND TO_CHAR(FM_ETD_DT,'YYYYMMDD')  BETWEEN
+                                            (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_1])
+                                            AND
+                                            (SELECT  TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_1])
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                            #if (${transshippln} == 'E')
+                                                AND LDIS_TS_FLG <> 'Y'
+                                            #end
+                                            #if (${transshippln} == 'O')
+                                                AND LDIS_TS_FLG = 'Y'
+                                            #end
+                                        GROUP BY PLN.REPO_PLN_ID, FM_ECC_CD
+
+                                        UNION ALL
+
+                                        -------EQR_INLND_TRSP_PLN
+                                        SELECT
+                                            PLN.REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) CNTR_QTY
+                                        FROM
+                                            EQR_INLND_TRSP_PLN PLN
+                                            , EQR_INLND_TRSP_PLN_QTY QTY
+                                        WHERE
+                                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                            AND FM_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY PLN.REPO_PLN_ID, FM_ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'OffHireVol' ITEM
+                                    FROM
+                                    (
+                                        SELECT
+                                            PLN.REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) CNTR_QTY
+                                        FROM
+                                            EQR_ONF_HIR_PLN PLN
+                                            , EQR_ONF_HIR_PLN_QTY QTY
+                                        WHERE
+                                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                            AND ONF_HIR_DIV_CD = 'F'
+                                            AND PLN.PLN_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY PLN.REPO_PLN_ID, PLN.ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'IBGenerationVol' ITEM
+                                    FROM
+                                    (
+                                        SELECT
+                                            @[repo_pln_id] REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                            , SUM(CNTR_VOL_QTY) CNTR_QTY
+                                        FROM
+                                            EQR_IB_BKG_FCAST PLN
+                                        WHERE
+                                            SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id])
+                                            AND FCAST_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY TO_ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'RepoInVol' ITEM
+                                    FROM
+                                    (
+                                        --EQR_VSL_LODG_DCHG_PLN--------------
+                                        SELECT
+                                            PLN.REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) AS CNTR_QTY
+                                        FROM
+                                            EQR_VSL_LODG_DCHG_PLN PLN
+                                            , EQR_VSL_LODG_DCHG_PLN_QTY QTY
+                                        WHERE
+                                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                            AND TO_CHAR(TO_ETB_DT,'YYYYMMDD')  BETWEEN
+                                            (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_1])
+                                            AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_1])
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                            #if (${transshippln} == 'E')
+                                                AND LDIS_TS_FLG <> 'Y'
+                                            #end
+                                            #if (${transshippln} == 'O')
+                                                AND LDIS_TS_FLG = 'Y'
+                                            #end
+                                        GROUP BY PLN.REPO_PLN_ID, TO_ECC_CD
+
+                                        UNION ALL
+
+                                        --EQR_INLND_TRSP_PLN--------------
+                                        SELECT
+                                            PLN.REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) AS CNTR_QTY
+                                        FROM
+                                            EQR_INLND_TRSP_PLN PLN
+                                            , EQR_INLND_TRSP_PLN_QTY QTY
+                                        WHERE
+                                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                            AND TO_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY PLN.REPO_PLN_ID, TO_ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'OnHireVol' ITEM
+                                    FROM
+                                    (
+                                        SELECT
+                                            PLN.REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) AS CNTR_QTY
+                                        FROM
+                                            EQR_ONF_HIR_PLN PLN
+                                            , EQR_ONF_HIR_PLN_QTY QTY
+                                        WHERE
+                                            PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                            AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                            AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                            AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                            AND ONF_HIR_DIV_CD = 'O'
+                                            AND PLN.PLN_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY PLN.REPO_PLN_ID, PLN.ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+
+                                    UNION ALL
+
+                                    SELECT
+                                        REPO_PLN_ID
+                                        , RCC_CD
+                                        , SUM(CNTR_QTY) CNTR_QTY
+                                        , 'ETCVol' ITEM
+                                    FROM
+                                    (
+                                        SELECT
+                                            REPO_PLN_ID
+                                            , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                            , SUM(CNTR_QTY) AS CNTR_QTY
+                                        FROM
+                                            EQR_ADD_PLN PLN
+                                        WHERE
+                                            REPO_PLN_ID = @[repo_pln_id]
+                                            AND PLN_YRWK BETWEEN @[weekStrArr_1_1] AND @[weekStrArr_1_1]
+                                            AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                        GROUP BY REPO_PLN_ID, PLN.ECC_CD
+                                    )
+                                    GROUP BY  REPO_PLN_ID, RCC_CD
+                                )
+                                WHERE RCC_CD IS NOT NULL -- 8개 RCC 만 출력.
+                            )
+                            GROUP BY  RUMM , REPO_PLN_ID, RCC_CD
+                            --//[planWk+2]
+                            --> 전주차[planWk+2] balance End   ----------------------------
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'DemandVol' ITEM
+                        FROM
+                        (
+                            SELECT
+                                @[repo_pln_id] REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                , SUM(CNTR_VOL_QTY)  CNTR_QTY
+                            FROM
+                                EQR_OB_FCAST PLN
+                            WHERE
+                                SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id])
+                                AND FCAST_YRWK BETWEEN @[weekStrArr_1_2] AND @[weekStrArr_1_2]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY PLN.FM_ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'RepoOutVol' ITEM
+                        FROM
+                        (
+                            -------EQR_VSL_LODG_DCHG_PLN
+                            SELECT
+                                PLN.REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) CNTR_QTY
+                            FROM
+                                EQR_VSL_LODG_DCHG_PLN PLN
+                                , EQR_VSL_LODG_DCHG_PLN_QTY QTY
+                            WHERE
+                                PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                AND TO_CHAR(FM_ETD_DT,'YYYYMMDD')  BETWEEN
+                                (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_2])
+                                AND
+                                (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_2])
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                #if (${transshippln} == 'E')
+                                    AND LDIS_TS_FLG <> 'Y'
+                                #end
+                                #if (${transshippln} == 'O')
+                                    AND LDIS_TS_FLG = 'Y'
+                                #end
+                            GROUP BY PLN.REPO_PLN_ID, FM_ECC_CD
+
+                            UNION ALL
+
+                            -------EQR_INLND_TRSP_PLN
+                            SELECT
+                                PLN.REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.FM_ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) CNTR_QTY
+                            FROM
+                                EQR_INLND_TRSP_PLN PLN
+                                , EQR_INLND_TRSP_PLN_QTY QTY
+                            WHERE
+                                PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                AND FM_YRWK BETWEEN @[weekStrArr_1_2] AND @[weekStrArr_1_2]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY PLN.REPO_PLN_ID, FM_ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'OffHireVol' ITEM
+                        FROM
+                        (
+                            SELECT
+                                PLN.REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) CNTR_QTY
+                            FROM
+                                EQR_ONF_HIR_PLN PLN
+                                , EQR_ONF_HIR_PLN_QTY QTY
+                            WHERE
+                                PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                AND ONF_HIR_DIV_CD = 'F'
+                                AND PLN.PLN_YRWK BETWEEN @[weekStrArr_1_2] AND @[weekStrArr_1_2]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY PLN.REPO_PLN_ID, PLN.ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'IBGenerationVol' ITEM
+                        FROM
+                        (
+                            SELECT
+                                @[repo_pln_id] REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                , SUM(CNTR_VOL_QTY) CNTR_QTY
+                            FROM
+                                EQR_IB_BKG_FCAST PLN
+                            WHERE
+                                SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id])
+                                AND FCAST_YRWK BETWEEN @[weekStrArr_1_2] AND @[weekStrArr_1_2]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY TO_ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID, RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'RepoInVol' ITEM
+                        FROM
+                        (
+                            --EQR_VSL_LODG_DCHG_PLN--------------
+                            SELECT
+                                PLN.REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) AS CNTR_QTY
+                            FROM
+                                EQR_VSL_LODG_DCHG_PLN PLN
+                                , EQR_VSL_LODG_DCHG_PLN_QTY QTY
+                            WHERE
+                                PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                AND TO_CHAR(TO_ETB_DT,'YYYYMMDD')  BETWEEN
+                                (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_2])
+                                AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[weekStrArr_1_2])
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                                #if (${transshippln} == 'E')
+                                    AND LDIS_TS_FLG <> 'Y'
+                                #end
+                                #if (${transshippln} == 'O')
+                                    AND LDIS_TS_FLG = 'Y'
+                                #end
+                            GROUP BY PLN.REPO_PLN_ID, TO_ECC_CD
+
+                            UNION ALL
+
+                            --EQR_INLND_TRSP_PLN--------------
+                            SELECT
+                                PLN.REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.TO_ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) AS CNTR_QTY
+                            FROM
+                                EQR_INLND_TRSP_PLN PLN
+                                , EQR_INLND_TRSP_PLN_QTY QTY
+                            WHERE
+                                PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                AND TO_YRWK BETWEEN @[weekStrArr_1_2] AND @[weekStrArr_1_2]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY PLN.REPO_PLN_ID, TO_ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'OnHireVol' ITEM
+                        FROM
+                        (
+                            SELECT
+                                PLN.REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) AS CNTR_QTY
+                            FROM
+                                EQR_ONF_HIR_PLN PLN
+                                , EQR_ONF_HIR_PLN_QTY QTY
+                            WHERE
+                                PLN.REPO_PLN_ID = QTY.REPO_PLN_ID
+                                AND PLN.PLN_YRWK = QTY.PLN_YRWK
+                                AND PLN.PLN_SEQ = QTY.PLN_SEQ
+                                AND PLN.REPO_PLN_ID = @[repo_pln_id]
+                                AND ONF_HIR_DIV_CD = 'O'
+                                AND PLN.PLN_YRWK BETWEEN @[weekStrArr_1_2] AND @[weekStrArr_1_2]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY PLN.REPO_PLN_ID, PLN.ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+
+                        UNION ALL
+
+                        SELECT
+                            REPO_PLN_ID
+                            , RCC_CD
+                            , SUM(CNTR_QTY) CNTR_QTY
+                            , 'ETCVol' ITEM
+                        FROM
+                        (
+                            SELECT
+                                REPO_PLN_ID
+                                , (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = PLN.ECC_CD) RCC_CD
+                                , SUM(CNTR_QTY) AS CNTR_QTY
+                            FROM
+                                EQR_ADD_PLN PLN
+                            WHERE
+                                REPO_PLN_ID = @[repo_pln_id]
+                                AND PLN_YRWK BETWEEN @[weekStrArr_1_2] AND @[weekStrArr_1_2]
+                                AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+                            GROUP BY REPO_PLN_ID, PLN.ECC_CD
+                        )
+                        GROUP BY  REPO_PLN_ID, RCC_CD
+                    )
+                    WHERE RCC_CD IS NOT NULL -- 8개 RCC 만 출력.
+                )
+                GROUP BY  RUMM , REPO_PLN_ID, RCC_CD
+                --//[planWk+3]
+            #end
+        )--------------------- MTY 최외곽.
+        GROUP BY
+            RCC_CD, REPO_PLN_ID, DIV
+    #end
+
+    UNION ALL
+
+    --------------------------------------------------------------------------------<ONH>
+    SELECT
+        (
+            SELECT 
+            #if (${radioopr} == '0')
+                #if (${typeBy} == 'R')
+                    A.RCC_CD
+                #elseif (${typeBy} == 'C')
+                    A.CNT_CD
+                #elseif (${typeBy} == 'L')
+                    A.LCC_CD
+                #else
+                    A.ECC_CD
+                #end
+            #else
+                RCC_CD
+            #end
+            FROM 
+                EQR_ECC_MST 
+            WHERE 
+                ECC_CD = T.ECC_CD
+        ) RCC_CD
+        , T.REPO_PLN_ID
+        , SUM(Q.CNTR_QTY)  CNTR_QTY
+        , 'ONH' DIV
+    FROM
+        EQR_ONF_HIR_PLN T
+        , EQR_ONF_HIR_PLN_QTY Q
+        , EQR_EQ_REPO_PLN M
+    WHERE
+        T.REPO_PLN_ID = Q.REPO_PLN_ID
+        AND T.PLN_YRWK = Q.PLN_YRWK
+        AND T.PLN_SEQ = Q.PLN_SEQ
+        AND T.ONF_HIR_DIV_CD = 'O'
+        AND T.REPO_PLN_ID = M.REPO_PLN_ID
+        AND M.REPO_PLN_DTRB_FLG = 'Y'
+        AND T.PLN_YRWK BETWEEN @[plnFrom] AND  @[plnTo]
+        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+        AND T.REPO_PLN_ID =  @[repo_pln_id]
+    GROUP BY T.ECC_CD, T.REPO_PLN_ID
+
+    UNION ALL
+
+    --------------------------------------------------------------------------------<OFF>
+    SELECT
+        (
+            SELECT 
+            #if (${radioopr} == '0')
+                #if (${typeBy} == 'R')
+                    A.RCC_CD
+                #elseif (${typeBy} == 'C')
+                    A.CNT_CD
+                #elseif (${typeBy} == 'L')
+                    A.LCC_CD
+                #else
+                    A.ECC_CD
+                #end
+            #else
+                RCC_CD
+            #end
+            FROM 
+                EQR_ECC_MST 
+            WHERE 
+                ECC_CD = T.ECC_CD
+        ) RCC_CD
+        , T.REPO_PLN_ID
+        , SUM(Q.CNTR_QTY)  CNTR_QTY
+        , 'OFH' DIV
+    FROM
+        EQR_ONF_HIR_PLN T
+        , EQR_ONF_HIR_PLN_QTY Q
+        , EQR_EQ_REPO_PLN M
+    WHERE
+        T.REPO_PLN_ID = Q.REPO_PLN_ID
+        AND T.PLN_YRWK = Q.PLN_YRWK
+        AND T.PLN_SEQ = Q.PLN_SEQ
+        AND T.ONF_HIR_DIV_CD = 'F'
+        AND T.REPO_PLN_ID = M.REPO_PLN_ID
+        AND M.REPO_PLN_DTRB_FLG = 'Y'
+        AND T.PLN_YRWK BETWEEN @[plnFrom] AND  @[plnTo]
+        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+        AND T.REPO_PLN_ID =  @[repo_pln_id]
+    GROUP BY T.ECC_CD, T.REPO_PLN_ID
+
+    UNION ALL
+
+    --------------------------------------------------------------------------------<COST>
+    ------RepoOut
+    SELECT
+        (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = T.FM_ECC_CD) RCC_CD
+        , T.REPO_PLN_ID
+        , SUM(Q.LODG_DCHG_COST_AMT)  CNTR_QTY
+        , 'COST' DIV
+    FROM
+        EQR_VSL_LODG_DCHG_PLN T
+        , EQR_VSL_LODG_DCHG_PLN_QTY Q
+        , EQR_EQ_REPO_PLN M
+    WHERE
+        T.REPO_PLN_ID = Q.REPO_PLN_ID
+        AND T.PLN_YRWK = Q.PLN_YRWK
+        AND T.PLN_SEQ = Q.PLN_SEQ
+        AND T.REPO_PLN_ID = M.REPO_PLN_ID
+        AND M.REPO_PLN_DTRB_FLG = 'Y'
+        AND T.PLN_YRWK  BETWEEN @[plnFrom] AND @[plnTo]
+        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+        #if (${transshippln} == 'E')
+            AND LDIS_TS_FLG <> 'Y'
+        #end
+        #if (${transshippln} == 'O')
+            AND LDIS_TS_FLG = 'Y'
+        #end
+        AND T.REPO_PLN_ID =  @[repo_pln_id]
+    GROUP BY T.FM_ECC_CD, T.REPO_PLN_ID
+
+    UNION ALL
+
+    SELECT
+        (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = T.FM_ECC_CD) RCC_CD
+        , T.REPO_PLN_ID
+        , SUM(Q.TRSP_COST_AMT)  CNTR_QTY
+        , 'COST' DIV
+    FROM
+        EQR_INLND_TRSP_PLN T
+        , EQR_INLND_TRSP_PLN_QTY Q
+        , EQR_EQ_REPO_PLN M
+    WHERE
+        T.REPO_PLN_ID = Q.REPO_PLN_ID
+        AND T.PLN_YRWK = Q.PLN_YRWK
+        AND T.PLN_SEQ = Q.PLN_SEQ
+        AND T.REPO_PLN_ID = M.REPO_PLN_ID
+        AND M.REPO_PLN_DTRB_FLG = 'Y'
+        AND FM_YRWK  BETWEEN @[plnFrom] AND @[plnTo]
+        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+        AND T.REPO_PLN_ID =  @[repo_pln_id]
+    GROUP BY T.FM_ECC_CD, T.REPO_PLN_ID
+
+    UNION ALL
+
+    ------OnHire
+    SELECT
+        (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = T.ECC_CD) RCC_CD
+        , T.REPO_PLN_ID
+        , SUM(Q.ONF_HIR_COST_AMT)  CNTR_QTY
+        , 'COST' DIV
+    FROM
+        EQR_ONF_HIR_PLN T
+        , EQR_ONF_HIR_PLN_QTY Q
+        , EQR_EQ_REPO_PLN M
+    WHERE
+        T.REPO_PLN_ID = Q.REPO_PLN_ID
+        AND T.PLN_YRWK = Q.PLN_YRWK
+        AND T.PLN_SEQ = Q.PLN_SEQ
+        AND T.ONF_HIR_DIV_CD = 'O'
+        AND T.REPO_PLN_ID = M.REPO_PLN_ID
+        AND M.REPO_PLN_DTRB_FLG = 'Y'
+        AND T.PLN_YRWK BETWEEN @[plnFrom] AND  @[plnTo]
+        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+        AND T.REPO_PLN_ID =  @[repo_pln_id]
+    GROUP BY T.ECC_CD, T.REPO_PLN_ID
+
+    UNION ALL
+
+    ------OffHire
+    SELECT
+        (SELECT RCC_CD FROM EQR_ECC_MST WHERE ECC_CD = T.ECC_CD) RCC_CD
+        , T.REPO_PLN_ID
+        , SUM(Q.ONF_HIR_COST_AMT)  CNTR_QTY
+        , 'COST' DIV
+    FROM
+        EQR_ONF_HIR_PLN T
+        , EQR_ONF_HIR_PLN_QTY Q
+        , EQR_EQ_REPO_PLN M
+    WHERE
+        T.REPO_PLN_ID = Q.REPO_PLN_ID
+        AND T.PLN_YRWK = Q.PLN_YRWK
+        AND T.PLN_SEQ = Q.PLN_SEQ
+        AND T.ONF_HIR_DIV_CD = 'F'
+        AND T.REPO_PLN_ID = M.REPO_PLN_ID
+        AND M.REPO_PLN_DTRB_FLG = 'Y'
+        AND T.PLN_YRWK BETWEEN @[plnFrom] AND  @[plnTo]
+        AND CNTR_TPSZ_CD IN (SELECT INTG_CD_VAL_CTNT FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD00244' )
+        AND T.REPO_PLN_ID =  @[repo_pln_id]
+    GROUP BY T.ECC_CD, T.REPO_PLN_ID
+)
+WHERE RCC_CD IS NOT NULL
+GROUP BY RCC_CD , REPO_PLN_ID
+#if (${radiototrcc} == 'T')
+    )
+    GROUP BY REPO_PLN_ID
+#end
+ORDER BY ECC_CD , REPO_PLN_ID			]]></sql>
+			<params>
+				<param name="repo_pln_id" type="12" value="" out="N"/>
+				<param name="plnFrom" type="12" value="" out="N"/>
+				<param name="data0" type="2" value="" out="N"/>
+				<param name="weekStrArr_1_0" type="12" value="" out="N"/>
+				<param name="weekStrArr_1_1" type="12" value="" out="N"/>
+				<param name="weekStrArr_1_2" type="12" value="" out="N"/>
+				<param name="plnTo" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

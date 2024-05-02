@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="GeneralBookingSearchDBDAOSearchBlHistSiRSQL">
+			<desc><![CDATA[GeneralBookingSearchDBDAOSearchBlHistSiRSQL
+2011.02.14 이일민 [SRM-201113338] [BKG main history 상 ENS 전송 history 표기]
+2011.02.14 이일민 [SRM-201113375] MI 전송시 bkg history상에 Local 시간 조회 기능 보완]]></desc>
+			<sql><![CDATA[
+SELECT HIS_SEQ,HIS_DTL_SEQ,ITEM_HDR,HIS_CATE_NM,
+       TO_CLOB(PRE_CTNT) PRE_CTNT,
+       TO_CLOB(PRE_CTNT_ORG) PRE_CTNT_ORG,
+       TO_CLOB(CRNT_CTNT) CRNT_CTNT,
+       TO_CLOB(CRNT_CTNT_ORG) CRNT_CTNT_ORG,
+       CRE_USR_ID,OFFICE,CRE_DT,GMT_DT,CORR_NO
+FROM (
+SELECT mst.his_seq
+		,DTL.HIS_DTL_SEQ
+		, (SELECT ATTR_CTNT2 
+          FROM BKG_HRD_CDG_CTNT 
+         WHERE HRD_CDG_ID = 'HIST_UI_NAME' 
+           AND ATTR_CTNT1 = MST.BKG_HIS_ISS_UI_ID) ITEM_HDR
+        , DTL.HIS_CATE_NM
+        , CASE  
+              WHEN LENGTHB(DTL.PRE_CTNT) > 200 THEN 'View Detail'
+              ELSE DTL.PRE_CTNT
+          END PRE_CTNT
+        , DTL.PRE_CTNT PRE_CTNT_ORG
+        , CASE  
+              WHEN LENGTHB(DTL.CRNT_CTNT) > 200 THEN 'View Detail'
+              ELSE DTL.CRNT_CTNT
+          END CRNT_CTNT
+        , DTL.CRNT_CTNT CRNT_CTNT_ORG
+		--CUP I/F의 경우 CRE_USR_ID가 WEB, UPD_USR_ID가  WEB USER ID가 입력됨
+        , DECODE(DTL.CRE_USR_ID, 'WEB', DTL.UPD_USR_ID, USR.USR_NM) CRE_USR_ID
+        , NVL(MST.CRE_OFC_CD,(SELECT OFC_CD FROM COM_USER WHERE UPPER(USR_ID) = UPPER(MST.CRE_USR_ID) AND USE_FLG = 'Y' AND ROWNUM = 1 )) OFFICE
+        , TO_CHAR(DECODE(DTL.HIS_CATE_NM,'EXPORT INFORMATION-USA',DTL.UPD_DT,MST.EVNT_DT), 'YYYY-MM-DD HH24:MI') CRE_DT
+		, TO_CHAR(GLOBALDATE_PKG.TIME_CONV_FNC(NVL(BKG_COM_USER_LOC_FNC(MST.CRE_USR_ID),(SELECT POR_CD FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])), DECODE(DTL.HIS_CATE_NM,'EXPORT INFORMATION-USA',DTL.UPD_DT,MST.EVNT_DT), 'GMT'), 'YYYY-MM-DD HH24:MI') GMT_DT
+		, MST.CORR_NO
+  FROM BKG_HIS_MST MST
+     , BKG_HIS_DTL DTL
+     , COM_USER USR
+ WHERE MST.BKG_NO  = DTL.BKG_NO
+   AND MST.HIS_SEQ = DTL.HIS_SEQ
+   AND UPPER(MST.CRE_USR_ID) = UPPER(USR.USR_ID(+))
+   AND MST.BKG_NO = @[bkg_no]
+   AND NVL(MST.CORR_NO, 'X') <> 'TMP0000001'
+   AND UPPER(NVL(DTL.CRNT_CTNT,'TMP')) NOT IN ('SEE CUSTOMER INFORMATION TAB', 'SEE FREIGHT & CHARGE TAB')
+   --ORDER BY MST.HIS_SEQ, HIS_DTL_SEQ
+UNION ALL 
+SELECT NVL((SELECT /*+ index_desc(his XPKBKG_HIS_MST)*/
+                   HIS_SEQ
+              FROM BKG_HIS_MST HIS
+             WHERE HIS.BKG_NO = @[bkg_no] 
+               AND HIS.CRE_DT < TO_DATE(T.MF_SND_DT,'YYYY-MM-DD HH24:MI') 
+               AND ROWNUM = 1), 0) + 1 AS HIS_SEQ
+,	    0  as HIS_DTL_SEQ
+,	    DECODE(SUBSTR(T.PORT,0,2),'US','USAMS','CA','Canada ACI',T.PORT)	AS ITEM_HDR
+,       T.PORT_NM AS HIS_CATE_NM
+,	    '' PRE_CTNT
+,	    '' PRE_CTNT_ORG
+--,       DECODE(XDT.BY_SEQ,1,T.DOWNLOAD_FLAG,T.CUST_STATUS) AS CRNT_CTNT
+,       DECODE(XDT.BY_SEQ,1,T.DOWNLOAD_FLAG,NVL(T.CUST_STATUS_NM,'Manifest Transmit')) AS CRNT_CTNT
+,	    '' CRNT_CTNT_ORG
+,		NVL((SELECT USR.USR_NM  
+               FROM COM_USER USR 
+              WHERE UPPER(USR.USR_ID) = UPPER(DECODE(XDT.BY_SEQ, 1, T.DOWN_USR_ID, T.SEND_USER_ID))
+                AND NVL(USE_FLG, 'Y') = 'Y'
+                AND ROWNUM = 1),DECODE(XDT.BY_SEQ, 1, T.DOWN_USR_ID, T.SEND_USER_ID))  CRE_USR_ID
+,       DECODE(XDT.BY_SEQ, 1, T.DOWN_OFC_NM, T.SEND_OFC_NM) AS OFC_NM
+,       DECODE(XDT.BY_SEQ,1,T.DOWNLOAD_DT,T.MF_SND_DT) AS MF_SND_DT
+,       DECODE(XDT.BY_SEQ,1,T.GMT_DOWNLOAD_DT,T.GMT_MF_SND_DT) AS GMT_DT
+,       ''  CORR_NO
+  from  (select CS.CSTMS_PORT_CD AS PORT
+              ,(SELECT M.LOC_NM
+                FROM   MDM_LOCATION M
+                WHERE  M.LOC_CD = CS.CSTMS_PORT_CD) PORT_NM
+              ,DECODE(IF_DT,NULL,'','DownLoad') DOWNLOAD_FLAG
+              ,TO_CHAR(GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL',CS.CRE_DT,(SELECT LOC_CD 
+                                                                         FROM COM_USER USR
+                                                                             ,MDM_ORGANIZATION ORG
+                                                                        WHERE USR.USR_ID = CS.CRE_USR_ID
+                                                                          AND USR.OFC_CD = ORG.OFC_CD)), 'YYYY-MM-DD HH24:MI') DOWNLOAD_DT
+              ,TO_CHAR(GLOBALDATE_PKG.TIME_CONV_FNC('KRSEL',CS.CRE_DT, 'GMT'), 'YYYY-MM-DD HH24:MI') GMT_DOWNLOAD_DT
+              ,CS.CSTMS_MF_TP_CD CUST_STATUS
+              ,(SELECT B.INTG_CD_VAL_DESC
+                FROM   COM_INTG_CD_DTL B
+                WHERE  INTG_CD_ID = 'CD02235' AND
+                       B.INTG_CD_VAL_CTNT = CS.CSTMS_MF_TP_CD) CUST_STATUS_NM
+              ,TO_CHAR(GLOBALDATE_PKG.TIME_CONV_FNC('USNYC',CASE WHEN CS.CNT_CD = 'US' THEN DECODE(CS.CSTMS_MF_TP_CD,'MI',CS.MF_SND_DT,CS.AMDT_SND_DT)
+                                                                 WHEN CS.CNT_CD = 'CA' THEN NVL(CS.AMDT_SND_DT,CS.MF_SND_DT)
+                                                            END ,SEND_LOC_CD),'YYYY-MM-DD HH24:MI') MF_SND_DT
+              ,TO_CHAR(GLOBALDATE_PKG.TIME_CONV_FNC('USNYC',CASE WHEN CS.CNT_CD = 'US' THEN DECODE(CS.CSTMS_MF_TP_CD,'MI',CS.MF_SND_DT,CS.AMDT_SND_DT)
+                                                                 WHEN CS.CNT_CD = 'CA' THEN NVL(CS.AMDT_SND_DT,CS.MF_SND_DT)
+                                                            END, 'GMT'), 'YYYY-MM-DD HH24:MI') GMT_MF_SND_DT 
+              ,CS.CRE_USR_ID AS DOWN_USR_ID
+              ,U.SND_USR_ID AS SEND_USER_ID
+              ,(SELECT OFC.OFC_CD FROM COM_USER OFC WHERE OFC.USR_ID = CS.CRE_USR_ID) AS DOWN_OFC_NM
+              ,(SELECT OFC.OFC_CD FROM COM_USER OFC WHERE OFC.USR_ID = U.SND_USR_ID) AS SEND_OFC_NM
+        from (select *
+                from (  select L.CNT_CD
+                              ,L.SND_USR_ID
+                              ,L.SND_DT
+                              ,ORG.LOC_CD AS SEND_LOC_CD
+                              ,MAX(L.SND_DT) OVER (PARTITION BY L.CNT_CD) AS MAX_SND_DT
+                              ,E.BL_NO
+                          from BKG_CSTMS_ADV_SND_LOG L,
+                               BKG_CSTMS_ADV_EDI_BL_RSPN E,
+                               COM_USER USR,
+                               MDM_ORGANIZATION ORG 
+                         where 1 = 1
+                           and L.CNT_CD = E.CNT_CD(+)
+                           AND L.CRR_BAT_NO = E.CRR_BAT_NO(+)
+                           AND L.IO_BND_CD ='I'
+                           AND E.BL_NO = (SELECT BL_NO FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+                           AND USR.USR_ID = L.SND_USR_ID
+                           AND USR.OFC_CD = ORG.OFC_CD  ) 
+               where SND_DT = MAX_SND_DT                       ) U
+              ,BKG_CSTMS_ADV_BL CS  
+        where CS.BL_NO = U.BL_NO (+)
+          and CS.CNT_CD = U.CNT_CD (+)
+          and CS.BL_NO = (SELECT BL_NO FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no]) ) T
+        ,(SELECT ROWNUM BY_SEQ
+                FROM   DUAL
+                CONNECT BY LEVEL <= 2) XDT      
+UNION ALL
+SELECT  999999  AS HIS_SEQ,
+     1  as HIS_DTL_SEQ,
+        
+        'WEB B/L' ITEM_HDR,
+        'INTERNET AUTH' HIS_CATE_NM,
+        '' PRE_CTNT, 
+        '' PRE_CTNT_ORG, 
+        'AUTHORIZED' CRNT_CTNT,
+        'AUTHORIZED' CRNT_CTNT_ORG,
+        AUTH_USR_ID CRE_USR_ID,
+        AUTH_OFC_CD OFFICE,
+        TO_CHAR(AUTH_DT,'YYYY-MM-DD HH24:MI') CRE_DT, 
+        NULL GMT_DT,
+        '' CORR_NO
+FROM BKG_INET_BL_PRN_AUTH
+WHERE BKG_NO = @[bkg_no]
+AND AUTH_USR_ID IS NOT NULL
+AND AUTH_OFC_CD IS NOT NULL
+AND AUTH_DT IS NOT NULL
+UNION ALL
+SELECT  999999 AS HIS_SEQ,
+     1  as HIS_DTL_SEQ,
+        'WEB B/L' ITEM_HDR,
+        'CANCEL AUTH' HIS_CATE_NM,
+        '' PRE_CTNT, 
+        '' PRE_CTNT_ORG, 
+        'CANCELED' CRNT_CTNT,
+        'CANCELED' CRNT_CTNT_ORG,
+        DELT_USR_ID CRE_USR_ID,
+        DELT_OFC_CD OFFICE,
+        TO_CHAR(DELT_DT,'YYYY-MM-DD HH24:MI') CRE_DT, 
+        NULL GMT_DT,
+        '' CORR_NO
+FROM BKG_INET_BL_PRN_AUTH
+WHERE BKG_NO = @[bkg_no]
+AND DELT_FLG = 'Y'
+UNION ALL
+SELECT  999999  AS HIS_SEQ,
+     1  as HIS_DTL_SEQ,
+        'WEB B/L' ITEM_HDR,
+        'WEB B/L PRINT' HIS_CATE_NM,
+        '' PRE_CTNT, 
+        '' PRE_CTNT_ORG, 
+        'Print-1ST' CRNT_CTNT,
+        'Print-1ST' CRNT_CTNT_ORG,
+        PRN_USR_ID CRE_USR_ID,
+        '' OFFICE,
+        TO_CHAR(N1ST_PRN_DT,'YYYY-MM-DD HH24:MI') CRE_DT, 
+        NULL GMT_DT,
+        '' CORR_NO
+FROM BKG_INET_BL_PRN_AUTH
+WHERE BKG_NO = @[bkg_no]
+AND N1ST_PRN_DT IS NOT NULL
+UNION ALL
+SELECT  999999  AS HIS_SEQ,
+     1  as HIS_DTL_SEQ,
+        'WEB B/L' ITEM_HDR,
+        'WEB B/L PRINT' HIS_CATE_NM,
+        '' PRE_CTNT, 
+        '' PRE_CTNT_ORG, 
+        'Print-2nd' CRNT_CTNT,
+        'Print-2nd' CRNT_CTNT_ORG,
+        PRN_USR_ID CRE_USR_ID,
+        '' OFFICE,
+        TO_CHAR(N2ND_PRN_DT,'YYYY-MM-DD HH24:MI') CRE_DT, 
+        NULL GMT_DT,
+        '' CORR_NO
+FROM BKG_INET_BL_PRN_AUTH
+WHERE BKG_NO =@[bkg_no]
+AND N2ND_PRN_DT IS NOT NULL
+UNION ALL
+SELECT NVL((SELECT /*+ index_desc(his XPKBKG_HIS_MST)*/
+                   HIS_SEQ
+              FROM BKG_HIS_MST HIS
+             WHERE HIS.BKG_NO = BKG.BKG_NO 
+               AND HIS.CRE_DT < ENS.CRE_DT 
+               AND ROWNUM = 1), 0) + 1 AS HIS_SEQ,
+       0 HIS_SEQ_DTL,
+       'EU ENS' AS ITEM_HDR,
+       CSTMS_PORT_CD || ' (POFE)' AS HIS_CATE_NM,
+       '' PRE_CTNT,
+       '' PRE_CTNT_ORG,
+       'Manifest Transmit (' || ENS.VSL_CD || ENS.SKD_VOY_NO || ENS.SKD_DIR_CD || ')' CRNT_CTNT,
+       'Manifest Transmit (' || ENS.VSL_CD || ENS.SKD_VOY_NO || ENS.SKD_DIR_CD || ')' CRNT_CTNT_ORG,
+       ENS.CRE_USR_ID,
+       ENS.SND_USR_OFC_CD,
+       TO_CHAR (ENS.SND_DT, 'YYYY-MM-DD HH24:MI'),
+       TO_CHAR (ENS.SND_GDT, 'YYYY-MM-DD HH24:MI'),
+       '' CORR_NO
+  FROM BKG_BOOKING BKG,
+       BKG_CSTMS_ADV_EUR_SND ENS
+ WHERE BKG.BKG_NO = @[bkg_no]
+   AND BKG.BL_NO = ENS.BL_NO
+UNION ALL
+SELECT 
+       NVL((SELECT /*+ index_desc(his XPKBKG_HIS_MST)*/
+                   HIS_SEQ
+              FROM BKG_HIS_MST HIS
+             WHERE HIS.BKG_NO = BKG.BKG_NO 
+               AND HIS.CRE_DT < SND.CRE_DT 
+               AND ROWNUM = 1), 0) + 1 AS HIS_SEQ,
+       0 HIS_SEQ_DTL,
+       'CCAM('|| DECODE(SND.CHN_MF_SND_IND_CD, 'D', 'I/B' , 'R', 'I/B', 'O/B') || ')' AS ITEM_HDR,
+       'Manifest Transmit'  AS HIS_CATE_NM,
+       '' PRE_CTNT,
+       '' PRE_CTNT_ORG,
+       'Manifest Transmit (' || SND.VSL_CD || SND.SKD_VOY_NO || SND.SKD_DIR_CD || ')' CRNT_CTNT,
+       'Manifest Transmit (' || SND.VSL_CD || SND.SKD_VOY_NO || SND.SKD_DIR_CD || ')' CRNT_CTNT_ORG,
+       SND.MF_SND_USR_ID,
+       SND.MF_SND_OFC_CD,
+       TO_CHAR (SND.MF_SND_DT, 'YYYY-MM-DD HH24:MI'),
+       TO_CHAR (SND.MF_SND_GDT, 'YYYY-MM-DD HH24:MI'),
+       '' CORR_NO
+  FROM BKG_BOOKING BKG,
+       BKG_CSTMS_CHN_SND_LOG_BL BL,
+       BKG_CSTMS_CHN_SND_LOG SND
+WHERE BKG.BKG_NO = @[bkg_no]
+   AND BKG.BL_NO = BL.BL_NO
+   AND BL.EDI_REF_ID = SND.EDI_REF_ID
+UNION ALL
+SELECT NVL((SELECT /*+ index_desc(his XPKBKG_HIS_MST)*/
+                   HIS_SEQ
+              FROM BKG_HIS_MST HIS
+             WHERE HIS.BKG_NO = NTC.BKG_NO 
+               AND HIS.CRE_DT < NTC.CRE_DT 
+               AND ROWNUM = 1), 0) + 1 AS HIS_SEQ,
+       0 HIS_DTL_SEQ,
+       'Mexico' AS ITEM_HDR,
+       'Manifest Transmit' AS HIS_CATE_NM,
+       '' PRE_CTNT,
+       '' PRE_CTNT_ORG,
+       'Manifest Transmit(' || NTC.DIFF_RMK || ')' CRNT_CTNT,
+       'Manifest Transmit(' || NTC.DIFF_RMK || ')' CRNT_CTNT_ORG,
+       NTC.CRE_USR_ID,
+       NTC.SND_OFC_CD,
+       TO_CHAR (NTC.SND_DT, 'YYYY-MM-DD HH24:MI') CRE_DT,
+       TO_CHAR (NTC.SND_GDT, 'YYYY-MM-DD HH24:MI') CRE_GDT,
+       '' CORR_NO
+  FROM BKG_BOOKING BKG,
+       BKG_NTC_HIS NTC
+WHERE BKG.BKG_NO = @[bkg_no]
+   AND BKG.BKG_NO = NTC.BKG_NO
+   AND NTC.NTC_KND_CD= 'IM'
+   AND NTC.EDI_ID = 'MEXCUS'
+ORDER BY 1, 2, 11
+) 
+UNION ALL
+SELECT NVL((SELECT /*+ index_desc(his XPKBKG_HIS_MST)*/
+                   HIS_SEQ
+              FROM BKG_HIS_MST HIS
+             WHERE HIS.BKG_NO = XTM.BKG_NO 
+               AND HIS.EVNT_DT < XTM.UPLD_DT
+               AND ROWNUM = 1), 0) + 1 AS HIS_SEQ,
+       0 HIS_DTL_SEQ,
+       'WEB auto upload' AS ITEM_HDR,
+       'DESCRIPTION OF GOODS' AS HIS_CATE_NM,
+       CASE WHEN DBMS_LOB.getlength(XTM.OLD_GDS_DESC) > 200 THEN TO_CLOB('View Detail')
+            ELSE XTM.OLD_GDS_DESC
+       END PRE_CTNT,       
+       XTM.OLD_GDS_DESC PRE_CTNT_ORG,
+       CASE WHEN DBMS_LOB.getlength(BM.CMDT_DESC) > 200 THEN TO_CLOB('View Detail')
+            ELSE BM.CMDT_DESC
+        END CRNT_CTNT,
+       XTM.GDS_DESC CRNT_CTNT_ORG,
+       '',
+       '',
+       TO_CHAR (XTM.UPLD_DT, 'YYYY-MM-DD HH24:MI') CRE_DT,
+       TO_CHAR (XTM.UPLD_GDT, 'YYYY-MM-DD HH24:MI') CRE_GDT,
+       '' CORR_NO
+  FROM BKG_XTER_RQST_MST XTM,
+	   BKG_BL_MK_DESC BM
+ WHERE XTM.XTER_SNDR_ID = @[xter_sndr_id]
+   AND XTM.XTER_RQST_NO = @[xter_rqst_no]
+   AND XTM.XTER_RQST_SEQ = @[xter_rqst_seq]
+   AND XTM.BKG_NO = BM.BKG_NO
+UNION ALL
+SELECT NVL((SELECT /*+ index_desc(his XPKBKG_HIS_MST)*/
+                   HIS_SEQ
+              FROM BKG_HIS_MST HIS
+             WHERE HIS.BKG_NO = XTM.BKG_NO 
+               AND HIS.EVNT_DT < XTM.UPLD_DT
+               AND ROWNUM = 1), 0) + 1 AS HIS_SEQ,
+       0 HIS_DTL_SEQ,
+       'WEB auto upload' AS ITEM_HDR,
+       'MARKS' AS HIS_CATE_NM,
+       CASE WHEN DBMS_LOB.getlength(XTM.OLD_MK_DESC) > 200 THEN TO_CLOB('View Detail')
+            ELSE XTM.OLD_MK_DESC
+       END PRE_CTNT,   
+       XTM.OLD_MK_DESC PRE_CTNT_ORG,
+       CASE WHEN DBMS_LOB.getlength(BM.MK_DESC) > 200 THEN TO_CLOB('View Detail')
+            ELSE BM.MK_DESC
+        END CRNT_CTNT,
+       BM.MK_DESC CRNT_CTNT_ORG,
+       ' ',
+       ' ',
+       TO_CHAR (XTM.UPLD_DT, 'YYYY-MM-DD HH24:MI') CRE_DT,
+       TO_CHAR (XTM.UPLD_GDT, 'YYYY-MM-DD HH24:MI') CRE_GDT,
+       '' CORR_NO
+  FROM BKG_XTER_RQST_MST XTM,
+	   BKG_BL_MK_DESC BM
+  WHERE XTM.XTER_SNDR_ID = @[xter_sndr_id]
+   AND XTM.XTER_RQST_NO = @[xter_rqst_no]
+   AND XTM.XTER_RQST_SEQ = @[xter_rqst_seq]
+    AND XTM.BKG_NO = BM.BKG_NO
+ORDER BY 1 DESC, 2, 11			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="AARY3310011" out="N"/>
+				<param name="xter_sndr_id" type="12" value="" out="N"/>
+				<param name="xter_rqst_no" type="12" value="" out="N"/>
+				<param name="xter_rqst_seq" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

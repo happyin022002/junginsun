@@ -1,0 +1,925 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="InvoiceIssueCollectionMgtDBDAOSearchIssuedInvoiceListRSQL">
+			<desc><![CDATA[Issued Invoice Inquiry - By Booking, By Container ]]></desc>
+			<sql><![CDATA[
+WITH INV_DATA AS (
+#if(${s_group_by} == '1')
+	SELECT  DISTINCT A.DMDT_INV_NO
+		   ,A.INV_PRT_FLG
+		   ,A.DMDT_AR_IF_CD
+		   ,A.DMDT_INV_STS_CD
+		   ,A.DMDT_TRF_CD
+		   ,A.BKG_NO
+		   ,A.BL_NO
+		   ,A.SC_NO
+		   ,A.RFA_NO 
+		   ,A.TAA_NO
+		   ,A.CHG_CURR_CD
+		   ,A.ORG_CHG_AMT
+		   ,A.DMDT_EXPT_AMT
+		   ,A.DC_AMT
+		   ,A.BIL_AMT
+		   ,A.INV_CURR_CD
+		   ,A.INV_CHG_AMT
+           ,CASE (SELECT SUBSTR(LOC_CD, 0, 2) FROM MDM_ORGANIZATION WHERE OFC_CD = A.CRE_OFC_CD)
+				WHEN 'IN' THEN 
+					CASE 
+						WHEN A.CRE_DT >= (SELECT TO_DATE(ATTR_CTNT1, 'YYYYMMDDHH24MI') FROM DMT_HRD_CDG_CTNT WHERE HRD_CDG_ID = 'IDA_TAX_APPL_DT') THEN
+							NVL(IDA_CGST_AMT, 0) + NVL(IDA_SGST_AMT, 0) + NVL(IDA_IGST_AMT, 0) + NVL(IDA_UGST_AMT, 0)
+						ELSE
+							A.TAX_AMT + NVL(A.IDA_EDU_TAX, 0) + NVL(A.IDA_HIGH_EDU_TAX, 0) + NVL(A.IDA_LOCL_TAX, 0) + NVL(A.IDA_N2ND_LOCL_TAX, 0)
+					END
+                ELSE 
+					A.TAX_AMT
+            END AS TAX_AMT
+		   ,A.INV_AMT
+		   ,DECODE(SUBSTR(A.DMDT_TRF_CD,3,1), 'I', A.POD_CD, A.POL_CD) 	AS PORT
+		   ,TO_CHAR(A.CRE_DT,'YYYY-MM-DD') 								AS CRE_DT
+		   ,A.CRE_OFC_CD
+		   ,A.CRE_USR_ID 												AS ISSUE_ID
+		   ,(SELECT USR_NM FROM COM_USER WHERE USR_ID = A.CRE_USR_ID) 	AS ISSUE_NM
+		   ,DECODE(A.DMDT_AR_IF_CD, 'Y', A.AR_IF_NO, '') 				AS AR_IF_NO
+		   ,TO_CHAR(A.AR_IF_DT, 'YYYY-MM-DD') 							AS AR_IF_DT
+		   ,A.AR_IF_OFC_CD
+		   ,A.AR_IF_USR_ID
+		   ,(SELECT USR_NM FROM COM_USER WHERE USR_ID = A.AR_IF_USR_ID) AS AR_IF_USR_NM
+		   ,DECODE(NVL(A.DMDT_AR_IF_CD,'N')
+				,'Y'
+				,(TO_DATE(TO_CHAR(A.AR_IF_DT, 'YYYYMMDD'),'YYYYMMDD') - TO_DATE(TO_CHAR(A.CRE_DT,'YYYYMMDD'),'YYYYMMDD'))
+				,(TO_DATE(TO_CHAR(NVL(GLOBALDATE_PKG.TIME_LOCAL_OFC_FNC(A.CRE_OFC_CD),SYSDATE),'YYYYMMDD'),'YYYYMMDD') - TO_DATE(TO_CHAR(A.CRE_DT,'YYYYMMDD'),'YYYYMMDD'))
+			) 															AS INV_OVER
+		   ,DECODE(A.ACT_PAYR_CNT_CD, '00', NULL ,A.ACT_PAYR_CNT_CD) || DECODE(LPAD(A.ACT_PAYR_SEQ, 6,'0'), '000000', NULL, LPAD(A.ACT_PAYR_SEQ, 6,'0')) AS ACT_PAYR_CD
+		   ,CASE 
+				WHEN A.ACT_PAYR_CNT_CD = '00' THEN 
+					(
+						SELECT  VNDR_LGL_ENG_NM 
+						  FROM  MDM_VENDOR 
+						 WHERE  VNDR_SEQ = A.ACT_PAYR_SEQ
+					)
+	            ELSE 
+					(
+					
+						SELECT  CUST_LGL_ENG_NM 
+						  FROM  MDM_CUSTOMER 
+						 WHERE  CUST_CNT_CD = A.ACT_PAYR_CNT_CD 
+						   AND  CUST_SEQ = A.ACT_PAYR_SEQ
+					 )
+	        END 														AS ACT_PAYR_NM
+		   ,CASE 
+				WHEN A.ACT_PAYR_CNT_CD = '00' THEN 
+					(
+						SELECT  DELT_FLG 
+						  FROM  MDM_VENDOR 
+						 WHERE  VNDR_SEQ = A.ACT_PAYR_SEQ
+					)
+				ELSE 
+					(
+						SELECT  DELT_FLG 
+						  FROM  MDM_CUSTOMER 
+						 WHERE  CUST_CNT_CD = A.ACT_PAYR_CNT_CD 
+						   AND CUST_SEQ = A.ACT_PAYR_SEQ
+					)
+			END 														AS ACT_DELT_FLG
+		   ,A.CR_INV_NO		   
+		   ,CASE 
+				WHEN C.RFA_NO IS NOT NULL AND SUBSTR(C.RFA_NO, 1, 3) != 'DUM' THEN 
+					(
+						SELECT  PROP_OFC_CD
+						  FROM  PRI_RP_HDR 	HDR
+							   ,PRI_RP_MN 	MN
+						 WHERE  1 = 1
+						   AND  HDR.RFA_NO  = A.RFA_NO
+						   AND  HDR.PROP_NO = MN.PROP_NO
+						   AND  ROWNUM      = 1
+					) 
+				WHEN C.SC_NO IS NOT NULL AND SUBSTR(C.SC_NO, 1, 3) != 'DUM' THEN 
+					(
+						SELECT  PROP_OFC_CD
+						  FROM  PRI_SP_HDR 	HDR
+							   ,PRI_SP_MN 	MN
+						 WHERE  1 = 1
+						   AND  A.SC_NO     = HDR.SC_NO
+						   AND  HDR.PROP_NO = MN.PROP_NO
+						   AND  ROWNUM      = 1
+					)
+				WHEN C.TAA_NO IS NOT NULL AND SUBSTR(C.TAA_NO, 1, 3) != 'DUM' THEN 
+					(
+						SELECT  RESPB_SLS_OFC_CD
+						  FROM  PRI_TAA_HDR HDR
+							   ,PRI_TAA_MN 	MN
+						 WHERE  HDR.TAA_PROP_NO = MN.TAA_PROP_NO
+						   AND  HDR.TAA_NO    	= A.TAA_NO
+						   AND  ROWNUM          = 1
+					)
+				ELSE 
+					' ' 
+			END															AS CTRT_OFC
+		   ,REPLACE(REPLACE(A.INV_RMK,'@*',CHR(10)),CHR(10), '-') 		AS INV_RMK
+           ,(
+				SELECT  AR_HD_QTR_OFC_CD 
+				  FROM  MDM_ORGANIZATION 
+				 WHERE  OFC_CD = A.CRE_OFC_CD
+			) 															AS RHQ_OFC_CD
+           ,A.POR_CD
+           ,A.POL_CD
+           ,A.POD_CD
+           ,A.DEL_CD
+           ,A.CRE_DT 													AS S_CRE_DT
+           ,CASE 
+                WHEN DMDT_INV_STS_CD = 'I' AND DMDT_AR_IF_CD = 'Y' THEN 
+					'Y'
+                WHEN DMDT_INV_STS_CD = 'I' AND DMDT_AR_IF_CD = 'N' THEN 
+					'N'
+                WHEN DMDT_INV_STS_CD IN ('C', 'X') THEN 
+					'Y'
+                ELSE 
+					'N' 
+			END 														AS V_COLLECTED
+           ,INV_XCH_RT
+		   ,(
+				SELECT  CASE 
+							WHEN A2.CNT_CD = 'IN' AND A.CRE_DT >= TO_DATE(A3.ATTR_CTNT1, 'YYYYMMDDHH24MI') THEN 
+								SUBSTR(A.DMDT_INV_NO, 4, 1)
+							ELSE
+								SUBSTR(A.DMDT_INV_NO, 3, 1)
+						END
+						
+				  FROM  MDM_ORGANIZATION  	A1
+					   ,MDM_LOCATION      	A2
+					   ,DMT_HRD_CDG_CTNT	A3
+					   
+				 WHERE  A1.OFC_CD     = A.CRE_OFC_CD
+				   AND  A1.LOC_CD     = A2.LOC_CD
+				   AND  A3.HRD_CDG_ID = 'IDA_TAX_APPL_DT'
+			 ) AS DMDT_INV_TP_CD
+			 
+	  FROM  DMT_INV_MN  		A
+	       ,DMT_INV_DTL 		B
+		   ,BKG_BOOKING 		C
+
+	 WHERE  A.DMDT_INV_NO   = B.DMDT_INV_NO(+)
+	   AND  A.CRE_OFC_CD    = B.CRE_OFC_CD(+)
+	   AND  A.BKG_NO        = C.BKG_NO(+)
+	   
+	## Tariff Type
+	   #if (${s_dmdt_trf_cd} != '')
+       AND  A.DMDT_TRF_CD IN (
+			#foreach($dmdt_trf_no in ${dmdt_trf_cd_list}) 
+			#if($velocityCount < $dmdt_trf_cd_list.size()) 
+		           '$dmdt_trf_no', 
+			#else 
+		           '$dmdt_trf_no' 
+			#end 
+			#end
+			)
+	   #end
+	
+	## AR/IF = (N, Y, H, H and LIT)
+	   #if (${s_dmdt_ar_if_cd} != '')
+       AND  ( 1 != 1 
+				#if (${uncollected} == 'N')
+				OR (DMDT_INV_STS_CD  IN ('I', 'X', 'C') AND DMDT_AR_IF_CD = 'N')								--// AUTO I/F OFFICE 가 아닌 경우
+				#end 
+				#if (${collected} == 'Y')
+				OR (DMDT_AR_IF_CD = 'Y')
+				#end 
+				#if (${hold} == 'H')
+				OR A.DMDT_AR_IF_CD = 'H'
+				#end 
+				#if (${hold_Litigation} == 'L')
+				OR (A.DMDT_AR_IF_CD = 'H' AND A.INV_HLD_RSN_CD = 'LIT')
+				#end 
+			)
+	   #end 
+	   
+	## INVOICE STATUS
+       #if (${s_dmdt_inv_sts_cd} != '')
+       AND  A.DMDT_INV_STS_CD IN (
+			#foreach($dmdt_inv_sts_no in ${dmdt_inv_sts_list}) 
+			#if($velocityCount < $dmdt_inv_sts_list.size()) 
+		           '$dmdt_inv_sts_no', 
+			#else 
+		           '$dmdt_inv_sts_no' 
+			#end 
+			#end
+			)
+	   #end
+	   
+	## OFC radio box
+       #if (${s_inv_check} == 'N')
+       AND  A.CRE_OFC_CD IN (
+			#foreach($s_issue_ofc in ${ofc_cd_list} )
+				#if($velocityCount < $ofc_cd_list.size()) '$s_issue_ofc', #else '$s_issue_ofc' #end
+			#end
+			)
+			
+       AND  A.CRE_DT >= TO_DATE(@[s_issue_fm]||'000000','YYYYMMDDHH24MISS')
+       AND  A.CRE_DT <= TO_DATE(@[s_issue_to]||'235959','YYYYMMDDHH24MISS')
+	   #end
+	   
+	## INV radio box
+    #if (${s_inv_check} == 'Y')
+       #if (${session_rhq_ofc_cd} != 'SELHO')
+       AND  A.CRE_OFC_CD IN 
+			( 
+				SELECT  OFC_CD 
+				  FROM  MDM_ORGANIZATION 
+				 WHERE  AR_HD_QTR_OFC_CD = @[session_rhq_ofc_cd]
+			)
+	   #end
+	   
+	   #if (${s_invoice_no} != '')	
+       AND  A.DMDT_INV_NO IN 
+			(
+			#foreach( $invoice_cd in ${invoice_no_list} )
+			#if($velocityCount < $invoice_no_list.size()) 
+				'$invoice_cd', 
+			#else 
+				'$invoice_cd' 
+			#end
+			#end
+			)
+	   #end
+	   
+	   #if (${s_bkg_no} != '')	
+	   AND  A.BKG_NO IN 
+			(
+			#foreach( $bkg_cd in ${bkg_no_list} )
+			#if($velocityCount < $bkg_no_list.size()) 
+				'$bkg_cd', 
+			#else 
+				'$bkg_cd' 
+			#end
+			#end
+			)
+	   #end
+	   
+	   #if (${s_bl_no} != '')	
+	   AND  A.BL_NO IN 
+			(
+			#foreach( $bl_cd in ${bl_no_list} )
+			#if($velocityCount < $bl_no_list.size()) 
+				'$bl_cd', 
+			#else 
+				'$bl_cd' 
+			#end
+			#end
+			)
+	   #end
+	#end
+	
+	## ISSUE ID
+	   #if(${s_issue_usr_id} != '')
+	   AND  A.CRE_USR_ID = @[s_issue_usr_id]
+	   #end
+	   
+	## PAYER
+	  #if(${s_payer_cd} != '')
+	   #if (${s_cust_gubun} == '1')
+	   AND  LPAD(A.ACT_PAYR_SEQ,6,'0') = LPAD(@[s_cust_cd],6,'0')
+	   #elseif (${s_cust_gubun} == '2') 
+	   AND  A.ACT_PAYR_CNT_CD          = SUBSTR(@[s_cust_cd],1,2)
+	   AND  LPAD(A.ACT_PAYR_SEQ,6,'0') = SUBSTR(@[s_cust_cd],3)
+	   #end
+	  #end
+	
+	## SC NO
+	   #if(${s_sc_no} != '')
+	   AND  A.SC_NO = @[s_sc_no]
+	   #end
+	   
+	## RFA NO
+	   #if(${s_rfa_no} != '')
+	   AND  A.RFA_NO = @[s_rfa_no]
+	   #end
+	   
+	## TAA NO
+	   #if(${s_taa_no} != '')
+	   AND C.TAA_NO = @[s_taa_no]
+	   #end
+	   
+	ORDER BY A.DMDT_INV_NO
+
+#elseif(${s_group_by} == '2')
+	SELECT  A.DMDT_INV_NO
+		   ,A.INV_PRT_FLG
+		   ,A.DMDT_AR_IF_CD
+		   ,A.DMDT_INV_STS_CD
+		   ,A.DMDT_TRF_CD
+		   ,A.BKG_NO
+		   ,A.BL_NO
+		   --// Incl. CNTR Detail 을 선택하지 않은 경우 CNTR No. 없어서 아래 JOIN 시 데이터를 찾지 못하는 문제점을 해결하기 위해서 사용함.
+           ,CASE
+				WHEN MNL_INP_FLG = 'Y' AND MNL_INV_SND_FLG = 'N' THEN
+					'0000000000' 
+				ELSE
+					B.CNTR_NO 
+			END						AS CNTR_NO
+		   ,B.FT_DYS
+		   ,A.SC_NO
+		   ,A.RFA_NO
+		   ,A.TAA_NO
+		   ,A.CHG_CURR_CD
+		   ,B.ORG_CHG_AMT
+		   ,B.SC_RFA_EXPT_AMT 		AS DMDT_EXPT_AMT
+		   ,B.AFT_EXPT_DC_AMT 		AS DC_AMT
+		   ,B.BIL_AMT
+		   ,A.INV_CURR_CD
+           ,CASE 
+				WHEN SUBSTR(A.DMDT_INV_NO, 3, 1) = 'M' THEN		--// Manual Invoice 인 경우
+					CASE 
+						WHEN MNL_INV_SND_FLG = 'Y' THEN   		--// Incl. CNTR Detail 가 'Y' 인 경우
+							( 
+								SELECT  SUM(RT_OVR_CHG_AMT) 
+								  FROM  DMT_INV_RT 
+								 WHERE  DMDT_INV_NO = A.DMDT_INV_NO 
+								   AND  INV_DTL_SEQ = B.INV_DTL_SEQ 
+							)
+						ELSE							--// Incl. CNTR Detail 가 'N' 인 경우
+							A.INV_CHG_AMT
+					END
+				ELSE									--// Manual Invoice 가 아닌 경우
+					B.CNTR_INV_AMT
+            END 					AS INV_CHG_AMT
+           ,CASE 
+				WHEN A.TAX_RTO = 0 THEN 0
+				WHEN SUBSTR(A.DMDT_INV_NO, 3, 1) = 'M' THEN 	--// Manual Invoice 인 경우
+					CASE 
+						WHEN MNL_INV_SND_FLG = 'Y' THEN		    --// Incl. CNTR Detail 가 'Y' 인 경우
+			            	CASE 
+								WHEN A.INV_CURR_CD IN ('KRW', 'JPY', 'BEF', 'DJF', 'ESP', 'GRD', 'ITL', 'LAK', 'MGF', 'MRO', 'MXP', 'PTE', 'SDD', 'MXN') THEN
+			                        TRUNC(( SELECT SUM(RT_OVR_CHG_AMT) FROM DMT_INV_RT WHERE DMDT_INV_NO = B.DMDT_INV_NO AND INV_DTL_SEQ = B.INV_DTL_SEQ ) / A.TAX_RTO, 0)
+					            WHEN A.INV_CURR_CD IN ('TWD', 'IDR', 'VND') THEN
+						            ROUND(( SELECT SUM(RT_OVR_CHG_AMT) FROM DMT_INV_RT WHERE DMDT_INV_NO = B.DMDT_INV_NO AND INV_DTL_SEQ = B.INV_DTL_SEQ ) / A.TAX_RTO, 0)
+					            ELSE
+                    				ROUND(( SELECT SUM(RT_OVR_CHG_AMT) FROM DMT_INV_RT WHERE DMDT_INV_NO = B.DMDT_INV_NO AND INV_DTL_SEQ = B.INV_DTL_SEQ ) / A.TAX_RTO, 2)
+							END
+						ELSE							--// Incl. CNTR Detail 가 'N' 인 경우
+							A.TAX_AMT
+					END
+				ELSE 									--// Manual Invoice 가 아닌 경우
+					B.TAX_AMT 
+			END AS TAX_AMT
+           ,CASE 
+				WHEN SUBSTR(A.DMDT_INV_NO, 3, 1) = 'M' THEN  	--// Manual Invoice 인 경우
+					CASE 
+						WHEN MNL_INV_SND_FLG = 'Y' THEN	   		--// Incl. CNTR Detail 가 'Y' 인 경우
+							( 
+								SELECT  SUM(RT_OVR_CHG_AMT) 
+								  FROM  DMT_INV_RT 
+								 WHERE  DMDT_INV_NO = B.DMDT_INV_NO 
+								   AND  INV_DTL_SEQ = B.INV_DTL_SEQ
+							)
+						ELSE						--// Incl. CNTR Detail 가 'N' 인 경우
+							A.INV_CHG_AMT
+					END
+                ELSE 									--// Manual Invoice 가 아닌 경우
+					B.CNTR_INV_AMT
+			END
+            +
+            CASE 
+				WHEN NVL(A.TAX_RTO, 0) = 0 THEN
+					0
+				WHEN SUBSTR(A.DMDT_INV_NO,3,1) = 'M' THEN		--// Manual Invoice 인 경우
+					CASE 
+						WHEN MNL_INV_SND_FLG = 'Y' THEN    --// Incl. CNTR Detail 가 'Y' 인 경우
+			            	CASE 
+								WHEN A.INV_CURR_CD IN ('KRW', 'JPY', 'BEF', 'DJF', 'ESP', 'GRD', 'ITL', 'LAK', 'MGF', 'MRO', 'MXP', 'PTE', 'SDD', 'MXN') THEN
+			                        TRUNC(( SELECT SUM(RT_OVR_CHG_AMT) FROM DMT_INV_RT WHERE DMDT_INV_NO = B.DMDT_INV_NO AND INV_DTL_SEQ = B.INV_DTL_SEQ ) / A.TAX_RTO, 0)
+			                    WHEN A.INV_CURR_CD IN ('TWD', 'IDR', 'VND') THEN
+						            ROUND(( SELECT SUM(RT_OVR_CHG_AMT) FROM DMT_INV_RT WHERE DMDT_INV_NO = B.DMDT_INV_NO AND INV_DTL_SEQ = B.INV_DTL_SEQ ) / A.TAX_RTO, 0)
+					            ELSE
+                    			    ROUND(( SELECT SUM(RT_OVR_CHG_AMT) FROM DMT_INV_RT WHERE DMDT_INV_NO = B.DMDT_INV_NO AND INV_DTL_SEQ = B.INV_DTL_SEQ ) / A.TAX_RTO, 2)
+			                END
+						ELSE						--// Incl. CNTR Detail 가 'N' 인 경우
+							A.TAX_AMT
+					END
+                ELSE 									--// Manual Invoice 가 아닌 경우
+					B.TAX_AMT 
+			END AS INV_AMT
+		   ,DECODE(SUBSTR(A.DMDT_TRF_CD,3,1), 'I', A.POD_CD, A.POL_CD) 	AS PORT
+		   ,TO_CHAR(A.CRE_DT,'YYYY-MM-DD') 								AS CRE_DT
+		   ,A.CRE_OFC_CD
+		   ,A.CRE_USR_ID 												AS ISSUE_ID
+		   ,(SELECT USR_NM FROM COM_USER WHERE USR_ID = A.CRE_USR_ID) 	AS ISSUE_NM
+		   ,DECODE(A.DMDT_AR_IF_CD, 'Y', A.AR_IF_NO, '') 				AS AR_IF_NO
+		   ,TO_CHAR(A.AR_IF_DT, 'YYYY-MM-DD') 							AS AR_IF_DT
+		   ,A.AR_IF_OFC_CD
+		   ,A.AR_IF_USR_ID
+		   ,(SELECT USR_NM FROM COM_USER WHERE USR_ID = A.AR_IF_USR_ID) AS AR_IF_USR_NM
+		   ,DECODE(NVL(A.DMDT_AR_IF_CD,'N')
+				,'Y'
+				,(TO_DATE(TO_CHAR(A.AR_IF_DT, 'YYYYMMDD'),'YYYYMMDD') - TO_DATE(TO_CHAR(A.CRE_DT,'YYYYMMDD'),'YYYYMMDD'))
+				,(TO_DATE(TO_CHAR(NVL(GLOBALDATE_PKG.TIME_LOCAL_OFC_FNC(A.CRE_OFC_CD),SYSDATE),'YYYYMMDD'),'YYYYMMDD') - TO_DATE(TO_CHAR(A.CRE_DT,'YYYYMMDD'),'YYYYMMDD'))
+			) 															AS INV_OVER			
+		   ,DECODE(A.ACT_PAYR_CNT_CD, '00', NULL ,A.ACT_PAYR_CNT_CD) || DECODE(LPAD(A.ACT_PAYR_SEQ, 6,'0'), '000000', NULL, LPAD(A.ACT_PAYR_SEQ, 6,'0')) AS ACT_PAYR_CD
+		   ,CASE 
+				WHEN A.ACT_PAYR_CNT_CD = '00' THEN 
+					(
+						SELECT  VNDR_LGL_ENG_NM 
+						  FROM  MDM_VENDOR 
+						 WHERE  VNDR_SEQ = A.ACT_PAYR_SEQ
+					)
+	            ELSE 
+					(
+					
+						SELECT  CUST_LGL_ENG_NM 
+						  FROM  MDM_CUSTOMER 
+						 WHERE  CUST_CNT_CD = A.ACT_PAYR_CNT_CD 
+						   AND  CUST_SEQ = A.ACT_PAYR_SEQ
+					 )
+	        END 														AS ACT_PAYR_NM
+		   ,CASE 
+				WHEN A.ACT_PAYR_CNT_CD = '00' THEN 
+					(
+						SELECT  DELT_FLG 
+						  FROM  MDM_VENDOR 
+						 WHERE  VNDR_SEQ = A.ACT_PAYR_SEQ
+					)
+				ELSE 
+					(
+						SELECT  DELT_FLG 
+						  FROM  MDM_CUSTOMER 
+						 WHERE  CUST_CNT_CD = A.ACT_PAYR_CNT_CD 
+						   AND  CUST_SEQ = A.ACT_PAYR_SEQ
+					)
+			END 														AS ACT_DELT_FLG
+		   ,A.CR_INV_NO	
+		   ,CASE 
+				WHEN C.RFA_NO IS NOT NULL AND SUBSTR(C.RFA_NO, 1, 3) != 'DUM' THEN 
+					(
+						SELECT  PROP_OFC_CD
+						  FROM  PRI_RP_HDR 	HDR
+							   ,PRI_RP_MN 	MN
+						 WHERE  1 = 1
+						   AND  HDR.RFA_NO  = A.RFA_NO
+						   AND  HDR.PROP_NO = MN.PROP_NO
+						   AND  ROWNUM      = 1
+					) 
+				WHEN C.SC_NO IS NOT NULL AND SUBSTR(C.SC_NO, 1, 3) != 'DUM' THEN 
+					(
+						SELECT  PROP_OFC_CD
+						  FROM  PRI_SP_HDR 	HDR
+							   ,PRI_SP_MN 	MN
+						 WHERE  1 = 1
+						   AND  A.SC_NO     = HDR.SC_NO
+						   AND  HDR.PROP_NO = MN.PROP_NO
+						   AND  ROWNUM      = 1
+					)
+				WHEN C.TAA_NO IS NOT NULL AND SUBSTR(C.TAA_NO, 1, 3) != 'DUM' THEN 
+					(
+						SELECT  RESPB_SLS_OFC_CD
+						  FROM  PRI_TAA_HDR HDR
+							   ,PRI_TAA_MN 	MN
+						 WHERE  HDR.TAA_PROP_NO = MN.TAA_PROP_NO
+						   AND  HDR.TAA_NO    	= A.TAA_NO
+						   AND  ROWNUM          = 1
+					)
+				ELSE 
+					' ' 
+			END															AS CTRT_OFC
+		   ,REPLACE(REPLACE(A.INV_RMK,'@*',CHR(10)),CHR(10), '-') 		AS INV_RMK
+           ,(
+				SELECT  AR_HD_QTR_OFC_CD 
+				  FROM  MDM_ORGANIZATION 
+				 WHERE  OFC_CD = A.CRE_OFC_CD
+			) 															AS RHQ_OFC_CD
+           ,A.POR_CD
+           ,A.POL_CD
+           ,A.POD_CD
+           ,A.DEL_CD
+           ,A.CRE_DT 													AS S_CRE_DT
+           ,CASE 
+                WHEN DMDT_INV_STS_CD = 'I' AND DMDT_AR_IF_CD = 'Y' THEN 
+					'Y'
+                WHEN DMDT_INV_STS_CD = 'I' AND DMDT_AR_IF_CD = 'N' THEN 
+					'N'
+                WHEN DMDT_INV_STS_CD IN ('C', 'X') THEN 
+					'Y'
+                ELSE 
+					'N' 
+			END 														AS V_COLLECTED
+           ,INV_XCH_RT
+           ,ROUND(B.CNTR_INV_AMT/DECODE(NVL(A.INV_CHG_AMT,1),0,1,NVL(A.INV_CHG_AMT,1)),2) AS BKG_CNTR_QTY
+           ,INV_DTL_SEQ		   
+		   ,(
+				SELECT  CASE 
+							WHEN A2.CNT_CD = 'IN' AND A.CRE_DT >= TO_DATE(A3.ATTR_CTNT1, 'YYYYMMDDHH24MI') THEN 
+								SUBSTR(A.DMDT_INV_NO, 4, 1)
+							ELSE
+								SUBSTR(A.DMDT_INV_NO, 3, 1)
+						END
+						
+				  FROM  MDM_ORGANIZATION  	A1
+					   ,MDM_LOCATION      	A2
+					   ,DMT_HRD_CDG_CTNT	A3
+					   
+				 WHERE  A1.OFC_CD     = A.CRE_OFC_CD
+				   AND  A1.LOC_CD     = A2.LOC_CD
+				   AND  A3.HRD_CDG_ID = 'IDA_TAX_APPL_DT'
+			) AS DMDT_INV_TP_CD
+
+	  FROM  DMT_INV_MN  		A
+	       ,DMT_INV_DTL 		B
+		   ,BKG_BOOKING 		C
+		   
+	 WHERE  A.DMDT_INV_NO   = B.DMDT_INV_NO(+)
+	   AND  A.CRE_OFC_CD    = B.CRE_OFC_CD(+)
+	   AND  A.BKG_NO        = C.BKG_NO(+)
+	
+	## Tariff Type
+	   #if (${s_dmdt_trf_cd} != '')
+       AND  A.DMDT_TRF_CD IN (
+			#foreach($dmdt_trf_no in ${dmdt_trf_cd_list}) 
+			#if($velocityCount < $dmdt_trf_cd_list.size()) 
+		           '$dmdt_trf_no', 
+			#else 
+		           '$dmdt_trf_no' 
+			#end 
+			#end
+			)
+	   #end
+	   
+	## AR/IF = (N, Y, H, H and LIT)
+	   #if (${s_dmdt_ar_if_cd} != '')
+       AND  ( 1 != 1 
+				#if (${uncollected} == 'N')
+				OR (DMDT_INV_STS_CD  IN ('I', 'X', 'C') AND DMDT_AR_IF_CD = 'N')								--// AUTO I/F OFFICE 가 아닌 경우
+				#end 
+				#if (${collected} == 'Y')
+				OR (DMDT_AR_IF_CD = 'Y')
+				#end 
+				#if (${hold} == 'H')
+				OR A.DMDT_AR_IF_CD = 'H'
+				#end 
+				#if (${hold_Litigation} == 'L')
+				OR (A.DMDT_AR_IF_CD = 'H' AND A.INV_HLD_RSN_CD = 'LIT')
+				#end 
+			)
+	   #end	   
+
+	## INVOICE STATUS
+       #if (${s_dmdt_inv_sts_cd} != '')
+       AND  A.DMDT_INV_STS_CD IN (
+			#foreach($dmdt_inv_sts_no in ${dmdt_inv_sts_list}) 
+			#if($velocityCount < $dmdt_inv_sts_list.size()) 
+		           '$dmdt_inv_sts_no', 
+			#else 
+		           '$dmdt_inv_sts_no' 
+			#end 
+			#end
+			)
+	   #end	
+	
+	## OFC radio box
+       #if (${s_inv_check} == 'N')
+       AND  A.CRE_OFC_CD IN (
+			#foreach($s_issue_ofc in ${ofc_cd_list} )
+				#if($velocityCount < $ofc_cd_list.size()) '$s_issue_ofc', #else '$s_issue_ofc' #end
+			#end
+			)
+			
+       AND  A.CRE_DT >= TO_DATE(@[s_issue_fm]||'000000','YYYYMMDDHH24MISS')
+       AND  A.CRE_DT <= TO_DATE(@[s_issue_to]||'235959','YYYYMMDDHH24MISS')
+	   #end
+
+	## INV radio box
+    #if (${s_inv_check} == 'Y')
+       #if (${session_rhq_ofc_cd} != 'SELHO')
+       AND  A.CRE_OFC_CD IN 
+			( 
+				SELECT  OFC_CD 
+				  FROM  MDM_ORGANIZATION 
+				 WHERE  AR_HD_QTR_OFC_CD = @[session_rhq_ofc_cd]
+			)
+	   #end
+	   
+	   #if (${s_invoice_no} != '')	
+       AND  A.DMDT_INV_NO IN 
+			(
+			#foreach( $invoice_cd in ${invoice_no_list} )
+			#if($velocityCount < $invoice_no_list.size()) 
+				'$invoice_cd', 
+			#else 
+				'$invoice_cd' 
+			#end
+			#end
+			)
+	   #end
+	   
+	   #if (${s_bkg_no} != '')	
+	   AND  A.BKG_NO IN 
+			(
+			#foreach( $bkg_cd in ${bkg_no_list} )
+			#if($velocityCount < $bkg_no_list.size()) 
+				'$bkg_cd', 
+			#else 
+				'$bkg_cd' 
+			#end
+			#end
+			)
+	   #end
+	   
+	   #if (${s_bl_no} != '')	
+	   AND  A.BL_NO IN 
+			(
+			#foreach( $bl_cd in ${bl_no_list} )
+			#if($velocityCount < $bl_no_list.size()) 
+				'$bl_cd', 
+			#else 
+				'$bl_cd' 
+			#end
+			#end
+			)
+	   #end
+	#end
+
+	## ISSUE ID
+	   #if(${s_issue_usr_id} != '')
+	   AND  A.CRE_USR_ID = @[s_issue_usr_id]
+	   #end
+	   
+	## PAYER
+	  #if(${s_payer_cd} != '')
+	   #if (${s_cust_gubun} == '1')
+	   AND  LPAD(A.ACT_PAYR_SEQ,6,'0') = LPAD(@[s_cust_cd],6,'0')
+	   #elseif (${s_cust_gubun} == '2') 
+	   AND  A.ACT_PAYR_CNT_CD          = SUBSTR(@[s_cust_cd],1,2)
+	   AND  LPAD(A.ACT_PAYR_SEQ,6,'0') = SUBSTR(@[s_cust_cd],3)
+	   #end
+	  #end
+	
+	## SC NO
+	   #if(${s_sc_no} != '')
+	   AND  A.SC_NO = @[s_sc_no]
+	   #end
+	   
+	## RFA NO
+	   #if(${s_rfa_no} != '')
+	   AND  A.RFA_NO = @[s_rfa_no]
+	   #end
+	   
+	## TAA NO
+	   #if(${s_taa_no} != '')
+	   AND C.TAA_NO = @[s_taa_no]
+	   #end
+	   
+	ORDER BY A.DMDT_INV_NO
+#end
+)
+
+#if (${usr_ofc_cd} == 'SAOSC' && ${btn_id} == 'btn_downexcel')
+    SELECT  DISTINCT
+            T1.*
+           ,NVL(T3.CNTR_NO, T2.CNTR_NO)				   			AS CNTR_NO_S
+           ,TO_CHAR(T2.FM_MVMT_DT, 'YYYY-MM-DD HH24:MI')		AS FM_MVMT_DT 
+           ,TO_CHAR(T2.TO_MVMT_DT, 'YYYY-MM-DD HH24:MI')		AS TO_MVMT_DT
+           ,NVL(T3.FX_FT_OVR_DYS, T2.TO_MVMT_DT - T2.FT_END_DT) AS FX_FT_OVR_DYS
+		   
+      FROM  INV_DATA        T1
+	       ,DMT_INV_DTL     T2
+		   ,DMT_CHG_CALC    T3
+		   
+     WHERE  1 = 1
+       AND  T1.DMDT_INV_NO          = T2.DMDT_INV_NO
+       AND  T1.CRE_OFC_CD           = T2.CRE_OFC_CD
+	   
+       #if(${s_group_by} != '1')
+       AND  T1.CNTR_NO	            = T2.CNTR_NO
+       #end
+	   
+       AND  T2.SYS_AREA_GRP_ID      = T3.SYS_AREA_GRP_ID    (+)
+       AND  T2.CNTR_NO              = T3.CNTR_NO            (+)
+       AND  T2.CNTR_CYC_NO          = T3.CNTR_CYC_NO        (+)
+       AND  T2.DMDT_TRF_CD          = T3.DMDT_TRF_CD        (+)
+       AND  T2.DMDT_CHG_LOC_DIV_CD  = T3.DMDT_CHG_LOC_DIV_CD(+)
+       AND  T2.CHG_SEQ              = T3.CHG_SEQ            (+)
+	   
+    ORDER BY T1.DMDT_INV_NO
+#else
+
+#if (${srch_tp_cd} == 'G')
+	SELECT  DMDT_INV_NO	
+           ,INV_PRT_FLG	
+           ,DMDT_AR_IF_CD	
+           ,DMDT_INV_STS_CD	
+           ,DMDT_TRF_CD	
+           ,BKG_NO	
+           ,BL_NO
+		   #if(${s_group_by} != '1')
+	       ,DECODE(CNTR_NO, '0000000000', NULL, CNTR_NO) AS CNTR_NO
+           ,FT_DYS
+		   #end
+           ,SC_NO	
+           ,RFA_NO	
+           ,TAA_NO	
+           ,CHG_CURR_CD	
+           ,ORG_CHG_AMT	
+           ,DMDT_EXPT_AMT	
+           ,DC_AMT	
+           ,BIL_AMT	
+           ,INV_CURR_CD	
+           ,INV_CHG_AMT	
+           ,TAX_AMT	
+           ,INV_AMT	
+           ,PORT	
+           ,CRE_DT	
+           ,CRE_OFC_CD	
+           ,ISSUE_ID	
+           ,ISSUE_NM	
+           ,AR_IF_NO	
+           ,AR_IF_DT	
+           ,AR_IF_OFC_CD	
+           ,AR_IF_USR_ID	
+           ,AR_IF_USR_NM	
+           ,ACT_PAYR_CD	
+           ,ACT_PAYR_NM	
+           ,ACT_DELT_FLG	
+           ,CR_INV_NO	
+           ,CTRT_OFC	
+           ,INV_RMK	
+           ,RHQ_OFC_CD	
+           ,POR_CD	
+           ,POL_CD	
+           ,POD_CD	
+           ,DEL_CD
+	       ,INV_OVER
+	       ,DMDT_INV_TP_CD
+		   ,DECODE(DMDT_AR_IF_CD, 'H', 0, DECODE(V_COLLECTED, 'Y', 0, INV_AMT)) AS UNCOL_AMT
+	
+	  FROM  INV_DATA
+
+	WHERE  1 = 1
+	
+	## OVER DAYS
+	  #if(${s_inv_over_to} != '')
+	  AND  INV_OVER BETWEEN @[s_inv_over_fm] AND @[s_inv_over_to]
+	  #end
+	  
+#else	  
+	SELECT  T.*
+		   ,CASE
+				WHEN T.SM_GSTN_NO IS NULL THEN
+					'Yes'
+				ELSE
+					'No'
+			END AS RVS_CHG_FLG		-- REVERSE CHARGE
+	  FROM  (
+				SELECT  T2.CRE_OFC_CD					AS ISS_OFC_CD
+					   ,(
+							SELECT  B.IDA_GST_RGST_NO
+							  FROM  MDM_ORGANIZATION  A
+								   ,MDM_CUSTOMER      B
+							 WHERE  A.OFC_CD          = T2.CRE_OFC_CD
+							   AND  A.REP_CUST_CNT_CD = B.CUST_CNT_CD
+							   AND  A.REP_CUST_SEQ    = B.CUST_SEQ
+						)								AS SM_GSTN_NO
+					   ,T2.BKG_NO
+					   ,CASE 
+							WHEN T2.ACT_PAYR_CNT_CD = '00' THEN
+							   (
+									SELECT  NVL(IDA_SPCL_ECN_ZN_UT_FLG, 'N')  
+									  FROM  MDM_VENDOR  
+									 WHERE  VNDR_SEQ = T2.ACT_PAYR_SEQ
+									   AND  NVL(DELT_FLG, 'N') = 'N'  
+								)							
+							ELSE
+							   (
+									SELECT  NVL(IDA_SPCL_ECN_ZN_UT_FLG, 'N')  
+									  FROM  MDM_CUSTOMER  
+									 WHERE  CUST_CNT_CD = T2.ACT_PAYR_CNT_CD
+									   AND  CUST_SEQ    = T2.ACT_PAYR_SEQ
+									   AND  NVL(DELT_FLG, 'N') = 'N'   
+								)				
+						END								AS SEZ_FLG
+					   ,CASE 
+							WHEN T2.ACT_PAYR_CNT_CD = '00' THEN
+								(
+									SELECT  IDA_GST_RGST_NO
+									  FROM  MDM_VENDOR
+									 WHERE  VNDR_SEQ = T2.ACT_PAYR_SEQ
+								)
+							ELSE
+								(
+									SELECT  IDA_GST_RGST_NO  
+									  FROM  MDM_CUSTOMER  
+									 WHERE  CUST_CNT_CD = T2.ACT_PAYR_CNT_CD
+									   AND  CUST_SEQ    = T2.ACT_PAYR_SEQ
+									   AND  NVL(DELT_FLG, 'N') = 'N' 
+								)
+						END								AS CUST_GSTN_NO
+					   ,CASE 
+							WHEN T2.ACT_PAYR_CNT_CD = '00' THEN
+								(
+									SELECT  VNDR_LGL_ENG_NM
+									  FROM  MDM_VENDOR
+									 WHERE  VNDR_SEQ = T2.ACT_PAYR_SEQ
+								)
+							ELSE
+								(
+									SELECT  CUST_LGL_ENG_NM  
+									  FROM  MDM_CUSTOMER  
+									 WHERE  CUST_CNT_CD = T2.ACT_PAYR_CNT_CD
+									   AND  CUST_SEQ    = T2.ACT_PAYR_SEQ
+									   AND  NVL(DELT_FLG, 'N') = 'N' 
+								)
+						END				AS CUST_NM
+					   ,T2.DMDT_INV_NO
+					   ,TO_CHAR(T2.CRE_DT, 'YYYY-MM-DD')	AS ISS_DT
+					   ,T2.INV_AMT							AS TTL_INV_AMT
+					   ,(
+							SELECT   C.IDA_STE_CD  
+							FROM     MDM_ORGANIZATION 	A  
+								   , MDM_LOCATION 		B  
+								   , MDM_STATE 			C  
+							WHERE    1 = 1  
+							AND      A.LOC_CD = B.LOC_CD  
+							AND      B.CNT_CD = C.CNT_CD  
+							AND      B.STE_CD = C.STE_CD  
+							AND      A.OFC_CD = T2.CRE_OFC_CD
+							AND      NVL(A.DELT_FLG, 'N') = 'N'  
+							AND      NVL(B.DELT_FLG, 'N') = 'N'  
+							AND      NVL(C.DELT_FLG, 'N') = 'N' 				   
+						)								AS SM_STE_CD
+					   ,CASE 
+							WHEN T2.ACT_PAYR_CNT_CD = '00' THEN
+							   (
+									SELECT   NVL(SUBSTR(A.IDA_GST_RGST_NO, 1, 2), C.IDA_STE_CD)  
+									FROM     MDM_VENDOR 	A  
+										   , MDM_LOCATION 	B  
+										   , MDM_STATE 		C  
+									WHERE    1 = 1  
+									AND      A.LOC_CD = B.LOC_CD  
+									AND      B.CNT_CD = C.CNT_CD  
+									AND      B.STE_CD = C.STE_CD  
+									AND      A.VNDR_SEQ = T2.ACT_PAYR_SEQ
+									AND      NVL(A.DELT_FLG, 'N') = 'N'  
+									AND      NVL(B.DELT_FLG, 'N') = 'N'  
+									AND      NVL(C.DELT_FLG, 'N') = 'N'  
+								)							
+							ELSE
+							   (
+									SELECT   C.IDA_STE_CD  
+									FROM     MDM_CUSTOMER 		A  
+										   , MDM_LOCATION 		B  
+										   , MDM_STATE 			C  
+									WHERE    1 = 1  
+									AND      A.LOC_CD = B.LOC_CD  
+									AND      B.CNT_CD = C.CNT_CD  
+									AND      B.STE_CD = C.STE_CD  
+									AND      A.CUST_CNT_CD = T2.ACT_PAYR_CNT_CD
+									AND      A.CUST_SEQ    = T2.ACT_PAYR_SEQ
+									AND      NVL(A.DELT_FLG, 'N') = 'N'  
+									AND      NVL(B.DELT_FLG, 'N') = 'N'  
+									AND      NVL(C.DELT_FLG, 'N') = 'N' 
+								)				
+						END								AS CUST_STE_CD
+					   ,T2.POR_CD
+					   ,T2.DEL_CD
+					   ,'996719'						AS SAC_CD
+					   ,T2.INV_CHG_AMT
+					   ,T2.IDA_CGST_RTO
+					   ,T2.IDA_CGST_AMT
+					   ,T2.IDA_SGST_RTO
+					   ,T2.IDA_SGST_AMT
+					   ,T2.IDA_IGST_RTO
+					   ,T2.IDA_IGST_AMT
+					   ,T2.IDA_UGST_RTO
+					   ,T2.IDA_UGST_AMT
+					   ,T2.INV_AMT
+					   ,T1.CRE_OFC_CD
+					   ,T1.DMDT_TRF_CD
+					   ,T1.DMDT_INV_TP_CD
+                       ,''								AS CNTR_NO
+				
+				  FROM  INV_DATA   T1
+					   ,DMT_INV_MN T2
+
+				WHERE  1 = 1
+				  AND  T1.DMDT_INV_NO = T2.DMDT_INV_NO
+				
+				## OVER DAYS
+				  #if(${s_inv_over_to} != '')
+				  AND  T1.INV_OVER BETWEEN @[s_inv_over_fm] AND @[s_inv_over_to]
+				  #end
+			) T
+#end
+
+#end			]]></sql>
+			<params>
+				<param name="s_issue_fm" type="12" value="1" out="N"/>
+				<param name="s_issue_to" type="12" value="1" out="N"/>
+				<param name="session_rhq_ofc_cd" type="12" value="1" out="N"/>
+				<param name="s_issue_usr_id" type="12" value="1" out="N"/>
+				<param name="s_cust_cd" type="12" value="11" out="N"/>
+				<param name="s_sc_no" type="12" value="1" out="N"/>
+				<param name="s_rfa_no" type="12" value="1" out="N"/>
+				<param name="s_taa_no" type="12" value="" out="N"/>
+				<param name="s_inv_over_fm" type="12" value="1" out="N"/>
+				<param name="s_inv_over_to" type="12" value="1" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

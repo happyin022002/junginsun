@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LongstayingUnclaimEQFlaggingDBDAOsearchCorDraftRSQL">
+			<desc><![CDATA[COR draft를 조회한다.
+* 2012.09.19 신자영 [CHM-201220003-01] L/S U/C CREATION - COR DRAFT 기능 개발]]></desc>
+			<sql><![CDATA[
+SELECT     DECODE(NO, 1, 'B/L No'                   )
+		|| DECODE(NO, 2, 'Sales Office'             ) 
+        || DECODE(NO, 3, 'Vessel/VVD'               ) 
+        || DECODE(NO, 4, 'Shipper'                  ) 
+        || DECODE(NO, 5, 'Consignee'                )        
+        || DECODE(NO, 6, 'Notify'                   )       
+        || DECODE(NO, 7, 'Container Quantity'       ) 
+        || DECODE(NO, 8, 'S. Days(Average)'         ) 
+        || DECODE(NO, 9, 'Commodity'                ) 
+        || DECODE(NO, 10, 'OFT Terms'                ) 
+        || DECODE(NO, 11, 'Demurrage as of Today'   ) 
+        || DECODE(NO, 12, 'Reason of U/C or L/S'    ) 
+        || DECODE(NO, 13, 'D/O Issuance Status'     )         
+        || DECODE(NO, 14, 'Actions taken by Dest.'  )
+  		|| ' '     AS title
+        ,    DECODE(NO, 1, C1) || DECODE(NO, 2, C2) || DECODE(NO, 3, C3)  || DECODE(NO, 4, C4)  || DECODE(NO, 5, C5) 
+          || DECODE(NO, 6, C6) || DECODE(NO, 7, C7) || DECODE(NO, 8, C8)  || DECODE(NO, 9, C9)  || DECODE(NO, 10, C10) 
+          || DECODE(NO, 11, C11) || DECODE(NO, 12, C12) || DECODE(NO, 13, C13) || DECODE(NO, 14, C14) ||' '   AS contents
+FROM     (
+	SELECT  C1, MAX(C2) C2, MAX(C3) C3, MAX(C4) C4, MAX(C5) C5, MAX(C6) C6
+            , SUBSTR(XMLAGG(XMLELEMENT(x,', '||C7||'') ORDER BY C1).EXTRACT('//text()').GetStringVal(), 3) C7
+            , ROUND(SUM(C8) / COUNT(C1)) C8, MAX(C9) C9, MAX(C10) C10,
+            SUM(C11) ||' '|| MAX(C15)  C11, MAX(C15) C15,
+            MAX(C12) C12, MAX(C13) C13, MAX(C14) C14    
+    FROM    (
+            SELECT  BL_NO AS C1,
+					SOFC AS C2,
+                    VVD AS C3,
+                    SHPR AS C4,
+                    CNEE AS C5,
+                    NTFY AS C6,
+                    CNTR_TPSZ_CD || ' ' || 'X' || ' ' || COUNT(CNTR_NO) AS C7,
+                    ROUND (SUM(STAY_DAYS) / COUNT(CNTR_NO)) AS C8,
+                    REP_CMDT_NM AS C9,
+                    OFT_TERM AS C10,
+                    --SUM(DEM) ||' '|| MAX(CUR) AS C11,
+                	SUM(DEM) C11,
+                	MAX(CUR) C15,
+                    MAX(RES) AS C12,
+                    DO AS C13,
+                    ACT AS C14
+            FROM 
+              (	SELECT  A.BL_NO BL_NO
+						,A.OB_SLS_OFC_CD SOFC
+                        ,(SELECT F.VSL_CD||F.SKD_VOY_NO||F.SKD_DIR_CD  FROM BKG_VVD F WHERE F.VSL_PRE_PST_CD  = 'T' AND F.BKG_NO = A.BKG_NO) VVD
+                        ,REPLACE(SUBSTR(B.CUST_NM,1,50),CHR(13)||chr(10),' ') SHPR
+                        ,REPLACE(SUBSTR(C.CUST_NM,1,50),CHR(13)||chr(10),' ')  CNEE
+                        ,REPLACE(SUBSTR(D.CUST_NM,1,50),CHR(13)||chr(10),' ')  NTFY
+                        ,E.CNTR_NO
+                        ,E.CNTR_TPSZ_CD
+                        ,CEIL(SYSDATE  - E.CNMV_DT) STAY_DAYS
+                        ,(SELECT D.CMDT_NM FROM MDM_COMMODITY D WHERE  A.CMDT_CD = D.CMDT_CD) REP_CMDT_NM 
+                        ,(SELECT R.FRT_TERM_CD FROM BKG_RATE R WHERE R.BKG_NO = A.BKG_NO) OFT_TERM
+                        
+                        ,T.BIL_AMT DEM, T.BZC_TRF_CURR_CD CUR
+                        
+/*                     ,(SELECT C1.BIL_AMT
+                          FROM DMT_CHG_BKG_CNTR B,
+                                DMT_CHG_CALC  C
+                          WHERE   B.SYS_AREA_GRP_ID = C.SYS_AREA_GRP_ID
+                           AND B.CNTR_NO           = C.CNTR_NO
+                           AND B.CNTR_CYC_NO       = C.CNTR_CYC_NO
+                            AND B.BKG_NO = A.BKG_NO
+                            AND B.CNTR_NO = E.CNTR_NO
+                           AND C.DMDT_TRF_CD   = 'DMIF'
+                           AND C.DMDT_CHG_STS_CD   IN ('A', 'F', 'C', 'I', 'L', 'E',  'N', 'U', 'D')
+                           AND NOT (C.DUL_TP_EXPT_FLG  = 'Y' AND SUBSTR(C.DMDT_TRF_CD, 1, 1) = 'D')
+                           AND C.DMDT_CHG_LOC_DIV_CD <> 'SZP'
+                           ) DEM
+*/
+                           
+                        ,DECODE(E.UCLM_LS_DIV_CD,NULL,'',E.UCLM_RSN) RES
+                        ,'' DO
+                        ,'' ACT
+                FROM BKG_BOOKING A, BKG_CUSTOMER B, BKG_CUSTOMER C, BKG_CUSTOMER D, MST_CONTAINER E, 
+                     (SELECT B.BKG_NO,  B.CNTR_NO, C.BIL_AMT, C.BZC_TRF_CURR_CD
+                          FROM DMT_CHG_BKG_CNTR B,
+                                DMT_CHG_CALC  C
+                          WHERE   B.SYS_AREA_GRP_ID = C.SYS_AREA_GRP_ID
+                           AND B.CNTR_NO           = C.CNTR_NO
+                           AND B.CNTR_CYC_NO       = C.CNTR_CYC_NO
+                            --AND B.BKG_NO = A.BKG_NO
+                            --AND B.CNTR_NO = E.CNTR_NO
+                           AND C.DMDT_TRF_CD   = 'DMIF'
+                           AND C.DMDT_CHG_STS_CD   IN ('A', 'F', 'C', 'I', 'L', 'E',  'N', 'U', 'D')
+                           AND NOT (C.DUL_TP_EXPT_FLG  = 'Y' AND SUBSTR(C.DMDT_TRF_CD, 1, 1) = 'D')
+                           AND C.DMDT_CHG_LOC_DIV_CD <> 'SZP'
+                           )  T
+                           
+                WHERE A.BKG_NO = B.BKG_NO(+)
+                AND A.BKG_NO  = C.BKG_NO(+)
+                AND A.BKG_NO  = D.BKG_NO(+)
+                AND B.BKG_CUST_TP_CD(+) ='S'
+                AND C.BKG_CUST_TP_CD(+) ='C'
+                AND D.BKG_CUST_TP_CD(+) ='N'
+                
+                AND A.BKG_NO = E.BKG_NO
+                AND B.BKG_NO IN (
+                    			#foreach ($user_bkgNos IN ${inBkgNos})
+									#if($velocityCount < $inBkgNos.size())
+										'$user_bkgNos',
+									#else
+										'$user_bkgNos'
+									#end
+								#end
+							)
+				AND E.CNTR_NO IN (
+                    			#foreach ($user_cntrNos IN ${inCntrNos})
+									#if($velocityCount < $inCntrNos.size())
+										'$user_cntrNos',
+									#else
+										'$user_cntrNos'
+									#end
+								#end
+							)  
+                AND T.BKG_NO (+) = E.BKG_NO
+                AND T.CNTR_NO (+) = E.CNTR_NO
+            
+            )
+            GROUP BY BL_NO,
+					SOFC,
+                    VVD,
+                    SHPR,
+                    CNEE,
+                    NTFY,
+                    CNTR_TPSZ_CD,
+                    REP_CMDT_NM,
+                    OFT_TERM,
+                    DEM,
+                    RES,
+                    DO,
+                    ACT
+            -- ORDER BY 1 
+			ORDER BY  SOFC  
+-- 추가
+   )                 
+    WHERE 1=1
+    GROUP BY C1
+-- 추가
+                    
+        ) T, 
+        (SELECT (CPY_NO + 1) AS NO FROM COM_CPY_NO WHERE CPY_NO <= 14)			]]></sql>
+			<params>
+			</params>
+		</query>
+	</querys>
+</sqls>

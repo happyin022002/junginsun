@@ -1,0 +1,464 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SpacecontrolinquiryDBDAO021AllocPortViewList6ByNextRSQL">
+			<desc><![CDATA[한국지점 팀별 차주 Projection 현황
+2012.11.22 최윤성 [CHM-201221575-01] Daily Forecast Status - FCST&BKG PFMC by S.Office 탭 전일에 대한 BSE_DT를 History 의 MAX 을 가지고 오도록 수정
+2013.12.05 김시몬 [CHM-201326854] SAQ project로 인한 SPC 변경건_테이블 변경
+2014.01.13 김시몬 [선처리] SELSC/TYOSC RHQ변경에 따른 SQM SPC_OFC_LVL추가
+2014.03.25 김시몬 [선처리] SQM 분기구하는 로직 관련 보완
+2015.03.03 CHM-201534458 SQM QTA주가 변경 관련 적용 요청]]></desc>
+			<sql><![CDATA[
+WITH VVDS AS (
+    SELECT   DISTINCT 
+             PRE.TRD_CD
+           , PRE.RLANE_CD
+           , PRE.VSL_CD
+           , PRE.SKD_VOY_NO
+           , PRE.DIR_CD AS SKD_DIR_CD
+           , SPC_CONTI_CONV_FNC(R.TO_CONTI_CD, PRE.RLANE_CD, PRE.DIR_CD) AS CONTI_CD
+           , TO_CHAR(S.VPS_ETD_DT, 'YYYYMMDD') AS PUS_ETD_DT
+           , PRE.SLS_YRMON
+           , PRE.COST_WK
+           , @[rhq1] AS SLS_RHQ_CD
+           , @[sales_office1] AS SLS_RGN_OFC_CD
+           , CASE WHEN PRE.COST_YRMON >= '201501' 
+                  THEN CEIL(TO_NUMBER(SUBSTR(PRE.COST_YRMON, -2))/3)||'Q' 
+                  ELSE CEIL(TO_NUMBER(DECODE(PRE.COST_WK,'00','01','53','52',PRE.COST_WK))/13)||'Q'
+             END BSE_QTR_CD --2015.03.04 CHM-201534435 SQM QTA주가 변경 관련 적용 요청
+           , SUBSTR(PRE.COST_YRMON, 1,4) AS BSE_YR
+        FROM MAS_MON_VVD PRE
+           , VSK_VSL_PORT_SKD S
+           , MDM_DTL_REV_LANE R
+     WHERE PRE.DELT_FLG = 'N'
+       AND SUBSTR(PRE.SLS_YRMON, 1, 4)||PRE.COST_WK = (
+                                                       SELECT MIN(SUBSTR(M1.SLS_YRMON, 1, 4)||M1.COST_WK)
+                                                         FROM MAS_MON_VVD M1,
+                                                              MAS_MON_VVD M,
+                                                              SPC_TGT_VVD S
+                                                        WHERE M1.TRD_CD = PRE.TRD_CD
+                                                          AND M1.RLANE_CD = PRE.RLANE_CD
+                                                          AND M1.DIR_CD = PRE.DIR_CD
+                                                          AND M1.DELT_FLG = 'N'
+                                                          AND M1.TRD_CD = M.TRD_CD
+                                                          AND M1.RLANE_CD = M.RLANE_CD
+                                                          AND M1.DIR_CD = M.DIR_CD
+                                                          AND M.TRD_CD = S.TRD_CD
+                                                          AND M.RLANE_CD = S.RLANE_CD
+                                                          AND M.VSL_CD = S.VSL_CD
+                                                          AND M.SKD_VOY_NO = S.SKD_VOY_NO
+                                                          AND M.DIR_CD = S.SKD_DIR_CD
+                                                          AND SUBSTR(M1.SLS_YRMON, 1, 4)||M1.COST_WK > SUBSTR(M.SLS_YRMON, 1, 4)||M.COST_WK
+                                                      )
+       AND S.VSL_CD = PRE.VSL_CD
+       AND S.SKD_VOY_NO = PRE.SKD_VOY_NO
+       AND S.SKD_DIR_CD = PRE.DIR_CD
+       AND S.VPS_PORT_CD = 'KRPUS'
+       AND NVL(S.SKD_CNG_STS_CD, 'X') <> 'S'
+       AND S.TURN_PORT_IND_CD NOT IN ('D', 'V', 'F')
+       AND PRE.TRD_CD  = R.TRD_CD
+       AND PRE.RLANE_CD = R.RLANE_CD
+       AND R.FM_CONTI_CD = 'A'
+       AND R.TO_CONTI_CD = DECODE(PRE.TRD_CD, 'EMS', 'M', R.TO_CONTI_CD)
+       AND CLPT_IND_SEQ = (SELECT MIN(CLPT_IND_SEQ)
+                             FROM VSK_VSL_PORT_SKD
+                            WHERE VSL_CD = PRE.VSL_CD
+                              AND SKD_VOY_NO = PRE.SKD_VOY_NO
+                              AND SKD_DIR_CD = PRE.DIR_CD
+                              AND VPS_PORT_CD = S.VPS_PORT_CD
+                              AND NVL(SKD_CNG_STS_CD, 'X') <> 'S' )
+
+)
+, HIS_DATA AS (
+    SELECT D.TRD_CD,
+           D.RLANE_CD,
+           D.VSL_CD,
+           D.SKD_VOY_NO,
+           D.SKD_DIR_CD,
+           T.CONTI_CD,
+           T.PUS_ETD_DT,
+           D.SLS_RGN_OFC_CD,
+           D.SLS_OFC_CD,
+           NVL(S.SLS_REP_OFC_TEAM_CD, D.SLS_OFC_CD) AS TEAM_CD, 
+           D.SREP_CD,
+           NVL(D.FCAST_20FT_QTY, 0) + ( NVL(D.FCAST_40FT_QTY, 0) + NVL(D.FCAST_40FT_HC_QTY, 0) + NVL(D.FCAST_45FT_HC_QTY, 0) + NVL(D.FCAST_53FT_QTY, 0) ) * 2 AS PRE_FCAST_QTY
+      FROM VVDS T,
+           SPC_DLY_FCAST_SLS_REP_HIS D,
+           SPC_SLS_REP_TEAM_IF S
+     WHERE T.TRD_CD     = D.TRD_CD
+       AND T.RLANE_CD   = D.RLANE_CD
+       AND T.VSL_CD     = D.VSL_CD
+       AND T.SKD_VOY_NO = D.SKD_VOY_NO
+       AND T.SKD_DIR_CD = D.SKD_DIR_CD
+       AND D.SLS_RHQ_CD = T.SLS_RHQ_CD
+       AND D.SLS_RGN_OFC_CD = T.SLS_RGN_OFC_CD
+       AND D.CTRT_CUST_CNT_CD = '00'
+       AND D.SREP_CD = S.SREP_USR_ID
+       AND D.BSE_DT = (SELECT 
+                              MAX(H.BSE_DT) 
+                         FROM SPC_DLY_FCAST_SLS_REP_HIS H
+                        WHERE H.TRD_CD     = D.TRD_CD
+                          AND H.RLANE_CD   = D.RLANE_CD
+                          AND H.VSL_CD     = D.VSL_CD
+                          AND H.SKD_VOY_NO = D.SKD_VOY_NO
+                          AND H.SKD_DIR_CD = D.SKD_DIR_CD
+                          AND H.SLS_RHQ_CD = D.SLS_RHQ_CD
+                          AND H.SLS_RGN_OFC_CD = D.SLS_RGN_OFC_CD
+                       )
+)
+, FCAST_DATA AS (
+    SELECT D.TRD_CD,
+           D.RLANE_CD,
+           D.VSL_CD,
+           D.SKD_VOY_NO,
+           D.SKD_DIR_CD,
+           T.CONTI_CD,
+           T.PUS_ETD_DT,
+           D.SLS_RGN_OFC_CD,
+           D.SLS_OFC_CD,
+           NVL(S.SLS_REP_OFC_TEAM_CD, D.SLS_OFC_CD) AS TEAM_CD, 
+           D.SREP_USR_ID AS SREP_CD,
+           NVL(D.FCAST_20FT_QTY, NVL(D.CFM_TTL_QTY, 0)) + ( NVL(D.FCAST_40FT_QTY, 0) + NVL(D.CFM_40FT_HC_QTY, 0) + NVL(D.CFM_45FT_HC_QTY, 0) + NVL(D.CFM_53FT_QTY, 0) ) * 2 AS TODAY_FCAST_QTY
+      FROM VVDS T,
+           SPC_DLY_FCAST_CUST D,
+           SPC_SLS_REP_TEAM_IF S
+     WHERE T.TRD_CD = D.TRD_CD
+       AND T.RLANE_CD = D.RLANE_CD
+       AND T.VSL_CD = D.VSL_CD
+       AND T.SKD_VOY_NO = D.SKD_VOY_NO
+       AND T.SKD_DIR_CD = D.SKD_DIR_CD
+       AND D.SREP_USR_ID = S.SREP_USR_ID
+       AND D.SLS_RHQ_CD  = T.SLS_RHQ_CD
+       AND D.SLS_RGN_OFC_CD = T.SLS_RGN_OFC_CD
+) 
+, ALOC_DATA AS (
+    SELECT A.TRD_CD,
+           A.RLANE_CD,
+           A.VSL_CD,
+           A.SKD_VOY_NO,
+           A.SKD_DIR_CD,
+           T.CONTI_CD,
+           T.PUS_ETD_DT,
+           A.SLS_RGN_OFC_CD,
+           A.SLS_OFC_CD,
+           A.SLS_OFC_CD AS TEAM_CD,
+           SUM(A.ASGN_TTL_QTY) RGN_ALLOC_QTY,
+           SUM(A.BKG_AVAL_TTL_QTY) ALLOC_QTY
+      FROM VVDS T,
+           SPC_ALOC_POL_POD A
+     WHERE T.TRD_CD = A.TRD_CD
+       AND T.RLANE_CD = A.RLANE_CD
+       AND T.VSL_CD = A.VSL_CD
+       AND T.SKD_VOY_NO = A.SKD_VOY_NO
+       AND T.SKD_DIR_CD = A.SKD_DIR_CD
+       AND A.SLS_RHQ_CD = T.SLS_RHQ_CD
+       AND A.SLS_RGN_OFC_CD = T.SLS_RGN_OFC_CD
+     GROUP BY A.TRD_CD,
+           A.RLANE_CD,
+           A.VSL_CD,
+           A.SKD_VOY_NO,
+           A.SKD_DIR_CD,
+           T.CONTI_CD,
+           T.PUS_ETD_DT,
+           A.SLS_RGN_OFC_CD,
+           A.SLS_OFC_CD
+)
+, QTA_DATA AS (
+    SELECT MQ.TRD_CD, 
+           MQ.RLANE_CD, 
+           MQ.VSL_CD, 
+           MQ.SKD_VOY_NO, 
+           MQ.SKD_DIR_CD, 
+           T.CONTI_CD,
+           T.PUS_ETD_DT,
+           T.SLS_RGN_OFC_CD AS SLS_RGN_OFC_CD, 
+           R.SLS_OFC_CD, 
+           R.SLS_REP_OFC_TEAM_CD AS TEAM_CD,
+           R.TEAM_QTA_RTO,
+           ROUND(MQ.LOD_QTY * R.TEAM_QTA_RTO / 100) AS TEAM_QTA
+      FROM VVDS T,
+           SQM_QTA_RLSE_VER MQR,
+           SQM_CFM_QTA      MQ ,
+           SPC_TEAM_QTA_RTO R,
+           SPC_OFC_LVL      O
+     WHERE MQR.BSE_YR          = T.BSE_YR
+       --AND MQR.BSE_QTR_CD      = CEIL(TO_NUMBER(DECODE(T.COST_WK,'00','01','53','52',T.COST_WK))/13)||'Q' --CEIL(TO_NUMBER(SUBSTR(T.SLS_YRMON, 5, 4)) / 3)||'Q'
+       -- CHM-201534458 SQM QTA주가 변경 관련 적용 요청
+	   AND MQR.BSE_QTR_CD      = T.BSE_QTR_CD
+       AND MQR.SQM_VER_STS_CD  = 'R'
+       AND MQR.BSE_TP_CD       = 'Q' -- 분기 20131205추가
+       AND MQ.QTA_RLSE_VER_NO  = MQR.QTA_RLSE_VER_NO
+       AND MQ.BSE_TP_CD        = MQR.BSE_TP_CD -- 분기 20131205추가    
+       AND MQ.BSE_YR           = MQR.BSE_YR
+       AND MQ.BSE_QTR_CD       = MQR.BSE_QTR_CD
+       AND MQ.QTA_TGT_CD       = 'D'
+       AND MQ.OFC_VW_CD        = 'L'       
+       AND MQ.TRD_CD           = T.TRD_CD
+       AND MQ.RLANE_CD         = T.RLANE_CD
+       AND MQ.DIR_CD           = T.SKD_DIR_CD
+       AND MQ.VSL_CD           = T.VSL_CD
+       AND MQ.SKD_VOY_NO       = T.SKD_VOY_NO
+       AND MQ.SKD_DIR_CD       = T.SKD_DIR_CD
+       AND O.N2ND_PRNT_OFC_CD  = T.SLS_RHQ_CD
+       AND SPC_SCR_OFC_CONV_FNC(MQ.RGN_OFC_CD,'') = T.SLS_RGN_OFC_CD
+       AND MQ.TRD_CD           = R.TRD_CD
+       AND MQ.RLANE_CD         = R.RLANE_CD
+       AND SPC_SCR_OFC_CONV_FNC(MQ.RGN_OFC_CD,'') = R.SLS_RGN_OFC_CD   
+       --AND MQ.BSE_YR           = R.BSE_YR
+       --AND MQ.BSE_QTR_CD       = R.BSE_QTR_CD
+       AND SUBSTR(T.SLS_YRMON,1,4) || T.COST_WK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+       --AND MQ.RGN_OFC_CD        = O.OFC_CD
+       AND (
+             SELECT NVL(MAX(ROC.CONV_RGN_OFC_CD), MQ.RGN_OFC_CD)
+               FROM SPC_RGN_OFC_CONV ROC
+              WHERE ROC.SLS_RGN_OFC_CD = MQ.RGN_OFC_CD
+           ) = O.OFC_CD
+       AND R.BSE_YR||R.BSE_QTR_CD = (SELECT /*+INDEX_DESC(Q XPKSPC_TEAM_QTA_RTO) */
+                                            BSE_YR||BSE_QTR_CD
+                                       FROM SPC_TEAM_QTA_RTO Q
+                                      WHERE Q.TRD_CD = R.TRD_CD
+                                        AND Q.SUB_TRD_CD = R.SUB_TRD_CD
+                                        AND Q.RLANE_CD = R.RLANE_CD
+                                        AND Q.BSE_YR = MQR.BSE_YR
+                                        AND Q.BSE_QTR_CD <= MQR.BSE_QTR_CD
+                                        AND ROWNUM = 1)
+       AND NOT EXISTS (SELECT 'A' 
+                         FROM SPC_TEAM_QTA_RTO
+                        WHERE TRD_CD = MQ.TRD_CD
+                          AND RLANE_CD = MQ.RLANE_CD
+                          AND VSL_CD = MQ.VSL_CD
+                          AND SKD_VOY_NO = MQ.SKD_VOY_NO
+                          AND SKD_DIR_CD = MQ.SKD_DIR_CD)
+     UNION ALL
+    SELECT MQ.TRD_CD, 
+           MQ.RLANE_CD, 
+           MQ.VSL_CD, 
+           MQ.SKD_VOY_NO, 
+           MQ.SKD_DIR_CD, 
+           T.CONTI_CD,
+           T.PUS_ETD_DT,
+           T.SLS_RGN_OFC_CD AS SLS_RGN_OFC_CD, 
+           R.SLS_OFC_CD, 
+           R.SLS_REP_OFC_TEAM_CD AS TEAM_CD,
+           R.TEAM_QTA_RTO,
+           ROUND(MQ.LOD_QTY * R.TEAM_QTA_RTO / 100) AS TEAM_QTA
+      FROM VVDS T,
+           SQM_QTA_RLSE_VER MQR,
+           SQM_CFM_QTA      MQ ,
+           SPC_TEAM_QTA_RTO R,
+           SPC_OFC_LVL      O
+     WHERE MQR.BSE_YR          = T.BSE_YR
+       --AND MQR.BSE_QTR_CD      = CEIL(TO_NUMBER(DECODE(T.COST_WK,'00','01','53','52',T.COST_WK))/13)||'Q' --CEIL(TO_NUMBER(SUBSTR(T.SLS_YRMON, 5, 4)) / 3)||'Q'
+	   -- CHM-201534458 SQM QTA주가 변경 관련 적용 요청
+	   AND MQR.BSE_QTR_CD      = T.BSE_QTR_CD
+       AND MQR.SQM_VER_STS_CD  = 'R'
+       AND MQR.BSE_TP_CD       = 'Q' -- 분기 20131205추가
+       AND MQ.QTA_RLSE_VER_NO  = MQR.QTA_RLSE_VER_NO
+       AND MQ.BSE_TP_CD        = MQR.BSE_TP_CD -- 분기 20131205추가    
+       AND MQ.BSE_YR           = MQR.BSE_YR
+       AND MQ.BSE_QTR_CD       = MQR.BSE_QTR_CD
+       AND MQ.QTA_TGT_CD       = 'D'
+       AND MQ.OFC_VW_CD        = 'L'
+       AND MQ.TRD_CD           = T.TRD_CD
+       AND MQ.RLANE_CD         = T.RLANE_CD
+       AND MQ.DIR_CD           = T.SKD_DIR_CD
+       AND MQ.VSL_CD           = T.VSL_CD
+       AND MQ.SKD_VOY_NO       = T.SKD_VOY_NO
+       AND MQ.SKD_DIR_CD       = T.SKD_DIR_CD
+       AND O.N2ND_PRNT_OFC_CD  = T.SLS_RHQ_CD
+       AND SPC_SCR_OFC_CONV_FNC(MQ.RGN_OFC_CD,'') = T.SLS_RGN_OFC_CD
+       AND MQ.TRD_CD           = R.TRD_CD
+       AND MQ.RLANE_CD         = R.RLANE_CD
+       AND SPC_SCR_OFC_CONV_FNC(MQ.RGN_OFC_CD,'') = R.SLS_RGN_OFC_CD   
+       AND MQ.VSL_CD           = R.VSL_CD
+       AND MQ.SKD_VOY_NO       = R.SKD_VOY_NO
+       AND MQ.SKD_DIR_CD       = R.SKD_DIR_CD
+       AND SUBSTR(T.SLS_YRMON,1,4) || T.COST_WK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+       --AND MQ.RGN_OFC_CD        = O.OFC_CD
+       AND (
+             SELECT NVL(MAX(ROC.CONV_RGN_OFC_CD), MQ.RGN_OFC_CD)
+               FROM SPC_RGN_OFC_CONV ROC
+              WHERE ROC.SLS_RGN_OFC_CD = MQ.RGN_OFC_CD
+           ) = O.OFC_CD
+)
+, ALL_DATA AS (
+    SELECT CONTI_CD,
+           RLANE_CD,
+           VSL_CD, 
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           PUS_ETD_DT,
+           SLS_RGN_OFC_CD,
+           SLS_OFC_CD,
+           TEAM_CD,
+           SUM(TEAM_QTA) AS TEAM_QTA,
+           SUM(PRE_FCAST_QTY) AS PRE_FCAST_QTY,
+           SUM(TODAY_FCAST_QTY) AS TODAY_FCAST_QTY,
+           SUM(RGN_ALOC_QTY) AS RGN_ALOC_QTY,
+           SUM(ALOC_QTY) AS ALOC_QTY,
+           CASE WHEN SLS_OFC_CD IS NULL THEN 6
+                WHEN TEAM_CD IS NULL AND SLS_OFC_CD = 'PUSBS' THEN 5
+                WHEN TEAM_CD IS NULL AND SLS_OFC_CD = 'SELSC' THEN 4
+                WHEN TEAM_CD = 'SELBS' THEN 3
+                WHEN TEAM_CD = 'SELBK' THEN 2
+                ELSE 1
+           END RNUM
+      FROM (
+            SELECT TRD_CD,
+                   RLANE_CD, 
+                   VSL_CD,
+                   SKD_VOY_NO,
+                   SKD_DIR_CD,
+                   CONTI_CD,
+                   PUS_ETD_DT,
+                   SLS_RGN_OFC_CD,
+                   SLS_OFC_CD,
+                   TEAM_CD,
+                   0 AS TEAM_QTA,
+                   PRE_FCAST_QTY,
+                   0 AS TODAY_FCAST_QTY,
+                   0 AS RGN_ALOC_QTY,
+                   0 AS ALOC_QTY
+              FROM HIS_DATA
+             UNION ALL 
+            SELECT TRD_CD,
+                   RLANE_CD, 
+                   VSL_CD,
+                   SKD_VOY_NO,
+                   SKD_DIR_CD,
+                   CONTI_CD,
+                   PUS_ETD_DT,
+                   SLS_RGN_OFC_CD,
+                   SLS_OFC_CD,
+                   TEAM_CD,
+                   0 AS TEAM_QTA,
+                   0 AS PRE_FCAST_QTY,
+                   TODAY_FCAST_QTY,
+                   0 AS RGN_ALOC_QTY,
+                   0 AS ALOC_QTY
+              FROM FCAST_DATA
+             UNION ALL 
+            SELECT TRD_CD,
+                   RLANE_CD, 
+                   VSL_CD,
+                   SKD_VOY_NO,
+                   SKD_DIR_CD,
+                   CONTI_CD,
+                   PUS_ETD_DT,
+                   SLS_RGN_OFC_CD,
+                   SLS_OFC_CD,
+                   TEAM_CD,
+                   TEAM_QTA,
+                   0 AS PRE_FCAST_QTY,
+                   0 AS TODAY_FCAST_QTY,
+                   0 AS RGN_ALOC_QTY,
+                   0 AS ALOC_QTY
+              FROM QTA_DATA
+             UNION ALL 
+            SELECT TRD_CD,
+                   RLANE_CD, 
+                   VSL_CD,
+                   SKD_VOY_NO,
+                   SKD_DIR_CD,
+                   CONTI_CD,
+                   PUS_ETD_DT,
+                   SLS_RGN_OFC_CD,
+                   SLS_OFC_CD,
+                   TEAM_CD,
+                   0 AS TEAM_QTA,
+                   0 AS PRE_FCAST_QTY,
+                   0 AS TODAY_FCAST_QTY,
+                   RGN_ALLOC_QTY AS RGN_ALOC_QTY,
+                   ALLOC_QTY AS ALOC_QTY
+              FROM ALOC_DATA
+           )
+     GROUP BY GROUPING SETS (
+                                (SLS_RGN_OFC_CD, SLS_OFC_CD, TEAM_CD),
+                                (SLS_RGN_OFC_CD, SLS_OFC_CD),
+                                (SLS_RGN_OFC_CD),
+                                (CONTI_CD, SLS_RGN_OFC_CD, SLS_OFC_CD, TEAM_CD),
+                                (CONTI_CD, SLS_RGN_OFC_CD, SLS_OFC_CD),
+                                (CONTI_CD, SLS_RGN_OFC_CD),
+                                (CONTI_CD, RLANE_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, PUS_ETD_DT, SLS_RGN_OFC_CD, SLS_OFC_CD, TEAM_CD),
+                                (CONTI_CD, RLANE_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, PUS_ETD_DT, SLS_RGN_OFC_CD, SLS_OFC_CD),
+                                (CONTI_CD, RLANE_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, PUS_ETD_DT, SLS_RGN_OFC_CD)
+                            )
+     HAVING NOT NVL(TEAM_CD, 'X') IN ('SELSC', 'PUSBS')
+)
+SELECT TRD_CD,
+       RLANE_CD,  
+       VVD1,     
+       AQ_CD,
+
+#set($primate = 'new_dur')
+	#set($new_dur = ['1','2','3','4','5','6'])
+
+#foreach( $key in $new_dur )
+       SUM(QTA${key}1) AS QTA${key}1,
+       SUM(FCT${key}1) AS FCT${key}1,
+       SUM(BKG${key}1) AS BKG${key}1,
+       DECODE(SUM(QTA${key}1), 0, 0, ROUND(SUM(BKG${key}1)/SUM(QTA${key}1) * 100)) AS PREF${key}1,
+       SUM(ALC${key}1) AS ALC${key}1,
+#end
+       '' AS T
+  FROM (    
+    SELECT DECODE(CONTI_CD, 'M', 'USA', 'E', 'EUR', 'Grand') AS TRD_CD,
+           RLANE_CD,
+           VSL_CD||SKD_VOY_NO||SKD_DIR_CD AS VVD1,
+           PUS_ETD_DT AS AQ_CD,
+           VSL_CD, 
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           PUS_ETD_DT,
+           SLS_RGN_OFC_CD,
+           SLS_OFC_CD,
+           TEAM_CD,
+           RNUM,
+           C1.CPY_NO,
+
+           DECODE(C1.CPY_NO, 1, DECODE(RNUM , C1.CPY_NO, TEAM_QTA, 0), 0) AS QTA11,
+           DECODE(C1.CPY_NO, 1, DECODE(RNUM , C1.CPY_NO, PRE_FCAST_QTY, 0), 0) AS FCT11,
+           DECODE(C1.CPY_NO, 1, DECODE(RNUM , C1.CPY_NO, TODAY_FCAST_QTY, 0), 0) AS BKG11,
+           DECODE(C1.CPY_NO, 1, DECODE(RNUM , C1.CPY_NO, ALOC_QTY, 0), 0) AS ALC11,
+           DECODE(C1.CPY_NO, 2, DECODE(RNUM , C1.CPY_NO, TEAM_QTA, 0), 0) AS QTA21,
+           DECODE(C1.CPY_NO, 2, DECODE(RNUM , C1.CPY_NO, PRE_FCAST_QTY, 0), 0) AS FCT21,
+           DECODE(C1.CPY_NO, 2, DECODE(RNUM , C1.CPY_NO, TODAY_FCAST_QTY, 0), 0) AS BKG21,
+           DECODE(C1.CPY_NO, 2, DECODE(RNUM , C1.CPY_NO, ALOC_QTY, 0), 0) AS ALC21,
+           DECODE(C1.CPY_NO, 3, DECODE(RNUM , C1.CPY_NO, TEAM_QTA, 0), 0) AS QTA31,
+           DECODE(C1.CPY_NO, 3, DECODE(RNUM , C1.CPY_NO, PRE_FCAST_QTY, 0), 0) AS FCT31,
+           DECODE(C1.CPY_NO, 3, DECODE(RNUM , C1.CPY_NO, TODAY_FCAST_QTY, 0), 0) AS BKG31,
+           DECODE(C1.CPY_NO, 3, DECODE(RNUM , C1.CPY_NO, ALOC_QTY, 0), 0) AS ALC31,
+           DECODE(C1.CPY_NO, 4, DECODE(RNUM , C1.CPY_NO, TEAM_QTA, 0), 0) AS QTA41,
+           DECODE(C1.CPY_NO, 4, DECODE(RNUM , C1.CPY_NO, PRE_FCAST_QTY, 0), 0) AS FCT41,
+           DECODE(C1.CPY_NO, 4, DECODE(RNUM , C1.CPY_NO, TODAY_FCAST_QTY, 0), 0) AS BKG41,
+           DECODE(C1.CPY_NO, 4, DECODE(RNUM , C1.CPY_NO, ALOC_QTY, 0), 0) AS ALC41,
+           DECODE(C1.CPY_NO, 5, DECODE(RNUM , C1.CPY_NO, TEAM_QTA, 0), 0) AS QTA51,
+           DECODE(C1.CPY_NO, 5, DECODE(RNUM , C1.CPY_NO, PRE_FCAST_QTY, 0), 0) AS FCT51,
+           DECODE(C1.CPY_NO, 5, DECODE(RNUM , C1.CPY_NO, TODAY_FCAST_QTY, 0), 0) AS BKG51,
+           DECODE(C1.CPY_NO, 5, DECODE(RNUM , C1.CPY_NO, ALOC_QTY, 0), 0) AS ALC51,
+           DECODE(C1.CPY_NO, 6, DECODE(RNUM , C1.CPY_NO, TEAM_QTA, 0), 0) AS QTA61,
+           DECODE(C1.CPY_NO, 6, DECODE(RNUM , C1.CPY_NO, PRE_FCAST_QTY, 0), 0) AS FCT61,
+           DECODE(C1.CPY_NO, 6, DECODE(RNUM , C1.CPY_NO, TODAY_FCAST_QTY, 0), 0) AS BKG61,
+           DECODE(C1.CPY_NO, 6, DECODE(RNUM , C1.CPY_NO, RGN_ALOC_QTY, 0), 0) AS ALC61,
+           '' AS T
+      FROM ALL_DATA A,
+           (SELECT CPY_NO 
+              FROM COM_CPY_NO 
+             WHERE CPY_NO > 0 
+               AND CPY_NO < 7) C1
+    ) 
+ GROUP BY AQ_CD,
+       TRD_CD,
+       RLANE_CD,  
+       VVD1,     
+       VSL_CD, 
+       SKD_VOY_NO,
+       SKD_DIR_CD    
+ORDER BY DECODE(TRD_CD, 'Grand', '9', TRD_CD) DESC, RLANE_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, AQ_CD DESC			]]></sql>
+			<params>
+				<param name="rhq1" type="12" value="" out="N"/>
+				<param name="sales_office1" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

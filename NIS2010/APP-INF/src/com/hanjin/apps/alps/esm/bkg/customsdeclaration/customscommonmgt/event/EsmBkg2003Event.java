@@ -1,0 +1,54 @@
+/*=========================================================
+*Copyright(c) 2012 CyberLogitec
+*@FileName : TmpStd0001Event.java
+*@FileTitle : Customs Error Code
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2012.04.09
+*@LastModifier : 이영헌
+*@LastVersion : 1.0
+* 2012.04.09 이영헌
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.bkg.customsdeclaration.customscommonmgt.event;
+
+import com.hanjin.apps.alps.esm.bkg.customsdeclaration.customscommonmgt.vo.CstmsErrCdVO;
+import com.hanjin.framework.support.layer.event.EventSupport;
+
+
+/**
+ * ESM_BKG_2003 에 대한 PDTO(Data Transfer Object including Parameters)<br>
+ * -  ESM_BKG_2003HTMLAction에서 작성<br>
+ * - ServiceCommand Layer로 전달하는 PDTO로 사용<br>
+ *
+ * @author YoungHeon Lee
+ * @see ESM_BKG_2003HTMLAction 참조
+ * @since J2EE 1.6
+ */
+public class EsmBkg2003Event extends EventSupport {
+
+	private static final long serialVersionUID = 1L;
+	
+	/** Table Value Object 조회 조건 및 단건 처리  */
+	private CstmsErrCdVO cstmsErrCdVO = null;
+	
+	/** Table Value Object Multi Data 처리 */
+	private CstmsErrCdVO[] cstmsErrCdVOs = null;
+	
+	public CstmsErrCdVO getCstmsErrCdVO() {
+		return cstmsErrCdVO;
+	}
+
+	public void setCstmsErrCdVO(CstmsErrCdVO cstmsErrCdVO) {
+		this.cstmsErrCdVO = cstmsErrCdVO;
+	}
+
+	public CstmsErrCdVO[] getCstmsErrCdVOs() {
+		return cstmsErrCdVOs;
+	}
+
+	public void setCstmsErrCdVOs(CstmsErrCdVO[] cstmsErrCdVOs) {
+		this.cstmsErrCdVOs = cstmsErrCdVOs;
+	}
+
+}

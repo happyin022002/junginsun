@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="NetworkCostDBDAOGNAExpAssignCSQL">
+			<desc><![CDATA[ ]]></desc>
+			<sql><![CDATA[
+INSERT INTO MAS_GEN_EXPN_ASGN(
+    TRD_CD
+    , RLANE_CD
+    , IOC_CD
+    , VSL_CD
+    , SKD_VOY_NO
+    , DIR_CD
+    , OFC_CD
+    , LOD_QTA
+    , HO_EXPN_AMT
+    , OWN_EXPN_AMT
+
+    , HO_QTA_RTO
+    , OWN_QTA_RTO
+
+    , EXPN_TTL
+    , CRE_USR_ID
+    , CRE_DT
+    , UPD_USR_ID
+    , UPD_DT 
+    , ADJ_EXPN_TTL
+)
+WITH 
+ORG_TREE AS
+(
+SELECT LEVEL AS LVL, A.PRNT_OFC_CD, A.OFC_CD, A.OFC_TP_CD
+  FROM MDM_ORGANIZATION A
+ WHERE NVL(DELT_FLG, 'N') = 'N'
+ START WITH OFC_CD = 'SELHO'
+ CONNECT BY PRIOR OFC_CD = PRNT_OFC_CD
+)
+, ORG_TREE_NOT_HO AS
+(
+SELECT OFC_CD
+     , NVL(SUBSTR(SYS_CONNECT_BY_PATH(OFC_CD, ','), 2, INSTR(SYS_CONNECT_BY_PATH(OFC_CD, ','), ',', 1, 2) - 2)
+          , OFC_CD) 
+       AS REP_OFC_CD
+  FROM MDM_ORGANIZATION
+ WHERE NVL(DELT_FLG, 'N') = 'N'
+ START WITH OFC_CD IN (
+                       SELECT OFC_CD
+                         FROM ORG_TREE
+                        WHERE LVL = 4
+                          AND OFC_TP_CD IN ('BB', 'BA')
+                      )
+ CONNECT BY PRIOR OFC_CD = PRNT_OFC_CD
+)
+, GEN_BUDGET_EXISTS_OFC AS
+(
+SELECT DISTINCT C.OFC_CD
+  FROM (
+        SELECT GEN_EXPN_RQST_NO
+              ,GEN_EXPN_RQST_TP_CD
+              ,SUBSTR(PLN_YRMON,1,4)||'00' PLN_YRMON
+          FROM GEM_REQUEST
+         WHERE PLN_YRMON LIKE @[f_year]||'%'
+       ) A
+      ,GEM_ITEM B
+      ,GEM_APRO_STEP C
+      ,GEM_OFFICE D
+ WHERE A.GEN_EXPN_RQST_NO = B.GEN_EXPN_RQST_NO
+   AND B.CRNT_GEN_EXPN_APRO_STEP_CD = 'CO'
+   AND B.CRNT_GEN_EXPN_APSTS_CD = 'AP'
+   AND B.GEN_EXPN_RQST_NO = C.GEN_EXPN_RQST_NO
+   AND B.OFC_CD = C.OFC_CD
+   AND B.GEN_EXPN_CD = C.GEN_EXPN_CD
+   AND B.GEN_EXPN_ITM_NO = C.GEN_EXPN_ITM_NO
+   AND B.GEN_EXPN_TRNS_DIV_CD = C.GEN_EXPN_TRNS_DIV_CD
+   AND B.GEN_EXPN_RQST_SEQ = C.GEN_EXPN_RQST_SEQ
+   AND B.CRNT_GEN_EXPN_APRO_STEP_CD = C.GEN_EXPN_APRO_STEP_CD
+   AND C.OFC_CD = D.OFC_CD
+   AND DECODE(TO_NUMBER(@[f_mon])
+              , 1,  C.JAN_AMT
+              , 2,  C.FEB_AMT
+              , 3,  C.MAR_AMT
+              , 4,  C.APR_AMT
+              , 5,  C.MAY_AMT
+              , 6,  C.JUN_AMT
+              , 7,  C.JUL_AMT
+              , 8,  C.AUG_AMT
+              , 9,  C.SEP_AMT
+              , 10, C.OCT_AMT
+              , 11, C.NOV_AMT
+              , 12, C.DEC_AMT
+              , 0
+       ) > 0
+)
+, QTA AS
+(
+SELECT Q.TRD_CD, Q.RLANE_CD, T.IOC_CD, Q.VSL_CD, Q.SKD_VOY_NO, Q.SKD_DIR_CD
+     , O.REP_OFC_CD AS OFC_CD, SUM(Q.LOD_QTY) AS LOD_QTY
+  FROM SQM_QTA_RLSE_VER V
+     , SQM_CFM_QTA      Q
+     , SQM_CFM_TGT_VVD  T
+     , ORG_TREE_NOT_HO  O
+     , GEN_BUDGET_EXISTS_OFC GBO
+ WHERE V.BSE_TP_CD       = 'Q'
+   AND V.BSE_YR          = @[f_year]
+   AND V.BSE_QTR_CD      = TO_CHAR(TO_DATE(@[f_year]||@[f_mon], 'YYYYMM'), 'Q') || 'Q'
+   AND V.SQM_VER_STS_CD  = 'R'
+   AND T.QTA_TGT_CD      = 'D'		-- 고정
+   AND Q.QTA_RLSE_VER_NO = V.QTA_RLSE_VER_NO
+   AND Q.BSE_TP_CD       = V.BSE_TP_CD
+   AND Q.BSE_YR          = V.BSE_YR
+   AND Q.BSE_QTR_CD      = V.BSE_QTR_CD
+   AND Q.OFC_VW_CD       = 'L'
+   AND Q.QTA_RLSE_VER_NO = T.QTA_RLSE_VER_NO
+   AND Q.BSE_TP_CD       = T.BSE_TP_CD
+   AND Q.BSE_YR          = T.BSE_YR
+   AND Q.BSE_QTR_CD      = T.BSE_QTR_CD
+   AND Q.QTA_TGT_CD      = T.QTA_TGT_CD
+   AND Q.TRD_CD          = T.TRD_CD
+   AND Q.RLANE_CD        = T.RLANE_CD
+   AND Q.DIR_CD          = T.DIR_CD
+   AND Q.VSL_CD          = T.VSL_CD
+   AND Q.SKD_VOY_NO      = T.SKD_VOY_NO
+   AND Q.SKD_DIR_CD      = T.SKD_DIR_CD
+   AND Q.RGN_OFC_CD      = O.OFC_CD
+   AND O.OFC_CD          = GBO.OFC_CD
+   AND Q.LOD_QTY         <> 0
+ GROUP BY Q.TRD_CD, Q.RLANE_CD, T.IOC_CD
+        , Q.VSL_CD, Q.SKD_VOY_NO, Q.SKD_DIR_CD, O.REP_OFC_CD
+)
+, GE_USD_SUM AS
+(
+SELECT COST_YRMON, OFC_CD, OFC_GRP_NO, SUM(EXPN_USD_AMT) EXPN_USD_AMT
+  FROM MAS_GEN_EXPN_OFC_STUP
+ WHERE COST_YRMON = @[f_year]||@[f_mon]
+ GROUP BY COST_YRMON, OFC_CD, OFC_GRP_NO
+)
+, GE_DTRB_NOT_YET AS
+(
+SELECT A.COST_YRMON, A.COST_WK, A.TRD_CD, A.SUB_TRD_CD, A.RLANE_CD, A.IOC_CD
+     , A.VSL_CD, A.SKD_VOY_NO, A.DIR_CD, A.HUL_BND_CD, A.OFC_CD
+     , A.EXPN_USD_AMT, A.LOD_QTY
+  FROM (
+        SELECT A.COST_YRMON, A.COST_WK, A.TRD_CD, A.SUB_TRD_CD, A.RLANE_CD, A.IOC_CD
+             , A.VSL_CD, A.SKD_VOY_NO, A.DIR_CD, A.HUL_BND_CD, A.OFC_CD
+             , A.EXPN_USD_AMT
+             , NVL(Q.LOD_QTY, 0) AS LOD_QTY
+          FROM (
+                SELECT A.COST_YRMON, A.COST_WK, A.TRD_CD, A.SUB_TRD_CD, A.RLANE_CD, A.IOC_CD
+                     , A.VSL_CD, A.SKD_VOY_NO, A.DIR_CD
+                     , (SELECT INTG_CD_VAL_DP_DESC FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD03217' AND INTG_CD_VAL_CTNT = B.HUL_BND_CD) HUL_BND_CD
+                     , GE.OFC_CD, GE.OFC_GRP_NO, GE.EXPN_USD_AMT
+                  FROM MAS_MON_VVD A
+                     , MAS_LANE_RGST B
+                     , GE_USD_SUM GE
+                 WHERE A.TRD_CD     = B.TRD_CD
+                   AND A.RLANE_CD   = B.RLANE_CD
+                   AND A.IOC_CD     = B.IOC_CD
+                   AND A.DIR_CD     = B.DIR_CD
+                   AND GE.OFC_GRP_NO = 2
+                   AND NVL(B.DELT_FLG,'N') = 'N'
+                   AND NVL(A.DELT_FLG, 'N') = 'N'
+               ) A
+             , QTA Q
+         WHERE A.TRD_CD     = Q.TRD_CD(+)
+           AND A.IOC_CD     = Q.IOC_CD(+)
+           AND A.VSL_CD     = Q.VSL_CD(+)
+           AND A.SKD_VOY_NO = Q.SKD_VOY_NO(+)
+           AND A.DIR_CD     = Q.SKD_DIR_CD(+)
+           AND A.OFC_CD     = Q.OFC_CD(+)
+           AND A.COST_YRMON = @[f_year]||@[f_mon]
+      ) A
+ WHERE A.LOD_QTY <> 0
+)
+SELECT 
+       
+       GE.TRD_CD, GE.RLANE_CD, GE.IOC_CD, GE.VSL_CD, GE.SKD_VOY_NO, GE.DIR_CD
+    
+     , GE.OFC_CD, GE.LOD_QTY
+     , ROUND((SELECT SUM(EXPN_USD_AMT) FROM GE_USD_SUM WHERE OFC_GRP_NO = 1) * ROUND(GE.LOD_QTY / TOT_SUM.LOD_QTY, 15), 13) AS HO_EXPN_AMT     
+     , ROUND(EXPN_USD_AMT * ROUND(GE.LOD_QTY / OFC_SUM.LOD_QTY, 15), 13) AS OWN_EXPN_AMT
+     , ROUND(GE.LOD_QTY / TOT_SUM.LOD_QTY, 15) * 100 AS HO_QTA_RATIO
+     , ROUND(GE.LOD_QTY / OFC_SUM.LOD_QTY, 15) * 100 AS OWN_QTA_RATIO     
+     , ROUND((SELECT SUM(EXPN_USD_AMT) FROM GE_USD_SUM WHERE OFC_GRP_NO = 1) * ROUND(GE.LOD_QTY / TOT_SUM.LOD_QTY, 15), 13)
+         + ROUND(EXPN_USD_AMT * ROUND(GE.LOD_QTY / OFC_SUM.LOD_QTY, 15), 13) AS EXPN_TTL
+     , @[cre_usr_id] AS CRE_USR_ID, SYSDATE CRE_DT, @[upd_usr_id] AS UPD_USR_ID, SYSDATE UPD_DT
+     , ROUND((SELECT SUM(EXPN_USD_AMT) FROM GE_USD_SUM WHERE OFC_GRP_NO = 1) * ROUND(GE.LOD_QTY / TOT_SUM.LOD_QTY, 15), 13)
+         + ROUND(EXPN_USD_AMT * ROUND(GE.LOD_QTY / OFC_SUM.LOD_QTY, 15), 13) AS ADJ_EXPN_TTL
+  FROM GE_DTRB_NOT_YET GE
+     , (
+        SELECT SUM(LOD_QTY) AS LOD_QTY
+          FROM GE_DTRB_NOT_YET
+       ) TOT_SUM
+     , (
+        SELECT OFC_CD, SUM(LOD_QTY) AS LOD_QTY
+          FROM GE_DTRB_NOT_YET
+         GROUP BY OFC_CD
+       ) OFC_SUM
+ WHERE GE.OFC_CD = OFC_SUM.OFC_CD
+ ORDER BY COST_YRMON, COST_WK, TRD_CD, SUB_TRD_CD, RLANE_CD, VSL_CD, SKD_VOY_NO, DIR_CD, OFC_CD			]]></sql>
+			<params>
+				<param name="f_year" type="12" value="" out="N"/>
+				<param name="f_mon" type="12" value="" out="N"/>
+				<param name="cre_usr_id" type="12" value="" out="N"/>
+				<param name="upd_usr_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

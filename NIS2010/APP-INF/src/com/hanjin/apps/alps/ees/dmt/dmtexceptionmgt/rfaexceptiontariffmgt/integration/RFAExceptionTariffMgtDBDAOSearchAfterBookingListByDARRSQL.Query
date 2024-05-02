@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="RFAExceptionTariffMgtDBDAOSearchAfterBookingListByDARRSQL">
+			<desc><![CDATA[DEM/DET Adjustment Request & Approval Status 조회(After Booking, DAR)용 쿼리]]></desc>
+			<sql><![CDATA[
+SELECT  DISTINCT AFT_RQST.AFT_EXPT_DAR_NO AS DAR_NO
+    ,   AFT_RQST.AFT_BKG_APRO_NO AS APVL_NO
+    ,   CD_DTL.INTG_CD_VAL_DP_DESC AS STATUS
+
+	#if(${group_by} == 'CVRG')
+    ,   AFT_RQST_DTL.DMDT_TRF_CD
+    ,   CASE
+            WHEN AFT_RQST_DTL.DMDT_TRF_CD = 'DMIF' THEN SUBSTR(BOOKING.POD_NOD_CD, 1, 5)
+			WHEN AFT_RQST_DTL.DMDT_TRF_CD = 'DMOF' THEN SUBSTR(BOOKING.POL_NOD_CD, 1, 5)
+            WHEN AFT_RQST_DTL.DMDT_TRF_CD IN ('DTIC', 'CTIC') THEN BOOKING.DEL_CD
+            WHEN AFT_RQST_DTL.DMDT_TRF_CD IN ('DTOC', 'CTOC') THEN BOOKING.POR_CD
+        END AS COVERAGE
+    ,   AFT_RQST_DTL.BKG_NO
+    ,   AFT_RQST_DTL.BL_NO
+	#end
+
+	,	(
+			SELECT	/*+ INDEX_DESC(DMT_AFT_BKG_ADJ_PROG XPKDMT_AFT_BKG_ADJ_PROG) */ PROG_OFC_CD
+			FROM	DMT_AFT_BKG_ADJ_PROG
+			WHERE	AFT_EXPT_DAR_NO 		= AFT_RQST.AFT_EXPT_DAR_NO
+				AND DMDT_EXPT_RQST_STS_CD 	= 'R'
+				AND	ROWNUM 					= 1	
+		) AS REQ_OFC_CD
+	,	(
+			SELECT	/*+ INDEX_DESC(DMT_AFT_BKG_ADJ_PROG XPKDMT_AFT_BKG_ADJ_PROG) */ DECODE(AFT_RQST.DMDT_EXPT_RQST_STS_CD, 'C', '', PROG_OFC_CD)
+			FROM	DMT_AFT_BKG_ADJ_PROG
+			WHERE	AFT_EXPT_DAR_NO = AFT_RQST.AFT_EXPT_DAR_NO
+				AND DMDT_EXPT_RQST_STS_CD IN ('A', 'C', 'J', 'O')
+				AND	ROWNUM 			= 1	
+		) AS APRO_OFC_CD
+	,	(
+                SELECT CASE C.AFT_BKG_PATH_CD WHEN 'BBOPIC' THEN LVL.OFC_CD
+                                              WHEN 'BBGMGR' THEN LVL.OFC_CD
+                                              WHEN 'RHQPIC' THEN ( SELECT OFC_N3RD_LVL_CD FROM DMT_OFC_LVL_V WHERE OFC_N8TH_LVL_CD = LVL.OFC_CD )
+                                              WHEN 'RHQMGR' THEN ( SELECT OFC_N3RD_LVL_CD FROM DMT_OFC_LVL_V WHERE OFC_N8TH_LVL_CD = LVL.OFC_CD )
+                                              WHEN 'HDOPIC' THEN 'SELHO'
+                                              WHEN 'HDOMGR' THEN 'SELHO'
+                                              ELSE 'ERROR' END
+                FROM MAS_OFC_LVL LVL, DMT_CHG_CALC B, DMT_AFT_BKG_CNTR A, DMT_AFT_BKG_APRO_PATH C
+                WHERE B.SYS_AREA_GRP_ID = A.SYS_AREA_GRP_ID
+                AND B.CNTR_NO = A.CNTR_NO
+                AND B.CNTR_CYC_NO = A.CNTR_CYC_NO
+                AND B.DMDT_TRF_CD = A.DMDT_TRF_CD
+                AND B.DMDT_CHG_LOC_DIV_CD = A.DMDT_CHG_LOC_DIV_CD
+                AND B.CHG_SEQ = A.CHG_SEQ
+                AND LVL.OFC_CD = B.OFC_CD
+                AND TO_CHAR(SYSDATE,'YYYYMM') BETWEEN LVL.OFC_APLY_FM_YRMON AND LVL.OFC_APLY_TO_YRMON
+                AND A.AFT_EXPT_DAR_NO 		= AFT_RQST.AFT_EXPT_DAR_NO
+                AND A.AFT_EXPT_DAR_NO 		= C.AFT_EXPT_DAR_NO
+                AND C.AFT_BKG_PATH_CPLS_FLG = 'Y'
+                AND C.AFT_BKG_PATH_LVL = ( SELECT MAX(AFT_BKG_PATH_LVL) FROM DMT_AFT_BKG_APRO_PATH
+                                                      WHERE AFT_EXPT_DAR_NO = C.AFT_EXPT_DAR_NO
+                                                        AND AFT_BKG_PATH_CPLS_FLG = 'Y' )
+                AND ROWNUM = 1
+
+		) AS FINAL_OFC_CD
+    ,   TO_CHAR(AFT_RQST.UPD_DT, 'YYYY-MM-DD') AS UPD_DT
+    ,   BOOKING.SC_NO
+    ,   BOOKING.RFA_NO
+	,	DECODE(NVL(BOOKING.RFA_NO, ''), '', PRI_SP_CUST.CUST_CD, PRI_RP_CUST.CUST_CD) AS CUST_CD
+	,	DECODE(NVL(BOOKING.RFA_NO, ''), '', PRI_SP_CUST.CUST_NM, PRI_RP_CUST.CUST_NM) AS CUST_NM
+				
+FROM	DMT_AFT_BKG_ADJ_RQST AFT_RQST
+	,	DMT_AFT_BKG_ADJ_RQST_DTL AFT_RQST_DTL
+	,	BKG_BOOKING BOOKING
+	,	(
+			SELECT	HDR.RFA_NO
+				, 	MN.CTRT_CUST_CNT_CD CUST_CNT_CD
+				, 	MN.CTRT_CUST_SEQ CUST_SEQ
+				,	MN.CTRT_CUST_CNT_CD || LPAD(MN.CTRT_CUST_SEQ, 6, '0') CUST_CD
+				, 	CUST.CUST_LGL_ENG_NM CUST_NM
+			FROM	PRI_RP_HDR HDR, PRI_RP_MN MN, MDM_CUSTOMER CUST
+			WHERE	HDR.PROP_NO 	= MN.PROP_NO
+				AND	MN.AMDT_SEQ 	= 
+					(	
+						SELECT 	/*+ INDEX_DESC(PRI_RP_MN XPKPRI_RP_MN) */AMDT_SEQ
+						FROM	PRI_RP_MN
+						WHERE	PROP_NO = MN.PROP_NO
+							AND	ROWNUM 	= 1
+					)
+				AND MN.CTRT_CUST_CNT_CD = CUST.CUST_CNT_CD
+				AND MN.CTRT_CUST_SEQ 	= CUST.CUST_SEQ
+		) 						PRI_RP_CUST
+	,	(
+			SELECT	HDR.SC_NO
+				, 	PTY.CUST_CNT_CD
+				,	PTY.CUST_SEQ
+				,	PTY.CUST_CNT_CD || LPAD(PTY.CUST_SEQ, 6, '0') CUST_CD
+				, 	CUST.CUST_LGL_ENG_NM CUST_NM
+			FROM	PRI_SP_HDR HDR, PRI_SP_CTRT_PTY PTY, MDM_CUSTOMER CUST
+			WHERE	HDR.PROP_NO 	= PTY.PROP_NO
+				AND	PTY.AMDT_SEQ 	= 
+					( 
+						SELECT	/*+ INDEX_DESC(PRI_SP_CTRT_PTY XPKPRI_SP_CTRT_PTY) */AMDT_SEQ
+	 					FROM	PRI_SP_CTRT_PTY
+						WHERE	PROP_NO 			= PTY.PROP_NO
+							AND PRC_CTRT_PTY_TP_CD 	= 'C'
+							AND	ROWNUM 				= 1
+					)
+				AND PTY.PRC_CTRT_PTY_TP_CD 	= 'C'
+				AND PTY.CUST_CNT_CD 		= CUST.CUST_CNT_CD
+				AND PTY.CUST_SEQ 			= CUST.CUST_SEQ
+		) PRI_SP_CUST
+	,	COM_INTG_CD_DTL CD_DTL
+
+WHERE	AFT_RQST.AFT_EXPT_DAR_NO 		= AFT_RQST_DTL.AFT_EXPT_DAR_NO
+
+	#if(${dar_no} != '')
+	AND AFT_RQST.AFT_EXPT_DAR_NO 		= @[dar_no]
+	#end
+
+	#if(${apvl_no} != '')
+	AND AFT_RQST.AFT_BKG_APRO_NO 		= @[apvl_no]
+	#end
+
+	#if(${bkg_no} != '')
+	AND AFT_RQST_DTL.BKG_NO 			= @[bkg_no]
+	#end
+
+	#if(${bl_no} != '')
+	AND AFT_RQST_DTL.BL_NO 				= @[bl_no]
+	#end
+
+	AND AFT_RQST_DTL.DMDT_TRF_CD IN 
+		(
+			#foreach( $trf_cd in ${trf_cd_list} )
+				#if($velocityCount < $trf_cd_list.size()) '$trf_cd', #else '$trf_cd' #end
+			#end
+		)
+
+	AND AFT_RQST_DTL.BKG_NO 			= BOOKING.BKG_NO(+)
+	AND BOOKING.SC_NO 					= PRI_SP_CUST.SC_NO(+)
+	AND BOOKING.RFA_NO					= PRI_RP_CUST.RFA_NO(+)
+
+	#if(${sc_no} != '')
+	AND BOOKING.SC_NO = @[sc_no]
+	#end
+
+	#if(${rfa_no} != '')
+	AND BOOKING.RFA_NO = @[rfa_no]
+	#end
+
+	#if(${cust_cd} != '')
+	AND (	PRI_SP_CUST.CUST_CNT_CD = SUBSTR(@[cust_cd], 0, 2) AND PRI_SP_CUST.CUST_SEQ = SUBSTR(@[cust_cd], 3)
+			OR
+			PRI_RP_CUST.CUST_CNT_CD = SUBSTR(@[cust_cd], 0, 2) AND PRI_RP_CUST.CUST_SEQ = SUBSTR(@[cust_cd], 3)
+		)
+	#end
+
+	AND AFT_RQST.DMDT_EXPT_RQST_STS_CD 	= CD_DTL.INTG_CD_VAL_CTNT
+	AND CD_DTL.INTG_CD_ID 				= 'CD01971'
+
+ORDER BY UPD_DT, DAR_NO			]]></sql>
+			<params>
+				<param name="dar_no" type="12" value=" " out="N"/>
+				<param name="apvl_no" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="bl_no" type="12" value="" out="N"/>
+				<param name="sc_no" type="12" value="" out="N"/>
+				<param name="rfa_no" type="12" value="" out="N"/>
+				<param name="cust_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

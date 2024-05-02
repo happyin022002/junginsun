@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TesAdvanceAuditDBDAOModifyInitialInvAudUSQL">
+			<desc><![CDATA[Auto Audit 결과 초기화]]></desc>
+			<sql><![CDATA[
+UPDATE EAS_TML_AUD K
+SET	  	K.CURR_CD = NULL
+		, K.INV_AMT = NULL
+		, K.EXPN_AUD_ESTM_AMT = NULL
+		, K.AMT_AUD_TGT_FLG = NULL
+		, K.AUD_LGS_COST_CD_QTY = NULL
+		, K.VRFY_RSLT_CD_CTNT = NULL
+		, K.VOL_AUD_TGT_QTY = NULL
+		, K.AUTO_EXPN_AUD_STS_CD = NULL
+		, K.AUD_DTL_TGT_QTY = NULL
+		, K.CALC_TP_CD_CTNT = NULL
+		, K.BAT_VOL_RSLT_CD_QTY = NULL
+		, K.BAT_AMT_RSLT_CD_QTY = NULL
+		, K.BAT_ESTM_VOL_RSLT_CD_QTY = NULL
+#if(${batch_tp_cd} == 'M')
+		, K.EXPN_AUD_STS_CD = NULL
+		, K.EXPN_AUD_RSLT_RMK	= NULL
+		, K.EXPN_AUD_RSLT_USR_ID = NULL
+#end
+WHERE	1	= 1
+AND		(INV_NO, VNDR_SEQ, INV_CFM_DT, TML_INV_TP_CD
+		, NVL(VSL_CD, 'X')
+		, NVL(SKD_VOY_NO, 'X')
+		, NVL(SKD_DIR_CD, 'X')
+		, NVL(IO_BND_CD, 'X')) IN (
+				SELECT	  H.INV_NO
+						, H.VNDR_SEQ
+						, H.INV_CFM_DT
+						, H.TML_INV_TP_CD
+						, NVL((CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.VSL_CD ELSE NULL END),'X') VSL_CD
+						, NVL((CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.SKD_VOY_NO ELSE NULL END),'X') SKD_VOY_NO
+						, NVL((CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.SKD_DIR_CD ELSE NULL END),'X') SKD_DIR_CD
+						, NVL((CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.IO_BND_CD ELSE NULL END),'X') IO_BND_CD
+				FROM	TES_TML_SO_HDR H
+						, TES_TML_SO_DTL D
+						, TES_TML_SO_COST C
+						#if(${batch_tp_cd} == 'M')
+						, EAS_AUTO_AUD_BAT X
+						#end
+				WHERE	H.TML_SO_OFC_CTY_CD	= D.TML_SO_OFC_CTY_CD
+				AND		H.TML_SO_SEQ		= D.TML_SO_SEQ
+--				AND		NVL(H.DELT_FLG, 'N')	<> 'Y' -- 미심사 된 자료중 삭제된 Invoice는 심사 자료에서도 삭제 처리한다.
+--				AND		H.TML_INV_STS_CD	<> 'R'
+--				AND		H.TML_INV_RJCT_STS_CD	<> 'RJ'
+				-- 2시간 배치 -> 1일전으로 수정
+				#if(${batch_tp_cd} == 'A')
+				AND		H.INV_CFM_DT BETWEEN TO_DATE(@[to_datetime], 'YYYYMMDDHH24MISS') - 1 AND TO_DATE(@[to_datetime], 'YYYYMMDDHH24MISS')
+				#end
+
+				-- 실시간(5분) 배치
+				#if(${batch_tp_cd} == 'M')
+				AND		H.INV_NO			= X.INV_NO
+				AND		H.VNDR_SEQ			= X.INV_VNDR_SEQ
+				AND		H.INV_CFM_DT		= X.INV_CFM_DT
+				AND		(CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.VSL_CD ELSE 'X' END) = NVL(X.VSL_CD, 'X')
+				AND		(CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.SKD_VOY_NO ELSE 'X' END) = NVL(X.SKD_VOY_NO, 'X')
+				AND		(CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.SKD_DIR_CD ELSE 'X' END) = NVL(X.SKD_DIR_CD, 'X')
+				AND		(CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.IO_BND_CD ELSE 'X' END) = NVL(X.IO_BND_CD, 'X')
+				AND		X.BAT_PROG_STS_CD	= 'P'
+				AND		X.SUB_SYS_CD		= 'TES'
+				#end
+
+				-- 메뉴얼 기간 배치 (Period로 조회)
+				#if(${batch_tp_cd} == 'E')
+				AND		H.INV_CFM_DT BETWEEN TO_DATE(@[s_fm_dt], 'YYYY-MM-DD') AND TO_DATE(@[s_to_dt], 'YYYY-MM-DD') + 0.99999
+				AND		NOT EXISTS (SELECT	'X'
+									FROM	EAS_TML_AUD X
+									WHERE	X.INV_NO			= H.INV_NO
+									AND		X.VNDR_SEQ			= H.VNDR_SEQ
+									AND		X.INV_CFM_DT		= H.INV_CFM_DT
+									)
+				#end
+				AND		D.LGS_COST_CD		= C.LGS_COST_CD
+				AND		C.EAS_AUD_FLG		= 'Y'
+
+				#if(${batch_tp_cd} != 'M')
+				AND		NOT EXISTS (
+							SELECT	1
+							FROM	EAS_TML_AUD A
+							WHERE	A.INV_NO				= H.INV_NO
+							AND		A.VNDR_SEQ				= H.VNDR_SEQ
+							AND		A.INV_CFM_DT			= H.INV_CFM_DT
+							AND		NVL(A.VSL_CD,'X')		= (CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.VSL_CD ELSE 'X' END)
+							AND		NVL(A.SKD_VOY_NO,'X')	= (CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.SKD_VOY_NO ELSE 'X' END)
+							AND		NVL(A.SKD_DIR_CD,'X')	= (CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.SKD_DIR_CD ELSE 'X' END)
+							AND		NVL(A.IO_BND_CD,'X')	= (CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.IO_BND_CD ELSE 'X' END)
+							AND		NVL(A.FM_PRD_DT,'X')	= (CASE WHEN H.TML_INV_TP_CD IN ('ST', 'OF') THEN H.FM_PRD_DT ELSE 'X' END)
+							AND		NVL(A.TO_PRD_DT,'X')	= (CASE WHEN H.TML_INV_TP_CD IN ('ST', 'OF') THEN H.TO_PRD_DT ELSE 'X' END)
+							AND		A.EXPN_AUD_STS_CD IN ('A', 'P', 'E')
+							)
+				#end
+				GROUP BY H.INV_NO, H.VNDR_SEQ, H.INV_CFM_DT, H.TML_INV_TP_CD
+						, NVL((CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.VSL_CD ELSE NULL END),'X')
+						, NVL((CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.SKD_VOY_NO ELSE NULL END),'X')
+						, NVL((CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.SKD_DIR_CD ELSE NULL END),'X')
+						, NVL((CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.IO_BND_CD ELSE NULL END),'X')
+				#if(${batch_tp_cd} != 'M')
+				UNION
+				SELECT	  A.INV_NO
+						, A.VNDR_SEQ
+						, A.INV_CFM_DT
+						, A.TML_INV_TP_CD
+						, NVL((CASE WHEN A.TML_INV_TP_CD = 'TM' THEN A.VSL_CD ELSE NULL END),'X') VSL_CD
+						, NVL((CASE WHEN A.TML_INV_TP_CD = 'TM' THEN A.SKD_VOY_NO ELSE NULL END),'X') SKD_VOY_NO
+						, NVL((CASE WHEN A.TML_INV_TP_CD = 'TM' THEN A.SKD_DIR_CD ELSE NULL END),'X') SKD_DIR_CD
+						, NVL((CASE WHEN A.TML_INV_TP_CD = 'TM' THEN A.IO_BND_CD ELSE NULL END),'X') IO_BND_CD
+				FROM	TES_TML_SO_HDR H
+						, TES_TML_SO_DTL D
+						, EAS_TML_AUD A
+				WHERE	A.INV_NO			= H.INV_NO
+				AND		A.VNDR_SEQ			= H.VNDR_SEQ
+				AND		A.INV_CFM_DT		= H.INV_CFM_DT
+				AND		A.VSL_CD			= (CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.VSL_CD ELSE NULL END)
+				AND		A.SKD_VOY_NO		= (CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.SKD_VOY_NO ELSE NULL END)
+				AND		A.SKD_DIR_CD		= (CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.SKD_DIR_CD ELSE NULL END)
+				AND		A.IO_BND_CD			= (CASE WHEN H.TML_INV_TP_CD = 'TM' THEN D.IO_BND_CD ELSE NULL END)
+				AND		H.TML_SO_OFC_CTY_CD	= D.TML_SO_OFC_CTY_CD
+				AND		H.TML_SO_SEQ		= D.TML_SO_SEQ
+				AND		(A.BAT_VOL_RSLT_CD = 'F' OR A.BAT_AMT_RSLT_CD = 'F' OR A.BAT_ESTM_VOL_RSLT_CD = 'F')
+				AND		A.CRE_DT > TO_DATE(@[to_datetime], 'YYYYMMDDHH24MISS') - 14
+				#end
+				)			]]></sql>
+			<params>
+				<param name="to_datetime" type="12" value="" out="N"/>
+				<param name="s_fm_dt" type="12" value="" out="N"/>
+				<param name="s_to_dt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

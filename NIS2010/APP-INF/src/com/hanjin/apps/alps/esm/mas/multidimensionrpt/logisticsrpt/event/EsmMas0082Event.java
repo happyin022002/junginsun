@@ -1,0 +1,64 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : EsmMas0082Event.java
+*@FileTitle : Logistics Exp. by Node & Link
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.10.19
+*@LastModifier : 최인경
+*@LastVersion : 1.0
+* 2009.08.04 최인경
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.mas.multidimensionrpt.logisticsrpt.event;
+
+import com.hanjin.apps.alps.esm.mas.multidimensionrpt.logisticsrpt.vo.SearchLgstConditionVO;
+import com.hanjin.apps.alps.esm.mas.multidimensionrpt.logisticsrpt.vo.SearchLogisticsRPT0082ListVO;
+import com.hanjin.framework.support.layer.event.EventSupport;
+
+/**
+ * ESM_MAS_0082 에 대한 PDTO(Data Transfer Object including Parameters)<br>
+ * -  ESM_MAS_0082HTMLAction에서 작성<br>
+ * - ServiceCommand Layer로 전달하는 PDTO로 사용<br>
+ *
+ * @author Choi In Kyung
+ * @see ESM_MAS_0082HTMLAction 참조
+ * @since J2EE 1.6
+ */
+public class EsmMas0082Event extends EventSupport {
+	private static final long serialVersionUID = 1L;
+	
+	/** Table Value Object 조회 조건 및 단건 처리  */
+	private SearchLogisticsRPT0082ListVO searchLogisticsRPT0082ListVO = null;	
+	
+	private SearchLgstConditionVO searchLgstConditionVO = null;
+	
+	/** Table Value Object Multi Data 처리 */
+	private SearchLogisticsRPT0082ListVO[] searchLogisticsRPT0082ListVOs = null;
+
+	public SearchLogisticsRPT0082ListVO getSearchLogisticsRPT0082ListVO() {
+		return searchLogisticsRPT0082ListVO;
+	}
+
+	public void setSearchLogisticsRPT0082ListVO(
+			SearchLogisticsRPT0082ListVO searchLogisticsRPT0082ListVO) {
+		this.searchLogisticsRPT0082ListVO = searchLogisticsRPT0082ListVO;
+	}
+
+	public SearchLgstConditionVO getSearchLgstConditionVO() {
+		return searchLgstConditionVO;
+	}
+
+	public void setSearchLgstConditionVO(SearchLgstConditionVO searchLgstConditionVO) {
+		this.searchLgstConditionVO = searchLgstConditionVO;
+	}
+
+	public SearchLogisticsRPT0082ListVO[] getSearchLogisticsRPT0082ListVOs() {
+		return searchLogisticsRPT0082ListVOs;
+	}
+
+	public void setSearchLogisticsRPT0082ListVOs(
+			SearchLogisticsRPT0082ListVO[] searchLogisticsRPT0082ListVOs) {
+		this.searchLogisticsRPT0082ListVOs = searchLogisticsRPT0082ListVOs;
+	}
+}

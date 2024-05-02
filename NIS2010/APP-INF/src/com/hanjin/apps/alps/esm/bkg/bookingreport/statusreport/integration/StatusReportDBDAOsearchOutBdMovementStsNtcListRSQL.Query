@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="StatusReportDBDAOsearchOutBdMovementStsNtcListRSQL">
+			<desc><![CDATA[VVD별로 CCT 를 기준으로 하여 위 LIST를 대상으로 BKG의 BKG CONTACT 정보상의 E MAIL 주소로 일괄 화물 CCT 미도착 메일 발송하기 
+위한 정보들을 조회]]></desc>
+			<sql><![CDATA[
+SELECT TRD_CD, SUB_TRD_CD, SLAN_CD, BKG_NO, CNTR_NO, POR_CD, POD_CD, DEL_CD, CNTR_TPSZ_CD,
+       RCV_TERM_CD, DE_TERM_CD, CNMV_STS_CD, ORG_YD_CD, CNMV_EVNT_DT, TRNS_MODE, NTC_EXP, 
+       VVD, DECODE(NTC_EXP,'SHUTTLE','N', TML_GI_STS) TML_GI_STS,
+       DG_STS, DG_DESC, RF_STS, RF_DESC, AK_STS, AK_DESC, STWG_CD, VSL_PRE_PST_CD, SHPR_NM,
+       BKG_PIC, BKG_MPHN_NO, BKG_EML, SREP_PIC, SREP_MPHN_NO, SREP_EML,
+       CNTC_MPHN_NO, CNTC_EML, CTRT_OFC_PHN_NO, MBL_SND_FLG, 
+       SHPR_NTC_FLG, BKG_PIC_NTC_FLG, SREP_NTC_FLG, OB_PIC_NTC_FLG, SHPR_PIC, SHPR_MPHN_NO, SHPR_EML,
+       EML_SND_FLG, SMS_SND_FLG, EML_SND_DT, SMS_SND_DT, 
+       COUNT(CNTR_NO) OVER (PARTITION BY  BKG_NO) - 1 CNTR_CNT
+FROM(
+    SELECT TRD_CD, SUB_TRD_CD, SLAN_CD, O.BKG_NO, CNTR_NO, POR_CD, POD_CD, DEL_CD, VVD,
+           CNTR_TPSZ_CD, RCV_TERM_CD, DE_TERM_CD, CNMV_STS_CD, ORG_YD_CD, CNMV_EVNT_DT,
+
+                   CASE WHEN CNMV_STS_CD = 'OC' AND POL_YD_CD <> ORG_YD_CD THEN 'SHUTTLE'
+                        ELSE NVL((SELECT DECODE(OWNR_TRK_FLG,'Y','S/TRK','HJT')
+                              FROM BKG_TRO H, BKG_TRO_DTL D
+                              WHERE H.BKG_NO = O.BKG_NO 
+                              AND H.CXL_FLG = 'N' 
+                              AND H.BKG_NO = D.BKG_NO
+                              AND D.CNTR_TPSZ_CD = O.CNTR_TPSZ_CD
+                              AND ROWNUM = 1),'HJT')
+                   END TRNS_MODE,
+                   CASE WHEN RCV_TERM_CD = 'I' THEN 'FREE IN'
+                        WHEN RCV_TERM_CD = 'T' THEN 'TACKLE'
+                        WHEN RCV_TERM_CD = 'S' THEN 'CFS'
+                        WHEN (SELECT COUNT(BKG_NO) FROM BKG_DG_CGO WHERE BKG_NO = O.BKG_NO AND CNTR_NO = O.CNTR_NO 
+                              AND (IMDG_CLSS_CD LIKE '1%' OR IMDG_CLSS_CD LIKE '2%' OR IMDG_CLSS_CD LIKE '7%'))>0   THEN 'DG DIRECT'
+                        ELSE NULL
+                        END NTC_EXP,  
+                   CASE WHEN (SELECT 'Y' 
+                               FROM SCE_COP_HDR H, SCE_COP_DTL D
+                               WHERE H.BKG_NO = O.BKG_NO
+                               AND H.COP_STS_CD <> 'X'
+                               AND H.COP_NO = D.COP_NO
+                               AND H.CNTR_NO = O.CNTR_NO
+                               AND D.ACT_CD IN ('FOTMAD', 'FTTMAD')
+                               AND D.ACT_DT IS NOT NULL
+                               AND D.NOD_CD = POL_YD_CD
+							   AND ROWNUM = 1
+                               ) = 'Y' THEN 'Y'
+                        WHEN (SELECT 'Y'
+                                  FROM CTM_MOVEMENT AA
+                                 WHERE CNTR_NO = O.CNTR_NO
+                                   AND CNMV_YR = O.CNMV_YR
+                                   AND CNMV_CYC_NO = O.CNMV_CYC_NO
+                                   AND MVMT_STS_CD = 'OC'
+                                   AND ORG_YD_CD = O.POL_YD_CD
+                                   AND ROWNUM =1 ) ='Y' THEN 'Y'  
+                         ELSE 'N'
+                         END TML_GI_STS,
+                  (  SELECT  K.SPCL_CGO_APRO_CD 
+                       FROM    BKG_DG_CGO K 
+                       WHERE   K.BKG_NO = O.BKG_NO
+                       AND     K.CNTR_NO = O.CNTR_NO
+                       AND     K.DCGO_SEQ = (  SELECT MAX(G.DCGO_SEQ) FROM BKG_DG_CGO G WHERE G.BKG_NO = O.BKG_NO AND G.CNTR_NO = O.CNTR_NO  )
+                    )  AS DG_STS
+                  , BKG_JOIN_FNC(CURSOR(  SELECT IMDG_UN_NO||'/'||IMDG_CLSS_CD FROM BKG_DG_CGO WHERE BKG_NO = O.BKG_NO AND   CNTR_NO = O.CNTR_NO  )) DG_DESC
+                  , (  SELECT  J.SPCL_CGO_APRO_CD 
+                       FROM    BKG_RF_CGO J 
+                       WHERE   J.BKG_NO = O.BKG_NO
+                       AND     J.RC_SEQ = (  SELECT MAX(S.RC_SEQ) FROM BKG_RF_CGO S WHERE S.BKG_NO = O.BKG_NO AND S.CNTR_NO = O.CNTR_NO  )
+                    ) AS RF_STS
+                  , BKG_JOIN_FNC(CURSOR(  SELECT CDO_TEMP||'℃'||'/'||VENT_RTO||'%' FROM BKG_RF_CGO WHERE BKG_NO = O.BKG_NO AND CNTR_NO = O.CNTR_NO  ))  RF_DESC
+                  , (  SELECT  Y.SPCL_CGO_APRO_CD
+                       FROM    BKG_AWK_CGO Y
+                       WHERE   Y.BKG_NO = O.BKG_NO
+                       AND     Y.AWK_CGO_SEQ = (  SELECT MAX(Q.AWK_CGO_SEQ) FROM BKG_AWK_CGO Q WHERE Q.BKG_NO = O.BKG_NO AND Q.CNTR_NO = O.CNTR_NO  )
+                    ) AS AK_STS
+                  , BKG_JOIN_FNC(CURSOR(  SELECT  'L:'||OVR_LF_LEN||' / R:'||OVR_RT_LEN||' / H:'||OVR_HGT
+                                          FROM    BKG_AWK_CGO
+                                          WHERE   BKG_NO = O.BKG_NO
+                                          AND     CNTR_NO = O.CNTR_NO))   AK_DESC,
+                   (SELECT STWG_CD FROM BKG_BOOKING WHERE BKG_NO = O.BKG_NO) STWG_CD,        
+           VSL_PRE_PST_CD, 
+           SHPR_NM,BKG_PIC, BKG_MPHN_NO, BKG_EML,
+           SREP_PIC, SREP_MPHN_NO, SREP_EML, CNTC_MPHN_NO, CNTC_EML, CTRT_OFC_PHN_NO,
+           MBL_SND_FLG,SHPR_NTC_FLG,BKG_PIC_NTC_FLG,SREP_NTC_FLG,OB_PIC_NTC_FLG,
+		   SP1.CNTC_PSON_NM SHPR_PIC,
+           SP1.CNTC_PSON_MPHN_NO SHPR_MPHN_NO,
+           SP1.CNTC_PSON_EML SHPR_EML,
+           DECODE((SELECT TO_CHAR(MAX(CRE_DT),'YYYY-MM-DD HH24:MI') FROM BKG_NTC_HIS WHERE BKG_NO = O.BKG_NO AND NTC_KND_CD = 'DM'), NULL, 'N', 'Y') EML_SND_FLG, 
+           DECODE((SELECT TO_CHAR(MAX(CRE_DT),'YYYY-MM-DD HH24:MI') FROM BKG_NTC_HIS WHERE BKG_NO = O.BKG_NO AND NTC_KND_CD = 'DS'), NULL, 'N', 'Y') SMS_SND_FLG,
+           (SELECT TO_CHAR(MAX(CRE_DT),'YYYY-MM-DD HH24:MI') FROM BKG_NTC_HIS WHERE BKG_NO = O.BKG_NO AND NTC_KND_CD = 'DM') EML_SND_DT,
+           (SELECT TO_CHAR(MAX(CRE_DT),'YYYY-MM-DD HH24:MI') FROM BKG_NTC_HIS WHERE BKG_NO = O.BKG_NO AND NTC_KND_CD = 'DS') SMS_SND_DT
+    FROM ( SELECT RL.TRD_CD, RL.SUB_TRD_CD, BV.SLAN_CD, MIN(BV.BKG_NO) BKG_NO, BC.CNTR_NO, BB.POR_CD, BV.POD_CD, BB.DEL_CD,
+                   EML_SND_FLG,MBL_SND_FLG,SHPR_NTC_FLG,BKG_PIC_NTC_FLG,SREP_NTC_FLG,OB_PIC_NTC_FLG,
+                   BC.CNTR_TPSZ_CD, BC.RCV_TERM_CD, BC.DE_TERM_CD, CM.MVMT_STS_CD CNMV_STS_CD, 
+                   NVL(CM.ORG_YD_CD, BC.ORG_YD_CD) ORG_YD_CD, TO_CHAR(CM.CNMV_EVNT_DT,'YYYY-MM-DD HH24:MI') CNMV_EVNT_DT,
+                   BV.POL_YD_CD, CM.CNMV_YR, CM.CNMV_CYC_NO, CM.CNMV_ID_NO, BV.POL_CD, BV.VSL_CD||BV.SKD_VOY_NO||BV.SKD_DIR_CD VVD,
+                   DECODE(BV.VSL_PRE_PST_CD,'T','TRUNK','U','POST','S','PRE') VSL_PRE_PST_CD,
+                   NM.CUST_LGL_ENG_NM SHPR_NM,
+                   BP.USR_NM BKG_PIC,
+                   BP.MPHN_NO BKG_MPHN_NO,
+                   BP.USR_EML BKG_EML,
+                   SR.SREP_NM SREP_PIC,
+                   SP.MPHN_NO SREP_MPHN_NO,
+                   SR.SREP_EML,
+                   BS.CNTC_MPHN_NO,
+                   BS.CNTC_EML,
+                   BS.CTRT_OFC_PHN_NO
+            FROM BKG_VVD BV, BKG_CGO_CLZ_TM_STUP BS, BKG_BOOKING BB, BKG_CONTAINER BC, BKG_CUSTOMER SH,
+                 CTM_MOVEMENT CM, COM_USER BP, MDM_SLS_REP SR, COM_USER SP, MDM_CUSTOMER NM,
+                 (SELECT   V.TRD_CD
+                         , V.SUB_TRD_CD
+                         , RD.FM_CONTI_CD
+                         , RD.TO_CONTI_CD
+                   FROM    MDM_REV_LANE RL, MDM_DTL_REV_LANE RD
+                         , MAS_MON_VVD V
+                   WHERE   RL.RLANE_CD = V.RLANE_CD
+                   AND     V.DELT_FLG = 'N'
+                   AND RL.VSL_TP_CD = 'C'
+                   AND V.VSL_CD = SUBSTR(@[vvd], 1, 4)
+                   AND V.SKD_VOY_NO = SUBSTR(@[vvd], 5, 4)
+                   AND V.DIR_CD = SUBSTR(@[vvd], 9, 1)
+                   AND RD.RLANE_CD = RL.RLANE_CD
+                   AND RD.VSL_SLAN_DIR_CD = V.DIR_CD
+                   AND RD.TRD_CD = V.TRD_CD
+                   AND RD.SUB_TRD_CD = V.SUB_TRD_CD
+                   AND RD.DELT_FLG = 'N')RL
+            WHERE BV.VSL_CD = SUBSTR(@[vvd],1,4)
+            AND BV.SKD_VOY_NO = SUBSTR(@[vvd],5,4)
+            AND BV.SKD_DIR_CD = SUBSTR(@[vvd],9,1)
+            AND BV.POL_CD = BS.POL_CD
+            AND BV.POL_CD = BB.POL_CD
+            AND BV.SLAN_CD = BS.LANE_CD
+            AND BV.SKD_DIR_CD = BS.DIR_CD
+            AND BV.POL_CD = NVL(@[pol_cd], BV.POL_CD)
+            AND BV.POL_YD_CD = DECODE(LENGTH(@[pol_cd]||@[pol_yd_cd]),7 , @[pol_cd]||@[pol_yd_cd], BV.POL_YD_CD)
+            AND SH.BKG_NO = BV.BKG_NO
+            AND SH.BKG_CUST_TP_CD = 'S'
+            AND SH.CUST_CNT_CD = NM.CUST_CNT_CD
+            AND SH.CUST_SEQ = NM.CUST_SEQ
+            AND RL.FM_CONTI_CD = ( SELECT SPC_CONTI_CONV_FNC(L.CONTI_CD, BV.SLAN_CD, BV.SKD_DIR_CD) FROM MDM_LOCATION L WHERE L.LOC_CD = BV.POL_CD )
+            AND RL.TO_CONTI_CD = ( SELECT SPC_CONTI_CONV_FNC(L.CONTI_CD, BV.SLAN_CD, BV.SKD_DIR_CD) FROM MDM_LOCATION L WHERE L.LOC_CD = BV.POD_CD )
+            AND BC.BKG_NO = BV.BKG_NO
+            AND BB.BKG_NO = BV.BKG_NO
+            AND BB.BKG_STS_CD IN ('F','W')
+            --AND BB.BKG_CGO_TP_CD = 'F'
+            AND BB.BKG_CGO_TP_CD = DECODE(@[bkg_cgo_tp_cd],'ALL', BB.BKG_CGO_TP_CD,@[bkg_cgo_tp_cd])
+            AND BC.RCV_TERM_CD = NVL(@[rcv_term_cd], BC.RCV_TERM_CD)
+            AND BC.DE_TERM_CD = NVL(@[de_term_cd], BC.DE_TERM_CD)
+            AND BC.CNTR_NO = CM.CNTR_NO
+            AND CM.CNMV_YR = DECODE(BC.CNMV_CYC_NO, 9999, (SELECT MAX(CNMV_YR) FROM CTM_MOVEMENT  WHERE CNTR_NO = BC.CNTR_NO), BC.CNMV_YR)
+            AND CM.CNMV_ID_NO = DECODE(BC.CNMV_CYC_NO, 9999, CM.CNMV_ID_NO, BC.CNMV_ID_NO)
+            AND CM.CNMV_CYC_NO = DECODE(BC.CNMV_CYC_NO, 9999, (SELECT MAX(CNMV_CYC_NO)
+                                                               FROM CTM_MOVEMENT  WHERE CNTR_NO = BC.CNTR_NO), BC.CNMV_CYC_NO)
+            AND CM.CNMV_SEQ = (SELECT MAX(CNMV_SEQ)
+                               FROM CTM_MOVEMENT  
+                               WHERE CNTR_NO = BC.CNTR_NO
+                               AND CNMV_YR = DECODE(BC.CNMV_CYC_NO, 9999, (SELECT MAX(CNMV_YR) FROM CTM_MOVEMENT  WHERE CNTR_NO = BC.CNTR_NO), BC.CNMV_YR)
+                               AND CNMV_CYC_NO = DECODE(BC.CNMV_CYC_NO, 9999, (SELECT MAX(CNMV_CYC_NO)FROM CTM_MOVEMENT  WHERE CNTR_NO = BC.CNTR_NO), BC.CNMV_CYC_NO))
+            AND BP.USR_ID(+) = BB.DOC_USR_ID
+            AND SR.SREP_CD(+) = BB.OB_SREP_CD
+            AND SR.EMPE_CD = SP.USR_ID(+)
+            GROUP BY RL.TRD_CD, RL.SUB_TRD_CD, BV.SLAN_CD, BC.CNTR_NO, BB.POR_CD, BV.POD_CD, BB.DEL_CD,
+                   EML_SND_FLG,MBL_SND_FLG,SHPR_NTC_FLG,BKG_PIC_NTC_FLG,SREP_NTC_FLG,OB_PIC_NTC_FLG,
+                   BC.CNTR_TPSZ_CD, BC.RCV_TERM_CD, BC.DE_TERM_CD, CM.MVMT_STS_CD , 
+                   NVL(CM.ORG_YD_CD, BC.ORG_YD_CD), TO_CHAR(CM.CNMV_EVNT_DT,'YYYY-MM-DD HH24:MI'),
+                   DECODE(BV.VSL_PRE_PST_CD,'T','TRUNK','U','POST','S','PRE'),
+                   BV.POL_YD_CD, CM.CNMV_YR, CM.CNMV_CYC_NO, CM.CNMV_ID_NO, BV.POL_CD,BV.VSL_CD||BV.SKD_VOY_NO||BV.SKD_DIR_CD,
+                   NM.CUST_LGL_ENG_NM,
+                   BP.USR_NM,
+                   BP.MPHN_NO,
+                   BP.USR_EML,
+                   SR.SREP_NM,
+                   SP.MPHN_NO,
+                   SR.SREP_EML,
+                   BS.CNTC_MPHN_NO,
+                   BS.CNTC_EML,
+                   BS.CTRT_OFC_PHN_NO
+    ) O , BKG_CNTC_PSON SP1
+     WHERE SP1.BKG_NO(+) = O.BKG_NO
+       AND SP1.BKG_CNTC_PSON_TP_CD(+) = 'BK'
+)
+WHERE 1=1
+AND NVL(TRNS_MODE,'X') = DECODE(@[trns_mode],'ALL', NVL(TRNS_MODE,'X'),@[trns_mode])
+AND NVL(NTC_EXP,'X') = DECODE(@[ntc_exp],'ALL', NVL(NTC_EXP,'X'),@[ntc_exp])
+AND DECODE(NTC_EXP,'SHUTTLE','N', TML_GI_STS) = DECODE(@[tml_gi_sts],'ALL', DECODE(NTC_EXP,'SHUTTLE','N', TML_GI_STS),@[tml_gi_sts])
+ORDER BY TRD_CD,SUB_TRD_CD,BKG_NO,CNTR_NO			]]></sql>
+			<params>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="pol_yd_cd" type="12" value="" out="N"/>
+				<param name="bkg_cgo_tp_cd" type="12" value="" out="N"/>
+				<param name="rcv_term_cd" type="12" value="" out="N"/>
+				<param name="de_term_cd" type="12" value="" out="N"/>
+				<param name="trns_mode" type="12" value="" out="N"/>
+				<param name="ntc_exp" type="12" value="" out="N"/>
+				<param name="tml_gi_sts" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

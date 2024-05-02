@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TransshipmentMgtDBDAOsearchTSSummaryRSQL">
+			<desc><![CDATA[T/S port에 입항한 1st VVD를 기준으로 연결되는 선명 별로 물량을 조회한다.
+2011.04.28 이일민 [CHM-201110111] Transshipment 와 discharging list data match 요청
+2011.05.13 이일민 [CHM-201110190] * 전배 모선 표시 사항
+2011.05.27 이일민 [CHM-201110190] * 전배 모선 표시 사항 - 'AKJ' != P.VSL_SLAN_CD 조건 추가 (ANSI JOIN)
+2011.06.20,23 김진승 [CHM-201111528] R9 CNTR의 BKG UPDATE 요청 - R4, R5부분 변경]]></desc>
+			<sql><![CDATA[
+select lane 
+	   , vvd  
+#if (${disc_load_cd}=='D')
+       , pol_yd_cd
+#elseif (${disc_load_cd}=='L')
+       , pod_yd_cd
+#end
+       , eta
+       , sum(decode(substr(cntr_tpsz_cd, 2, 1), '2', CNTR_VOL_QTY, 0)) ft20
+       , sum(decode(substr(cntr_tpsz_cd, 2, 1), '2', 0, CNTR_VOL_QTY)) ft40
+       , sum(decode(RD_CGO_FLG,'Y',0,decode(cntr_tpsz_cd, 'R2', CNTR_VOL_QTY,  0))) rf20
+       , sum(decode(RD_CGO_FLG,'Y',0,(case when cntr_tpsz_cd <> 'R2' and cntr_tpsz_cd like 'R%' then CNTR_VOL_QTY else 0 end))) rf40
+       , NVL((SELECT P.YD_CD
+                FROM (SELECT V1.VSL_SLAN_CD,
+                             V1.PF_SKD_TP_CD,
+                             V2.VSL_CD,
+                             V2.SKD_VOY_NO,
+                             V2.SKD_DIR_CD,
+                             V2.VPS_PORT_CD,
+                             V2.CLPT_IND_SEQ,
+                             V2.YD_CD,
+                             V2.CLPT_SEQ,
+                             V2.TURN_PORT_IND_CD,
+                             V2.TURN_SKD_VOY_NO,
+                             V2.TURN_SKD_DIR_CD,
+                             V2.TURN_CLPT_IND_SEQ
+                        FROM VSK_VSL_SKD V1,
+                             VSK_VSL_PORT_SKD V2
+                       WHERE V1.VSL_CD=V2.VSL_CD
+                         AND V1.SKD_VOY_NO=DECODE(V2.TURN_PORT_IND_CD, 'Y', V2.SKD_VOY_NO, 'N', V2.SKD_VOY_NO, V2.TURN_SKD_VOY_NO)
+                         AND V1.SKD_DIR_CD=DECODE(V2.TURN_PORT_IND_CD, 'Y', V2.SKD_DIR_CD, 'N', V2.SKD_DIR_CD, V2.TURN_SKD_DIR_CD)
+                     ) V
+                     LEFT OUTER JOIN VSK_PF_SKD_DTL P
+                     ON V.VSL_SLAN_CD = P.VSL_SLAN_CD
+                     AND V.PF_SKD_TP_CD = P.PF_SVC_TP_CD
+                     AND DECODE (V.TURN_PORT_IND_CD, 'Y', V.SKD_DIR_CD, 'N', V.SKD_DIR_CD, V.TURN_SKD_DIR_CD) = P.SKD_DIR_CD
+                     AND V.VPS_PORT_CD = P.PORT_CD
+                     AND DECODE (V.TURN_PORT_IND_CD, 'Y', V.CLPT_IND_SEQ, 'N', V.CLPT_IND_SEQ, V.TURN_CLPT_IND_SEQ) = P.CLPT_SEQ
+                     AND P.VSL_SLAN_CD NOT IN
+                         (SELECT ATTR_CTNT1
+                            FROM BKG_HRD_CDG_CTNT
+                           WHERE 'PF_DIFF_EXMPT' = HRD_CDG_ID)
+               WHERE V.VSL_CD = SUBSTR(vvd, 1, 4)
+                 AND V.SKD_VOY_NO = SUBSTR(vvd, 5, 4)
+                 AND V.SKD_DIR_CD = SUBSTR(vvd, 9, 1)
+#if (${disc_load_cd}=='D')
+                 AND V.YD_CD = pol_yd_cd
+                 AND ROWNUM = 1), pol_yd_cd) AS P_YD_CD
+#elseif (${disc_load_cd}=='L')
+                 AND V.YD_CD = pod_yd_cd
+                 AND ROWNUM = 1), pod_yd_cd) AS P_YD_CD
+#end
+  from (
+select 
+#if (${disc_load_cd}=='D')
+         RANK() OVER (PARTITION BY BK.BL_NO, CNTR.CNTR_NO ORDER BY VVD2.VSL_PRE_PST_CD DESC, VVD2.VSL_SEQ DESC) AS RNK
+	   , vvd2.slan_cd lane
+       , vvd2.vsl_cd||vvd2.skd_voy_no||vvd2.skd_dir_cd vvd  
+       , vvd2.pol_yd_cd
+       , to_char(skd2.vps_eta_dt, 'yyyy-mm-dd') eta
+#elseif (${disc_load_cd}=='L')
+         RANK() OVER (PARTITION BY BK.BL_NO, CNTR.CNTR_NO ORDER BY VVD1.VSL_PRE_PST_CD DESC, VVD1.VSL_SEQ DESC) AS RNK
+	   , vvd1.slan_cd lane
+       , vvd1.vsl_cd||vvd1.skd_voy_no||vvd1.skd_dir_cd vvd 
+       , vvd1.pod_yd_cd
+       , to_char(skd1.vps_eta_dt, 'yyyy-mm-dd') eta    
+#end
+       , cntr.cntr_tpsz_cd as cntr_tpsz_cd
+       , CNTR_VOL_QTY
+       , cntr.RD_CGO_FLG as RD_CGO_FLG
+  from bkg_booking bk
+        , bkg_container cntr
+        , bkg_vvd vvd1, vsk_vsl_port_skd skd1
+        , bkg_vvd vvd2, vsk_vsl_port_skd skd2
+ where bk.bkg_no         = VVD1.bkg_no 
+   and bk.bkg_no         = VVD2.bkg_no 
+   and vvd1.pod_cd       = vvd2.pol_cd
+   AND BK.BKG_STS_CD     NOT IN ('X','S')
+   and bk.bkg_no         = cntr.bkg_no 
+   and vvd1.vsl_cd        = skd1.vsl_cd(+)
+   and vvd1.skd_voy_no    = skd1.skd_voy_no(+)
+   and vvd1.skd_dir_cd    = skd1.skd_dir_cd(+)
+   and vvd1.pod_cd        = skd1.vps_port_cd(+)
+   and vvd1.pod_clpt_ind_seq  = skd1.clpt_ind_seq(+)
+   and vvd2.vsl_cd        = skd2.vsl_cd(+)
+   and vvd2.skd_voy_no    = skd2.skd_voy_no(+)
+   and vvd2.skd_dir_cd    = skd2.skd_dir_cd(+)
+   and vvd2.pol_cd        = skd2.vps_port_cd(+)
+   and vvd2.pol_clpt_ind_seq  = skd2.clpt_ind_seq(+)
+#if (${loc_cd}!='')
+   and vvd1.pod_cd  = @[loc_cd]             
+#end 
+
+#if (${loc_cd}!='' && ${loc_yd_cd} !='')
+   and vvd1.pod_yd_cd =@[loc_cd]||@[loc_yd_cd]           
+#end
+
+#if (${vvd} !='')
+	#if (${disc_load_cd}=='D')
+		and vvd1.vsl_Cd       = substr(@[vvd], 1, 4)
+   		and vvd1.skd_voy_no   = substr(@[vvd], 5, 4)
+   		and vvd1.skd_dir_cd   = substr(@[vvd], 9, 1)
+	#elseif (${disc_load_cd}=='L')
+		and vvd2.vsl_Cd       = substr(@[vvd], 1, 4)
+   		and vvd2.skd_voy_no   = substr(@[vvd], 5, 4)
+   		and vvd2.skd_dir_cd   = substr(@[vvd], 9, 1)
+	#end
+#end
+
+#if (${search_kind_cd} =='D')
+     #if (${disc_load_cd}=='D'&& ${dur_from}!=''&& ${dur_to}!='')
+		and skd1.vps_eta_dt > to_date(@[dur_from], 'yyyy-mm-dd')
+		and skd1.vps_eta_dt < to_date(@[dur_to],   'yyyy-mm-dd')+1
+     #elseif (${disc_load_cd}=='L' && ${dur_from}!=''&& ${dur_to}!='')
+	 	and skd2.vps_etd_dt > to_date(@[dur_from], 'yyyy-mm-dd')
+	 	and skd2.vps_etd_dt < to_date(@[dur_to],   'yyyy-mm-dd')+1
+     #end
+#end
+
+#if(${search_kind_cd} =='E' && ${vvd}=='' && 0==1)
+--적용 중지
+	 #if (${disc_load_cd}=='D'&& ${vps_etd_dt}!='')
+        and skd1.vps_eta_dt > to_date(@[vps_etd_dt], 'yyyy-mm-dd')
+        and skd1.vps_eta_dt < to_date(@[vps_etd_dt],   'yyyy-mm-dd')+1
+     #elseif (${disc_load_cd}=='L' && ${vps_etd_dt}!='')
+        and skd2.vps_etd_dt > to_date(@[vps_etd_dt], 'yyyy-mm-dd')
+        and skd2.vps_etd_dt < to_date(@[vps_etd_dt],   'yyyy-mm-dd')+1
+     #end 
+#end
+
+#if (${pol_cd} !='')
+     and bk.pol_cd = @[pol_cd]
+#end
+
+#if (${pod_cd} !='')
+     and bk.pod_cd = @[pod_cd] 
+#end
+
+#if (${disc_load_cd}=='D' && ${op_cd} !='' )
+             and vvd2.op_cd = @[op_cd]
+#elseif (${disc_load_cd}=='L' && ${op_cd} !='')
+             and vvd1.op_cd = @[op_cd]
+#end
+
+#if (${special} != 'SD')
+			 #if (${special} == 'All')
+                 and (CNTR.dcgo_flg = 'Y'
+                 or CNTR.rc_flg = 'Y'
+                 or CNTR.awk_cgo_flg = 'Y'
+                 or CNTR.rd_cgo_flg  = 'Y'
+                 or bk.stwg_cd  is not null)
+             #elseif (${special} == 'DG')
+                 and CNTR.dcgo_flg = 'Y'
+             #elseif (${special} == 'RF')
+                 and CNTR.rc_flg = 'Y'
+             #elseif (${special} == 'AK') 
+                 and CNTR.awk_cgo_flg = 'Y'
+             #elseif (${special} == 'ST')
+                 and bk.stwg_cd  is not null
+             #elseif (${special} == 'RD')
+                 and CNTR.rd_cgo_flg  = 'Y'
+             #end
+#end
+)
+where 1 = rnk
+group by lane
+		, vvd
+#if (${disc_load_cd}=='D')
+       , pol_yd_cd
+#elseif (${disc_load_cd}=='L')
+       , pod_yd_cd
+#end
+       , eta
+order by vvd
+#if (${disc_load_cd}=='D')
+       , pol_yd_cd
+#elseif (${disc_load_cd}=='L')
+       , pod_yd_cd
+#end
+       , eta			]]></sql>
+			<params>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="loc_yd_cd" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="dur_from" type="12" value="" out="N"/>
+				<param name="dur_to" type="12" value="" out="N"/>
+				<param name="vps_etd_dt" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="op_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

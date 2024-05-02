@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ScqAwkwardDBDAOcalcPriScqAwkYdDtlTmpCSQL">
+			<desc><![CDATA[PRI_SCQ_AWK_YD_DTL_TMP 의 Yard - Cargo 별 Cost 계산 및 결과 생성]]></desc>
+			<sql><![CDATA[
+INSERT INTO PRI_SCQ_AWK_YD_DTL_TMP
+(       SCQ_RQST_NO
+    ,   SCQ_VER_NO
+    ,   ROUT_SEQ
+    ,   YD_COST_SEQ
+    ,   YD_COST_DTL_SEQ
+    ,   IO_BND_CD
+    ,   YD_CD
+    ,   COST_TP_CD
+    ,   CGO_SEQ
+    ,   CNTR_QTY
+    ,   USD_AMT
+    ,   SPCL_CGO_REF_SEQ
+    ,   CRE_USR_ID
+    ,   CRE_DT
+    ,   UPD_USR_ID
+    ,   UPD_DT 
+)
+WITH 
+CGO_CS AS 
+(
+    SELECT  CGO_SEQ
+         ,  CNTR_TPSZ_CD
+         ,  CNTR_QTY
+         ,  CASE WHEN NVL( OVR_FWRD_LEN, 0 ) <= 0 AND NVL( OVR_BKWD_LEN, 0 ) <= 0 AND NVL( OVR_LF_LEN, 0 ) <= 0 AND NVL( OVR_RT_LEN, 0 ) <= 0 AND NVL( OVR_HGT, 0 ) <= 0 THEN 'I' ELSE 'O' END AS CGO_IO_GA_CD  
+    FROM    PRI_SCQ_AWK_CGO_TMP
+    WHERE   SCQ_RQST_NO = @[scq_rqst_no] 
+    AND     SCQ_VER_NO  = @[scq_ver_no_tmp] 
+)
+, ROUT_CS AS ( 
+    SELECT  ROUT_SEQ, ROUT_TP_CD, YD_CD, IO_BND_CD, TML_AWK_TS_CD, CGO_IO_GA_CD
+    FROM 
+    (   SELECT  ROUT_SEQ, ROUT_TP_CD, 'I' AS IO_BND_CD, IB_YD_CD AS YD_CD
+             ,  DECODE ( ROUT_TP_CD, 'L', 'S', 'P', 'S', CASE WHEN IB_YD_CD = OB_YD_CD THEN 'S' ELSE 'D' END ) AS TML_AWK_TS_CD
+        FROM    PRI_SCQ_AWK_ROUT_TMP A
+        WHERE   A.SCQ_RQST_NO = @[scq_rqst_no] 
+        AND     A.SCQ_VER_NO = @[scq_ver_no_tmp]
+        AND     A.IB_YD_CD IS NOT NULL
+        UNION   ALL
+        SELECT  ROUT_SEQ, ROUT_TP_CD, 'O', OB_YD_CD
+             ,  DECODE ( ROUT_TP_CD, 'L', 'S', 'P', 'S', CASE WHEN IB_YD_CD = OB_YD_CD THEN 'S' ELSE 'D' END )
+        FROM    PRI_SCQ_AWK_ROUT_TMP A
+        WHERE   A.SCQ_RQST_NO = @[scq_rqst_no]
+        AND     A.SCQ_VER_NO = @[scq_ver_no_tmp] 
+        AND     A.OB_YD_CD IS NOT NULL
+    ) A,
+    (
+        SELECT  DISTINCT CGO_IO_GA_CD
+        FROM    CGO_CS 
+    ) 
+    ORDER   BY  CGO_IO_GA_CD, ROUT_SEQ, ROUT_TP_CD, IO_BND_CD  
+     
+) 
+, MAX_COND_LIST AS (
+    SELECT  B.ROUT_SEQ, A.IO_BND_CD, A.YD_CD, B.ROUT_TP_CD, B.CGO_IO_GA_CD
+        ,   CASE WHEN  B.ROUT_TP_CD IN ( 'L', 'P' ) AND A.COND_NO NOT IN ( 3, 4 ) THEN 'N'
+             WHEN  ( B.ROUT_TP_CD IN ( 'L', 'P' ) AND A.COND_NO = 3 ) OR ( B.ROUT_TP_CD = 'N' AND A.COND_NO = 3 ) THEN 'G' 
+             WHEN  ( B.ROUT_TP_CD IN ( 'L', 'P' ) AND A.COND_NO = 4 ) OR ( B.ROUT_TP_CD = 'N' AND A.COND_NO = 4 ) THEN 'W'
+             WHEN  B.ROUT_TP_CD = 'N' AND A.COND_NO NOT IN ( 3, 4 ) THEN 'T' END AS COST_TP_CD 
+        ,   MAX ( A.TML_AWK_TRF_VER_NO ) AS MAX_VER_NO
+        ,   A.TML_AWK_CGO_TRF_TP_CD, A.IO_GA_CD, A.TML_AWK_TS_CD, A.COND_NO
+    FROM    TES_AWK_CGO_TRF_DTL A, ROUT_CS B
+    WHERE   A.YD_CD = B.YD_CD
+    AND     A.IO_BND_CD = B.IO_BND_CD
+    AND     A.TML_AWK_TS_CD = B.TML_AWK_TS_CD   
+--  AND     A.COND_NO <> '0'      
+    AND  (
+         (  B.ROUT_TP_CD =  'N' AND A.TML_AWK_CGO_TRF_TP_CD = 'T' AND A.IO_GA_CD = B.CGO_IO_GA_CD ) OR 
+         (  B.ROUT_TP_CD <> 'N' AND A.TML_AWK_CGO_TRF_TP_CD = 'B' AND A.IO_GA_CD = 'I' )
+         )
+    GROUP   BY  
+            B.ROUT_SEQ, B.ROUT_TP_CD, B.CGO_IO_GA_CD, A.YD_CD, A.TML_AWK_CGO_TRF_TP_CD, A.IO_BND_CD, A.IO_GA_CD, A.TML_AWK_TS_CD, A.COND_NO
+           
+)
+, DIST_COND_LIST AS (
+    SELECT DISTINCT  TML_AWK_CGO_TRF_TP_CD, IO_GA_CD, COND_NO FROM MAX_COND_LIST 
+) 
+, CGO_COND_CHK_LIST AS ( 
+    SELECT  A.CGO_SEQ, A.CNTR_TPSZ_CD, A.CNTR_QTY, A.CGO_IO_GA_CD, B.TML_AWK_CGO_TRF_TP_CD, B.IO_GA_CD, B.COND_NO
+        ,   PRI_SCQ_CGO_COND_CHK_FNC ( B.COND_NO, @[scq_rqst_no], @[scq_ver_no_tmp], A.CGO_SEQ ) COND_CHK_RSLT
+    FROM    CGO_CS A, DIST_COND_LIST B
+    WHERE(  B.TML_AWK_CGO_TRF_TP_CD = 'B' 
+    OR   (  B.TML_AWK_CGO_TRF_TP_CD = 'T' AND  B.IO_GA_CD = A.CGO_IO_GA_CD  ) )
+    
+)
+, MAX_AMT_LIST AS (
+    SELECT
+            A.ROUT_SEQ, A.IO_BND_CD, A.YD_CD
+        ,   A.COST_TP_CD
+        ,   B.CGO_SEQ, B.CNTR_QTY, C.USD_AMT
+        ,   C.SPCL_CGO_REF_SEQ
+        ,   MAX ( C.USD_AMT ) OVER ( PARTITION BY A.ROUT_SEQ, A.IO_BND_CD, A.YD_CD, A.COST_TP_CD, B.CGO_SEQ ) AS MAX_USD_AMT
+        ,   A.ROUT_TP_CD
+        ,   A.CGO_IO_GA_CD, A.IO_GA_CD, A.TML_AWK_TS_CD, A.COND_NO, A.MAX_VER_NO
+        ,   B.TML_AWK_CGO_TRF_TP_CD
+    FROM    MAX_COND_LIST A
+        ,   CGO_COND_CHK_LIST B
+        ,   TES_AWK_CGO_TRF_TP_SZ C
+    WHERE   A.TML_AWK_CGO_TRF_TP_CD = B.TML_AWK_CGO_TRF_TP_CD
+    AND     A.COND_NO = B.COND_NO 
+    AND     A.CGO_IO_GA_CD = B.CGO_IO_GA_CD
+    AND     B.COND_CHK_RSLT = 1   
+    AND     A.YD_CD = C.YD_CD
+    AND     A.TML_AWK_CGO_TRF_TP_CD = C.TML_AWK_CGO_TRF_TP_CD
+    AND     A.IO_BND_CD = C.IO_BND_CD
+    AND     A.IO_GA_CD = C.IO_GA_CD
+    AND     A.TML_AWK_TS_CD = C.TML_AWK_TS_CD
+    AND     A.COND_NO = C.COND_NO
+    AND     A.MAX_VER_NO = C.TML_AWK_TRF_VER_NO    
+    AND     C.TML_AWK_UC_CALC_TP_CD = 'S'   
+    AND     C.CNTR_SZ_CD = DECODE ( SIGN ( INSTR ( B.CNTR_TPSZ_CD, '2' ) ), 1, '2', '4' )
+
+)
+SELECT  @[scq_rqst_no], @[scq_ver_no_tmp], A.ROUT_SEQ
+    ,   PRI_SCQ_AWK_COST_SEQ_FNC ( A.ROUT_TP_CD, A.COST_TP_CD, A.IO_BND_CD ) AS YD_COST_SEQ
+    ,   ROW_NUMBER ( ) OVER ( PARTITION BY A.ROUT_SEQ, A.IO_BND_CD, A.YD_CD, A.COST_TP_CD  ORDER BY A.CGO_SEQ ) AS YD_COST_DTL_SEQ
+    ,   A.IO_BND_CD, A.YD_CD, A.COST_TP_CD, A.CGO_SEQ, A.CNTR_QTY, A.USD_AMT
+    ,   MAX ( SPCL_CGO_REF_SEQ )  AS MAX_SPCL_CGO_REF_SEQ
+    ,   @[cre_usr_id], SYSDATE, @[cre_usr_id], SYSDATE
+FROM    MAX_AMT_LIST A
+WHERE   A.USD_AMT = A.MAX_USD_AMT
+GROUP   BY A.ROUT_SEQ, A.ROUT_TP_CD, A.IO_BND_CD, A.YD_CD, A.COST_TP_CD, A.CGO_SEQ, A.CNTR_QTY, A.USD_AMT
+ORDER   BY A.ROUT_SEQ, A.ROUT_TP_CD, A.IO_BND_CD, A.YD_CD, A.COST_TP_CD, A.CGO_SEQ			]]></sql>
+			<params>
+				<param name="scq_rqst_no" type="12" value="" out="N"/>
+				<param name="scq_ver_no_tmp" type="12" value="" out="N"/>
+				<param name="cre_usr_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

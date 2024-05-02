@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SCReportDBDAORsltSearchSCPerformanceDetailOnlyBookingListRSQL">
+			<desc><![CDATA[searchSCPerformanceDetailOnlyBookingList
+2015.06.30 최성환 [CHM-201536493] Split03-주간 MAS Open에 따른 타모듈 프로그램 적용 요청]]></desc>
+			<sql><![CDATA[
+WITH
+TR AS
+	(
+	/* PK : SLAN_CD, DIR_CD, FM_CONTI, TO_CONTI */
+	SELECT  VSL_SLAN_CD, VSL_SLAN_DIR_CD, FM_CONTI_CD, TO_CONTI_CD, TRD_CD, SUB_TRD_CD, RLANE_CD
+	FROM
+		(
+		 SELECT  RL.VSL_SLAN_CD, DL.VSL_SLAN_DIR_CD, DL.FM_CONTI_CD, DL.TO_CONTI_CD, DL.TRD_CD, DL.SUB_TRD_CD, DL.RLANE_CD
+		         /* DELETE 되지 않고, I/O 가 정상적인 것이 우선 적용됨 */
+    		    ,ROW_NUMBER() OVER ( PARTITION BY RL.VSL_SLAN_CD, DL.VSL_SLAN_DIR_CD, DL.FM_CONTI_CD, DL.TO_CONTI_CD ORDER BY DL.DELT_FLG, DECODE(FM_CONTI_CD, TO_CONTI_CD, DECODE(IOC_CD, 'I', 1, 2), DECODE(IOC_CD, 'O', 1 ,2)) ) ROW_NUMBER
+		 FROM    MDM_REV_LANE      RL  ,
+    	  	     MDM_DTL_REV_LANE  DL
+		 WHERE   DL.RLANE_CD   = RL.RLANE_CD
+		 AND     RL.VSL_TP_CD  = 'C'
+         AND     TRD_CD     LIKE @[trd_cd] || '%' -- trade
+	     AND     SUB_TRD_CD LIKE @[sub_trd_cd] || '%' -- sub trade
+		)
+	WHERE   ROW_NUMBER  = 1
+	) ,
+
+BK AS
+	(
+            SELECT  TRD_CD ,SKD_DIR_CD ,SUB_TRD_CD 
+				   ,SLAN_CD 
+                   ,VVD 
+                   ,SVC_SCP_CD ,CMDT_CD ,AGMT_ACT_CNT_CD ,AGMT_ACT_CUST_SEQ 
+                   ,USA_SVC_MOD_CD
+                   ,POR_CD 
+                   ,POL_CD 
+                   ,POD_CD 
+                   ,DEL_CD 
+                   ,OP_CNTR_QTY
+            FROM    (
+                     SELECT  BK.SVC_SCP_CD ,BK.CMDT_CD ,BK.AGMT_ACT_CNT_CD ,DECODE(BK.AGMT_ACT_CNT_CD, NULL, 0, BK.AGMT_ACT_CUST_SEQ) AS AGMT_ACT_CUST_SEQ ,TR.TRD_CD
+                            ,BK.SKD_DIR_CD ,TR.SUB_TRD_CD ,BK.SLAN_CD ,BK.VSL_CD || BK.SKD_VOY_NO || BK.SKD_DIR_CD AS VVD 
+                            ,CASE WHEN  L3.CNT_CD IN ( 'US', 'CA' ) AND BK.POD_CD = BK.DEL_CD AND BK.DE_TERM_CD NOT IN ( 'D', 'H' ) THEN 'PO'
+                                  WHEN  L3.CNT_CD IN ( 'US', 'CA' ) THEN NVL(( SELECT SUBSTR(SVC_MOD_CD, 1, 2) FROM MAS_USA_SVC_MOD A WHERE A.ORG_RGN_CD = L3.RGN_CD AND A.DEST_RGN_CD = L4.RGN_CD ), 'OT' )
+                                  WHEN  L2.CNT_CD IN ( 'US', 'CA' ) AND BK.POL_CD = BK.POR_CD AND BK.RCV_TERM_CD NOT IN ( 'D', 'H' ) THEN 'PO'
+                                  WHEN  L2.CNT_CD IN ( 'US', 'CA' ) THEN NVL(( SELECT SUBSTR(SVC_MOD_CD, 1, 2) FROM MAS_USA_SVC_MOD A WHERE A.ORG_RGN_CD = L2.RGN_CD AND A.DEST_RGN_CD = L1.RGN_CD ), 'OT' )
+                              END  USA_SVC_MOD_CD  
+                             /* PO, LO, IP, ML, OT */
+                            ,BK.POR_CD ,BK.POL_CD ,BK.POD_CD ,BK.DEL_CD             
+                            ,(
+                              SELECT  SUM( BQ.OP_CNTR_QTY * ( SELECT PRI_SC_FEU_CONV(BK.SVC_SCP_CD, BQ.CNTR_TPSZ_CD) FROM DUAL) )
+                              FROM    BKG_QUANTITY  BQ
+                              WHERE   BQ.BKG_NO = BK.BKG_NO
+                              AND     BQ.CNTR_TPSZ_CD NOT LIKE 'Q%'
+                             ) AS OP_CNTR_QTY
+                     FROM    BKG_BOOKING BK    ,
+                             BKG_BL_DOC  BB    ,
+                             MDM_LOCATION  L1  ,
+                             MDM_LOCATION  L2  ,
+                             MDM_LOCATION  L3  ,
+                             MDM_LOCATION  L4  ,
+                             TR
+                     WHERE   BB.BKG_NO           = BK.BKG_NO
+                     AND     L1.LOC_CD           = BK.POR_CD
+                     AND     L2.LOC_CD           = BK.POL_CD
+                     AND     L3.LOC_CD           = BK.POD_CD
+                     AND     L4.LOC_CD           = BK.DEL_CD
+                     AND     TR.VSL_SLAN_CD      = BK.SLAN_CD
+                     AND     TR.VSL_SLAN_DIR_CD  = BK.SKD_DIR_CD
+                     AND     TR.FM_CONTI_CD      = L2.CONTI_CD
+                     AND     TR.TO_CONTI_CD      = L3.CONTI_CD
+                     AND     BK.BKG_STS_CD       = 'F'
+                     /* 조회 조건 */
+                     AND     BK.SC_NO        = @[sc_no]      -- sc_no
+                	 #if (${skd_dir_cd} != '') 
+                     AND     BK.SKD_DIR_CD   = @[skd_dir_cd] -- direction
+                     #end
+                     #if (${slan_cd} != '') 
+                     AND     BK.SLAN_CD      = @[slan_cd]    -- lane
+                     #end
+                     #if (${vsl_cd} != '') 
+                     AND     BK.VSL_CD       = @[vsl_cd]     -- vvd 1
+                     #end
+                     #if (${skd_voy_no} != '') 
+                     AND     BK.SKD_VOY_NO   = @[skd_voy_no] -- vvd 2
+                     #end
+                     #if (${skd_dir_cd_txt} != '')
+                     AND     BK.SKD_DIR_CD   = @[skd_dir_cd_txt] -- ?
+                     #end
+                     #if (${por_cd} != '')
+                     AND     BK.POR_CD       = @[por_cd]     -- por
+                     #end
+                     #if (${pol_cd} != '') 
+                     AND     BK.POL_CD       =  @[pol_cd]     -- pol
+                     #end
+                     #if (${pod_cd} != '') 
+                     AND     BK.POD_CD       = @[pod_cd]     -- pod
+                     #end
+                     #if (${del_cd} != '') 
+                     AND     BK.DEL_CD       = @[del_cd]     -- del
+                     #end
+                     #if (${bl_obrd_dt_from} != '') 
+                     AND     BB.BL_OBRD_DT >= TO_DATE(@[bl_obrd_dt_from], 'YYYY-MM-DD')
+                     #end
+                     #if (${bl_obrd_dt_to} != '') 
+                     AND     BB.BL_OBRD_DT <= TO_DATE (@[bl_obrd_dt_to], 'YYYY-MM-DD') + 0.99999 /* 0.99999 는 23시 59분 59초를 의미 */  -- Period
+                     #end
+                     #if (${svc_scp_cd} != '') 
+                     AND     BK.SVC_SCP_CD   = @[svc_scp_cd]   -- SVC SCOPE CODE
+                     #end       
+
+                    )
+            WHERE     USA_SVC_MOD_CD LIKE @[usa_svc_mod_cd] || '%' -- us mode
+
+	)
+
+
+
+
+SELECT 
+		TRD_CD ,SKD_DIR_CD ,SUB_TRD_CD 
+	   #if (${chk_slan_cd} != '') 
+	   ,SLAN_CD
+       #end     
+	   #if (${chk_vvd} != '') 
+       ,VVD                
+       #end     
+       ,SVC_SCP_CD 
+	   #if (${chk_usa_svc_mod_cd} != '') 
+	   ,USA_SVC_MOD_CD
+       #end
+	   #if (${chk_por_cd} != '')
+       ,POR_CD
+       #end
+	   #if (${chk_pol_cd} != '')
+       ,POL_CD
+       #end
+	   #if (${chk_pod_cd} != '')
+       ,POD_CD
+       #end
+	   #if (${chk_del_cd} != '')
+       ,DEL_CD
+       #end
+       ,SUM(OP_CNTR_QTY) AS OP_CNTR_QTY
+FROM    
+        (
+
+        SELECT  BK.TRD_CD ,BK.SKD_DIR_CD ,BK.SUB_TRD_CD 
+               ,DECODE(@[chk_slan_cd], NULL, NULL, BK.SLAN_CD)           		   AS SLAN_CD     
+               ,DECODE(@[chk_vvd], NULL, NULL, BK.VVD)                             AS VVD                
+               --,SC.SVC_SCP_CD 
+               ,BK.SVC_SCP_CD 
+               ,DECODE(@[chk_usa_svc_mod_cd], NULL, NULL, BK.USA_SVC_MOD_CD)       AS USA_SVC_MOD_CD
+               ,DECODE(@[chk_por_cd], NULL, NULL, BK.POR_CD)                       AS POR_CD
+               ,DECODE(@[chk_pol_cd], NULL, NULL, BK.POL_CD)                       AS POL_CD
+        	   ,DECODE(@[chk_pod_cd], NULL, NULL, BK.POD_CD)                       AS POD_CD
+               ,DECODE(@[chk_del_cd], NULL, NULL, BK.DEL_CD)                       AS DEL_CD
+               ,OP_CNTR_QTY
+        
+        FROM    BK
+           
+    )
+
+GROUP BY
+		TRD_CD     ,SKD_DIR_CD        ,SUB_TRD_CD 
+	   #if (${chk_slan_cd} != '') 
+	   ,SLAN_CD
+       #end         
+	   #if (${chk_vvd} != '') 
+       ,VVD                
+       #end     
+       ,SVC_SCP_CD 
+	   #if (${chk_usa_svc_mod_cd} != '') 
+	   ,USA_SVC_MOD_CD
+       #end
+	   #if (${chk_por_cd} != '')
+       ,POR_CD
+       #end
+	   #if (${chk_pol_cd} != '')
+       ,POL_CD
+       #end
+	   #if (${chk_pod_cd} != '')
+       ,POD_CD
+       #end
+	   #if (${chk_del_cd} != '') 
+       ,DEL_CD
+	   #end			]]></sql>
+			<params>
+				<param name="trd_cd" type="12" value="" out="N"/>
+				<param name="sub_trd_cd" type="12" value="" out="N"/>
+				<param name="sc_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="slan_cd" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd_txt" type="12" value="" out="N"/>
+				<param name="por_cd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="del_cd" type="12" value="" out="N"/>
+				<param name="bl_obrd_dt_from" type="12" value="" out="N"/>
+				<param name="bl_obrd_dt_to" type="12" value="" out="N"/>
+				<param name="svc_scp_cd" type="12" value="" out="N"/>
+				<param name="usa_svc_mod_cd" type="12" value="" out="N"/>
+				<param name="chk_slan_cd" type="12" value="" out="N"/>
+				<param name="chk_vvd" type="12" value="" out="N"/>
+				<param name="chk_usa_svc_mod_cd" type="12" value="" out="N"/>
+				<param name="chk_por_cd" type="12" value="" out="N"/>
+				<param name="chk_pol_cd" type="12" value="" out="N"/>
+				<param name="chk_pod_cd" type="12" value="" out="N"/>
+				<param name="chk_del_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

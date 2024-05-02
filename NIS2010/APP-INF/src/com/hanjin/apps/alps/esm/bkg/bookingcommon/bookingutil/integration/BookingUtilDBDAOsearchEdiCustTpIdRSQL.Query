@@ -1,0 +1,477 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="BookingUtilDBDAOsearchEdiCustTpIdRSQL">
+			<desc><![CDATA[searchEdiCustTpId
+ * 2011.02.14 이일민 [SRM-201113442] Lowe"s 301 전송로직 변경요청
+* 2011.07.28 정선용 [SRM-201118551] IFTMBC 수정 요청 (TP ID: NIPPON-EXPRESS )
+
+*2016.05.18
+[CHM-201641139] GTN 중복 transaction block 처리 (CHM-201006030 처리로직 원복)
+
+*2016.06.21
+[CHM-201642250] GTN 중복 transaction block 로직 보완
+현재의 “304(SI) 가 GTN으로부터 왔을 때만 TRADIANT 로 전송”을
+ “304(SI)가 Offline, E-mail (Simple SI), EDI로 전송되었을 경우 TRADIANT로 전송”으로 변경. 
+즉, “304(SI) 가 Inttra, Cargosmart 등 타 Portal로 접수되었을 경우에만 
+TRADIANT 전송을 제한”하는 것으로 변경
+
+*2017.11.17
+[CSR #2468] GST 관련 eSVC / ALPS 수정 요청
+EDI 수신된 Booking 일 경우만 301 전송
+]]></desc>
+			<sql><![CDATA[
+SELECT DISTINCT GROUP_EDI_ID GROUP_ID
+	, EDI_RECEIVE_ID RCV_ID
+#if (${tp_cd} == 'D') 
+	, REF_CODE
+#end
+  FROM    
+    (SELECT BKG_NO
+        , MIN(RANK) RANK
+        , GROUP_EDI_ID
+        , EDI_RECEIVE_ID
+        , REF_CODE
+      FROM 
+        (SELECT  BK.BKG_NO
+                , MIN(TP_RANK.RANK) RANK
+                , edi_BY_CUST.group_edi_id
+                , edi_BY_CUST.EDI_RECEIVE_ID
+                , DECODE(@[tp_cd], 'D', 'D', edi_BY_CUST.cnt_cd||edi_BY_CUST.cust_seq) AS ref_code
+          FROM BKG_CUSTOMER CUST
+                , BKG_BOOKING BK
+                , (SELECT GRP.ESVC_GRP_CD           GROUP_EDI_ID
+                         , GRP.CUST_TRD_PRNR_ID     EDI_RECEIVE_ID
+                         , grp_cUST.CNT_CD   
+                         , grp_cUST.CUST_SEQ
+                         , GRP_CUST.BKG_CUST_TP_DESC 
+                   FROM BKG_EDI_GRP_CUST grp_cUST, BKG_EDI_GRP GRP
+                  WHERE GRP.ESVC_GRP_CD         = grp_cUST.ESVC_GRP_CD
+                    AND GRP.CO_CD               = grp_cUST.CO_CD
+                    AND GRP.CO_CD               = 'H'
+                    AND GRP.ESVC_GRP_DELT_FLG   = 'N'
+                    AND grp_cUST.cnt_Cd         > ' '
+                    AND grp_cUST.cust_seq       > 0
+                    AND grp_cUST.DELT_FLG       = 'N'
+#if (${tp_cd} == 'B') 
+                    -- tpCd = 'B'
+                    AND grp_cUST.BKG_CFM_FLG    = 'Y'
+	#if (${auto_manual_flg} == 'Y') 
+                    --autoManualCd = 'Y'
+                    AND grp_cust.BKG_CFM_AUTO_FLG = 'Y' 
+	#end
+#end
+
+#if (${tp_cd} == 'D') 
+                    -- tpCd = 'D'
+                    AND grp_cust.bl_drft_flg    = 'Y'       
+	#if (${auto_manual_flg} == 'Y') 
+                    --autoManualCd = 'Y'
+                    AND grp_cust.BL_DRFT_AUTO_FLG = 'Y'
+				    AND grp_cust.BL_DRFT_AUTO_DYS < 1                           
+	#end
+#end
+                    ) EDI_BY_CUST               
+                , (SELECT 'S' RCV_TP, '1SH' RANK FROM DUAL 
+                   UNION SELECT 'C' RCV_TP, '2CN' RANK FROM DUAL 
+                   UNION SELECT 'N' RCV_TP, '3NF' RANK FROM DUAL 
+                   UNION SELECT 'F' RCV_TP, '4FF' RANK FROM DUAL 
+                   UNION SELECT 'A' RCV_TP, '5AN' RANK FROM DUAL 
+                   UNION SELECT 'E' RCV_TP, '6EX' RANK FROM DUAL) TP_RANK
+         WHERE EDI_BY_CUST.CNT_CD   = CUST.CUST_CNT_CD 
+           AND EDI_BY_CUST.CUST_SEQ = CUST.CUST_SEQ
+           AND BK.BKG_NO            = CUST.BKG_NO
+           AND CUST.BKG_CUST_TP_CD = TP_RANK.RCV_TP
+           and bk.bkg_no = @[bkg_no]
+           AND DECODE(BKG_CUST_TP_DESC,'ALL','ALL',CUST.BKG_CUST_TP_CD)
+                               IN (SELECT COLUMN_VALUE
+                                     FROM TABLE(BKG_SPLIT_FNC(BKG_CUST_TP_DESC,',')))
+         GROUP BY bk.bkg_no
+                , edi_BY_CUST.group_edi_id
+                , edi_BY_CUST.EDI_RECEIVE_ID
+                , edi_BY_CUST.cnt_cd||edi_BY_CUST.cust_seq
+         UNION
+          SELECT bk.bkg_no
+                , '7SC' RANK
+                , edi_BY_SC.group_edi_iD
+                , edi_BY_SC.EDI_RECEIVE_ID
+                , DECODE(@[tp_cd], 'D', 'D', edi_BY_SC.sc_no) AS ref_code
+          FROM BKG_BOOKING BK
+                , (SELECT  GRP.ESVC_GRP_CD           GROUP_EDI_ID
+                         , GRP.CUST_TRD_PRNR_ID     EDI_RECEIVE_ID
+                         , grp_cUST.SC_NO
+                         , GRP_CUST.BKG_CTRT_TP_CD
+                   FROM BKG_EDI_GRP GRP, BKG_EDI_GRP_CUST grp_cUST
+                  WHERE GRP.ESVC_GRP_CD         = grp_cUST.ESVC_GRP_CD
+                    AND GRP.CO_CD               = grp_cUST.CO_CD      
+                    AND GRP.CO_CD               = 'H'
+                    AND GRP.ESVC_GRP_DELT_FLG   = 'N'
+                    and grp_cUST.sc_no          > ' '              
+                    AND grp_cUST.DELT_FLG       = 'N'
+#if (${tp_cd} == 'B') 
+                    -- tpCd = 'B'
+                    AND grp_cUST.BKG_CFM_FLG    = 'Y'
+	#if (${auto_manual_flg} == 'Y') 
+                    --autoManualCd = 'Y'
+                    AND grp_cust.BKG_CFM_AUTO_FLG = 'Y' 
+	#end
+#end
+
+#if (${tp_cd} == 'D') 
+                    -- tpCd = 'D'
+                    AND grp_cust.bl_drft_flg    = 'Y'       
+	#if (${auto_manual_flg} == 'Y') 
+                    --autoManualCd = 'Y'
+                    AND grp_cust.BL_DRFT_AUTO_FLG = 'Y'     
+				    AND grp_cust.BL_DRFT_AUTO_DYS < 1                            
+	#end                        
+#end
+
+                    ) EDI_BY_SC
+         WHERE EDI_BY_SC.SC_NO  = DECODE(EDI_BY_SC.BKG_CTRT_TP_CD, '1', BK.SC_NO, '2', BK.RFA_NO)
+           and bk.bkg_no = @[bkg_no]
+           )
+     GROUP BY BKG_NO
+        , GROUP_EDI_ID
+        , EDI_RECEIVE_ID
+        , ref_code) mst, bkg_booking bk
+  where bk.bkg_no = mst.bkg_no 
+	#if (${tp_cd} == 'B')
+    AND (EDI_RECEIVE_ID NOT IN ('INTTRA', 'INTTRANG2')
+         OR EXISTS (SELECT 'X' 
+               FROM BKG_XTER_RQST_MST BXRM 
+               WHERE BXRM.BKG_NO = BK.BKG_NO
+               AND BXRM.DOC_TP_CD = 'B'
+               AND BXRM.BKG_UPLD_STS_CD = 'F'
+               AND BXRM.XTER_RQST_VIA_CD = 'INT')
+        )
+    --and 'YES' = case when bk.xter_bkg_rqst_Cd <> 'GTN' and edi_receive_id = 'TRADIANT' then 'NO' /* 이병동씨 요청 */
+    --                 when bk.xter_bkg_rqst_Cd <> 'CSM' and edi_receive_id = 'CARGOSMART' then 'NO'     
+    --                 when 1 > (select count(1) 
+ 	--							 from bkg_xter_rqst_mst mst
+	--							where mst.bkg_no = bk.bkg_no
+	--							  and mst.doc_tp_cd = 'B'
+	--							  and mst.BKG_UPLD_STS_CD = 'F'
+	--							  and mst.xter_sndr_id in ('INTTRA','INTTRANG2'))
+	--						 and (edi_receive_id = 'INTTRA' or edi_receive_id = 'INTTRANG2') then 'NO'
+    --                 when bk.xter_bkg_rqst_cd <> 'EDI' and edi_receive_id = 'SEAEXPD' then 'NO'
+    --                 when bk.xter_bkg_rqst_cd <> 'EDI' and edi_receive_id = 'NIPPON-EXPRESS' then 'NO' -- 2011.7.28 추가
+    --                 when (bk.xter_bkg_rqst_cd <> 'EDI' 
+    --                      or (SELECT /*+ INDEX(MST XPKBKG_XTER_RQST_MST)*/
+    --                                  DECODE(COUNT(1), 1, 'Y', 'N') AS TP_ID
+    --                             FROM BKG_XTER_RQST_MST MST
+    --                            WHERE XTER_SNDR_ID = '6135830007'
+    --                              AND DOC_TP_CD = 'B'
+    --                              AND BKG_NO = bkg_no -- prameter
+    --                              AND BKG_UPLD_STS_CD NOT IN ('D','R')
+    --                              AND ROWNUM = 1) <> 'Y')
+    --                      and edi_receive_id = '6135830007' then 'NO'
+    --                 else 'YES' end
+	#end
+	#if (${tp_cd} == 'D')
+    AND 'YES' = CASE WHEN BK.XTER_SI_CD IN ('INT','CSM') AND EDI_RECEIVE_ID = 'TRADIANT' THEN 'NO'
+                     WHEN BK.XTER_SI_CD <> 'CSM' AND EDI_RECEIVE_ID = 'CARGOSMART' THEN 'NO' /* 이병동씨 요청 */
+                     WHEN BK.XTER_SI_CD <> 'INT' AND (EDI_RECEIVE_ID = 'INTTRA' OR EDI_RECEIVE_ID = 'INTTRANG2') THEN 'NO'
+					  /* CARGOSMART 는 DPCS 대상인건의 경우 'QA' 완료일때 전송 이지영과장님 요청 */
+					 WHEN BK.BKG_OFC_CD NOT IN ('HKGSC', 'SZPSC', 'XMNSC')
+                          AND NVL((SELECT 'Y' FROM BKG_SR_CRNT_RQST WHERE BKG_NO = BK.BKG_NO AND BL_AUD_FLG = 'Y' AND ROWNUM = 1 ),'N') <> 'Y'
+						  AND (EDI_RECEIVE_ID = 'CARGOSMART' 
+						  AND NVL((SELECT 'Y' FROM BKG_SR_CRNT_RQST WHERE BKG_NO = BK.BKG_NO AND SR_AMD_TP_CD = 'O' AND ROWNUM = 1),'N') = 'Y') THEN 'NO' 
+                     /* CARGOSMART 인 경우라도 'HKGSC', 'SZPSC', 'XMNSC' 경우에는 BKG AUDIT완료되어있으면 전송 황일균부장님 요청 */
+                     WHEN EDI_RECEIVE_ID = 'CARGOSMART' 
+                          AND BK.BKG_OFC_CD IN ('HKGSC', 'SZPSC', 'XMNSC')
+                          AND NVL((SELECT AUD_STS_CD FROM BKG_RATE WHERE BKG_NO = BK.BKG_NO),'N') != 'Y' THEN 'NO'
+                     ELSE 'YES' END
+
+	#end
+#if (${auto_manual_flg} == 'Y') 
+--autoManualCd = 'Y'
+	#if (${tp_cd} == 'B') 
+    and ((not exists (select 'X'
+                        from bkg_ntc_his ntc
+                       where ntc.bkg_no = bk.bkg_no
+                         and ntc.ntc_via_cd = 'E'
+                         and ntc.edi_id = edi_receive_id
+                    
+                         -- tpCd = 'B'
+                         and ntc.ntc_knd_cd = 'BK'
+                         and rownum = 1)
+         )OR(
+          EXISTS     (SELECT 'X' -- BKG Cancel 땐 다시 전송
+                        FROM BKG_HIS_MST HIS, BKG_HIS_DTL DTL
+                       WHERE HIS.BKG_NO  = BK.BKG_NO
+                         AND DTL.BKG_NO  = BK.BKG_NO
+                         AND HIS.HIS_SEQ = DTL.HIS_SEQ
+                         AND HIS.HIS_SEQ = (SELECT MAX(A.HIS_SEQ) 
+                                              FROM BKG_HIS_MST A, BKG_HIS_DTL B 
+                                             WHERE A.BKG_NO = HIS.BKG_NO 
+                                               AND A.BKG_NO   = B.BKG_NO 
+                                               AND A.HIS_SEQ  = B.HIS_SEQ)
+                         AND DTL.HIS_CATE_NM = 'Booking Cancel.' 
+                         AND ROWNUM = 1
+                     )
+          )
+         )
+
+	#end
+	#if (${tp_cd} == 'D') 
+    and exists (select 'x'
+                  from bkg_chg_rt rt
+                 where rt.bkg_no = bk.bkg_no
+                   and rt.chg_cd = 'OFT'
+				 union	
+                 select 'x'
+                   from bkg_rate rt
+                  where rt.bkg_no = bk.bkg_no
+                    and rt.rt_bl_tp_cd ='C' 
+				)
+	#end
+	#if (${tp_cd} == 'D')
+	and exists (select 'x'
+                    from bkg_booking 
+                    where bkg_no = bk.bkg_no
+                      and port_clz_dt <= TRUNC(sysdate))
+    and not exists (select 'x' 
+                      from bkg_booking a, bkg_ntc_his ntc
+                     where 1=1
+                       and a.bkg_no = bk.bkg_no
+					   and a.port_clz_dt <= TRUNC(sysdate)
+                       and a.bkg_no = ntc.bkg_no
+                       and ntc.ntc_via_cd ='E'
+                       and ntc.ntc_knd_cd ='BL'
+                       and ntc.snd_usr_id = 'SYSTEM'
+					   and ntc.edi_id = edi_receive_id                 
+                     ) 
+	#end
+#end
+#if (${tp_cd} == 'D') 
+	#if (${auto_manual_flg} == 'Y') 
+	UNION
+	
+	SELECT DISTINCT GROUP_EDI_ID GROUP_ID
+		, EDI_RECEIVE_ID RCV_ID
+	#if (${tp_cd} == 'D') 
+		, REF_CODE
+	#end
+	 FROM 
+    	(SELECT BKG_NO
+        	, MIN(RANK) RANK
+	        , GROUP_EDI_ID
+	        , EDI_RECEIVE_ID
+	        , REF_CODE
+	      FROM 
+	        (SELECT  BK.BKG_NO
+	                , MIN(TP_RANK.RANK) RANK
+	                , edi_BY_CUST.group_edi_id
+	                , edi_BY_CUST.EDI_RECEIVE_ID
+	                , DECODE(@[tp_cd], 'D', 'D', edi_BY_CUST.cnt_cd||edi_BY_CUST.cust_seq) AS ref_code
+	          FROM BKG_CUSTOMER CUST
+	                , BKG_BOOKING BK
+	                , (SELECT GRP.ESVC_GRP_CD           GROUP_EDI_ID
+	                         , GRP.CUST_TRD_PRNR_ID     EDI_RECEIVE_ID
+	                         , grp_cUST.CNT_CD   
+	                         , grp_cUST.CUST_SEQ
+	                         , GRP_CUST.BKG_CUST_TP_DESC 
+							 , GRP_CUST.BL_DRFT_AUTO_DYS
+	                   FROM BKG_EDI_GRP_CUST grp_cUST, BKG_EDI_GRP GRP
+	                  WHERE GRP.ESVC_GRP_CD         = grp_cUST.ESVC_GRP_CD
+	                    AND GRP.CO_CD               = grp_cUST.CO_CD
+	                    AND GRP.CO_CD               = 'H'
+	                    AND GRP.ESVC_GRP_DELT_FLG   = 'N'
+	                    AND grp_cUST.cnt_Cd         > ' '
+	                    AND grp_cUST.cust_seq       > 0
+	                    AND grp_cUST.DELT_FLG       = 'N'
+	#if (${tp_cd} == 'D') 
+	                    -- tpCd = 'D'
+	                    AND grp_cust.bl_drft_flg    = 'Y'       
+		#if (${auto_manual_flg} == 'Y') 
+	                    --autoManualCd = 'Y'
+	                    AND grp_cust.BL_DRFT_AUTO_FLG = 'Y'
+					    AND grp_cust.BL_DRFT_AUTO_DYS > 0	                           
+		#end
+	#end
+	                    ) EDI_BY_CUST               
+	                , (SELECT 'S' RCV_TP, '1SH' RANK FROM DUAL 
+	                   UNION SELECT 'C' RCV_TP, '2CN' RANK FROM DUAL 
+	                   UNION SELECT 'N' RCV_TP, '3NF' RANK FROM DUAL 
+	                   UNION SELECT 'F' RCV_TP, '4FF' RANK FROM DUAL 
+	                   UNION SELECT 'A' RCV_TP, '5AN' RANK FROM DUAL 
+	                   UNION SELECT 'E' RCV_TP, '6EX' RANK FROM DUAL) TP_RANK,
+					   VSK_VSL_PORT_SKD VSK,
+					   BKG_VVD VVD
+		         WHERE EDI_BY_CUST.CNT_CD   = CUST.CUST_CNT_CD 
+		           AND EDI_BY_CUST.CUST_SEQ = CUST.CUST_SEQ
+		           AND BK.BKG_NO            = CUST.BKG_NO
+		           AND CUST.BKG_CUST_TP_CD = TP_RANK.RCV_TP
+		           and bk.bkg_no = @[bkg_no]
+		           AND DECODE(BKG_CUST_TP_DESC,'ALL','ALL',CUST.BKG_CUST_TP_CD) IN (SELECT COLUMN_VALUE FROM TABLE(BKG_SPLIT_FNC(BKG_CUST_TP_DESC,',')))
+		           AND VSK.VPS_ETD_DT    >= TRUNC(SYSDATE) - 11
+	           	   AND VSK.VPS_ETD_DT    <= TRUNC(SYSDATE)
+              	   AND VSK.VPS_ETD_DT    <= TRUNC(SYSDATE) - EDI_BY_CUST.BL_DRFT_AUTO_DYS + 1
+                   AND SYSDATE  >= TRUNC(SYSDATE)+ 23/24
+                   AND VSK.VSL_CD = VVD.VSL_CD
+                   AND VSK.SKD_VOY_NO = VVD.SKD_VOY_NO
+                   AND VSK.SKD_DIR_CD = VVD.SKD_DIR_CD
+                   AND VSK.VPS_PORT_CD = VVD.POL_CD
+                   AND VSK.CLPT_IND_SEQ = VVD.POL_CLPT_IND_SEQ
+                   AND VVD.POL_CD = BK.POL_CD
+                   AND VVD.BKG_NO = BK.BKG_NO
+           		   AND BK.BKG_STS_CD <> 'X' 		
+	               /* Consignee의 Name 누락여부 */										
+           		   AND EXISTS (SELECT CUST_NM 										
+	                 	         FROM BKG_CUSTOMER 										
+	                     		 WHERE BKG_NO = BK.BKG_NO 										
+	                          	   AND BKG_CUST_TP_CD ='C' 	
+	                          	   AND CUST_NM > ' '									
+	                          	   AND ROWNUM = 1 )										
+	           		 /* TTL Package and Description 누락여부 */										
+	           		 AND EXISTS (SELECT 'Y' 										
+	                 	         FROM BKG_BL_DOC A, 										
+								  BKG_BL_MK_DESC B 										
+	                        	 WHERE BK.BKG_NO = A.BKG_NO										
+	                          	   AND A.BKG_NO = B.BKG_NO (+)										
+	                          	   AND B.MK_SEQ (+) = 1										
+	                               AND (A.PCK_CMDT_DESC IS NOT NULL OR A.CNTR_CMDT_DESC IS NOT NULL OR B.CMDT_DESC IS NOT NULL)										
+	                          	   AND ROWNUM = 1 )										
+	           		 /* CNTR No 존재 여부 */ 										
+	           		 AND EXISTS (SELECT 'Y' 										
+	                 	         FROM BKG_CONTAINER 										
+	                        	 WHERE BKG_NO = BK.BKG_NO 										
+	                          	   AND ROWNUM = 1 )                                          										
+	         	  GROUP BY BK.BKG_NO										
+						 , EDI_BY_CUST.GROUP_EDI_ID										
+	                	 , EDI_BY_CUST.EDI_RECEIVE_ID										
+	                     , EDI_BY_CUST.CNT_CD||EDI_BY_CUST.CUST_SEQ		
+	         UNION
+	          SELECT bk.bkg_no
+	                , '7SC' RANK
+	                , edi_BY_SC.group_edi_iD
+	                , edi_BY_SC.EDI_RECEIVE_ID
+	                , DECODE(@[tp_cd], 'D', 'D', edi_BY_SC.sc_no) AS ref_code
+	          FROM BKG_BOOKING BK
+	                , (SELECT  GRP.ESVC_GRP_CD           GROUP_EDI_ID
+	                         , GRP.CUST_TRD_PRNR_ID     EDI_RECEIVE_ID
+	                         , grp_cUST.SC_NO
+	                         , GRP_CUST.BKG_CTRT_TP_CD
+						    , GRP_CUST.BL_DRFT_AUTO_DYS	
+	                   FROM BKG_EDI_GRP GRP, BKG_EDI_GRP_CUST grp_cUST
+	                  WHERE GRP.ESVC_GRP_CD         = grp_cUST.ESVC_GRP_CD
+	                    AND GRP.CO_CD               = grp_cUST.CO_CD      
+	                    AND GRP.CO_CD               = 'H'
+	                    AND GRP.ESVC_GRP_DELT_FLG   = 'N'
+	                    and grp_cUST.sc_no          > ' '              
+	                    AND grp_cUST.DELT_FLG       = 'N'
+	#if (${tp_cd} == 'D') 
+	                    -- tpCd = 'D'
+	                    AND grp_cust.bl_drft_flg    = 'Y'       
+		#if (${auto_manual_flg} == 'Y') 
+                    --autoManualCd = 'Y'
+	                    AND grp_cust.BL_DRFT_AUTO_FLG = 'Y'     
+					    AND grp_cust.BL_DRFT_AUTO_DYS > 0                            
+		#end                        
+	#end
+	                    ) EDI_BY_SC,
+					    VSK_VSL_PORT_SKD VSK,
+	                    BKG_VVD VVD
+	         WHERE EDI_BY_SC.SC_NO  = DECODE(EDI_BY_SC.BKG_CTRT_TP_CD, '1', BK.SC_NO, '2', BK.RFA_NO)
+	           and bk.bkg_no = @[bkg_no]
+			   AND VSK.VPS_ETD_DT    >= TRUNC(SYSDATE) - 11
+               AND VSK.VPS_ETD_DT    <= TRUNC(SYSDATE)
+               AND VSK.VPS_ETD_DT    <= TRUNC(SYSDATE) - EDI_BY_SC.BL_DRFT_AUTO_DYS + 1
+               AND SYSDATE  >= TRUNC(SYSDATE)+ 23/24
+               AND VSK.VSL_CD = VVD.VSL_CD
+               AND VSK.SKD_VOY_NO = VVD.SKD_VOY_NO
+               AND VSK.SKD_DIR_CD = VVD.SKD_DIR_CD
+               AND VSK.VPS_PORT_CD = VVD.POL_CD
+               AND VSK.CLPT_IND_SEQ = VVD.POL_CLPT_IND_SEQ
+               AND VVD.POL_CD = BK.POL_CD
+               AND VVD.BKG_NO = BK.BKG_NO								
+               AND BK.BKG_STS_CD <> 'X'
+               /* Consignee의 Name 누락여부 */										
+           	   AND EXISTS (SELECT CUST_NM 										
+	                          FROM BKG_CUSTOMER 										
+	                          WHERE BKG_NO = BK.BKG_NO 										
+	                            AND BKG_CUST_TP_CD ='C'
+	                            AND CUST_NM > ' ' 										
+	                            AND ROWNUM = 1 )										
+           	  /* TTL Package and Description 누락여부 */										
+           	  AND EXISTS (SELECT 'Y' 										
+                          FROM BKG_BL_DOC A, 										
+                               BKG_BL_MK_DESC B 										
+                          WHERE BK.BKG_NO = A.BKG_NO										
+                            AND A.BKG_NO = B.BKG_NO (+)										
+                            AND B.MK_SEQ (+) = 1										
+                            AND (A.PCK_CMDT_DESC IS NOT NULL OR A.CNTR_CMDT_DESC IS NOT NULL OR B.CMDT_DESC IS NOT NULL)										
+                            AND ROWNUM = 1 )										
+           	   /* CNTR No 존재 여부 */ 										
+           	   AND EXISTS (SELECT 'Y' 										
+                           FROM BKG_CONTAINER 										
+                           WHERE BKG_NO = BK.BKG_NO 										
+                             AND ROWNUM = 1 ) 
+	           )
+	     GROUP BY BKG_NO
+	        , GROUP_EDI_ID
+	        , EDI_RECEIVE_ID
+	        , ref_code) mst, bkg_booking bk
+	  where bk.bkg_no = mst.bkg_no 
+		#if (${tp_cd} == 'D')
+	    AND 'YES' = CASE WHEN BK.XTER_SI_CD IN ('INT','CSM') AND EDI_RECEIVE_ID = 'TRADIANT' THEN 'NO'
+	                     WHEN BK.XTER_SI_CD <> 'CSM' AND EDI_RECEIVE_ID = 'CARGOSMART' THEN 'NO' /* 이병동씨 요청 */
+	                     WHEN BK.XTER_SI_CD <> 'INT' AND (EDI_RECEIVE_ID = 'INTTRA' OR EDI_RECEIVE_ID = 'INTTRANG2') THEN 'NO'
+						  /* CARGOSMART 는 DPCS 대상인건의 경우 'QA' 완료일때 전송 이지영과장님 요청 */
+						 WHEN BK.BKG_OFC_CD NOT IN ('HKGSC', 'SZPSC', 'XMNSC')
+                              AND NVL((SELECT 'Y' FROM BKG_SR_CRNT_RQST WHERE BKG_NO = BK.BKG_NO AND BL_AUD_FLG = 'Y' AND ROWNUM = 1 ),'N') <> 'Y'
+							  AND (EDI_RECEIVE_ID = 'CARGOSMART' 
+							  AND NVL((SELECT 'Y' FROM BKG_SR_CRNT_RQST WHERE BKG_NO = BK.BKG_NO AND SR_AMD_TP_CD = 'O' AND ROWNUM = 1),'N') = 'Y') THEN 'NO' 
+                         /* CARGOSMART 인 경우라도 'HKGSC', 'SZPSC', 'XMNSC' 경우에는 BKG AUDIT완료되어있으면 전송 황일균부장님 요청 */
+                         WHEN EDI_RECEIVE_ID = 'CARGOSMART' 
+                              AND BK.BKG_OFC_CD IN ('HKGSC', 'SZPSC', 'XMNSC')
+                              AND NVL((SELECT AUD_STS_CD FROM BKG_RATE WHERE BKG_NO = BK.BKG_NO),'N') != 'Y' THEN 'NO'
+                         ELSE 'YES' END
+		#end
+		#if (${auto_manual_flg} == 'Y') 
+		--autoManualCd = 'Y'
+			#if (${tp_cd} == 'D')    
+			 AND EXISTS (SELECT 'X'									
+			   	          FROM BKG_CHG_RT CHG										
+			           	  WHERE CHG.BKG_NO = BK.BKG_NO										
+		               		AND CHG.CHG_CD = 'OFT'
+		               		AND ROWNUM = 1 
+		               	  UNION	
+		               	  SELECT 'X'
+		               	  FROM BKG_RATE RT
+			           	  WHERE RT.BKG_NO = BK.BKG_NO
+		               	    AND RT.RT_BL_TP_CD ='C' 
+        	       		)										
+			#end
+			#if (${tp_cd} == 'D')
+			AND NOT EXISTS (SELECT /*+USE_NL(A,NTC,VVD,VSK)*/ 'X' 										
+		                      FROM BKG_BOOKING A, BKG_NTC_HIS NTC, 	BKG_VVD VVD, VSK_VSL_PORT_SKD VSK										
+		                      WHERE 1=1										
+		                        AND A.BKG_NO = BK.BKG_NO										
+		                        AND A.BKG_NO = NTC.BKG_NO	
+								AND A.BKG_NO = @[bkg_no]									
+		                        AND NTC.NTC_VIA_CD ='E'										
+		                        AND NTC.NTC_KND_CD ='BL'										
+		                        AND NTC.SND_USR_ID = 'SYSTEM'
+		                        AND NTC.EDI_ID = EDI_RECEIVE_ID										
+		                        AND VSK.VPS_ETD_DT <= TRUNC(SYSDATE) 
+	                            AND VSK.VSL_CD = VVD.VSL_CD
+	                            AND VSK.SKD_VOY_NO = VVD.SKD_VOY_NO
+	                            AND VSK.SKD_DIR_CD = VVD.SKD_DIR_CD
+	                            AND VSK.VPS_PORT_CD = VVD.POL_CD
+	                            AND VSK.CLPT_IND_SEQ = VVD.POL_CLPT_IND_SEQ
+	                            AND VVD.POL_CD = A.POL_CD
+	                            AND VVD.BKG_NO = A.BKG_NO                    										
+	                         )  
+			#end
+		#end
+	#end
+#end			]]></sql>
+			<params>
+				<param name="tp_cd" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ApprovalDBDAOApprovalCsrVORSQL">
+			<desc><![CDATA[Csr의 목록을 가져온다.]]></desc>
+			<sql><![CDATA[
+SELECT T.APRO_RQST_NO
+      ,T.CRNT_APRO_SEQ APRO_RQST_SEQ
+      --,DECODE(T.PAY_DT,'',T.APSTS_CD,'Paid') APSTS_CD
+      ,T.APSTS_CD ALPS_STATUS
+      ,T.IF_STATUS
+      ,T.SUB_SYS_CD
+      ,T.RQST_ST_DT
+      ,T.COST_OFC_CD
+      ,T.CSR_NO
+      ,T.INV_KNT
+      ,T.VNDR_SEQ
+      ,T.VNDR_NM
+      ,T.PAY_DUE_DT
+      ,T.PAY_DT 
+      ,T.CURR_CD
+      ,T.APRO_TTL_AMT
+	  ,DECODE(T.APRO_TTL_AMT,0,T.ASA_AMT,0) ASA_AMT
+      ,T.CSR_USD_AMT
+      ,T.APRO_RMK
+      ,T.APPYN
+      ,'' FRST_APRO_USR_ID
+      ,'' APRO_STEP
+      ,'' APRO_SEQ_KEY
+      ,'' USR_ID
+      ,'' USR_NM
+      ,'' OFC_CD
+      --,'' APRO_RQST_SEQ
+      ,'' INV_SUB_SYS_CD
+	  ,T.AGMT_DOC_CFM_CD
+	  ,T.AGMT_FILE_CFM_CD
+      , AP_COM_CHK_CURR_APRO_USR_FNC((SELECT D.CSR_NO FROM COM_APRO_CSR_DTL D WHERE D.APRO_RQST_NO = T.APRO_RQST_NO),@[usr_id]) CHK_CURR_APRO_USR_YN
+	  ,(CASE WHEN
+        		NVL(( SELECT COUNT(F.ATCH_FILE_ID)
+        				FROM COM_AP_FILE_UPLD F
+        				WHERE 1=1
+        				AND F.AP_FILE_DIV_CD = 'C'
+        				AND F.CSR_NO = T.CSR_NO 
+        				AND F.CSR_FILE_UPLD_TP_CD = 'FU'
+						AND NVL(F.DELT_FLG,'N') <> 'Y'
+        			),0) > 0 THEN 'Y'    
+    	  	ELSE 'N'
+          	END ) FILE_UPLD_FLG
+	  ,DECODE(T.APRO_TTL_AMT,0,T.ASA_NO,'') ASA_NO
+  FROM ( SELECT ROW_NUMBER() OVER (ORDER BY RQST_ST_DT DESC) no
+               ,A.APRO_RQST_NO
+            ,A.CRNT_APRO_SEQ
+      		,CASE WHEN (E.AFT_ACT_FLG = 'N' OR E.AFT_ACT_FLG = 'X') THEN 'Canceled'
+                  ELSE D.INTG_CD_VAL_DP_DESC
+             END APSTS_CD
+			,CASE WHEN E.PAY_DT IS NOT NULL THEN 'Paid'
+                  WHEN E.RCV_ERR_FLG = 'E' THEN 'A/P Rejected'
+		          WHEN E.IF_FLG = 'E' THEN 'I/F Error'
+		          WHEN E.IF_FLG = 'Y' AND E.RCV_ERR_FLG IS NULL THEN 'I/F Success'
+             END IF_STATUS   
+            ,A.SUB_SYS_CD
+            ,TO_CHAR(A.RQST_ST_DT, 'YYYY-MM-DD') RQST_ST_DT
+            ,B.COST_OFC_CD
+            ,B.CSR_NO
+            ,B.INV_KNT
+            ,TO_CHAR(B.VNDR_SEQ, '000000') VNDR_SEQ
+            ,V.VNDR_LGL_ENG_NM VNDR_NM
+            ,B.PAY_DUE_DT
+            ,E.PAY_DT
+            ,B.CURR_CD
+            ,B.APRO_TTL_AMT
+			,CASE WHEN A.SUB_SYS_CD = 'TES' 
+							THEN NVL((SELECT SUM(TTL_INV_AMT) AMT FROM TES_TML_SO_HDR WHERE CSR_NO = B.CSR_NO AND NVL(DELT_FLG,'N') <> 'Y'), B.APRO_TTL_AMT)
+			 	  WHEN A.SUB_SYS_CD = 'TRS' THEN
+							(SELECT 
+  								SUM(NVL(INV_WRK.INV_BZC_AMT , RAIL_WRK.INV_BZC_AMT )) INV_BZC_AMT
+							FROM AP_INV_HDR DTRB , TRS_TRSP_INV_WRK INV_WRK , TRS_TRSP_RAIL_INV_WRK RAIL_WRK
+							WHERE DTRB.CSR_NO = INV_WRK.CSR_NO(+)
+  							AND DTRB.CSR_NO = RAIL_WRK.CSR_NO(+)
+  							AND DTRB.CSR_NO = B.CSR_NO)
+				  WHEN A.SUB_SYS_CD IN ('LSE','CHS','MGS','MNR','PSO','TLL','CNI')
+							THEN (SELECT SUM(NVL(T.INV_NET_AMT ,0)) TTL_INV_AMT FROM AP_PAY_INV T , AP_INV_HDR A WHERE  T.CSR_NO = A.CSR_NO AND T.CSR_NO = B.CSR_NO AND NVL(T.DELT_FLG,'N') <> 'Y')
+				  WHEN A.SUB_SYS_CD IN ('ACM','FMS') 
+							THEN (SELECT SUM(INV_AMT) FROM AP_INV_DTRB WHERE CSR_NO = B.CSR_NO AND ATTR_CTNT1 IS NOT NULL AND DTRB_COA_ACCT_CD <> '954113')
+				  ELSE 0 
+	         END AS ASA_AMT
+            ,CASE WHEN A.APSTS_CD = 'C' THEN 'Y' -- approved
+                  WHEN A.APSTS_CD = 'D' THEN 'Y' -- Canceled
+                    WHEN A.APSTS_CD = 'R' THEN 'Y' -- Disapproved
+                    ELSE DECODE(NVL(C.APSTS_CD, ''), '', 'N', 'Y') 
+                END AS APPYN
+            ,C.APRO_RMK
+            ,E.CSR_USD_AMT --추가
+      		,E.ACCT_XCH_RT_YRMON
+    		,( CASE WHEN E.GW_AGMT_DOC_CFM_CD IS NOT NULL
+           		THEN ( CASE WHEN E.GW_AGMT_DOC_CFM_CD = 'P' THEN 'Y'
+                       WHEN E.GW_AGMT_DOC_CFM_CD = 'Y' THEN 'Y'
+                       ELSE 'N'
+                  END )
+         	 ELSE NVL(E.AGMT_DOC_CFM_CD,'N')
+    		 END ) AGMT_DOC_CFM_CD 
+			,NVL(E.AGMT_FILE_CFM_CD,'N') AGMT_FILE_CFM_CD
+            ,C.APRO_USR_ID
+		    ,E.ATTR_CTNT2 AS ASA_NO
+        FROM COM_APRO_RQST_HDR  A
+            ,COM_APRO_CSR_DTL   B
+            ,COM_APRO_RQST_ROUT C
+      ,COM_INTG_CD_DTL    D
+               ,AP_INV_HDR         E
+               ,MDM_VENDOR         V
+       WHERE 1 = 1
+         AND A.SUB_SYS_CD NOT IN ('JOO')  /* FMS의 OA계정으로 FMS는 ALPS결재도 가능함에 FMS를 제외에서 뺌 */
+         AND NVL(A.DELT_FLG, 'N') <> 'Y'
+           #if (${sub_sys_cd} != '')
+            AND A.SUB_SYS_CD = @[sub_sys_cd]
+           #end
+       AND A.APRO_RQST_NO = B.APRO_RQST_NO
+         AND A.APRO_RQST_NO = C.APRO_RQST_NO
+   AND A.APSTS_CD = D.INTG_CD_VAL_CTNT(+)
+            AND 'CD01474' = D.INTG_CD_ID(+)
+            AND B.CSR_NO = E.CSR_NO
+            AND NVL(E.CSR_APRO_TP_CD,'AL') = 'AL'
+            AND NVL(E.RQST_APRO_STEP_FLG,'N') <> 'Y'
+
+		   #if (${alps_status} == 'P') -- Requested
+            AND A.APSTS_CD = 'P'
+            AND A.CRNT_APRO_SEQ = C.APRO_RQST_SEQ
+           #elseif (${alps_status} == 'C') -- Approved
+            AND NVL(A.APSTS_CD, ' ') = 'C' AND E.AFT_ACT_FLG IS NULL
+           #elseif (${alps_status} == 'R') -- Disapproved
+            AND NVL(A.APSTS_CD, ' ') = 'R' AND E.AFT_ACT_FLG IS NULL
+		   #elseif(${alps_status} == 'X') -- Canceled
+            AND (E.AFT_ACT_FLG = 'N' OR E.AFT_ACT_FLG = 'X')
+           #else
+            AND A.CRNT_APRO_SEQ >= C.APRO_RQST_SEQ
+           #end
+
+		   #if (${if_status} == 'P') -- Paid
+			AND E.PAY_DT IS NOT NULL
+           #elseif (${if_status} == 'R') -- A/P Rejected
+            AND E.RCV_ERR_FLG = 'E'
+		   #elseif (${if_status} == 'E') -- I/F Error
+            AND E.IF_FLG = 'E' AND E.RCV_ERR_FLG IS NULL
+		   #elseif (${if_status} == 'S') -- I/F Success
+            AND E.IF_FLG = 'Y' AND E.RCV_ERR_FLG IS NULL AND E.PAY_DT IS NULL
+           #end
+
+            AND B.VNDR_SEQ = V.VNDR_SEQ
+            AND C.APRO_USR_ID IN ( SELECT NVL(EP_ID, USR_ID)
+                                     FROM COM_USER
+                                    WHERE USR_ID = @[usr_id]
+                                      AND USE_FLG = 'Y'
+                                    UNION
+                                   SELECT USR_ID
+                                     FROM COM_USER
+                                    WHERE USR_ID = @[usr_id]
+                                      AND USE_FLG = 'Y'
+                                 )
+           #if (${status} == 'S') --Created
+           #if (${sdate} != '')
+            AND TO_CHAR(E.CRE_DT, 'YYYY-MM-DD') >= @[sdate]
+           #end
+           #if (${edate} != '')
+            AND TO_CHAR(E.CRE_DT, 'YYYY-MM-DD') <= @[edate]
+           #end
+           #else
+           #if (${sdate} != '')
+            AND TO_CHAR(A.RQST_ST_DT, 'YYYY-MM-DD') >= @[sdate]
+           #end
+           #if (${edate} != '')
+            AND TO_CHAR(A.RQST_ST_DT, 'YYYY-MM-DD') <= @[edate]
+           #end
+           #end
+     ) T			]]></sql>
+			<params>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="sub_sys_cd" type="12" value="" out="N"/>
+				<param name="sdate" type="12" value="" out="N"/>
+				<param name="edate" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="StatusReportDBDAOsearchVgmCrossCheckListRSQL">
+			<desc><![CDATA[VGM Closing Status Report]]></desc>
+			<sql><![CDATA[
+#if (${p_dt_type} == 'ETD' && ${p_atd} != '' && ${p_etd} != '')
+WITH SKD_V AS (
+    SELECT VSL_CD,SKD_VOY_NO,SKD_DIR_CD,CLPT_IND_SEQ,VPS_PORT_CD
+    FROM VSK_VSL_PORT_SKD VPS
+    WHERE VPS_ETD_DT      >=  TO_DATE(@[p_atd],'yyyy-mm-dd')
+    AND   VPS_ETD_DT      <=  TO_DATE(@[p_etd],'yyyy-mm-dd') + 0.99999
+)
+#elseif (${p_dt_type} == 'VGM' && ${p_atd} != '' && ${p_etd} != '')
+WITH VGM_V AS (
+    SELECT  BKG_NO
+    FROM BKG_CLZ_TM TM       
+    WHERE TM.CLZ_TP_CD = 'V' -- VGM 
+    AND NVL(TM.MNL_SET_DT,TM.SYS_SET_DT) >=  TO_DATE(@[p_atd],'yyyy-mm-dd')
+    AND NVL(TM.MNL_SET_DT,TM.SYS_SET_DT) <=  TO_DATE(@[p_etd],'yyyy-mm-dd') + 0.99999
+    AND NVL(TM.MNL_SET_DT,TM.SYS_SET_DT) IS NOT NULL
+)
+#end
+    SELECT Y.* , SUM(VGM_CNT_TARGET) OVER() TOTAL_VGM_CNT, TO_NUMBER(CNTR_CNT_TARGET) TOTAL_CNTR_CNT
+               ,(
+                  SELECT TO_CHAR(VPS_ETD_DT,'YYYY-MM-DD') VPS_ETD_DT
+                  FROM VSK_VSL_PORT_SKD VPS
+                  WHERE VPS.VSL_CD      =  Y.VSL_CD
+                  AND VPS.SKD_VOY_NO    =  Y.SKD_VOY_NO
+                  AND VPS.SKD_DIR_CD    =  Y.SKD_DIR_CD
+                  AND VPS.CLPT_IND_SEQ  =  Y.POL_CLPT_IND_SEQ
+                  AND VPS.VPS_PORT_CD   =  Y.POL_CD
+                  AND Y.VSL_PRE_PST_CD||Y.VSL_SEQ = (SELECT MIN(Z.VSL_PRE_PST_CD||Z.VSL_SEQ) FROM BKG_VVD Z WHERE Z.BKG_NO = Y.BKG_NO)
+                ) VPS_ETD_DT
+               , 0 TOTAL_NO_VGM_CNT 
+               , NVL((SELECT CUST_REF_NO_CTNT FROM BKG_REFERENCE Z WHERE Y.BKG_NO = Z.BKG_NO AND Z.BKG_REF_TP_CD = 'EBRF' ),'') REF_NO
+    FROM (
+        SELECT 
+                DENSE_RANK() OVER( ORDER BY BKG.BKG_NO) DENSE_RANK,
+                BKG.BKG_NO,
+                BKG.BL_NO,
+                BKG.BKG_OFC_CD, /*BKG OFC*/
+                BKG.OB_SLS_OFC_CD,/*Sales Office*/
+                BKG.CTRT_OFC_CD, /*Ctrt Office Code */
+                BKG.BKG_STS_CD,/*status1*/                                                 
+                BKG_JOIN_FNC( CURSOR(SELECT CNTR_TPSZ_CD||'-'||ltrim(TO_CHAR(NVL(OP_CNTR_QTY, 0),'99990.99'))
+                                     FROM BKG_QUANTITY
+                                     WHERE BKG_NO = BKG.BKG_NO
+                                     AND   CNTR_TPSZ_CD IS NOT NULL
+                                     ORDER BY CNTR_TPSZ_CD
+                                         )
+                ) QTY_BKG,/*QTY-BKG*/
+                BKG_JOIN_FNC( CURSOR(SELECT  CNTR_TPSZ_CD||'-'||ltrim(TO_CHAR(NVL(sum(CNTR_VOL_QTY), 0),'99990.99'))
+                                     FROM    BKG_CONTAINER
+                                     WHERE BKG_NO = BKG.BKG_NO
+                                     AND   CNTR_TPSZ_CD IS NOT NULL
+                                     GROUP BY CNTR_TPSZ_CD
+                                     ORDER BY CNTR_TPSZ_CD
+                                     )
+                ) QTY_CNTR,/*QTY-CNTR*/
+                B.CNTR_NO CNTR_NO,/*NO.*/
+                B.CNTR_TPSZ_CD SZ, /*SZ*/
+                B.CNTR_WGT, /*Weight*/        
+                B.WGT_UT_CD,                  
+                VGM_WGT,
+                VGM_WGT_UT_CD,
+                VGM_VRFY_SIG_CTNT,
+                VGM_MZD_TP_CD,
+                NVL(B.CNTR_VOL_QTY,0) VOL, /*Vol*/
+                BKG.DEL_CD,
+                BKG.POR_CD,
+                VVD.POL_CD,
+                VVD.POD_CD,
+                VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD  AS VVD_CD,
+                VVD.VSL_CD,VVD.SKD_VOY_NO,VVD.SKD_DIR_CD,VVD.POL_CLPT_IND_SEQ,VVD.VSL_PRE_PST_CD,VVD.VSL_SEQ,
+                (CASE WHEN NVL(VGM_WGT,0) > 0 AND NVL(VGM_WGT_UT_CD,'X') != 'X' AND NVL(VGM_VRFY_SIG_CTNT,'X') != 'X' 
+                       THEN NVL(B.CNTR_VOL_QTY,0)
+                       ELSE 0 
+                END) VGM_CNT_TARGET,  
+                COUNT(DISTINCT BKG.BKG_NO) OVER() TOTAL_BKG,
+                BKG_JOIN_FNC( CURSOR(SELECT  NVL(SUM(OP_CNTR_QTY), 0)
+                                     FROM BKG_QUANTITY
+                                     WHERE BKG_NO = BKG.BKG_NO
+                                     AND CNTR_TPSZ_CD IS NOT NULL
+                                     AND CNTR_TPSZ_CD NOT LIKE 'Q%' 
+                                     )
+                ) CNTR_CNT_TARGET,
+                VVD.POL_YD_CD,
+                VVD.SLAN_CD,
+                S.CUST_NM SHPR_NAME,
+                S.CUST_CNT_CD||S.CUST_SEQ SHIPPER,
+                TO_CHAR(NVL(TM.MNL_SET_DT,TM.SYS_SET_DT),'YYYY-MM-DD HH24:MI') VGM_SET_DT
+        FROM    BKG_BOOKING BKG,
+                BKG_CONTAINER B,
+                BKG_VVD VVD,
+                BKG_CUSTOMER S,
+                BKG_CLZ_TM TM
+        WHERE  BKG.BKG_NO = VVD.BKG_NO
+               AND BKG.BKG_NO = B.BKG_NO(+)
+               AND BKG.BKG_CGO_TP_CD <> 'P'
+               AND BKG.BKG_STS_CD <> 'X'
+               AND S.BKG_CUST_TP_CD ='S'
+               AND BKG.BKG_NO = S.BKG_NO
+               AND BKG.BKG_NO = TM.BKG_NO(+)
+               AND TM.CLZ_TP_CD(+) = 'V' -- VGM 
+        #if(${vvd_arr} != '')
+               AND (VVD.VSL_CD, VVD.SKD_VOY_NO, VVD.SKD_DIR_CD ) IN (
+          #foreach($vvd_str IN ${vvd_arr})
+            #if($velocityCount < $vvd_arr.size())
+                    (SUBSTR('$vvd_str',1,4),SUBSTR('$vvd_str',5,4),SUBSTR('$vvd_str',9,1)),
+            #else
+                    (SUBSTR('$vvd_str',1,4),SUBSTR('$vvd_str',5,4),SUBSTR('$vvd_str',9,1))
+                 )
+            #end
+         #end
+        #end
+
+        #if (${p_pol_cd} != '')
+               AND VVD.POL_CD LIKE '%'||@[p_pol_cd]||'%'
+        #end
+
+        #if (${p_pol_lt} == 'LC') 
+            AND BKG.POL_CD  = VVD.POL_CD
+        #end
+
+        #if (${p_pol_lt} == 'TS') 
+            AND BKG.POL_CD  != VVD.POL_CD
+        #end
+
+        #if (${p_bkg_ofc_cd} != '')
+          #if (${p_ofc_cd} != '')
+            AND BKG.BKG_OFC_CD IN 
+                     ( SELECT OFC_CD 
+                         FROM MDM_ORGANIZATION A 
+                        START WITH A.OFC_CD LIKE '%'||@[p_bkg_ofc_cd]||'%'
+                      CONNECT BY PRIOR  A.OFC_CD = A.PRNT_OFC_CD )
+          #else  
+             AND BKG.BKG_OFC_CD LIKE '%'||@[p_bkg_ofc_cd]||'%'
+          #end
+        #end
+
+        #if (${p_rhq_cd} != '')
+               AND EXISTS (
+                     SELECT  'Y' 
+                     FROM (
+                       SELECT A.OFC_CD
+                       FROM MDM_ORGANIZATION A
+                       START WITH A.OFC_CD = @[p_rhq_cd]
+                       CONNECT BY PRIOR A.OFC_CD = A.PRNT_OFC_CD  
+                       ) X
+                     WHERE  X.OFC_CD = BKG.BKG_OFC_CD
+         )
+        #end
+                 
+        #if (${p_dt_type} == 'ETD' && ${p_atd} != '' && ${p_etd} != '')
+               AND EXISTS (
+                     SELECT  'Y' 
+                     FROM SKD_V VPS 
+                     WHERE VPS.VSL_CD       =  VVD.VSL_CD
+                      AND VPS.SKD_VOY_NO    =  VVD.SKD_VOY_NO
+                      AND VPS.SKD_DIR_CD    =  VVD.SKD_DIR_CD
+                      AND VPS.CLPT_IND_SEQ  =  VVD.POL_CLPT_IND_SEQ
+                      AND VPS.VPS_PORT_CD   =  VVD.POL_CD
+               ) 
+                 
+        #elseif (${p_dt_type} == 'VGM' && ${p_atd} != '' && ${p_etd} != '')
+               AND EXISTS (
+                     SELECT  'Y' 
+                     FROM VGM_V X
+                     WHERE X.BKG_NO = BKG.BKG_NO
+               ) 
+        #end
+        #if(${p_vgm_flg} =='Y')
+               AND NVL(B.VGM_WGT,0) > 0
+               AND NVL(B.VGM_WGT_UT_CD,'X') != 'X'
+               AND NVL(B.VGM_VRFY_SIG_CTNT,'X') != 'X'
+        #elseif(${p_vgm_flg} =='I')
+               AND NVL(B.VGM_WGT,0) > 0 
+               AND NVL(B.VGM_VRFY_SIG_CTNT,'X') = 'X'
+        #elseif(${p_vgm_flg} =='N')
+               AND NVL(B.VGM_WGT,0) = 0 
+        #end
+        ORDER BY BKG.BKG_NO, B.CNTR_NO
+    ) Y			]]></sql>
+			<params>
+				<param name="p_atd" type="12" value="" out="N"/>
+				<param name="p_etd" type="12" value="" out="N"/>
+				<param name="p_pol_cd" type="12" value="" out="N"/>
+				<param name="p_bkg_ofc_cd" type="12" value="" out="N"/>
+				<param name="p_rhq_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

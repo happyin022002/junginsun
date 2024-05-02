@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ForecastReportDBDAOsearchPlannedRepoInOriginRSQL">
+			<desc><![CDATA[EES_EQR_1040 의 초기값 조회]]></desc>
+			<sql><![CDATA[
+WITH DUMMY_YARD AS 
+(
+    SELECT C.YD_CD, A.SCC_CD
+    FROM MDM_EQ_ORZ_CHT A
+        ,MDM_LOCATION B
+        ,MDM_YARD C                      
+  #if(${loc_grp_cd} == 'L')          
+    WHERE A.LCC_CD = @[loc_cd] -- E:ECC, L:LCC, S:SCC 
+  #elseif(${loc_grp_cd} == 'E')         
+    WHERE A.ECC_CD = @[loc_cd] -- E:ECC, L:LCC, S:SCC
+  #elseif(${loc_grp_cd} == 'S')    
+    WHERE A.SCC_CD = @[loc_cd] -- E:ECC, L:LCC, S:SCC 
+  #else
+    WHERE 1=1
+  #end        	                 	     
+    AND   A.SCC_CD = B.SCC_CD
+    AND   B.LOC_CD = C.LOC_CD
+)
+ 
+SELECT FIN_SEQ 
+      ,STS
+      ,LANE
+      ,VSL_CD
+      ,SKD_VOY_NO
+      ,SKD_DIR_CD
+      ,YARD
+      ,ETB
+      ,CNTR_TPSZ_CD
+      ,CNTR_QTY
+      ,CHK_FLG
+FROM (
+	SELECT ROW_NUMBER() OVER (PARTITION BY VSL_CD, SKD_VOY_NO, SKD_DIR_CD, YARD, ETB, CNTR_TPSZ_CD ORDER BY DP_SEQ ASC) FIN_SEQ -- MANUAL 조회(P+G) > (PLAN > GUIDELINE)
+	      ,STS
+	      ,LANE
+	      ,VSL_CD
+	      ,SKD_VOY_NO
+	      ,SKD_DIR_CD
+	      ,YARD
+	      ,ETB
+	      ,CNTR_TPSZ_CD
+	      ,CNTR_QTY
+	      ,CHK_FLG
+	FROM
+	(
+		-- < PLAN 조회 > ----------------------------------------------------------------------------------------- 
+		-- PLAN, GUIDE LINE 중에 PLAN > GUIDELINE 순으로 집계
+		
+		SELECT 2 DP_SEQ     -- MANUAL P/G이 1순위이고 PLAN-GUIDELINE은 2순위
+		      ,PLN_REPO_STS_CD STS
+		      ,SLAN_CD         LANE      
+		      ,VSL_CD      
+		      ,SKD_VOY_NO  
+		      ,SKD_DIR_CD  
+		      ,POD_YD_CD       YARD
+		      ,TO_CHAR(VPS_ETB_DT, 'YYYY-MM-DD')   ETB  
+		      ,CNTR_TPSZ_CD
+		      ,CNTR_QTY 
+		      ,'N' CHK_FLG -- 적색표시
+		FROM
+		(         
+		    SELECT ROW_NUMBER() OVER (PARTITION BY VSL_CD, SKD_VOY_NO, SKD_DIR_CD, POD_YD_CD, CNTR_TPSZ_CD, VPS_ETB_DT ORDER BY DP_SEQ ASC) SEL_CD -- PLAN > GUIDELINE
+		          ,PLN_REPO_STS_CD
+		          ,VSL_CD      
+		          ,SKD_VOY_NO  
+		          ,SKD_DIR_CD  
+		          ,POD_YD_CD   
+		          ,CNTR_TPSZ_CD
+		          ,CNTR_QTY 
+		          ,SLAN_CD
+		          ,VPS_PORT_CD
+		          ,VPS_ETB_DT   
+		    FROM
+		    (         
+		        --- < PLAN > --------------------------  
+		        SELECT 1 DP_SEQ
+		              ,'P' PLN_REPO_STS_CD 
+		              ,B.VSL_CD      
+		              ,B.SKD_VOY_NO  
+		              ,B.SKD_DIR_CD  
+		              ,B.POD_YD_CD   
+		              ,B.CNTR_TPSZ_CD
+		              ,B.CNTR_QTY 
+		              ,A.SLAN_CD
+		              ,A.VPS_PORT_CD
+		              ,A.VPS_ETB_DT   
+		        FROM VSK_VSL_PORT_SKD A
+		            ,(
+		                SELECT A.VSL_CD
+		                  ,A.SKD_VOY_NO
+		                  ,A.SKD_DIR_CD
+		                  ,A.POL_YD_CD
+		                  ,A.POD_YD_CD
+		                  ,B.CNTR_TPSZ_CD           
+		                  ,B.CNTR_QTY
+		                FROM EQR_CTRL_MTY_DCHG_PLN A
+		                    ,EQR_CTRL_MTY_DCHG_PLN_QTY B
+		                    ,DUMMY_YARD C
+		                WHERE A.POD_YD_CD  = C.YD_CD          
+		                AND   A.VSL_CD     = B.VSL_CD
+		                AND   A.SKD_VOY_NO = B.SKD_VOY_NO
+		                AND   A.SKD_DIR_CD = B.SKD_DIR_CD
+		                AND   A.POL_YD_CD  = B.POL_YD_CD 
+		                AND   A.POD_YD_CD  = B.POD_YD_CD  
+		                AND   A.MTY_PLN_SHW_FLG = 'Y'   -- 하드코딩  
+		            ) B
+		        WHERE A.VSL_CD(+)     = B.VSL_CD
+		        AND   A.SKD_VOY_NO(+) = B.SKD_VOY_NO
+		        AND   A.SKD_DIR_CD(+) = B.SKD_DIR_CD  
+		        AND   A.YD_CD(+)      = B.POD_YD_CD
+		        AND   A.CLPT_IND_SEQ = '1'  -- 하드코딩    
+		        AND   A.VPS_ETB_DT BETWEEN  TO_DATE(@[etb],'YYYY-MM-DD') AND TO_DATE(@[etb],'YYYY-MM-DD')+0.9999
+		        
+		            -- < GUIDELINE 조회 > -----------------------------------------------------------------------------------------
+		        UNION ALL         
+		        SELECT 2 DP_SEQ
+		              ,'G' PLN_REPO_STS_CD 
+		              ,B.VSL_CD      
+		              ,B.SKD_VOY_NO  
+		              ,B.SKD_DIR_CD  
+		              ,B.POD_YD_CD   
+		              ,B.CNTR_TPSZ_CD
+		              ,B.CNTR_QTY 
+		              ,A.SLAN_CD
+		              ,A.VPS_PORT_CD
+		              ,A.VPS_ETB_DT   
+		        FROM VSK_VSL_PORT_SKD A
+		            ,(
+		                SELECT A.VSL_CD
+		                  ,A.SKD_VOY_NO
+		                  ,A.SKD_DIR_CD
+		                  ,A.POD_YD_CD
+		                  ,B.CNTR_TPSZ_CD           
+		                  ,B.CNTR_QTY
+		                FROM EQR_CTRL_PLN_SNAP A
+		                    ,EQR_CTRL_PLN_SNAP_QTY B
+		                    ,DUMMY_YARD C
+		                WHERE A.POD_YD_CD  = C.YD_CD          
+		                AND   A.VSL_CD     = B.VSL_CD
+		                AND   A.SKD_VOY_NO = B.SKD_VOY_NO
+		                AND   A.SKD_DIR_CD = B.SKD_DIR_CD
+		                AND   A.POD_YD_CD  = B.POD_YD_CD  
+		                AND   A.TO_ETB_DT  = B.TO_ETB_DT
+		                AND   A.TO_ETB_DT BETWEEN  TO_DATE(@[etb],'YYYY-MM-DD') AND TO_DATE(@[etb],'YYYY-MM-DD')+0.9999
+		            ) B
+		        WHERE A.VSL_CD(+)     = B.VSL_CD
+		        AND   A.SKD_VOY_NO(+) = B.SKD_VOY_NO
+		        AND   A.SKD_DIR_CD(+) = B.SKD_DIR_CD  
+		        AND   A.YD_CD(+)      = B.POD_YD_CD
+		        AND   A.CLPT_IND_SEQ  = '1'  -- 하드코딩    
+		    )      
+		)
+		WHERE SEL_CD = 1   
+	   
+	)
+)
+WHERE FIN_SEQ = 1    
+AND   STS          = @[sts]         
+AND   LANE         = @[lane]        
+AND   VSL_CD       = @[vsl_cd]      
+AND   SKD_VOY_NO   = @[skd_voy_no]  
+AND   SKD_DIR_CD   = @[skd_dir_cd]  
+AND   YARD         = @[yard]        
+AND   ETB          = @[etb]         
+AND   CNTR_TPSZ_CD = @[tpsz]			]]></sql>
+			<params>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="etb" type="12" value="" out="N"/>
+				<param name="sts" type="12" value="" out="N"/>
+				<param name="lane" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="yard" type="12" value="" out="N"/>
+				<param name="tpsz" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

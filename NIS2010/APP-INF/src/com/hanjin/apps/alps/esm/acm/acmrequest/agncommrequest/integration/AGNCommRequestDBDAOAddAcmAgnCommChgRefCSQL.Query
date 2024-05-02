@@ -1,0 +1,529 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AGNCommRequestDBDAOAddAcmAgnCommChgRefCSQL">
+			<desc><![CDATA[AddAcmAgnCommChgRef
+
+2014.05.21 박다은 [선반영] charge ref 로직 변경
+2016.06.27 김상현 [CHM-201641685] Surcharge 등록 기능 개선, Live 전  보정 요청
+ - PRI 테이블에 승인 flag 추가 됨.(SCG_RQST_PROC_CD = 'A')]]></desc>
+			<sql><![CDATA[
+INSERT INTO ACM_AGN_COMM_CHG_REF
+SELECT 
+      BKG_NO
+    , CHG_CD
+    , BKG_AGMT_UT_CD
+    , SPCL_CGO_CTNT
+    , CURR_CD
+    , ROUT_TRF_FX_AMT
+    , ROUT_TRF_RT
+    , @[usr_id]
+    , SYSDATE
+    , @[usr_id]
+    , SYSDATE
+FROM 
+(
+    SELECT 
+          ARR.BKG_NO, 
+          SRT.CHG_CD,  
+          NVL(SRT.RAT_UT_CD     , '  ')                                         AS BKG_AGMT_UT_CD, 
+          NVL(SRT.PRC_CGO_TP_CD , '  ')                                         AS SPCL_CGO_CTNT,  
+          SRT.CURR_CD                                                           AS CURR_CD,  
+          DECODE (NVL (PRF.FLT_PCT_TP_CD, '0'), 'F', SRT.SCG_AMT, '0')          AS ROUT_TRF_FX_AMT,                                                                        
+          DECODE (NVL (PRF.FLT_PCT_TP_CD, '0'), 'P', SRT.SCG_AMT, '0')          AS ROUT_TRF_RT,                                                                       
+                                                                                                       
+          ROW_NUMBER () OVER                                                                                                                                           
+          (                                                                                                                                                            
+              PARTITION BY ARR.BKG_NO,SRT.CHG_CD,SRT.RAT_UT_CD,SRT.CURR_CD,SRT.PRC_CGO_TP_CD,POL_DEF_CD,POD_DEF_CD,DEL_DEF_CD                                          
+              ORDER BY LENGTH(NVL(POR_DEF_CD,'*')) DESC                                                                                                                
+          ) D_POR,                                                                                                                                                     
+          ROW_NUMBER () OVER                                                                                                                                           
+          (                                                                                                                                                            
+              PARTITION BY ARR.BKG_NO,SRT.CHG_CD,SRT.RAT_UT_CD,SRT.CURR_CD,SRT.PRC_CGO_TP_CD,POR_DEF_CD,POD_DEF_CD,DEL_DEF_CD                                          
+              ORDER BY LENGTH(NVL(POL_DEF_CD,'*')) DESC                                                                                                                
+          ) D_POL,                                                                                                                                                     
+          ROW_NUMBER () OVER                                                                                                                                           
+          (                                                                                                                                                            
+              PARTITION BY ARR.BKG_NO,SRT.CHG_CD,SRT.RAT_UT_CD,SRT.CURR_CD,SRT.PRC_CGO_TP_CD,POR_DEF_CD,POL_DEF_CD,DEL_DEF_CD                                          
+              ORDER BY LENGTH(NVL(POD_DEF_CD,'*')) DESC                                                                                                                
+          ) D_POD,                                                                                                                                                     
+          ROW_NUMBER () OVER                                                                                                                                           
+          (                                                                                                                                                            
+              PARTITION BY ARR.BKG_NO,SRT.CHG_CD,SRT.RAT_UT_CD,SRT.CURR_CD,SRT.PRC_CGO_TP_CD,POR_DEF_CD,POL_DEF_CD,POD_DEF_CD                                          
+              ORDER BY LENGTH(NVL(DEL_DEF_CD,'*')) DESC                                                                                                                
+          ) D_DEL,                                                                                                                                                     
+          ROW_NUMBER () OVER                                                                                                                                           
+          (                                                                                                                                                            
+              PARTITION BY ARR.BKG_NO,SRT.CHG_CD,SRT.RAT_UT_CD,SRT.CURR_CD,SRT.PRC_CGO_TP_CD                                          									
+              ORDER BY NVL(length(POR_TP_CD||POL_TP_CD||POD_TP_CD||DEL_TP_CD),0) DESC                                                     
+          ) MAT_LOC_CNT   
+
+
+
+     FROM PRI_SCG_RT  SRT,  
+          PRI_SCG_PRF PRF,  
+          MDM_LOCATION POR,  
+          MDM_LOCATION POL,  
+          MDM_LOCATION POD,  
+          MDM_LOCATION DEL,  
+          (
+       --------------------------------------------------------------------------------------------------------------------- 
+           SELECT  
+                  BKG.BKG_NO, 
+                  BKG.SVC_SCP_CD,  
+                  BKG.RCV_TERM_CD,  
+                  BKG.DE_TERM_CD,  
+                  BKG.CMDT_CD,  
+                  BKG.SOC_FLG,  
+                  BKG.POL_NOD_CD,  
+                  BKG.POD_NOD_CD,  
+                  BKG.ORG_TRNS_MOD_CD,  
+                  BKG.DEST_TRNS_MOD_CD,  
+                  BKG.POR_CD,  
+                  BKG.POL_CD,  
+                  BKG.POD_CD,  
+                  BKG.DEL_CD,  
+                  @[rt_aply_dt] AS RT_APLY_DT, 
+             CASE 
+             WHEN DEL.CML_ZN_FLG = 'Y' 
+              AND POD.RGN_CD 
+               IN 
+                ( 
+                  'UAG', 
+                  'UAN', 
+                  'UAS' 
+                ) 
+             THEN 'CZ' 
+             ELSE 'NN' 
+              END                                AS CML_ZN_CD, 
+       --;)----------------------------------------------------------------------------------------------- 
+       --;) <USA SERVICE MODE CODE, 미국내륙운송 형태> 
+       --;) 지정한 USA SERVICE MODE CODE에 해당하는 BOOKING인 경우 부과되는 SURCHARGE임을 의미함. 
+       --;) - PORT: 근처 
+       --;) - LOCAL: 근처 
+       --;) - MLB(Mini Land Bridge): 내륙 깊숙이까지 
+       --;) - IPI(Interior Point Intermodal): 복합내륙운송 
+       --;)----------------------------------------------------------------------------------------------- 
+             CASE 
+             WHEN POD.CNT_CD          IN ('US', 'CA') 
+              AND BKG.DE_TERM_CD  NOT IN ('D', 'H') 
+              AND BKG.POD_CD           = BKG.DEL_CD 
+             THEN 'PO' 
+             WHEN POD.CNT_CD          IN ('US', 'CA') 
+             THEN 
+                ( 
+                      SELECT 
+                             SUBSTR (SVC_MOD_CD, 1, 2) 
+                        FROM MAS_USA_SVC_MOD A 
+                       WHERE A.ORG_RGN_CD  = POD.RGN_CD 
+                         AND A.DEST_RGN_CD = DEL.RGN_CD 
+                ) 
+             WHEN POL.CNT_CD          IN ('US', 'CA') 
+              AND BKG.RCV_TERM_CD NOT IN ('D', 'H') 
+              AND BKG.POL_CD           = BKG.POR_CD 
+             THEN 'PO' 
+             WHEN POL.CNT_CD          IN ('US', 'CA') 
+             THEN 
+                (  
+                      SELECT 
+                             SUBSTR (SVC_MOD_CD, 1, 2) 
+                        FROM MAS_USA_SVC_MOD A 
+                       WHERE A.ORG_RGN_CD  = POL.RGN_CD 
+                         AND A.DEST_RGN_CD = POR.RGN_CD 
+                ) 
+              END                                                                              AS USA_SVC_MOD_CD, 
+       --;)----------------------------------------------------------------------------------------------- 
+       --;) <DIRECT CALLING FLAG> 
+       --;) TRANSHIPMENT 없는 경우에만 적용되는 SURCHARGE임을 의미함. 
+       --;)----------------------------------------------------------------------------------------------- 
+                  DECODE (BKG.PRE_RLY_PORT_CD||BKG.PST_RLY_PORT_CD, NULL, 'Y', 'N')            AS DIR_CALL_FLG 
+             FROM BKG_BOOKING    BKG, 
+                  BKG_RATE       RAT, 
+                  MDM_LOCATION   POR, 
+                  MDM_LOCATION   POL, 
+                  MDM_LOCATION   POD, 
+                  MDM_LOCATION   DEL 
+            WHERE BKG.BKG_NO     = RAT.BKG_NO 
+              AND POR.LOC_CD     = BKG.POR_CD 
+              AND POL.LOC_CD     = BKG.POL_CD 
+              AND POD.LOC_CD     = BKG.POD_CD 
+              AND DEL.LOC_CD     = BKG.DEL_CD 
+              AND POR.DELT_FLG   = 'N' 
+              AND POL.DELT_FLG   = 'N' 
+              AND POD.DELT_FLG   = 'N' 
+              AND DEL.DELT_FLG   = 'N' 
+              AND BKG.BKG_CRE_DT > TO_DATE ('20100405', 'YYYYMMDD') 
+              AND BKG.BKG_NO     =  @[bkg_no] --'CMB100645100' 
+       --------------------------------------------------------------------------------------------------------------------- 
+                ) ARR 
+    --------------------------------------------------------------------------------------------------------------------- 
+    WHERE SRT.SVC_SCP_CD           = ARR.SVC_SCP_CD 
+      AND PRF.SVC_SCP_CD           = ARR.SVC_SCP_CD 
+      AND PRF.SVC_SCP_CD           = SRT.SVC_SCP_CD 
+      AND PRF.CHG_CD               = SRT.CHG_CD 
+      AND SRT.DELT_FLG             = 'N'
+      AND SRT.WDR_FLG              = 'N'
+      AND SRT.SCG_RQST_PROC_CD     = 'A'
+      AND ARR.POR_CD = POR.LOC_CD 
+      AND ARR.POL_CD = POL.LOC_CD 
+      AND ARR.POD_CD = POD.LOC_CD 
+      AND ARR.DEL_CD = DEL.LOC_CD 
+      AND 'Y' = CASE WHEN NVL(SRT.POR_TP_CD,'x') <> 'G' AND NVL(DECODE (PRF.POR_USE_FLG, 'Y', SRT.POR_DEF_CD, '*'), '*') IN (POR.LOC_CD, POR.RGN_CD, POR.CNT_CD, '*' ) THEN 'Y'
+                     WHEN NVL(SRT.POR_TP_CD,'x') =  'G' AND SRT.POR_DEF_CD IN (
+                                                                            SELECT DISTINCT SCG_GRP_LOC_CD 
+                                                                            FROM PRI_SCG_GRP_LOC M, PRI_SCG_GRP_LOC_DTL D 
+                                                                            WHERE 1=1
+                                                                            AND M.SVC_SCP_CD = ARR.SVC_SCP_CD 
+                                                                            AND M.CHG_CD = SRT.CHG_CD
+                                                                            AND D.DTL_LOC_DEF_CD IN (POR.LOC_CD, POR.CNT_CD)
+                                                                            AND M.SVC_SCP_CD = D.SVC_SCP_CD
+                                                                            AND M.CHG_CD = D.CHG_CD
+                                                                            AND M.GRP_LOC_SEQ = D.GRP_LOC_SEQ ) THEN 'Y' 
+                     ELSE 'N' 
+                END
+
+      AND 'Y' = CASE WHEN NVL(SRT.POL_TP_CD,'x') <> 'G' AND NVL(DECODE (PRF.POL_USE_FLG, 'Y', SRT.POL_DEF_CD, '*'), '*') IN (POL.LOC_CD, POL.RGN_CD, POL.CNT_CD, '*' ) THEN 'Y' 
+                     WHEN NVL(SRT.POL_TP_CD,'x') =  'G' AND SRT.POL_DEF_CD IN (
+                                                                                SELECT DISTINCT SCG_GRP_LOC_CD 
+                                                                                FROM PRI_SCG_GRP_LOC M, PRI_SCG_GRP_LOC_DTL D 
+                                                                                WHERE 1=1
+                                                                                AND M.SVC_SCP_CD = ARR.SVC_SCP_CD 
+                                                                                AND M.CHG_CD = SRT.CHG_CD
+                                                                                AND D.DTL_LOC_DEF_CD IN (POL.LOC_CD, POL.CNT_CD)
+                                                                                AND M.SVC_SCP_CD = D.SVC_SCP_CD
+                                                                                AND M.CHG_CD = D.CHG_CD
+                                                                                AND M.GRP_LOC_SEQ = D.GRP_LOC_SEQ ) THEN 'Y'
+                
+                    ELSE 'N' 
+                END
+
+      AND 'Y' = CASE WHEN NVL(SRT.POD_TP_CD,'x') <> 'G' AND NVL(DECODE (PRF.POD_USE_FLG, 'Y', SRT.POD_DEF_CD, '*'), '*') IN (POD.LOC_CD, POD.RGN_CD, POD.CNT_CD, '*' ) THEN 'Y' 
+                     WHEN NVL(SRT.POD_TP_CD,'x') =  'G' AND SRT.POD_DEF_CD IN (
+                                                                                SELECT DISTINCT SCG_GRP_LOC_CD 
+                                                                                FROM PRI_SCG_GRP_LOC M, PRI_SCG_GRP_LOC_DTL D 
+                                                                                WHERE 1=1
+                                                                                AND M.SVC_SCP_CD = ARR.SVC_SCP_CD 
+                                                                                AND M.CHG_CD = SRT.CHG_CD
+                                                                                AND D.DTL_LOC_DEF_CD IN (POD.LOC_CD, POD.CNT_CD)
+                                                                                AND M.SVC_SCP_CD = D.SVC_SCP_CD
+                                                                                AND M.CHG_CD = D.CHG_CD
+                                                                                AND M.GRP_LOC_SEQ = D.GRP_LOC_SEQ ) THEN 'Y'
+                
+                    ELSE 'N' 
+                END
+
+      AND 'Y' = CASE WHEN NVL(SRT.DEL_TP_CD,'x') <> 'G' AND NVL(DECODE (PRF.DEL_USE_FLG, 'Y', SRT.DEL_DEF_CD, '*'), '*') IN (DEL.LOC_CD, DEL.RGN_CD, DEL.CNT_CD, '*' ) THEN 'Y' 
+                     WHEN NVL(SRT.DEL_TP_CD,'x') =  'G' AND SRT.DEL_DEF_CD IN (
+                                                                                SELECT DISTINCT SCG_GRP_LOC_CD 
+                                                                                FROM PRI_SCG_GRP_LOC M, PRI_SCG_GRP_LOC_DTL D 
+                                                                                WHERE 1=1
+                                                                                AND M.SVC_SCP_CD = ARR.SVC_SCP_CD 
+                                                                                AND M.CHG_CD = SRT.CHG_CD
+                                                                                AND D.DTL_LOC_DEF_CD IN (DEL.LOC_CD, DEL.CNT_CD)
+                                                                                AND M.SVC_SCP_CD = D.SVC_SCP_CD
+                                                                                AND M.CHG_CD = D.CHG_CD
+                                                                                AND M.GRP_LOC_SEQ = D.GRP_LOC_SEQ ) THEN 'Y'
+                    ELSE 'N' 
+                END
+
+--      AND NVL (DECODE (PRF.POR_USE_FLG, 'Y', SRT.POR_DEF_CD, '*'), '*') IN (POR.LOC_CD, POR.RGN_CD, POR.CNT_CD, '*' ) 
+--      AND NVL (DECODE (PRF.POL_USE_FLG, 'Y', SRT.POL_DEF_CD, '*'), '*') IN (POL.LOC_CD, POL.RGN_CD, POL.CNT_CD, '*' ) 
+--      AND NVL (DECODE (PRF.POD_USE_FLG, 'Y', SRT.POD_DEF_CD, '*'), '*') IN (POD.LOC_CD, POD.RGN_CD, POD.CNT_CD, '*' ) 
+--      AND NVL (DECODE (PRF.DEL_USE_FLG, 'Y', SRT.DEL_DEF_CD, '*'), '*') IN (DEL.LOC_CD, DEL.RGN_CD, DEL.CNT_CD, '*' )  
+
+      AND PRF.CHG_CD 
+       IN 
+        ( 
+         CASE 
+             WHEN ARR.RT_APLY_DT > '20101231' AND PRF.CHG_CD = 'FRC' THEN '*' 
+    --> CFM Charge(CFM) 
+    --;)----------------------------------------------------------------------------------------------- 
+    --;) <CFM Charge> 
+    --;) RCV_TERM_CD 혹은 DE_TERM_CD가 'S'(CFS)일 때 부과되는 CHARGE 
+    --;)----------------------------------------------------------------------------------------------- 
+             WHEN PRF.CHG_CD      = 'CFR' AND ARR.RCV_TERM_CD = 'S' THEN 'CFR' 
+             WHEN PRF.CHG_CD      = 'CFD' AND ARR.DE_TERM_CD  = 'S' THEN 'CFD' 
+             WHEN PRF.CHG_CD      = 'CFR' THEN '*' 
+             WHEN PRF.CHG_CD      = 'CFD' THEN '*' 
+             /* R/D Term 에 따라 THC 공제 여부 체크 로직 추가 - 임종한 과장 요청[CHM-201111599]*/ 
+             /* [THC 공제로직 변경사항]   CHM-201111599               */ 
+             /*   - BKG의 term 중에 I/O/T가 있는 경우 해당 지역의 THC 불공제 */ 
+             /*   - BKG R term에 I 혹은 T가 있는 경우 - OTH 불공제                */ 
+             /*   - BKG D term에 O 혹은 T가 있는 경우 - DTH 불공제                */ 
+             WHEN PRF.CHG_CD      = 'THC'  AND(ARR.RCV_TERM_CD IN ('T','I','O') or ARR.DE_TERM_CD IN ('T','I','O')) THEN '*' 
+             WHEN PRF.CHG_CD      = 'OTH'  AND ARR.RCV_TERM_CD IN ('T','I') THEN '*' 
+             WHEN PRF.CHG_CD      = 'DTH'  AND ARR.DE_TERM_CD  IN ('T','O') THEN '*' 
+             /* R/D Term 에 따라 THC 공제 여부 체크 로직 추가 - 임종한 과장 요청[CHM-201111599]*/ 
+             ELSE PRF.CHG_CD 
+         END 
+        ) 
+    --> RECEIVE TERM  
+      AND NVL (DECODE (PRF.RCV_DE_TERM_USE_FLG, 'Y', SRT.PRC_RCV_TERM_CD, '*'), '*') 
+       IN 
+        ( 
+          ARR.RCV_TERM_CD, 
+          '*' 
+        ) 
+    --> DELIVERY TERM 
+      AND NVL (DECODE (PRF.RCV_DE_TERM_USE_FLG, 'Y', SRT.PRC_DE_TERM_CD, '*'), '*') 
+       IN 
+        ( 
+          ARR.DE_TERM_CD, 
+          '*' 
+        ) 
+    --> USA SVC MODE  
+      AND NVL (DECODE (PRF.USA_SVC_MOD_USE_FLG, 'Y', SRT.USA_SVC_MOD_CD, '*'), '*') 
+       IN 
+        ( 
+          DECODE (ARR.USA_SVC_MOD_CD, 'CZ', ARR.CML_ZN_CD, ARR.USA_SVC_MOD_CD), 
+          '*' 
+        ) 
+    --> DIRECT CALLING 
+      AND NVL (DECODE (PRF.DIR_CALL_USE_FLG, 'Y', SRT.DIR_CALL_FLG, '*'), '*') 
+       IN 
+        ( 
+          ARR.DIR_CALL_FLG, 
+          '*' 
+        ) 
+    --> ORIGIN TRANSPORTATION MODE 
+      AND NVL (DECODE (PRF.TRNS_MOD_USE_FLG, 'Y', SRT.ORG_TRSP_MOD_CD, '*'), '*') 
+       IN 
+        ( 
+          ARR.ORG_TRNS_MOD_CD, 
+          '*' 
+        ) 
+    --> DESTINATION TRANSPORTATION MODE 
+      AND NVL (DECODE (PRF.TRNS_MOD_USE_FLG, 'Y', SRT.DEST_TRSP_MOD_CD, '*'), '*') 
+       IN 
+        ( 
+          ARR.DEST_TRNS_MOD_CD, 
+          '*' 
+        ) 
+    --> TERMINAL 
+      AND 
+        ( 
+          PRF.TML_USE_FLG = 'N' 
+       OR SRT.TML_CD     IS NULL 
+       OR SRT.TML_CD      = ARR.POL_NOD_CD 
+       OR SRT.TML_CD      = ARR.POD_NOD_CD 
+        ) 
+    --> TRANSSHIPMENT PORT 
+      AND 
+        ( 
+          PRF.TS_PORT_USE_FLG = 'N'  
+       OR SRT.TS_PORT_CD     IS NULL 
+       OR EXISTS 
+        ( 
+              SELECT 
+                     'X' 
+                FROM BKG_VVD    BVD 
+               WHERE BVD.BKG_NO   = ARR.BKG_NO 
+                 AND 
+                   ( 
+                     BVD.POL_CD   = SRT.TS_PORT_CD 
+                  OR BVD.POL_CD   = SRT.TS_PORT_CD 
+                   ) 
+        ) 
+        ) 
+    --> IN/OUT GAGE 
+      AND 
+        ( 
+          SRT.IO_GA_CD  IS NULL 
+       OR EXISTS 
+        ( 
+              SELECT 
+                     'X' 
+                FROM BKG_AWK_CGO AWK 
+               WHERE AWK.IN_GA_FLG    = 'Y' 
+                 AND AWK.BKG_NO       = ARR.BKG_NO 
+                 AND AWK.CNTR_TPSZ_CD = SRT.RAT_UT_CD 
+        ) 
+        ) 
+    --> VESSEL SERVICE LANE CODE 
+      AND 
+        ( 
+          PRF.SLAN_USE_FLG = 'N' 
+       OR SRT.VSL_SLAN_CD IS NULL 
+       OR EXISTS 
+        ( 
+              SELECT 
+                     'X' 
+                FROM BKG_VVD BVD 
+               WHERE BVD.BKG_NO  = ARR.BKG_NO 
+                 AND BVD.SLAN_CD = SRT.VSL_SLAN_CD 
+        ) 
+        ) 
+    --> COMMODITY 
+      AND NVL (DECODE (PRF.CMDT_USE_FLG, 'Y', SRT.CMDT_CD, '*'), '*') 
+       IN 
+        ( 
+          ARR.CMDT_CD, 
+          '*' 
+        ) 
+    --> SHIPPER'S OWN CONTAINER(S.O.C) 
+      AND NVL (DECODE (PRF.SOC_USE_FLG, 'Y', SRT.SOC_FLG, '*'), '*') 
+       IN 
+        ( 
+          ARR.SOC_FLG, 
+          '*' 
+        ) 
+    --> IMDG CLASS 
+      AND 
+        ( 
+          PRF.IMDG_CLSS_USE_FLG = 'N' 
+       OR SRT.SCG_IMDG_CLSS_CD  IS NULL 
+       OR EXISTS 
+        ( 
+              SELECT 
+                     'X' 
+                FROM BKG_DG_CGO BDG 
+               WHERE BDG.BKG_NO            = ARR.BKG_NO 
+                 AND BDG.CNTR_TPSZ_CD      = SRT.RAT_UT_CD 
+                 AND BDG.IMDG_CLSS_CD    LIKE SRT.SCG_IMDG_CLSS_CD||'%' 
+        ) 
+        ) 
+    --> SUB TRADE 
+    --;)----------------------------------------------------------------------------------------------- 
+    --;) <SUB TRADE CODE> 
+    --;) 운송 서비스 Trade 내의 상세 Area 세분화 하여 Code 화 함 
+    --;) 지정한 SUB TRADE에 해당하는 BOOKING인 경우 부과되는 SURCHARGE임을 의미함. 
+    --;)----------------------------------------------------------------------------------------------- 
+      AND 
+        ( 
+          PRF.SUB_TRD_USE_FLG  = 'N' 
+       OR SRT.SUB_TRD_CD      IS NULL 
+       OR SRT.SUB_TRD_CD 
+       IN 
+        ( 
+              SELECT 
+                     MDL.SUB_TRD_CD 
+                FROM BKG_VVD             BVD, 
+                     MDM_REV_LANE        MRL, 
+                     MDM_DTL_REV_LANE    MDL 
+               WHERE MDL.FM_CONTI_CD     = ( SELECT X.CONTI_CD FROM MDM_LOCATION X WHERE X.LOC_CD = BVD.POL_CD ) 
+                 AND MDL.TO_CONTI_CD     = ( SELECT x.CONTI_CD FROM MDM_LOCATION X WHERE X.LOC_CD = BVD.POL_CD ) 
+                 AND MRL.VSL_SLAN_CD     = BVD.SLAN_CD 
+                 AND MDL.RLANE_CD        = MRL.RLANE_CD 
+                 AND MDL.VSL_SLAN_DIR_CD = BVD.SKD_DIR_CD 
+                 AND MRL.DELT_FLG        = 'N' 
+                 AND MDL.DELT_FLG        = 'N' 
+                 AND BVD.BKG_NO          = ARR.BKG_NO 
+        ) 
+        ) 
+    --> DATE FROM 
+      AND TO_DATE(ARR.RT_APLY_DT ,'YYYYMMDD')
+    BETWEEN SRT.EFF_DT 
+      AND SRT.EXP_DT 
+    --> DATE TO 
+      AND TO_DATE(ARR.RT_APLY_DT ,'YYYYMMDD')
+    BETWEEN SRT.EFF_DT 
+      AND SRT.EXP_DT 
+    --> CARGO TYPE 
+      AND NVL(SRT.PRC_CGO_TP_CD, '*') 
+       IN 
+        ( 
+          'DR',  
+          'RF', 
+          'DG', 
+          'AK', 
+          'BB', 
+          '*' 
+        ) 
+    --> SURCARGE GROUP COMMODITY ( GRI ) 
+      AND 
+        ( 
+          PRF.GRI_CMDT_USE_FLG = 'N' 
+       OR SRT.SCG_GRP_CMDT_CD IS NULL 
+       OR EXISTS 
+        ( 
+              SELECT 
+                     'X' 
+                FROM PRI_SCG_GRP_CMDT     GC, 
+                     PRI_SCG_GRP_CMDT_DTL GD 
+               WHERE GD.SVC_SCP_CD         = GC.SVC_SCP_CD 
+                 AND GD.CHG_CD             = GC.CHG_CD 
+                 AND GD.SCG_GRP_CMDT_SEQ   = GC.SCG_GRP_CMDT_SEQ 
+                 AND GC.SVC_SCP_CD         = ARR.SVC_SCP_CD 
+                 AND GC.CHG_CD             = SRT.CHG_CD 
+                 AND GC.SCG_GRP_CMDT_CD    = SRT.SCG_GRP_CMDT_CD 
+                 AND GD.CMDT_CD            = ARR.CMDT_CD 
+             ) 
+       ) 
+    --> CANAL TRANSIT CODE 
+     AND 
+       ( 
+          PRF.CNL_TZ_FLG  = 'N' 
+       OR SRT.CNL_TZ_CD  IS NULL 
+       OR EXISTS 
+        ( 
+              SELECT 
+                     'X' 
+                FROM BKG_VVD          BV, 
+                     VSK_VSL_PORT_SKD S1, 
+                     VSK_VSL_PORT_SKD S2, 
+                     VSK_VSL_PORT_SKD S3 
+               WHERE BV.BKG_NO        = ARR.BKG_NO 
+                 AND S1.VSL_CD        = BV.VSL_CD 
+                 AND S1.SKD_VOY_NO    = BV.SKD_VOY_NO 
+                 AND S1.SKD_DIR_CD    = BV.SKD_DIR_CD 
+                 AND S1.VPS_PORT_CD   = BV.POL_CD 
+                 AND S1.CLPT_IND_SEQ  = BV.POL_CLPT_IND_SEQ 
+                 AND S2.VSL_CD        = BV.VSL_CD 
+                 AND S2.SKD_VOY_NO    = BV.SKD_VOY_NO 
+                 AND S2.SKD_DIR_CD    = BV.SKD_DIR_CD 
+                 AND S2.VPS_PORT_CD   = BV.POD_CD 
+                 AND S2.CLPT_IND_SEQ  = BV.POD_CLPT_IND_SEQ 
+                 AND S3.VSL_CD        = BV.VSL_CD 
+                 AND S3.SKD_VOY_NO    = BV.SKD_VOY_NO 
+                 AND S3.SKD_DIR_CD    = BV.SKD_DIR_CD 
+                 AND S3.VPS_PORT_CD   = DECODE (SRT.CNL_TZ_CD, 'P', 'PAPAC', 'S', 'EGSUC') 
+                 AND S3.CLPT_SEQ 
+             BETWEEN S1.CLPT_SEQ 
+                 AND S2.CLPT_SEQ 
+        ) 
+        ) 
+    --> CARGO WEIGHT  
+      AND 
+        ( 
+          PRF.CGO_WGT_USE_FLG = 'N' 
+       OR EXISTS 
+        ( 
+              SELECT 
+                     'X' 
+                FROM BKG_CONTAINER BCT 
+               WHERE BCT.BKG_NO      = ARR.BKG_NO 
+                 AND CNTR_TPSZ_CD    = SRT.RAT_UT_CD 
+              HAVING 'Y' = 
+                CASE 
+                WHEN TO_NUMBER (SRT.MIN_CGO_WGT) >= NVL (MIN (DECODE (BCT.WGT_UT_CD, 'LBS', BCT.CNTR_WGT * 0.45359, BCT.CNTR_WGT)), 0) 
+                 AND TO_NUMBER (SRT.MAX_CGO_WGT) <  NVL (MIN (DECODE (BCT.WGT_UT_CD, 'LBS', BCT.CNTR_WGT * 0.45359, BCT.CNTR_WGT)), 0) 
+                THEN 'Y' 
+                ELSE 'N' 
+                 END 
+           UNION ALL 
+              SELECT 
+                     'X' 
+                FROM BKG_BL_DOC  BBC, 
+                     BKG_QTY_DTL BQD 
+               WHERE BBC.BKG_NO    = ARR.BKG_NO 
+                 AND BBC.BKG_NO    = BQD.BKG_NO 
+              HAVING 'Y' = 
+                CASE 
+                WHEN 1 = SUM (BQD.OP_CNTR_QTY) 
+                 AND TO_NUMBER (SRT.MIN_CGO_WGT) >= NVL (MIN (DECODE (BBC.WGT_UT_CD, 'LBS', BBC.ACT_WGT * 0.45359, BBC.ACT_WGT)), 0) 
+                 AND TO_NUMBER (SRT.MAX_CGO_WGT) <  NVL (MIN (DECODE (BBC.WGT_UT_CD, 'LBS', BBC.ACT_WGT * 0.45359, BBC.ACT_WGT)), 0) 
+                THEN 'Y' 
+                ELSE 'N'  
+                 END 
+        ) 
+        ) 
+     ) TMP                                                                                                                                                                 
+WHERE D_POR = 1 AND D_POL = 1 AND D_POD = 1 AND D_DEL = 1 AND MAT_LOC_CNT = 1			]]></sql>
+			<params>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="rt_aply_dt" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

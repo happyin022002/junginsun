@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="GeneralBookingListSearchDBDAOsearchEmptyBkgHangerListRSQL">
+			<desc><![CDATA[Empty Booking의 Hanger 정보를 조회한다]]></desc>
+			<sql><![CDATA[
+SELECT POL_CD
+     , POD_CD
+     , POD_ETA
+     , CNTR_NO
+     , CNTR_TPSZ_CD
+     , (SELECT INTG_CD_VAL_DP_DESC 
+             FROM COM_INTG_CD_DTL 
+              WHERE INTG_CD_ID = 'CD02012' 
+                AND INTG_CD_VAL_CTNT = HRT) HRT
+     , (SELECT INTG_CD_VAL_DP_DESC 
+             FROM COM_INTG_CD_DTL 
+              WHERE INTG_CD_ID = 'CD02011' 
+                AND INTG_CD_VAL_CTNT = HBT) HBT
+     , HBQ
+     , BKG_NO
+--     , (SELECT PRE_BKG_NO FROM BKG_BOOKING BK WHERE BK.BKG_NO = A.PRE_BKG_NO AND BK.HNGR_FLG = 'Y') PRE_BKG_NO
+     , pre_bkg_no
+     , (SELECT DECODE(HBT, 'S', DECODE(CNTR_TPSZ_CD, 'D2', 11, 'D4', 22, 'D5', 22, 'D7', 24), 
+                           'D', DECODE(CNTR_TPSZ_CD, 'D2', 22, 'D4', 44, 'D5', 44, 'D7', 48))
+          FROM BKG_BOOKING BK 
+         WHERE BK.BKG_NO = A.PRE_BKG_NO
+           AND BK.HNGR_FLG = 'Y') S_BAR_QTY    
+  FROM (SELECT BK.POL_CD||SUBSTR(BK.POL_NOD_CD, 6, 2) POL_CD
+                , BK.POD_CD||SUBSTR(BK.POD_NOD_CD, 6, 2) POD_CD
+                , (SELECT MIN(SKD.VPS_ETB_DT)
+                     FROM VSK_VSL_PORT_SKD SKD
+                    WHERE SKD.VSL_CD = BK.VSL_CD
+                      AND SKD.SKD_VOY_NO = BK.SKD_VOY_NO
+                      AND SKD.SKD_DIR_CD = BK.SKD_DIR_CD
+                      AND SKD.VPS_PORT_CD = BK.POD_CD) AS POD_ETA
+                , CNTR.CNTR_NO
+                , CNTR.CNTR_TPSZ_CD
+                    , MST.CNTR_HNGR_RCK_CD       HRT
+                    , MST.MNR_HNGR_BAR_TP_CD     HBT
+                    , MST.CNTR_HNGR_BAR_ATCH_KNT HBQ
+                , BK.BKG_NO
+                    , (SELECT /*+ INDEX_DESC(CTM XAK11CTM_MOVEMENT) */ CTM.BKG_NO
+                         FROM CTM_MOVEMENT CTM, BKG_CONTAINER CNTR2
+                        WHERE CTM.CNTR_NO = CNTR.CNTR_NO
+                          AND CNTR2.CNTR_NO = CNTR.CNTR_NO
+                          AND CNTR2.BKG_NO = BK.BKG_NO
+                          AND CTM.BKG_CGO_TP_CD = 'F'
+                          AND CTM.BKG_NO <> BK.BKG_NO
+                          AND CTM.CNMV_CYC_NO <= CNTR2.CNMV_CYC_NO
+                          AND CTM.CNMV_YR     <= CNTR2.CNMV_YR
+                          AND ROWNUM = 1
+                      ) PRE_BKG_NO
+          FROM BKG_BOOKING BK, 
+               BKG_CONTAINER CNTR,
+               MST_CONTAINER MST,
+                (SELECT BK.BKG_NO, BK.FM_BKG_NO
+                  FROM BKG_BOOKING BK
+#if (${bkg_no} == '' && ${bl_no} == '')      
+       #if (${vvd_cd} != '')  
+            , bkg_vvd vvd  
+       #end
+	   #if (${cntr_no1} != '' || (${cntrTpsz} != '' && ${tpsztype} != '')) 
+			, bkg_container cntr
+	   #end
+       #if (${bkg_date_tp} == 'E')
+             ,(
+            select skd.vps_eta_dt, bk.bkg_no, vvd.pod_cd
+              from bkg_booking bk, bkg_vvd vvd, vsk_vsl_port_skd skd
+             where bk.bkg_no            = vvd.bkg_no
+               and bk.pod_cd            = vvd.pod_cd
+               and vvd.vsl_pre_pst_cd   in ('T','U')
+               and vvd.vsl_cd           = skd.vsl_cd
+               and vvd.skd_voy_no       = skd.skd_voy_no
+               and vvd.skd_dir_cd       = skd.skd_dir_cd
+               and vvd.pod_cd           = skd.VPS_PORT_CD
+               and vvd.pod_clpt_ind_seq = skd.clpt_ind_seq
+                    #if (${vvd_cd} != '')
+                       and vvd.vsl_cd     = substr(@[vvd_cd], 1, 4)
+                       and vvd.skd_voy_no = substr(@[vvd_cd], 5, 4)
+                       and vvd.skd_dir_cd = substr(@[vvd_cd], 9, 1)  
+                    #end
+                    #if (${cre_from_dt} != '') 
+                          and skd.vps_eta_dt >= to_date(@[cre_from_dt]|| '00:00:00','yyyy-mm-dd HH24:MI:SS')
+                    #end
+                    #if (${cre_to_dt} != '') 
+                          and skd.vps_eta_dt <= to_date(@[cre_to_dt]|| '23:59:59','yyyy-mm-dd HH24:MI:SS')
+                    #end
+             ) eta
+       #end
+#end
+                 WHERE BK.BKG_CGO_TP_CD = 'P'
+                   AND 'Y' = CASE WHEN BK.SPLIT_FLG = 'Y' AND BK.BKG_STS_CD = 'X' THEN 'Y'--SPLIT인데 CANCEL된 건 -> MASTER BKG -> 조회됨
+                                          WHEN BK.SPLIT_FLG = 'N' AND BK.BKG_STS_CD = 'X' THEN 'N'--SPLIT이 아닌데 CANCEL된 건 -> 일반 CANCEL -> 조회안됨
+                                          ELSE 'Y' END --그외 조회됨                
+#if (${bkg_no} != '')    
+   and bk.bkg_no LIKE @[bkg_no]||'%'
+#end
+#if  (${bl_no} != '')    
+   and bk.bl_no LIKE @[bl_no]||'%'
+#end
+#if (${bkg_ofc_cd} != '')  
+   and bk.bkg_ofc_cd = @[bkg_ofc_cd]
+#end
+#if (${bkg_no} == '' && ${bl_no} == '')      
+       #if (${vvd_cd} != '')
+          and bk.bkg_no     = vvd.bkg_no   
+          and vvd.vsl_cd     = substr(@[vvd_cd], 1, 4)
+          and vvd.skd_voy_no = substr(@[vvd_cd], 5, 4)
+          and vvd.skd_dir_cd = substr(@[vvd_cd], 9, 1)  
+       #end
+	   #if (${cntr_no1} != '' || (${cntrTpsz} != '' && ${tpsztype} != '')) 
+	       AND bk.BKG_NO = cntr.BKG_NO
+          #if (${cntr_no1} != '') 
+	       AND cntr.CNTR_NO = @[cntr_no1]||@[cntr_no2]
+          #end
+
+          #if (${cntrTpsz} != '' && ${tpsztype} != '') 
+	       AND cntr.CNTR_TPSZ_CD IN ( ${tpszTypeText} )
+          #end
+
+	   #end
+       #if (${pol_cd} != '') 
+          and bk.pol_cd LIKE @[pol_cd]||'%'
+       #end
+       #if (${pod_cd} != '') 
+          and bk.pod_cd LIKE @[pod_cd]||'%'
+       #end
+       #if (${pre_rly_port_cd} != '') 
+          and bk.pre_rly_port_cd LIKE @[pre_rly_port_cd]||'%'
+       #end
+       #if (${pst_rly_port_cd} != '') 
+          and bk.pst_rly_port_cd LIKE @[pst_rly_port_cd]||'%'
+       #end
+       #if (${vvd_cd} == '')
+             #if (${bkg_date_tp} != 'E')             
+                    #if (${cre_from_dt} != '') 
+                          and bk.bkg_cre_dt >= to_date(@[cre_from_dt]|| '00:00:00','yyyy-mm-dd HH24:MI:SS')
+                    #end
+                    #if (${cre_to_dt} != '') 
+                          and bk.bkg_cre_dt <= to_date(@[cre_to_dt]|| '23:59:59','yyyy-mm-dd HH24:MI:SS')
+                    #end
+             #else
+                    and bk.bkg_no = eta.bkg_no
+                    and bk.pod_cd = eta.pod_cd
+             #end
+       #end
+       #if (${vvd_cd_flg} == 'E')  
+          and vvd.vsl_pre_pst_cd = 'T'
+       #end 
+       #if (${cntr_attach} == 'Y')  
+          and (select count(1) from bkg_container bcntr where bk.bkg_no = bcntr.bkg_no and rownum = 1) > 0
+       #elseif  (${cntr_attach} == 'N')  
+          and (select count(1) from bkg_container bcntr where bk.bkg_no = bcntr.bkg_no and rownum = 1) = 0   
+       #end
+
+	#if (${bkg_status} == 'D')  -- VD
+        AND NVL(bk.BKG_CRE_TP_CD, 'X') = 'S' -- S:SPLIT
+    #elseif  (${bkg_status} == 'L') -- VL
+        AND NVL(bk.BKG_CRE_TP_CD, 'X') = 'X' -- L : VL
+	#end
+
+#end
+                ) MST_BKG
+        
+#if (${bkg_no} == '' && ${bl_no} == '') 
+ where bk.bkg_no = mst_bkg.bkg_no
+#else 
+ where (bk.bkg_no = mst_bkg.bkg_no or bk.fm_bkg_no = mst_bkg.bkg_no or mst_bkg.fm_bkg_no = bk.bkg_no)
+#end
+           AND BK.BKG_CGO_TP_CD = 'P'
+           AND BK.BKG_NO    = CNTR.BKG_NO
+           AND CNTR.CNTR_NO = MST.CNTR_NO
+           AND CNTR.CNTR_TPSZ_CD IN ('D2','D4','D5','D7')
+           AND MST.CNTR_HNGR_RCK_CD IS NOT NULL
+        ) A			]]></sql>
+			<params>
+				<param name="vvd_cd" type="12" value="" out="N"/>
+				<param name="cre_from_dt" type="12" value="" out="N"/>
+				<param name="cre_to_dt" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="bl_no" type="12" value="" out="N"/>
+				<param name="bkg_ofc_cd" type="12" value="" out="N"/>
+				<param name="cntr_no1" type="12" value="" out="N"/>
+				<param name="cntr_no2" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="pre_rly_port_cd" type="12" value="" out="N"/>
+				<param name="pst_rly_port_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

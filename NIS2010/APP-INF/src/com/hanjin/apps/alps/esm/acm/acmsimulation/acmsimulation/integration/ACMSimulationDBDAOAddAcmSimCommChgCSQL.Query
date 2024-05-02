@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ACMSimulationDBDAOAddAcmSimCommChgCSQL">
+			<desc><![CDATA[AddAcmSimCommChg
+
+2014.05.09 박다은 [선반영] PRM Charge G.Rev 에서 surchrage 유무에 상관없이 공제되도록 로직 변경 요청]]></desc>
+			<sql><![CDATA[
+INSERT INTO ACM_SIM_COMM_CHG
+SELECT 
+  @[sim_no]
+, M.BKG_NO
+, M.AGN_CD
+, M.IO_BND_CD
+, M.AC_TP_CD
+, @[max_ac_seq] AS AC_SEQ --> 임시
+, ROW_NUMBER() OVER (PARTITION BY   M.BKG_NO, M.AGN_CD, M.IO_BND_CD, M.AC_TP_CD  ORDER BY M.CHG_CD ) AS AC_CHG_SEQ
+, M.REP_CHG_CD
+, M.CHG_CD
+, M.BKG_AGMT_UT_CD
+, M.CHG_DDCT_AMT
+, M.CURR_CD
+, M.CHG_DDCT_PAY_AMT
+, @[usr_id]
+, sysdate
+, @[usr_id]
+, sysdate
+
+
+FROM (
+   SELECT A.BKG_NO,
+     A.AGN_CD,
+     A.IO_BND_CD,
+     A.AC_TP_CD,
+     ROW_NUMBER() OVER(PARTITION BY A.BKG_NO, A.AGN_CD, A.IO_BND_CD, A.AC_TP_CD, A.REP_CHG_CD, A.CHG_CD, A.BKG_AGMT_UT_CD ORDER BY A.AGMT_UT_ODR, A.BKG_AGMT_UT_CD DESC) AS RN,
+     A.REP_CHG_CD,
+     A.CHG_CD,
+     A.BKG_AGMT_UT_CD,
+     SUM(CASE WHEN ROUT_TRF_RT <> 0 AND CURR_CD = 'USD' THEN ROUT_TRF_RT * OFT / 100
+              WHEN ROUT_TRF_RT <> 0 AND CURR_CD <> 'USD' THEN ROUT_TRF_RT * OFT / 100 / USD_LOCL_XCH_RT
+              WHEN ROUT_TRF_FX_AMT <> 0 AND CURR_CD = 'USD' AND BKG_AGMT_UT_CD = 'BL' THEN DECODE(RN0, 1, ROUT_TRF_FX_AMT, 0)
+              WHEN ROUT_TRF_FX_AMT <> 0 AND CURR_CD <> 'USD' AND BKG_AGMT_UT_CD = 'BL' THEN DECODE(RN0, 1, ROUT_TRF_FX_AMT, 0) / USD_LOCL_XCH_RT
+              WHEN ROUT_TRF_FX_AMT <> 0 AND CURR_CD =  'USD' THEN ROUT_TRF_FX_AMT * OP_CNTR_QTY
+              WHEN ROUT_TRF_FX_AMT <> 0 AND CURR_CD <> 'USD' THEN ROUT_TRF_FX_AMT * OP_CNTR_QTY / USD_LOCL_XCH_RT
+              ELSE 0
+         END 
+     ) OVER(PARTITION BY A.BKG_NO, A.AGN_CD, A.IO_BND_CD, A.AC_TP_CD, A.REP_CHG_CD, A.CHG_CD, A.BKG_AGMT_UT_CD) AS CHG_DDCT_AMT,
+     A.CURR_CD,
+     SUM(CASE WHEN ROUT_TRF_RT <> 0 THEN ROUT_TRF_RT * OFT / 100
+              WHEN ROUT_TRF_FX_AMT <> 0 AND BKG_AGMT_UT_CD = 'BL' THEN DECODE(RN0, 1, ROUT_TRF_FX_AMT, 0)
+              WHEN ROUT_TRF_FX_AMT <> 0 THEN ROUT_TRF_FX_AMT * OP_CNTR_QTY 
+              ELSE 0
+         END
+     ) OVER(PARTITION BY A.BKG_NO, A.AGN_CD, A.IO_BND_CD, A.AC_TP_CD, A.REP_CHG_CD, A.CHG_CD, A.BKG_AGMT_UT_CD) AS CHG_DDCT_PAY_AMT
+   FROM (
+      SELECT R.BKG_NO,
+        (SELECT SUM(CASE WHEN BCR.CURR_CD = 'USD' THEN BCR.CHG_AMT
+                         WHEN XC2.USD_LOCL_XCH_RT = 0 THEN 0
+                         ELSE BCR.CHG_AMT / XC2.USD_LOCL_XCH_RT
+                    END
+                ) AS OFT_USD
+         FROM BKG_CHG_RT BCR,
+           GL_MON_XCH_RT XC2
+         WHERE BCR.BKG_NO = R.BKG_NO
+           AND BCR.RAT_UT_CD = Q.CNTR_TPSZ_CD
+           AND BCR.FRT_INCL_XCLD_DIV_CD = 'N'
+           AND BCR.CHG_CD = 'OFT'
+           AND BCR.CURR_CD = XC2.CURR_CD
+           AND XC2.ACCT_XCH_RT_LVL = '1'
+           AND XC2.ACCT_XCH_RT_YRMON = (CASE WHEN SUBSTR(@[sa_dt], 1, 6) > TO_CHAR(SYSDATE, 'YYYYMM')
+                                               THEN TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(@[sa_dt], 1, 6), 'YYYYMM'), -1), 'YYYYMM')
+                                             ELSE SUBSTR(@[sa_dt], 1, 6)
+                                        END
+                                       )
+        ) AS OFT,
+        ROUT_TRF_RT,
+        ROUT_TRF_FX_AMT,
+        OP_CNTR_QTY,
+        ROW_NUMBER() OVER(PARTITION BY R.CHG_CD, R.BKG_AGMT_UT_CD ORDER BY 1) AS RN0,
+        ROW_NUMBER() OVER(PARTITION BY R.CHG_CD, R.BKG_AGMT_UT_CD ORDER BY T.AGMT_UT_ODR, Q.CNTR_TPSZ_CD DESC, DECODE(SPCL_CGO_CTNT, '  ', 0, 1) DESC) AS RN1,
+        ROW_NUMBER() OVER(PARTITION BY R.CHG_CD, R.BKG_AGMT_UT_CD, Q.CNTR_TPSZ_CD ORDER BY T.AGMT_UT_ODR, DECODE(SPCL_CGO_CTNT, '  ', 0, 1) DESC) AS RN2,
+        ROW_NUMBER() OVER(PARTITION BY R.CHG_CD, T.CNTR_TPSZ_CD ORDER BY T.AGMT_UT_ODR, Q.CNTR_TPSZ_CD DESC, DECODE(SPCL_CGO_CTNT, '  ', 0, 1) DESC) AS RN3,
+        R.CURR_CD,
+        R.BKG_AGMT_UT_CD,
+        M.REP_CHG_CD,
+        Q.CNTR_TPSZ_CD,
+        C.*,
+        G.USD_LOCL_XCH_RT,
+        T.AGMT_UT_ODR
+      FROM ACM_SIM_COMM_CHG_REF R,
+        ACM_SIM_AGMT_DTL D,
+        ACM_SIM_AGMT_DTL_CHG C,
+        MDM_CHARGE M,
+        BKG_QUANTITY Q,
+        BKG_BOOKING B,
+        MDM_LOCATION MPOR,
+        MDM_LOCATION MDEL,
+        GL_MON_XCH_RT G,
+        (SELECT DISTINCT '1' AS AGMT_UT_ODR,
+           MPG.CNTR_TP AS CNTR_TPSZ_CD,
+           MPG.CNTR_TP AS BKG_AGMT_UT_CD
+         FROM AGT_CNTR_PERTP_MPG_V MPG
+         WHERE MPG.CNTR_TP <> MPG.REP_TP
+         UNION ALL
+         SELECT DISTINCT '2' AS AGMT_UT_ODR,
+           MPG.CNTR_TP AS CNTR_TPSZ_CD,
+           MPG.REP_TP AS BKG_AGMT_UT_CD
+         FROM AGT_CNTR_PERTP_MPG_V MPG
+         WHERE MPG.CNTR_TP <> MPG.REP_TP
+         UNION ALL
+         SELECT DISTINCT '3' AS AGMT_UT_ODR,
+           MPG.CNTR_TP AS CNTR_TPSZ_CD,
+           MP2.REP_TP AS BKG_AGMT_UT_CD
+         FROM AGT_CNTR_PERTP_MPG_V MPG,
+           AGT_CNTR_PERTP_MPG_V MP2
+         WHERE MPG.CNTR_TP <> MPG.REP_TP
+           AND MP2.CNTR_TP = MP2.REP_TP
+        ) T
+      WHERE B.BKG_NO = Q.BKG_NO
+        AND B.POR_CD = MPOR.LOC_CD
+        AND B.DEL_CD = MDEL.LOC_CD
+        AND C.AGN_AGMT_NO = @[agn_agmt_no]
+        AND C.AGN_AGMT_SEQ = @[agn_agmt_seq]
+        AND C.AC_TP_CD = @[ac_tp_cd]
+        AND C.IO_BND_CD = @[io_bnd_cd]
+        AND C.CHG_DIV_CD = 'C'
+        AND C.CHG_CD = R.CHG_CD
+        AND D.AGN_CD = C.AGN_CD
+        AND D.AGN_AGMT_NO = C.AGN_AGMT_NO
+        AND D.IO_BND_CD = C.IO_BND_CD
+        AND D.AC_TP_CD = C.AC_TP_CD
+        AND D.AGN_AGMT_SEQ = C.AGN_AGMT_SEQ
+        -- RepChargeCD 하드코딩 삭제 요청 ([CHM-201221023] Rep Charge에 상관없이 모든 Charge가 Deduction 될 수 있도록 로직 변경 요청)
+        -- AND M.REP_CHG_CD IN ('BAF', 'CAF', 'CHC')
+        AND R.CURR_CD = G.CURR_CD
+        AND G.ACCT_XCH_RT_LVL = '1'
+        AND G.ACCT_XCH_RT_YRMON = (CASE WHEN SUBSTR(@[sa_dt], 1, 6) > TO_CHAR(SYSDATE, 'YYYYMM')
+                                          THEN TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(@[sa_dt], 1, 6), 'YYYYMM'), -1), 'YYYYMM')
+                                        ELSE SUBSTR(@[sa_dt], 1, 6)
+                                   END
+                                  )
+        AND R.BKG_NO = @[bkg_no]
+        -- RepChargeCD 하드코딩 삭제 요청 ([CHM-201221023] Rep Charge에 상관없이 모든 Charge가 Deduction 될 수 있도록 로직 변경 요청) 
+        -- AND R.CHG_CD = M.CHG_CD
+        AND R.CHG_CD = M.CHG_CD
+        AND R.BKG_AGMT_UT_CD = T.BKG_AGMT_UT_CD
+        AND Q.CNTR_TPSZ_CD = T.CNTR_TPSZ_CD
+        AND Q.CNTR_TPSZ_CD NOT LIKE 'Q%'
+        AND Q.BKG_NO IN (SELECT DISTINCT DOC.BKG_NO
+                         FROM BKG_BL_DOC DOC,
+                           BKG_BOOKING BKG,
+                           BKG_BOOKING BK2
+                         WHERE (BKG.BKG_NO = DOC.BKG_NO OR BKG.BL_NO = DOC.MST_CVRD_BL_NO)
+                           AND BK2.BKG_NO = DOC.BKG_NO
+                           AND BK2.BL_NO_TP <> '9'
+                           AND BK2.BKG_STS_CD <> 'X'
+                           AND BKG.BKG_NO = R.BKG_NO
+                        )
+        AND NVL(R.SPCL_CGO_CTNT, '  ') IN ('  ', 'DR', CASE WHEN Q.DCGO_QTY > 0 THEN 'DG'
+                                                            WHEN Q.RC_QTY > 0 THEN 'RF'
+                                                            WHEN Q.BB_CGO_QTY > 0 THEN 'BB'
+                                                            WHEN Q.EQ_SUBST_CGO_QTY > 0 THEN 'RD'
+                                                            ELSE '  '
+                                                       END
+                                          )
+        -- 아시아 -> 미주항, Outbound General, 계약요율의 계산방식이 Gross 일때 모든 Surcharge 공제
+        AND 'TRUE' IN (CASE WHEN EXISTS(SELECT 1
+                                        FROM DUAL
+                                        WHERE D.AC_TP_CD IN ('G', 'C')
+                                          AND D.REV_DIV_CD = 'G'
+                                          AND D.IO_BND_CD = 'O'
+                                          AND MPOR.CONTI_CD = 'A'
+                                          AND MDEL.CONTI_CD = 'M'
+                                 )
+                              THEN 'TRUE'
+                            WHEN NOT EXISTS(SELECT 1
+                                            FROM BKG_CHG_RT BCR,
+                                              AGT_CNTR_PERTP_MPG_V PET
+                                            WHERE BCR.BKG_NO = R.BKG_NO
+                                              AND BCR.FRT_INCL_XCLD_DIV_CD = 'N'
+                                              AND (BCR.RAT_UT_CD = PET.REP_TP OR BCR.RAT_UT_CD = PET.CNTR_TP)
+                                              -- CFR rating되어 있으면 OTH, CFD rating되어 있으면 DTH 공제 제외 logic 추가. 2016.01.05 김상현
+                                              AND (CASE WHEN BCR.CHG_CD IN ('OTH', 'CYR', 'OPS', 'CFR') THEN 'OTH'
+                                                        WHEN BCR.CHG_CD IN ('DTH', 'CYC', 'CYD', 'DDC', 'DPS', 'CFD') THEN 'DTH'
+                                                        ELSE BCR.CHG_CD
+                                                   END
+                                                  ) IN (
+                                                   CASE WHEN R.CHG_CD IN ('OTH', 'CYR', 'OPS', 'CFR') THEN 'OTH'
+                                                        WHEN R.CHG_CD IN ('DTH', 'CYC', 'CYD', 'DDC', 'DPS', 'CFD') THEN 'DTH'
+                                                        ELSE R.CHG_CD
+                                                   END
+                                                  )
+                                           )
+                              THEN 'TRUE'
+                       END
+                      )
+        -- S/C, RFA, TAA 계약이 2013년 1월 1일 이후 계약일 경우, 'IFC' 공제 제외.
+        -- 2013년 1월 1일 이전 계약이면서 booking rating되어 있지 않으면 공제.
+        AND 'TRUE' = CASE WHEN R.CHG_CD = 'IFC' AND TO_DATE('20130101', 'YYYYMMDD') < CASE WHEN B.RFA_NO IS NOT NULL
+                                                                                             THEN (SELECT EFF_DT FROM PRI_RP_MN
+                                                                                                   WHERE PROP_NO = (SELECT PROP_NO FROM PRI_RP_HDR WHERE RFA_NO = B.RFA_NO)
+                                                                                                     AND AMDT_SEQ = '0'
+                                                                                                  )
+                                                                                           WHEN B.SC_NO IS NOT NULL
+                                                                                             THEN (SELECT EFF_DT FROM PRI_SP_MN
+                                                                                                   WHERE PROP_NO = (SELECT PROP_NO FROM PRI_SP_HDR WHERE SC_NO = B.SC_NO)
+                                                                                                     AND AMDT_SEQ = '0'
+                                                                                                  )
+                                                                                           WHEN B.TAA_NO IS NOT NULL
+                                                                                             THEN (SELECT EFF_DT FROM PRI_TAA_MN
+                                                                                                   WHERE TAA_PROP_NO = (SELECT TAA_PROP_NO FROM PRI_TAA_HDR WHERE TAA_NO = B.TAA_NO)
+                                                                                                     AND AMDT_SEQ = '0'
+                                                                                                  )
+                                                                                           ELSE SYSDATE
+                                                                                      END
+                            THEN 'FALSE'
+                          WHEN R.CHG_CD = 'IFC' AND EXISTS(SELECT 1
+                                                               FROM BKG_BOOKING BKG,
+                                                                 BKG_CHG_RT RT
+                                                               WHERE BKG.BKG_NO = RT.BKG_NO
+                                                                 AND RT.FRT_INCL_XCLD_DIV_CD = 'N'
+                                                                 AND RT.CHG_CD = 'IFC'
+                                                                 AND TO_DATE('20130101', 'YYYYMMDD') > CASE WHEN BKG.RFA_NO IS NOT NULL
+                                                                                                              THEN (SELECT EFF_DT FROM PRI_RP_MN
+                                                                                                                    WHERE PROP_NO = (SELECT PROP_NO FROM PRI_RP_HDR WHERE RFA_NO = BKG.RFA_NO)
+                                                                                                                      AND AMDT_SEQ = '0'
+                                                                                                                   )
+                                                                                                            WHEN BKG.SC_NO IS NOT NULL
+                                                                                                              THEN (SELECT EFF_DT FROM PRI_SP_MN
+                                                                                                                    WHERE PROP_NO = (SELECT PROP_NO FROM PRI_SP_HDR WHERE SC_NO = BKG.SC_NO)
+                                                                                                                      AND AMDT_SEQ = '0'
+                                                                                                                   )
+                                                                                                            WHEN BKG.TAA_NO IS NOT NULL
+                                                                                                              THEN (SELECT EFF_DT FROM PRI_TAA_MN
+                                                                                                                    WHERE TAA_PROP_NO = (SELECT TAA_PROP_NO FROM PRI_TAA_HDR WHERE TAA_NO = BKG.TAA_NO)
+                                                                                                                      AND AMDT_SEQ = '0'
+                                                                                                                   )
+                                                                                                            ELSE SYSDATE
+                                                                                                       END
+                                                                 AND BKG.BKG_NO = @[bkg_no]
+                                                        )
+                            THEN 'FALSE'
+                          ELSE 'TRUE'
+                     END
+     ) A
+   WHERE RN3 = 1
+  ) M
+WHERE RN = 1			]]></sql>
+			<params>
+				<param name="sim_no" type="12" value="" out="N"/>
+				<param name="max_ac_seq" type="12" value="" out="N"/>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="sa_dt" type="12" value="" out="N"/>
+				<param name="agn_agmt_no" type="12" value="" out="N"/>
+				<param name="agn_agmt_seq" type="12" value="" out="N"/>
+				<param name="ac_tp_cd" type="12" value="" out="N"/>
+				<param name="io_bnd_cd" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

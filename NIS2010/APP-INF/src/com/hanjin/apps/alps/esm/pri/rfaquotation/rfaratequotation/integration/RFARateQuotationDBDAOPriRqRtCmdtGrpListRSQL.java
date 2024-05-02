@@ -1,0 +1,119 @@
+/*=========================================================
+*Copyright(c) 2012 CyberLogitec
+*@FileName : RFARateQuotationDBDAOPriRqRtCmdtGrpListRSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2012.07.25
+*@LastModifier : 이은섭
+*@LastVersion : 1.0
+* 2012.07.25 이은섭
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.pri.rfaquotation.rfaratequotation.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author Eun-Sup Lee
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class RFARateQuotationDBDAOPriRqRtCmdtGrpListRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * CMDT_HDR_SEQ 별 Cmdt Grp 한줄로 합해서 조회
+	  * </pre>
+	  */
+	public RFARateQuotationDBDAOPriRqRtCmdtGrpListRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("qttn_ver_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("qttn_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("fic_rt_tp_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.esm.pri.rfaquotation.rfaratequotation.integration").append("\n"); 
+		query.append("FileName : RFARateQuotationDBDAOPriRqRtCmdtGrpListRSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT A1.QTTN_NO," ).append("\n"); 
+		query.append("       A1.QTTN_VER_NO," ).append("\n"); 
+		query.append("       A1.CMDT_HDR_SEQ," ).append("\n"); 
+		query.append("       A1.PRC_CMDT_DEF_CD," ).append("\n"); 
+		query.append("       A1.FIC_RT_TP_CD" ).append("\n"); 
+		query.append("  FROM (SELECT QTTN_NO," ).append("\n"); 
+		query.append("               QTTN_VER_NO," ).append("\n"); 
+		query.append("               CMDT_HDR_SEQ," ).append("\n"); 
+		query.append("               FIC_RT_TP_CD," ).append("\n"); 
+		query.append("               SUBSTR(MAX(SYS_CONNECT_BY_PATH(PRC_CMDT_DEF_CD, ' / ')), 4) AS PRC_CMDT_DEF_CD" ).append("\n"); 
+		query.append("          FROM (SELECT A.QTTN_NO," ).append("\n"); 
+		query.append("                       A.QTTN_VER_NO," ).append("\n"); 
+		query.append("                       A.CMDT_HDR_SEQ," ).append("\n"); 
+		query.append("                       A.PRC_CMDT_DEF_CD AS PRC_CMDT_DEF_CD," ).append("\n"); 
+		query.append("                       NVL(B.FIC_RT_TP_CD, 'G') FIC_RT_TP_CD," ).append("\n"); 
+		query.append("                       ROW_NUMBER() OVER(PARTITION BY A.QTTN_NO, A.QTTN_VER_NO, A.CMDT_HDR_SEQ ORDER BY DECODE(A.PRC_CMDT_TP_CD, 'G', '1', 'R', '2', 'C', '3'), A.PRC_CMDT_DEF_CD, A.QTTN_NO, A.QTTN_VER_NO, A.CMDT_HDR_SEQ, A.CMDT_SEQ) AS RN" ).append("\n"); 
+		query.append("                  FROM PRI_RQ_RT_CMDT     A," ).append("\n"); 
+		query.append("                       PRI_RQ_RT_CMDT_HDR B" ).append("\n"); 
+		query.append("                 WHERE 1 = 1" ).append("\n"); 
+		query.append("                       AND A.QTTN_NO = @[qttn_no]" ).append("\n"); 
+		query.append("                       AND A.QTTN_VER_NO = @[qttn_ver_no]" ).append("\n"); 
+		query.append("                       AND A.QTTN_NO = B.QTTN_NO" ).append("\n"); 
+		query.append("                       AND A.QTTN_VER_NO = B.QTTN_VER_NO" ).append("\n"); 
+		query.append("                       AND A.CMDT_HDR_SEQ = B.CMDT_HDR_SEQ" ).append("\n"); 
+		query.append("                       AND NVL(B.FIC_RT_TP_CD, 'G') = NVL(@[fic_rt_tp_cd], 'G'))" ).append("\n"); 
+		query.append("         START WITH RN = 1" ).append("\n"); 
+		query.append("        CONNECT BY PRIOR CMDT_HDR_SEQ = CMDT_HDR_SEQ" ).append("\n"); 
+		query.append("                   AND PRIOR RN = RN - 1" ).append("\n"); 
+		query.append("         GROUP BY QTTN_NO," ).append("\n"); 
+		query.append("                  QTTN_VER_NO," ).append("\n"); 
+		query.append("                  CMDT_HDR_SEQ," ).append("\n"); 
+		query.append("                  FIC_RT_TP_CD) A1" ).append("\n"); 
+		query.append(" ORDER BY A1.CMDT_HDR_SEQ" ).append("\n"); 
+
+	}
+}

@@ -1,0 +1,88 @@
+SELECT COP_NO,CNTR_NO,CNTR_TPSZ_CD,PCTL_NO,OB_TRO_FLG,IB_TRO_FLG,POR_NOD_CD,POL_YD_CD,
+       (CASE WHEN SUBSTR(OCN_BOUND,2,5) <> SUBSTR(POL_NOD_CD,1,5)
+              AND SUBSTR(OUT_BOUND,-8,5) = SUBSTR(POL_NOD_CD,1,5)
+              AND SUBSTR(OUT_BOUND,-8,7) <> POL_NOD_CD
+              AND NVL((SELECT 'Y' FROM PRD_NODE
+                       WHERE NOD_CD =SUBSTR(OUT_BOUND,-8,7)
+                       AND NOD_TP_CD IN ('M','B')),'X') = 'Y'
+             THEN SUBSTR(OUT_BOUND,-8,7)          
+       END) NEW_POL,
+       (CASE WHEN SUBSTR(OCN_BOUND,-8,5) <> SUBSTR(POD_NOD_CD,1,5)
+              AND SUBSTR(IN_BOUND,2,5) = SUBSTR(POD_NOD_CD,1,5)
+              AND SUBSTR(IN_BOUND,2,7) <> POD_NOD_CD
+              AND NVL((SELECT 'Y' FROM PRD_NODE
+                       WHERE NOD_CD =SUBSTR(IN_BOUND,2,7)
+                       AND NOD_TP_CD IN ('M','B')),'X') = 'Y'
+             THEN SUBSTR(IN_BOUND,2,7)          
+       END) NEW_POD,
+       RCV_TERM_CD,DE_TERM_CD,MT_PU,MT_RTN,IO_BND_CD,INCL_SHTL_SO_FLG,
+       ROUT_ORG_NOD_CD,ROUT_DEST_NOD_CD,ROUT_SEQ,CCT,POL_T,POD_T,OUT_BOUND,IN_BOUND,OCN_BOUND,
+       T_VVD,ORG_LOC_CD,DEST_LOC_CD,OCN_SEQ,
+       PRD_GET_OCN_VVD_FNC(PCTL_NO,1) VVD1,PRD_GET_OCN_VVD_FNC(PCTL_NO,2) VVD2,PRD_GET_OCN_VVD_FNC(PCTL_NO,3) VVD3,PRD_GET_OCN_VVD_FNC(PCTL_NO,4) VVD4
+FROM (
+    SELECT H.COP_NO,H.CNTR_NO,H.CNTR_TPSZ_CD,H.PCTL_NO,H.TRNK_VSL_CD||H.TRNK_SKD_VOY_NO||H.TRNK_SKD_DIR_CD T_VVD,    
+          OB_TRO_FLG,IB_TRO_FLG,BC.POR_NOD_CD,BC.POL_YD_CD, H.POL_NOD_CD,H.POD_NOD_CD,
+          NVL(BC.RCV_TERM_CD,M.BKG_RCV_TERM_CD)  RCV_TERM_CD, 
+          NVL(BC.DE_TERM_CD,M.BKG_DE_TERM_CD)  DE_TERM_CD ,
+          PU.NOD_CD MT_PU,RTN.NOD_CD MT_RTN, :IO_BND_CD IO_BND_CD,
+          (SELECT (CASE WHEN T.TRSP_BND_CD = 'I' AND T.COST_ACT_GRP_SEQ = 610 
+                            THEN 'N'
+                        WHEN T.TRSP_BND_CD = 'O' AND T.COST_ACT_GRP_SEQ = (SELECT MAX(COST_ACT_GRP_SEQ) 
+                                                                           FROM SCE_PLN_SO_LIST 
+                                                                           WHERE COP_NO = S.COP_NO
+                                                                           AND PCTL_IO_BND_CD ='O')
+                           THEN 'N'
+                  END ) INCL_SHTL_SO_FLG                                                             
+          FROM TRS_TRSP_SVC_ORD T, SCE_COP_HDR S 
+          WHERE T.COP_NO = :COP_NO
+          AND T.TRSP_BND_CD =:IO_BND_CD
+          AND NVL(T.DELT_FLG,'N') <> 'Y'
+          AND T.COP_NO =S.COP_NO
+          AND ROWNUM =1 ) INCL_SHTL_SO_FLG,
+          D.ROUT_ORG_NOD_CD,D.ROUT_DEST_NOD_CD,D.ROUT_SEQ,
+          O.ROUT_ORG_NOD_CD ORG_LOC_CD,O.ROUT_DEST_NOD_CD DEST_LOC_CD,O.ROUT_SEQ OCN_SEQ,
+          (SELECT TO_CHAR(MAX(ARR_ST_DT),'YYYYMMDDHH24MISS')
+          FROM PRD_PROD_CTL_ROUT_DTL
+          WHERE PCTL_NO =H.PCTL_NO
+          AND PCTL_IO_BND_CD ='O') CCT ,
+          (SELECT TO_CHAR(MIN(ARR_ST_DT),'YYYYMMDDHH24MISS')
+          FROM PRD_PROD_CTL_ROUT_DTL
+          WHERE PCTL_NO =H.PCTL_NO
+          AND PCTL_IO_BND_CD ='T') POL_T, 
+          (SELECT TO_CHAR(MIN(ARR_ST_DT),'YYYYMMDDHH24MISS') 
+          FROM PRD_PROD_CTL_ROUT_DTL
+          WHERE PCTL_NO =H.PCTL_NO
+          AND PCTL_IO_BND_CD ='I') POD_T,  
+          PRD_GET_COP_BND_SO_STR_FNC (H.COP_NO,'O') OUT_BOUND,
+          PRD_GET_COP_BND_SO_STR_FNC (H.COP_NO,'I') IN_BOUND,
+          PRD_GET_COP_BND_SO_STR_FNC (H.COP_NO,'T') OCN_BOUND                   
+    FROM SCE_COP_HDR H,SCE_COP_DTL PU, SCE_COP_DTL RTN, BKG_CONTAINER BC, PRD_PROD_CTL_MST M,PRD_PROD_CTL_ROUT_DTL D,PRD_PROD_CTL_ROUT_DTL O
+    WHERE H.COP_NO = :COP_NO 
+     AND H.PCTL_NO = M.PCTL_NO
+     AND H.PCTL_NO = D.PCTL_NO
+     AND D.PCTL_IO_BND_CD = :IO_BND_CD
+     AND D.PCTL_SEQ = (SELECT /*+ INDEX(D2 XPKPRD_PROD_CTL_ROUT_DTL) */
+                       PCTL_SEQ 
+                       FROM PRD_PROD_CTL_ROUT_DTL D2
+                       WHERE D2.PCTL_NO = D.PCTL_NO
+                       AND D2.PCTL_IO_BND_CD = :IO_BND_CD 
+                       AND ROWNUM =1)
+     AND H.PCTL_NO = O.PCTL_NO
+     AND O.PCTL_SEQ = (SELECT /*+ INDEX(D2 XPKPRD_PROD_CTL_ROUT_DTL) */
+                       PCTL_SEQ 
+                       FROM PRD_PROD_CTL_ROUT_DTL D2
+                       WHERE D2.PCTL_NO = D.PCTL_NO
+                       AND D2.PCTL_IO_BND_CD = 'T' 
+                       AND ROWNUM =1)
+     AND H.CNTR_NO = BC.CNTR_NO(+)
+     AND H.BKG_NO = BC.BKG_NO(+)
+     AND NVL(H.COP_STS_CD,'N') <> 'X' 
+     AND H.COP_NO = PU.COP_NO(+)
+     AND PU.ACT_CD(+) = 'MOTYDO'
+     AND PU.ACT_DT(+) IS NOT NULL
+     AND H.COP_NO = RTN.COP_NO(+)
+     AND RTN.ACT_CD(+) = 'MITYAD'
+     AND RTN.ACT_DT(+) IS NOT NULL  
+);
+
+

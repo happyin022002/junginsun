@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="JointOperationConsultationDBDAOSearchApproveJOOYnRSQL">
+			<desc><![CDATA[JOO에서 금액이 10만불 이상 이하에서 결재라인에 CEO, 본부장이 존재하는지 조회한다.]]></desc>
+			<sql><![CDATA[
+SELECT 
+    CASE
+    WHEN 
+        (SELECT R.APRO_RQST_SEQ FROM COM_APRO_RQST_ROUT R WHERE R.APRO_RQST_NO = X.APRO_RQST_NO AND NVL(AP_COM_CHECK_CEO_YN_FNC(R.APRO_USR_ID),'X') = 'Y') > 0 
+        AND
+        (SELECT R.APRO_RQST_SEQ FROM COM_APRO_RQST_ROUT R WHERE R.APRO_RQST_NO = X.APRO_RQST_NO AND NVL(AP_COM_CHECK_CEO_YN_FNC(R.APRO_USR_ID),'X') = 'Y')
+        <>
+        X.MAX_APRO_SEQ
+    THEN 'I' --// PDT 맨뒤인지 확인
+    WHEN EXISTS (
+        SELECT 'Y'
+        FROM JOO_CSR C, JOO_STL_CMB S, JOO_STL_CMB_DTL D, JOO_SETTLEMENT T
+        WHERE 1=1
+        AND C.SLP_TP_CD||C.SLP_FUNC_CD||C.SLP_OFC_CD||C.SLP_ISS_DT||C.SLP_SER_NO = 
+            S.SLP_TP_CD||S.SLP_FUNC_CD||S.SLP_OFC_CD||S.SLP_ISS_DT||S.SLP_SER_NO
+        AND S.ACCT_YRMON  = D.ACCT_YRMON
+        AND S.JO_CRR_CD   = D.JO_CRR_CD
+        AND S.STL_CMB_SEQ = D.STL_CMB_SEQ
+		AND S.RE_DIVR_CD  = D.RE_DIVR_CD
+        AND D.ACCT_YRMON  = T.ACCT_YRMON
+        AND D.STL_VVD_SEQ = T.STL_VVD_SEQ
+        AND D.STL_SEQ     = T.STL_SEQ
+	    AND D.RE_DIVR_CD  = T.RE_DIVR_CD
+        AND NVL(T.AP_CXL_FLG,'N') = 'Y'
+		AND C.SLP_TP_CD||C.SLP_FUNC_CD||C.SLP_OFC_CD||C.SLP_ISS_DT||C.SLP_SER_NO = X.CSR_NO
+        ) AND CSR_USD_AMT >= 100000
+    THEN 'F'
+    WHEN EXISTS (
+        SELECT 'Y'
+        FROM JOO_SLIP A
+        WHERE 1=1
+        AND A.SLP_TP_CD||A.SLP_FUNC_CD||A.SLP_OFC_CD||A.SLP_ISS_DT||A.SLP_SER_NO = X.CSR_NO
+        AND A.ACCT_CD IN ('954112', '954113') 
+        )
+    THEN 'C'
+	ELSE
+        CASE
+        WHEN ACCT_XCH_RT_YRMON IS NOT NULL AND CSR_USD_AMT IS NOT NULL
+        THEN 
+            CASE
+            WHEN X.KNT < 2
+            THEN 'K'
+            WHEN CSR_USD_AMT >= 100000
+            THEN DECODE(NVL(AP_COM_CHECK_CEO_YN_FNC(X.APRO_USR_ID),'X'),'N','P',NVL(AP_COM_CHECK_CEO_YN_FNC(X.APRO_USR_ID),'X')) --P : CEO 올자리에 CEO가 없다는
+            ELSE 
+                CASE
+                WHEN DECODE(NVL(AP_COM_CHECK_CEO_YN_FNC(X.APRO_USR_ID),'X'),'N','P',NVL(AP_COM_CHECK_CEO_YN_FNC(X.APRO_USR_ID),'X')) = 'Y'
+                THEN 'Y'
+                ELSE DECODE(NVL(AP_COM_CHECK_MGR_YN_FNC(X.APRO_USR_ID,@[lgn_usr_id]),'X'),'N','M',NVL(AP_COM_CHECK_MGR_YN_FNC(X.APRO_USR_ID,@[lgn_usr_id]),'X')) --M : 본부장직급 올자리에 본부장직급이 없다는
+                END
+            END
+        WHEN (ACCT_XCH_RT_YRMON IS NOT NULL AND CSR_USD_AMT IS NULL) OR (ACCT_XCH_RT_YRMON IS NULL AND CSR_USD_AMT IS NOT NULL)        
+        THEN 'E'
+        ELSE 'X'
+        END
+    END CHK_VAL_YN
+FROM (
+    SELECT 
+        A.SLP_TP_CD||A.SLP_FUNC_CD||A.SLP_OFC_CD||A.SLP_ISS_DT||A.SLP_SER_NO  CSR_NO
+        , A.CSR_DESC
+        , A.EFF_DT
+        , A.CRE_USR_ID
+        , A.CSR_LOCL_AMT
+        , SUBSTR(A.EFF_DT, 1, 6) ACCT_XCH_RT_YRMON        
+        ,(NVL(A.CSR_LOCL_AMT / DECODE(A.CSR_LOCL_CURR_CD, 'USD', 1, 
+          (SELECT NVL(EX1.USD_LOCL_XCH_RT, 1) 
+             FROM GL_MON_XCH_RT EX1
+           WHERE A.CSR_LOCL_CURR_CD = EX1.CURR_CD 
+             AND EX1.ACCT_XCH_RT_YRMON = SUBSTR(A.EFF_DT, 1, 6)
+             AND EX1.ACCT_XCH_RT_LVL = '1'
+            )),0)) CSR_USD_AMT               
+        , COUNT(R.APRO_RQST_SEQ) OVER (PARTITION BY R.APRO_RQST_NO) KNT
+        , DENSE_RANK() OVER (PARTITION BY R.APRO_RQST_NO ORDER BY R.APRO_RQST_SEQ DESC) RNK
+        , MAX(R.APRO_RQST_SEQ) OVER (PARTITION BY R.APRO_RQST_NO) MAX_APRO_SEQ        
+        , R.APRO_RQST_NO
+        , R.APRO_RQST_SEQ
+        , R.APRO_USR_ID
+        , R.APRO_USR_NM
+    FROM JOO_CSR A, COM_APRO_RQST_HDR H, COM_APRO_CSR_DTL D, COM_APRO_RQST_ROUT R 
+    WHERE 1=1
+    AND A.SLP_TP_CD||A.SLP_FUNC_CD||A.SLP_OFC_CD||SUBSTR(A.SLP_ISS_DT,3,8)||A.SLP_SER_NO = D.CSR_NO
+    AND H.APRO_RQST_NO = D.APRO_RQST_NO
+    AND H.APRO_RQST_NO = R.APRO_RQST_NO
+    AND A.SLP_TP_CD||A.SLP_FUNC_CD||A.SLP_OFC_CD||SUBSTR(A.SLP_ISS_DT,3,8)||A.SLP_SER_NO = @[csr_no]
+) X
+WHERE RNK = 1			]]></sql>
+			<params>
+				<param name="lgn_usr_id" type="12" value="" out="N"/>
+				<param name="csr_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

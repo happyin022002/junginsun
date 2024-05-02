@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="VesselScheduleMgtDBDAOPortSkdOnLongRangeRSQL">
+			<desc><![CDATA[주어진 기간내에서 특정 Lane이나 Vessel에 대한 Port Schedule을 조회한다.(Long Range Inquiry)
+
+* History
+* 2011.02.22 진마리아 CHM-201108456-01 사업계획용 스케줄 정보 노출 대응을 위한 시스템 업데이트건]]></desc>
+			<sql><![CDATA[
+SELECT 
+T2.VSL_SLAN_CD
+,T2.PF_SKD_TP_CD
+,T4.VSL_SVC_TP_CD
+,T2.VSL_CD
+,T2.SKD_VOY_NO
+,T2.SKD_DIR_CD
+,T2.VSL_SLAN_DIR_SEQ
+,T3.VPS_PORT_CD
+,T3.CLPT_IND_SEQ
+,T3.CLPT_SEQ
+,T3.PORT_SKD_STS_CD
+,T3.YD_CD
+,T3.CALL_YD_IND_SEQ
+,T3.PF_ETA_DT
+,T3.PF_ETB_DT
+,T3.PF_ETD_DT
+,T3.INIT_ETA_DT
+,T3.INIT_ETB_DT
+,T3.INIT_ETD_DT
+,T3.VPS_ETA_DT
+,T3.VPS_ETB_DT
+,T3.VPS_ETD_DT
+,T3.SKD_CNG_STS_CD
+,T3.TURN_PORT_FLG
+,T3.TURN_PORT_IND_CD
+,T3.TURN_SKD_VOY_NO
+,T3.TURN_SKD_DIR_CD
+,T3.TURN_CLPT_IND_SEQ
+,T2.SKD_RMK AS VPS_RMK
+,'' AS START_DATE
+,'' AS END_DATE
+,TO_CHAR(T3.CRE_DT, 'YYYY-MM-DD HH24:MI') CRE_DT
+,T3.CRE_USR_ID
+,TO_CHAR(T3.UPD_DT, 'YYYY-MM-DD HH24:MI') UPD_DT
+,T3.UPD_USR_ID
+,(SELECT LOC_NM FROM MDM_LOCATION WHERE LOC_CD=T3.VPS_PORT_CD) PORT_NM
+,(SELECT VSL_ENG_NM FROM MDM_VSL_CNTR WHERE VSL_CD=T3.VSL_CD) VSL_ENG_NM
+FROM (
+
+    /* 주어진 조회 기간내에 포함되는 VVD및 그와 연결되는 VVD를 조회한다.*/
+    SELECT * FROM (
+        SELECT 
+            DISTINCT
+            T1.VSL_CD
+            ,DECODE(MOD(Y, 2), 1, SKD_VOY_NO, 0, TURN_SKD_VOY_NO) SKD_VOY_NO
+            ,DECODE(MOD(Y, 2), 1, SKD_DIR_CD, 0, TURN_SKD_DIR_CD) SKD_DIR_CD
+        FROM (
+            SELECT
+                T1.*
+            FROM(
+                SELECT
+                    T1.*
+                    ,ROW_NUMBER() OVER(PARTITION BY VSL_CD, SKD_VOY_NO, SKD_DIR_CD ORDER BY TURN_SKD_VOY_NO) X
+                FROM (
+                    SELECT 
+                        T1.VSL_CD
+                        ,T1.SKD_VOY_NO
+                        ,T1.SKD_DIR_CD
+                        ,CASE WHEN T1.VSL_SLAN_DIR_SEQ=1 AND T1.TURN_PORT_IND_CD='D' THEN
+                            /* 첫번째 DIR의 경우, TURN_PORT_IND_CD가 'D' 즉, 두번째 DIR의 SKD_VOY_NO를 구한다.*/
+                            T1.TURN_SKD_VOY_NO
+                        WHEN T1.VSL_SLAN_DIR_SEQ=2 AND T1.TURN_PORT_FLG='Y' AND T1.TURN_PORT_IND_CD='Y' THEN
+                            /* 두번째 DIR의 경우, TURN_PORT_IND_CD가 'Y' 즉, 이전 VVD의 첫번째 DIR의 SKD_VOY_NO를 구한다.*/
+                            T1.TURN_SKD_VOY_NO
+                        ELSE
+                        'XXXX'
+                        END TURN_SKD_VOY_NO
+                        ,CASE WHEN T1.VSL_SLAN_DIR_SEQ=1 AND T1.TURN_PORT_IND_CD='D' THEN
+                            /* 첫번째 DIR의 경우, TURN_PORT_IND_CD가 'D' 즉, 두번째 DIR의 SKD_DIR_CD를 구한다.*/
+                            T1.TURN_SKD_DIR_CD
+                        WHEN T1.VSL_SLAN_DIR_SEQ=2 AND T1.TURN_PORT_FLG='Y' AND T1.TURN_PORT_IND_CD='Y' THEN
+                            /* 두번째 DIR의 경우, TURN_PORT_IND_CD가 'Y' 즉, 이전 VVD의 첫번째 DIR의 SKD_DIR_CD를 구한다.*/
+                            T1.TURN_SKD_DIR_CD
+                        ELSE
+                        'XXXX'
+                        END TURN_SKD_DIR_CD
+                    FROM (
+                        /* VVD별 최소ETB, 최대ETD 계산 */
+                        SELECT 
+                            T2.VSL_CD
+                            ,T2.SKD_VOY_NO
+                            ,T2.SKD_DIR_CD
+                            ,T1.VSL_SLAN_DIR_SEQ
+                            ,T2.VPS_PORT_CD
+                            ,T2.CLPT_IND_SEQ
+                            ,T2.CLPT_SEQ
+                            ,T2.VPS_ETB_DT
+                            ,T2.VPS_ETD_DT
+                            ,T2.TURN_PORT_FLG
+                            ,T2.TURN_PORT_IND_CD
+                            ,T2.TURN_SKD_VOY_NO
+                            ,T2.TURN_SKD_DIR_CD
+                            ,FIRST_VALUE(T2.VPS_ETB_DT) OVER(PARTITION BY T2.VSL_CD, T2.SKD_VOY_NO, T2.SKD_DIR_CD ORDER BY CLPT_SEQ ASC) FIRST_ETB
+                            ,FIRST_VALUE(T2.VPS_ETD_DT) OVER(PARTITION BY T2.VSL_CD, T2.SKD_VOY_NO, T2.SKD_DIR_CD ORDER BY CLPT_SEQ DESC) LAST_ETD
+                        FROM (
+								SELECT
+									T1.VSL_SLAN_CD
+									, T1.PF_SKD_TP_CD
+									, T1.VSL_CD
+									, T1.SKD_VOY_NO
+									, T1.SKD_DIR_CD
+									/* PF SKD DETAIL 을 이용하여 DIRECTION SEQ를 구함*/
+									, DECODE(MIN(PORT_ROTN_SEQ), NULL, ROW_NUMBER() OVER(PARTITION BY VSL_CD, SKD_VOY_NO ORDER BY T1.N1ST_PORT_BRTH_DT), 1, 1, 2) AS VSL_SLAN_DIR_SEQ
+								FROM VSK_BUD_VSL_SKD T1, VSK_BUD_PF_SKD_DTL T2
+								WHERE 1=1
+								AND T1.VSL_SLAN_CD  = T2.VSL_SLAN_CD(+)
+								AND T1.PF_SKD_TP_CD = T2.PF_SVC_TP_CD(+)
+								AND T1.SKD_DIR_CD   = T2.SKD_DIR_CD(+)
+								#if (${vsl_slan_cd} != '')
+								AND T1.VSL_SLAN_CD 	= @[vsl_slan_cd]
+								#end
+								#if (${vsl_cd} != '')
+								AND T1.VSL_CD 		= @[vsl_cd]
+								#end
+								GROUP BY T1.VSL_SLAN_CD, T1.PF_SKD_TP_CD, T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD, T1.N1ST_PORT_BRTH_DT
+							) T1, VSK_BUD_VSL_PORT_SKD T2
+                        WHERE 1=1
+
+    #if (${vsl_slan_cd} != '') 
+                        AND T1.VSL_SLAN_CD=@[vsl_slan_cd]
+                        AND T2.SLAN_CD=@[vsl_slan_cd]
+    #end
+    #if (${vsl_cd} != '')
+                        AND T2.VSL_CD=@[vsl_cd]
+    #end
+                        AND T1.VSL_CD=T2.VSL_CD
+                        AND T1.SKD_VOY_NO=T2.SKD_VOY_NO
+                        AND T1.SKD_DIR_CD=T2.SKD_DIR_CD
+						--AND T3.TURN_PORT_IND_CD!='F'
+						--AND T3.TURN_PORT_IND_CD!='D'
+                        AND T2.TURN_PORT_IND_CD!='V'
+                    ) T1
+                    WHERE 1=1
+					AND TO_DATE(@[start_date], 'YYYY-MM-DD') <= T1.LAST_ETD
+					AND TO_DATE(@[end_date], 'YYYY-MM-DD') >= T1.FIRST_ETB
+                ) T1
+            ) T1
+            WHERE X=1
+        ) T1
+        /* T1에서 TURN_SKD_VOY_NO, TURN_SKD_DIR_CD를 끌어내기 위해 인위적으로 2개 ROW를 갖는 테이블을 조인한다.*/
+        ,(SELECT ROWNUM AS Y FROM DUAL CONNECT BY LEVEL <= 2) T2
+    ) T1
+    WHERE T1.SKD_VOY_NO!='XXXX' AND T1.SKD_DIR_CD!='XXXX'
+    
+)T1, (
+		SELECT
+			T1.VSL_SLAN_CD
+			, T1.PF_SKD_TP_CD
+			, T1.VSL_CD
+			, T1.SKD_VOY_NO
+			, T1.SKD_DIR_CD
+			, MAX(T1.SKD_RMK) AS SKD_RMK
+			/* PF SKD DETAIL 을 이용하여 DIRECTION SEQ를 구함*/
+			, DECODE(MIN(PORT_ROTN_SEQ), NULL, ROW_NUMBER() OVER(PARTITION BY VSL_CD, SKD_VOY_NO ORDER BY T1.N1ST_PORT_BRTH_DT), 1, 1, 2) AS VSL_SLAN_DIR_SEQ
+		FROM VSK_BUD_VSL_SKD T1, VSK_BUD_PF_SKD_DTL T2
+		WHERE 1=1
+		AND T1.VSL_SLAN_CD  = T2.VSL_SLAN_CD(+)
+		AND T1.PF_SKD_TP_CD = T2.PF_SVC_TP_CD(+)
+		AND T1.SKD_DIR_CD   = T2.SKD_DIR_CD(+)
+		#if (${vsl_slan_cd} != '')
+		AND T1.VSL_SLAN_CD 	= @[vsl_slan_cd]
+		#end
+		#if (${vsl_cd} != '')
+		AND T1.VSL_CD 		= @[vsl_cd]
+		#end
+		GROUP BY T1.VSL_SLAN_CD, T1.PF_SKD_TP_CD, T1.VSL_CD, T1.SKD_VOY_NO, T1.SKD_DIR_CD, T1.N1ST_PORT_BRTH_DT
+) T2, VSK_BUD_VSL_PORT_SKD T3, MDM_VSL_SVC_LANE T4
+WHERE 1=1
+#if (${vsl_slan_cd} != '') 
+AND T2.VSL_SLAN_CD=@[vsl_slan_cd]
+#end
+#if (${vsl_cd} != '')
+AND T2.VSL_CD=@[vsl_cd]
+#end
+AND T2.VSL_SLAN_CD = T4.VSL_SLAN_CD
+AND T1.VSL_CD=T2.VSL_CD
+AND T1.SKD_VOY_NO=T2.SKD_VOY_NO
+AND T1.SKD_DIR_CD=T2.SKD_DIR_CD
+AND T2.VSL_CD=T3.VSL_CD
+AND T2.SKD_VOY_NO=T3.SKD_VOY_NO
+AND T2.SKD_DIR_CD=T3.SKD_DIR_CD
+AND T3.TURN_PORT_IND_CD!='D'
+AND T3.TURN_PORT_IND_CD!='V'
+AND T4.VSL_TP_CD='C' /*컨테이너선*/
+ORDER BY T3.VSL_CD, T3.SKD_VOY_NO, T2.VSL_SLAN_DIR_SEQ, T3.CLPT_SEQ			]]></sql>
+			<params>
+				<param name="vsl_slan_cd" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="start_date" type="12" value="" out="N"/>
+				<param name="end_date" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="GeneralBookingListSearchDBDAOsearchPreCheckForCodeAccuracyMatchRSQL">
+			<desc><![CDATA[Consignee, Nofity의 code accuracy를 조회한다.]]></desc>
+			<sql><![CDATA[
+SELECT RSLT.BKG_NO
+      , RSLT.BKG_CUST_TP_CD
+      , DECODE(RSLT.BKG_CUST_TP_CD, 'C', 'CNEE', 'NTFY') AS BKG_CUST_TP_CD_VIEW
+      , RSLT.BL_NO
+      , RSLT.MDM_CUST_CD
+      , RSLT.MDM_CUST_NM
+      , RSLT.MDM_CUST_ADDR
+      , RSLT.BKG_CUST_NM
+      , RSLT.BKG_CUST_ADDR
+      , RSLT.VAL_CD
+      , RSLT.VAL_USR_ID
+      , RSLT.VAL_CD_NM
+      , RSLT.VAL_USR_NM
+      , RSLT.VAL_OFC_CD
+      , RSLT.ORG_CUST_CD
+#if (${excel_flg} != 'Y')
+      , DECODE(RSLT.VAL_CD, 'C', -1, 'A', 0, DECODE(RSLT.VAL_OFC_CD, @[ofc_cd],  0, -1)) VAL_CD_IMG_IDX -- cobiz만 back하지 않음
+      , RSLT.ROW_COUNT
+#else
+	  , 0 ROW_COUNT
+#end
+FROM (SELECT BKGM.BKG_NO
+           , BCST.BKG_CUST_TP_CD
+           , BKGM.BL_NO
+           , BCST.CUST_CNT_CD || LPAD(DECODE(BCST.CUST_SEQ, 0, NULL,BCST.CUST_SEQ) , 6, '0') MDM_CUST_CD
+           , MCST.CUST_LGL_ENG_NM AS MDM_CUST_NM
+           , ADDR.BZET_ADDR AS MDM_CUST_ADDR
+           , BCST.CUST_NM AS BKG_CUST_NM
+           , BCST.CUST_ADDR AS BKG_CUST_ADDR
+           , DECODE(BCST.MTCH_FLG, 'Y', 'A', BCST.VAL_CD) AS VAL_CD
+           , DECODE(BCST.MTCH_FLG, 'Y', 'AUTO', DECODE(BCST.VAL_CD, 'C', 'AUTO', VACD.INTG_CD_VAL_DP_DESC)) AS VAL_CD_NM
+           , BCST.VAL_OFC_CD
+           , BCST.VAL_USR_ID
+           , DECODE(BCST.MTCH_FLG, 'Y', NULL, DECODE(BCST.VAL_CD, 'C', NULL, CUSR.USR_NM)) AS VAL_USR_NM
+           , BCST.VAL_DT
+           , BCST.ORG_CUST_CNT_CD || LPAD(DECODE(BCST.ORG_CUST_SEQ, 0, NULL,BCST.ORG_CUST_SEQ) , 6, '0') ORG_CUST_CD
+#if (${excel_flg} != 'Y')
+           , ROW_NUMBER() OVER (ORDER BY DECODE(BCST.MTCH_FLG, 'Y', 1, 0)
+                                        , BCST.VAL_DT DESC
+                                        , BCST.CUST_CNT_CD
+                                        , LPAD(DECODE(BCST.CUST_SEQ, 0, NULL,BCST.CUST_SEQ) , 6, '0')
+                                         ) 
+              + nvl(to_number(@[sheet_del_cnt]), 0) ROW_NUM
+           , COUNT(1) OVER () ROW_COUNT
+#end
+        FROM BKG_BOOKING BKGM
+            JOIN BKG_VVD BVVD ON
+            ( BVVD.BKG_NO = BKGM.BKG_NO
+#if ( ${ts_flg} != 'Y')     
+              AND BVVD.POL_CD = BKGM.POL_CD
+#else
+              AND BVVD.POL_CD = BKGM.PRE_RLY_PORT_CD
+#end
+              AND BKGM.BKG_STS_CD NOT IN ('X', 'S') -- 무효한 bkg제거 -- AS IS와 동일하게 하기위해 추가 20091124
+              AND BKGM.BL_NO IS NOT NULL  -- AS IS와 동일하게 하기위해 추가 20091124
+              AND BKGM.BKG_CGO_TP_CD IN ('F', 'R') -- full, revenue empty container
+            ) 
+#if (${sch_tp} == 'D') 
+            JOIN VSK_VSL_PORT_SKD VSKD ON
+            ( BVVD.VSL_CD = VSKD.VSL_CD 
+              AND BVVD.SKD_VOY_NO = VSKD.SKD_VOY_NO
+              AND BVVD.SKD_DIR_CD = VSKD.SKD_DIR_CD
+              AND BVVD.POL_CD = VSKD.VPS_PORT_CD
+              AND BVVD.POL_CLPT_IND_SEQ = VSKD.CLPT_IND_SEQ 
+            )
+#end
+            JOIN BKG_CUSTOMER BCST ON -- BOOKING CUSTOMER
+            ( BKGM.BKG_NO = BCST.BKG_NO
+               AND BCST.BKG_CUST_TP_CD IN ('C', 'N') 
+               AND (BCST.MTCH_FLG = 'Y'
+                    OR BCST.VAL_CD <> 'X' -- is null or not Auto-Cancel 20100201
+                   )
+            )
+            LEFT OUTER JOIN MDM_CUSTOMER MCST ON  -- 20090818 (customer와 join이 안되어도 데이터 나타나야 함
+            ( MCST.CUST_CNT_CD = BCST.CUST_CNT_CD
+                AND MCST.CUST_SEQ = BCST.CUST_SEQ)
+            LEFT OUTER JOIN COM_INTG_CD_DTL VACD ON
+            ( VACD.INTG_CD_ID = 'CD01655'
+                AND VACD.INTG_CD_VAL_CTNT = BCST.VAL_CD)
+            LEFT OUTER JOIN COM_USER CUSR ON 
+            ( CUSR.USR_ID = BCST.VAL_USR_ID )
+            LEFT OUTER JOIN MDM_CUST_ADDR ADDR ON
+            (ADDR.CUST_CNT_CD = BCST.CUST_CNT_CD 
+               AND ADDR.CUST_SEQ = BCST.CUST_SEQ
+               AND ADDR.PRMRY_CHK_FLG ='Y'
+               AND ADDR.DELT_FLG = 'N')
+            LEFT OUTER JOIN BKG_CUST_CD_VAL CVAL ON
+            (CVAL.CUST_CNT_CD = BCST.CUST_CNT_CD 
+               AND CVAL.CUST_SEQ = BCST.CUST_SEQ)
+       WHERE 1 = 1
+#if (${sch_tp} == 'V') 
+         AND BVVD.VSL_CD     = substr(@[vvd],1,4)      -- VVD (OPTIONAL 1)
+         AND BVVD.SKD_VOY_NO = substr(@[vvd],5,4)   -- VVD (OPTIONAL 1)
+         AND BVVD.SKD_DIR_CD = substr(@[vvd],9,1)   -- VVD (OPTIONAL 1)
+         AND BVVD.POL_CD     = @[pol_cd] -- (OPTIONAL 3)
+#elseif (${sch_tp} == 'D') 
+         AND VSKD.VPS_ETD_DT BETWEEN TO_DATE(@[vps_etd_dt_start], 'YYYYMMDD') 
+								 AND (TO_DATE(@[vps_etd_dt_end], 'YYYYMMDD') +1)  -- DURATION (OPTIONAL 2)
+         AND VSKD.VPS_PORT_CD = @[pol_cd] -- (OPTIONAL 3)
+#elseif (${sch_tp} == 'B') 
+         AND BKGM.BL_NO = @[bl_no]  -- BL NO (OPTIONAL 5-1)
+#else
+         AND 1 = 0
+#end
+#if (${sch_tp} != 'B' && ${pod_cd} != '') 
+         AND BKGM.POD_CD = @[pod_cd] -- (OPTIONAL)
+#end
+#if (${sch_tp} != 'B' && ${del_cd} != '') 
+         AND BKGM.DEL_CD LIKE @[del_cd] || '%'  -- DELIVERY PORT CD (OPTIONAL 4)
+#end
+       ORDER BY DECODE(BCST.MTCH_FLG, 'Y', 1, 0)
+              , BCST.VAL_DT DESC
+              , BCST.CUST_CNT_CD
+              , LPAD(DECODE(BCST.CUST_SEQ, 0, NULL,BCST.CUST_SEQ) , 6, '0')
+     )RSLT			]]></sql>
+			<params>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="sheet_del_cnt" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="vps_etd_dt_start" type="12" value="" out="N"/>
+				<param name="vps_etd_dt_end" type="12" value="" out="N"/>
+				<param name="bl_no" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="del_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

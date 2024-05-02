@@ -1,0 +1,1055 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CMSummaryDBDAOPriPrsCtrtSmryScgTmpVOCSQL">
+			<desc><![CDATA[Simulatoin을 위해 Cost Detail Surcharge Temp Data 생성
+
+* History
+2015.06.26 CHM-201536492 Split05-주간 MAS Open에 따른 타모듈 프로그램 적용 요청]]></desc>
+			<sql><![CDATA[
+INSERT INTO PRI_PRS_CTRT_SMRY_SCG_TMP (
+	PRS_YRMON
+	, PRS_WK
+	, PRC_CTRT_TP_CD
+	, PRC_CTRT_NO
+	, SVC_SCP_CD
+	, VSL_SLAN_DIR_CD
+	, TRD_CD
+	, SUB_TRD_CD
+	, RLANE_CD
+	, PRC_CGO_TP_CD
+	, ORG_LOC_TP_CD
+	, ORG_LOC_DEF_CD
+	, DEST_LOC_TP_CD
+	, DEST_LOC_DEF_CD
+	, CHG_CD
+	, SCG_AMT
+	, PROP_APRO_OFC_CD
+	, PRS_CUST_TP_CD
+	, SLS_FM_DT
+	, SLS_TO_DT
+	, CRE_USR_ID
+	, CRE_DT
+	, UPD_USR_ID
+	, UPD_DT
+
+)
+ WITH VW_CONTRACT_DT_LIST AS (
+	SELECT /*+ MATERIALIZE */COST_YR || SUBSTR(SLS_TO_DT, 5, 2) AS COST_YRMON,COST_WK
+	FROM MAS_WK_PRD
+	WHERE (COST_YR  || COST_WK) >= (@[frm_ctrt_eff_yr] || @[frm_ctrt_eff_wk])  AND (COST_YR || COST_WK )<= (@[frm_ctrt_exp_yr] || @[frm_ctrt_exp_wk])
+)
+-- SUMMARY에서 입력한 주차를 이용해 현재 날짜 이전 주차는 WK_TP : -1 , 현재 주차 : 0 , 미래주차 : 1
+  ,
+VW_SUMMARY_WEEK AS (
+	SELECT /*+ MATERIALIZE */SLS_FM_YRWK, SLS_FM_DT, SLS_TO_YRWK, SLS_TO_DT, WK_TP 
+		,(SELECT COUNT(*) FROM MAS_WK_PRD PRD WHERE ( PRD.COST_YR || PRD.COST_WK >= MN.SLS_FM_YRWK AND PRD.COST_YR || PRD.COST_WK <= MN.SLS_TO_YRWK) ) + DECODE(WK_TP, 1, 1, 0) AS TOT_WK -- ESTIMATE 조회시 현재주차도 미래주차에 포함시킨다.
+	FROM (
+			SELECT MIN(COST_YR || COST_WK) AS SLS_FM_YRWK, MIN(SLS_FM_DT) AS SLS_FM_DT, MAX(COST_YR || COST_WK) AS SLS_TO_YRWK , MAX(SLS_TO_DT) AS SLS_TO_DT, WK_TP
+		FROM (
+			SELECT COST_YR,	COST_WK, SLS_FM_DT, SLS_TO_DT,
+				CASE WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > SLS_TO_DT
+					THEN -1
+					ELSE 1
+				END AS WK_TP
+			FROM MAS_WK_PRD
+			WHERE (COST_YR || COST_WK >= (@[frm_smr_eff_yr] || @[frm_smr_eff_wk]) AND COST_YR || COST_WK <= (@[frm_smr_exp_yr] || @[frm_smr_exp_wk]))
+		)
+		GROUP BY WK_TP
+	) MN
+)
+-- 주당평균값에 주차를 붙이기 위한 ESTIMATE기간중의 주차 리스트
+,
+VW_ESTIMATE_DT_LIST AS (
+	SELECT /*+ MATERIALIZE */PRD.COST_YR || SUBSTR(PRD.SLS_TO_DT, 5, 2) AS COST_YRMON, COST_WK, PRD.SLS_FM_DT, PRD.SLS_TO_DT
+	FROM MAS_WK_PRD PRD , ( SELECT * FROM VW_SUMMARY_WEEK WHERE WK_TP = 1) WK
+	WHERE (COST_YR || COST_WK) >= WK.SLS_FM_YRWK AND (COST_YR || COST_WK) <= WK.SLS_TO_YRWK 
+)
+---------------------------------------------------------------------------------------------------------
+
+-- 이하 RFA
+
+-- 데이터 SELECT시 조회 조건으로 이용될 KEY LIST
+  ,
+VW_RFA_KEY_LIST AS (
+	SELECT /*+ MATERIALIZE LEADING(HDR SMRY @V0 SR_CST_DTL) use_hash(HDR SMRY SR_CST_DTL) */ HDR.RFA_NO, HDR.PROP_NO, HDR.AMDT_SEQ
+		, HDR.CTRT_EFF_DT, HDR.CTRT_EXP_DT , SR_CST_DTL.PRS_YRMON, SR_CST_DTL.PRS_WK, SR_CST_DTL.PRC_CTRT_TP_CD , SR_CST_DTL.PRC_CTRT_NO
+		, SR_CST_DTL.SVC_SCP_CD, SR_CST_DTL.VSL_SLAN_DIR_CD, SR_CST_DTL.TRD_CD,	SR_CST_DTL.SUB_TRD_CD
+		, SR_CST_DTL.RLANE_CD,	SR_CST_DTL.PRC_CGO_TP_CD, SR_CST_DTL.ORG_LOC_TP_CD, SR_CST_DTL.ORG_LOC_DEF_CD, SR_CST_DTL.DEST_LOC_TP_CD , SR_CST_DTL.DEST_LOC_DEF_CD, SR_CST_DTL.CHG_CD
+		, SR_CST_DTL.SCG_AMT
+		, SMRY.PROP_APRO_OFC_CD
+		, SMRY.PRS_CUST_TP_CD
+		, COST_DTL.PRS_CRNT_LOD_QTY
+	FROM (
+			SELECT /*+ ORDERED USE_NL(HDR DUR) */HDR.RFA_NO, DUR.PROP_NO, DUR.AMDT_SEQ, DUR.CTRT_EFF_DT, DUR.CTRT_EXP_DT 
+				, ROW_NUMBER() OVER (PARTITION BY HDR.RFA_NO, DUR.PROP_NO ORDER BY DUR.AMDT_SEQ DESC) RN
+			FROM PRI_RP_HDR HDR
+				, PRI_RP_DUR DUR
+			WHERE HDR.RFA_NO IN (
+					SELECT PRC_CTRT_NO
+					FROM PRI_PRS_CM_SMRY_SIM_TMP
+					WHERE PRC_CTRT_TP_CD = 'R' 
+				)
+				AND HDR.RFA_NO IS NOT NULL
+				AND HDR.PROP_NO = DUR.PROP_NO
+				AND DUR.CTRT_EFF_DT >= TO_DATE(@[c_sls_fm_dt],'YYYYMMDD')
+				AND DUR.CTRT_EXP_DT < TO_DATE(@[c_sls_to_dt],'YYYYMMDD') + 1   
+		) HDR
+		, PRI_PRS_CTRT_SMRY SMRY
+		, PRI_PRS_CTRT_SMRY_COST_DTL COST_DTL
+		, PRI_PRS_CTRT_SMRY_SCG_DTL SR_CST_DTL
+	WHERE HDR.RN = 1
+		AND HDR.RFA_NO = SMRY.PRC_CTRT_NO
+		AND SMRY.PRC_CTRT_TP_CD = 'R' -- RFA
+		AND (SMRY.PRS_YRMON, SMRY.PRS_WK) IN( SELECT /*+ QB_NAME(V0) */COST_YRMON, COST_WK FROM VW_CONTRACT_DT_LIST WHERE COST_YRMON IS NOT NULL AND COST_WK IS NOT NULL)
+		--AND SMRY.PRS_YRMON BETWEEN '200901' AND '201006' -- ### parameter로 변경할것. ###
+		AND SMRY.PRS_YRMON = SR_CST_DTL.PRS_YRMON
+		AND SMRY.PRS_WK = SR_CST_DTL.PRS_WK
+		AND SMRY.PRC_CTRT_TP_CD = SR_CST_DTL.PRC_CTRT_TP_CD
+		AND SMRY.PRC_CTRT_NO = SR_CST_DTL.PRC_CTRT_NO
+		--------------------------------------------
+		AND COST_DTL.PRS_YRMON = SR_CST_DTL.PRS_YRMON
+		AND COST_DTL.PRS_WK = SR_CST_DTL.PRS_WK
+		AND COST_DTL.PRC_CTRT_TP_CD = SR_CST_DTL.PRC_CTRT_TP_CD
+		AND COST_DTL.PRC_CTRT_NO = SR_CST_DTL.PRC_CTRT_NO
+
+		AND COST_DTL.SVC_SCP_CD = SR_CST_DTL.SVC_SCP_CD
+		AND COST_DTL.VSL_SLAN_DIR_CD = SR_CST_DTL.VSL_SLAN_DIR_CD
+		AND COST_DTL.TRD_CD = SR_CST_DTL.TRD_CD
+		AND COST_DTL.SUB_TRD_CD = SR_CST_DTL.SUB_TRD_CD
+		AND COST_DTL.RLANE_CD = SR_CST_DTL.RLANE_CD
+		AND COST_DTL.PRC_CGO_TP_CD = SR_CST_DTL.PRC_CGO_TP_CD
+		AND COST_DTL.ORG_LOC_TP_CD = SR_CST_DTL.ORG_LOC_TP_CD
+		AND COST_DTL.ORG_LOC_DEF_CD = SR_CST_DTL.ORG_LOC_DEF_CD
+		AND COST_DTL.DEST_LOC_TP_CD = SR_CST_DTL.DEST_LOC_TP_CD
+		AND COST_DTL.DEST_LOC_DEF_CD = SR_CST_DTL.DEST_LOC_DEF_CD
+
+		--------------------------------------------
+
+		AND HDR.RFA_NO IS NOT NULL
+		AND SR_CST_DTL.TRD_CD = @[frm_trd_cd]
+		AND SR_CST_DTL.VSL_SLAN_DIR_CD = @[frm_dir_cd]
+		AND HDR.RFA_NO IN ( SELECT PRC_CTRT_NO FROM PRI_PRS_CM_SMRY_SIM_TMP WHERE PRC_CTRT_TP_CD = 'R' )
+
+		#if(${frm_sub_trd_cd} != '')
+			AND SR_CST_DTL.SUB_TRD_CD = @[frm_sub_trd_cd]
+		#end
+		#if(${frm_rlane_cd} != '')
+			AND SR_CST_DTL.RLANE_CD IN (
+				#foreach( ${key} in ${rlane_list}) 
+					#if($velocityCount != 1 ) 
+						UNION ALL
+					#end
+					SELECT 
+							 '$key' 
+					FROM DUAL
+				#end
+			)
+		#end
+			 
+		#if(${frm_customer_type} == 'B')
+					AND SMRY.PRS_CUST_TP_CD IN ('I','A','O')
+		#elseif(${frm_customer_type} == 'N')
+					AND SMRY.PRS_CUST_TP_CD IN ('N')
+		#else 
+				AND SMRY.PRS_CUST_TP_CD IN ('I','A','O','N')
+		#end
+		#if(${frm_prop_ofc_cd} != '')
+					AND SMRY.PROP_OFC_CD = @[frm_prop_ofc_cd] -- REQUEST
+		#end
+
+		#if(${frm_prop_srep_cd} != '')
+					AND SMRY.RESPB_SREP_CD = @[frm_prop_srep_cd]
+		#end
+		#if(${frm_prop_apro_ofc_cd} != '')
+					AND SMRY.PROP_APRO_OFC_CD = @[frm_prop_apro_ofc_cd]
+		#end
+
+		#if( $cust_list.size() != 0 ) 
+			AND (SMRY.CUST_CNT_CD , SMRY.CUST_SEQ) IN (
+			#foreach( ${key} in ${cust_list}) 
+				#if($velocityCount != 1 ) 
+					UNION ALL
+				#end
+				SELECT 
+						substr('$key',1,2),substr('$key',3)
+				FROM DUAL
+			#end
+			)
+		#end 
+		-- BY CARGO TYPE
+		#if (${crg_tp_str} != '' )
+			AND SR_CST_DTL.PRC_CGO_TP_CD IN ( ${crg_tp_str} )
+		#end
+
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'R' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+
+ 
+
+
+)
+--- 계약번호당 실적이 총 몇주차 인지 ESTIMATE에 쓰일 총 주차가 몇주차인지 계산한다.
+,
+VW_RFA_TOT_WEEK_PER_RFA_NO AS (
+	SELECT /*+ MATERIALIZE */PROP_NO, AMDT_SEQ, RFA_NO
+		,ACTUAL_WK_CNT 
+		,DECODE(ESTIMATE_WK_CNT, 1, 0, ESTIMATE_WK_CNT) AS ESTIMATE_WK_CNT -- 현재주차만 걸릴경우 제외시킨다.
+		, REFER_WK_CNT
+	FROM (
+		SELECT PROP_NO, AMDT_SEQ, RFA_NO 
+			, SUM(
+				CASE WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= PRD.SLS_TO_DT AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= PRD.SLS_FM_DT 
+				THEN 0
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT AND PRD.SLS_TO_DT >= @[s_sls_fm_dt]
+				THEN 1
+				ELSE 0
+				END
+			) AS ACTUAL_WK_CNT ,
+			SUM(
+				CASE
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= PRD.SLS_TO_DT AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= PRD.SLS_FM_DT 
+				THEN 1
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT 
+				THEN 0 
+				WHEN PRD.SLS_TO_DT <=  @[s_sls_to_dt]
+				THEN 1
+				ELSE 0
+				END
+			) AS ESTIMATE_WK_CNT ,
+			SUM(
+				CASE
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= PRD.SLS_TO_DT AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= PRD.SLS_FM_DT 
+				THEN 0
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT  AND  PRD.SLS_FM_DT >=  @[r_sls_fm_dt] AND  PRD.SLS_FM_DT <= @[r_sls_to_dt]  
+				THEN 1
+				ELSE 0
+				END
+			) AS REFER_WK_CNT
+		FROM (
+				SELECT DISTINCT RFA_NO, PROP_NO, AMDT_SEQ, CTRT_EFF_DT,	CTRT_EXP_DT
+				FROM VW_RFA_KEY_LIST 
+			) DUR
+			, MAS_WK_PRD PRD
+		WHERE ( 
+				(	TO_CHAR(DUR.CTRT_EFF_DT, 'YYYYMMDD') >= PRD.SLS_FM_DT
+					AND TO_CHAR(DUR.CTRT_EFF_DT, 'YYYYMMDD') <= PRD.SLS_TO_DT
+				) OR ( 
+					TO_CHAR(DUR.CTRT_EXP_DT, 'YYYYMMDD') >= PRD.SLS_FM_DT
+					AND TO_CHAR(DUR.CTRT_EXP_DT, 'YYYYMMDD') <= PRD.SLS_TO_DT
+				) OR (
+					TO_CHAR(DUR.CTRT_EFF_DT, 'YYYYMMDD') <= PRD.SLS_FM_DT
+					AND TO_CHAR(DUR.CTRT_EXP_DT, 'YYYYMMDD') >= PRD.SLS_TO_DT
+				) 
+			)
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'R' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+		GROUP BY PROP_NO, AMDT_SEQ, RFA_NO
+	)
+)
+-- 1.정상적으로 REFERENCE 기간에에서 조회 되는 참조값을 SELECT해서 ESTIMATE에서 보여져야 할 값을 만든다.
+  ,
+VW_RFA_EST_ACT_1ST_VALUE AS (
+	SELECT /*+ MATERIALIZE */
+		MN.PRC_CTRT_TP_CD
+		,MN.PRC_CTRT_NO
+		,MN.SVC_SCP_CD
+		,MN.VSL_SLAN_DIR_CD
+		,MN.TRD_CD
+		,MN.SUB_TRD_CD
+		,MN.RLANE_CD
+		,MN.PRC_CGO_TP_CD 
+		,MN.ORG_LOC_TP_CD
+		,MN.ORG_LOC_DEF_CD
+		,MN.DEST_LOC_TP_CD
+		,MN.DEST_LOC_DEF_CD
+		,MN.CHG_CD
+		,MN.SCG_AMT
+		,MN.REFER_WK_CNT 
+		,MN.ESTIMATE_WK_CNT
+		,MN.PROP_APRO_OFC_CD
+		,MN.PRS_CUST_TP_CD
+	FROM (
+		SELECT MN.PRC_CTRT_TP_CD
+			, MN.PRC_CTRT_NO
+			, MN.SVC_SCP_CD
+			, MN.VSL_SLAN_DIR_CD
+			, MN.TRD_CD
+			, MN.SUB_TRD_CD
+			, MN.RLANE_CD 
+			, MN.PRC_CGO_TP_CD
+			, MN.ORG_LOC_TP_CD
+			, MN.ORG_LOC_DEF_CD
+			, MN.DEST_LOC_TP_CD
+			, MN.DEST_LOC_DEF_CD
+			, MN.CHG_CD 
+			, (MN.SCG_AMT/ MN.REFER_WK_CNT)   / (PRS_CRNT_LOD_QTY/ MN.REFER_WK_CNT )  AS SCG_AMT
+			, MN.REFER_WK_CNT
+			, MN.ESTIMATE_WK_CNT
+			, MN.PROP_APRO_OFC_CD
+			, MN.PRS_CUST_TP_CD
+		FROM (
+			SELECT CKEY.PRC_CTRT_TP_CD
+				, CKEY.PRC_CTRT_NO
+				, CKEY.SVC_SCP_CD
+				, CKEY.VSL_SLAN_DIR_CD
+				, CKEY.TRD_CD
+				, CKEY.SUB_TRD_CD 
+				, CKEY.RLANE_CD
+				, CKEY.PRC_CGO_TP_CD
+				, CKEY.ORG_LOC_TP_CD
+				, CKEY.ORG_LOC_DEF_CD
+				, CKEY.DEST_LOC_TP_CD 
+				, CKEY.DEST_LOC_DEF_CD
+				, CKEY.CHG_CD
+				, CKEY.PROP_APRO_OFC_CD
+				, CKEY.PRS_CUST_TP_CD
+				, SUM(PRS_CRNT_LOD_QTY) AS PRS_CRNT_LOD_QTY
+				, SUM(CKEY.SCG_AMT * PRS_CRNT_LOD_QTY) AS SCG_AMT 
+				, MAX(WK_PER_SC.REFER_WK_CNT) AS REFER_WK_CNT
+				, MAX(WK_PER_SC.ESTIMATE_WK_CNT) AS ESTIMATE_WK_CNT
+			FROM VW_RFA_KEY_LIST CKEY,
+				--VW_REFERENCE_WEEK WK, 
+				VW_RFA_TOT_WEEK_PER_RFA_NO WK_PER_SC
+				--                         WHERE (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) >= WK.SLS_FM_YRWK
+
+				--                           AND (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) <= WK.SLS_TO_YRWK
+			WHERE (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) >= @[r_fm_yrwk]
+				AND (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) <= @[r_to_yrwk]
+				AND CKEY.RFA_NO = WK_PER_SC.RFA_NO
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'R' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+			GROUP BY CKEY.PRC_CTRT_TP_CD
+				, CKEY.PRC_CTRT_NO
+				, CKEY.SVC_SCP_CD
+				, CKEY.VSL_SLAN_DIR_CD
+				, CKEY.TRD_CD
+				, CKEY.SUB_TRD_CD 
+				, CKEY.RLANE_CD
+				, CKEY.PRC_CGO_TP_CD
+				, CKEY.ORG_LOC_TP_CD
+				, CKEY.ORG_LOC_DEF_CD
+				, CKEY.DEST_LOC_TP_CD 
+				, CKEY.DEST_LOC_DEF_CD
+				, CKEY.CHG_CD
+				, CKEY.PROP_APRO_OFC_CD
+				, CKEY.PRS_CUST_TP_CD
+		) MN
+	) MN
+)
+-- 2. 정상적으로 REFERENCE 기간에에서 조회 되는 참조값이 없을때 contract모든 기간을 뒤져서 해당 실적이 있는지 확인후 있으면 그 데이터를 기초해
+
+--  ESTIMATE값을 만들어 낸다.
+,
+VW_RFA_EST_ACT_2ND_VALUE AS (
+	SELECT /*+ MATERIALIZE */
+		MN.PRC_CTRT_TP_CD
+		, MN.PRC_CTRT_NO
+		, MN.SVC_SCP_CD
+		, MN.VSL_SLAN_DIR_CD
+		, MN.TRD_CD
+		, MN.SUB_TRD_CD
+		, MN.RLANE_CD
+		, MN.PRC_CGO_TP_CD 
+		, MN.ORG_LOC_TP_CD
+		, MN.ORG_LOC_DEF_CD
+		, MN.DEST_LOC_TP_CD
+		, MN.DEST_LOC_DEF_CD
+		, MN.CHG_CD
+		, MN.SCG_AMT
+		, MN.REFER_WK_CNT 
+		, MN.ESTIMATE_WK_CNT
+		, MN.PROP_APRO_OFC_CD
+		, MN.PRS_CUST_TP_CD
+	FROM (
+		SELECT MN.PRC_CTRT_TP_CD
+			, MN.PRC_CTRT_NO
+			, MN.SVC_SCP_CD
+			, MN.VSL_SLAN_DIR_CD
+			, MN.TRD_CD
+			, MN.SUB_TRD_CD
+			, MN.RLANE_CD 
+			, MN.PRC_CGO_TP_CD
+			, MN.ORG_LOC_TP_CD
+			, MN.ORG_LOC_DEF_CD
+			, MN.DEST_LOC_TP_CD
+			, MN.DEST_LOC_DEF_CD
+			, MN.CHG_CD 
+			, (MN.SCG_AMT/ MN.REFER_WK_CNT)   / (PRS_CRNT_LOD_QTY/ MN.REFER_WK_CNT )  AS SCG_AMT
+			, MN.REFER_WK_CNT
+			, MN.ESTIMATE_WK_CNT
+			, MN.PROP_APRO_OFC_CD
+			, MN.PRS_CUST_TP_CD
+		FROM (
+			SELECT /*+ ORDERED SWAP_JOIN_INPUTS(@V1) USE_HASH(CKEY WK_PER_SC) */
+				CKEY.PRC_CTRT_TP_CD
+				, CKEY.PRC_CTRT_NO
+				, CKEY.SVC_SCP_CD
+				, CKEY.VSL_SLAN_DIR_CD
+				, CKEY.TRD_CD
+				, CKEY.SUB_TRD_CD 
+				, CKEY.RLANE_CD
+				, CKEY.PRC_CGO_TP_CD
+				, CKEY.ORG_LOC_TP_CD
+				, CKEY.ORG_LOC_DEF_CD
+				, CKEY.DEST_LOC_TP_CD 
+				, CKEY.DEST_LOC_DEF_CD
+				, CKEY.CHG_CD
+				, CKEY.PROP_APRO_OFC_CD
+				, CKEY.PRS_CUST_TP_CD
+				, SUM(PRS_CRNT_LOD_QTY) AS PRS_CRNT_LOD_QTY
+				, SUM( CKEY.SCG_AMT*PRS_CRNT_LOD_QTY)		AS SCG_AMT 
+				, MAX(WK_PER_SC.ACTUAL_WK_CNT + WK_PER_SC.ESTIMATE_WK_CNT) AS REFER_WK_CNT 
+				, MAX(WK_PER_SC.ESTIMATE_WK_CNT) AS ESTIMATE_WK_CNT
+			FROM VW_RFA_KEY_LIST CKEY
+				, VW_RFA_TOT_WEEK_PER_RFA_NO WK_PER_SC
+			WHERE NOT EXISTS( SELECT /*+ QB_NAME(V1) */'F'	FROM VW_RFA_EST_ACT_1ST_VALUE V1 WHERE V1.PRC_CTRT_NO = CKEY.PRC_CTRT_NO)
+				AND CKEY.RFA_NO = WK_PER_SC.RFA_NO
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'R' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+			GROUP BY CKEY.PRC_CTRT_TP_CD
+				, CKEY.PRC_CTRT_NO
+				, CKEY.SVC_SCP_CD
+				, CKEY.VSL_SLAN_DIR_CD
+				, CKEY.TRD_CD
+				, CKEY.SUB_TRD_CD
+				, CKEY.RLANE_CD
+				, CKEY.PRC_CGO_TP_CD
+				, CKEY.ORG_LOC_TP_CD
+				, CKEY.ORG_LOC_DEF_CD
+				, CKEY.DEST_LOC_TP_CD 
+				, CKEY.DEST_LOC_DEF_CD
+				, CKEY.CHG_CD
+				, CKEY.PROP_APRO_OFC_CD
+				, CKEY.PRS_CUST_TP_CD
+		) MN
+	) MN
+)
+---------------------------------------------------------------------------------------------------------
+
+-- 이하 SC
+
+-- 데이터 SELECT시 조회 조건으로 이용될 KEY LIST
+,
+VW_KEY_LIST AS (
+	SELECT /*+ MATERIALIZE use_hash(HDR SMRY @V0 SR_CST_DTL) USE_NL(HDR SMRY SR_CST_DTL) */
+		HDR.SC_NO
+		, HDR.PROP_NO
+		, HDR.AMDT_SEQ
+		, HDR.CTRT_EFF_DT
+		, HDR.CTRT_EXP_DT 
+		, SR_CST_DTL.PRS_YRMON
+		, SR_CST_DTL.PRS_WK
+		, SR_CST_DTL.PRC_CTRT_TP_CD 
+		, SR_CST_DTL.PRC_CTRT_NO
+		, SR_CST_DTL.SVC_SCP_CD
+		, SR_CST_DTL.VSL_SLAN_DIR_CD
+		, SR_CST_DTL.TRD_CD
+		, SR_CST_DTL.SUB_TRD_CD 
+		, SR_CST_DTL.RLANE_CD
+		, SR_CST_DTL.PRC_CGO_TP_CD
+		, SR_CST_DTL.ORG_LOC_TP_CD
+		, SR_CST_DTL.ORG_LOC_DEF_CD
+		, SR_CST_DTL.DEST_LOC_TP_CD 
+		, SR_CST_DTL.DEST_LOC_DEF_CD
+		, SR_CST_DTL.CHG_CD
+		, SR_CST_DTL.SCG_AMT
+		, SMRY.PROP_APRO_OFC_CD
+		, SMRY.PRS_CUST_TP_CD
+		, COST_DTL.PRS_CRNT_LOD_QTY
+	FROM (
+			SELECT /*+ ORDERED USE_NL(HDR DUR) */
+				HDR.SC_NO
+				, HDR.PROP_NO
+				, DUR.AMDT_SEQ
+				, DUR.CTRT_EFF_DT
+				, DUR.CTRT_EXP_DT 
+				, ROW_NUMBER() OVER(PARTITION BY HDR.SC_NO, DUR.PROP_NO ORDER BY DUR.AMDT_SEQ DESC) RN
+				--FROM VW_CONTRACT_DT CDT, PRI_SP_HDR HDR, PRI_SP_DUR DUR
+			FROM PRI_SP_HDR HDR
+				, PRI_SP_DUR DUR
+			WHERE HDR.SC_NO IN( SELECT PRC_CTRT_NO FROM PRI_PRS_CM_SMRY_SIM_TMP WHERE PRC_CTRT_TP_CD = 'S')
+				AND HDR.PROP_NO = DUR.PROP_NO
+				AND HDR.SC_NO IS NOT NULL
+				--AND CTRT_EFF_DT >= TO_DATE(CDT.SLS_FM_DT,'YYYYMMDD')
+
+				--AND CTRT_EXP_DT < TO_DATE(CDT.SLS_TO_DT,'YYYYMMDD')+1
+				AND CTRT_EFF_DT >= TO_DATE(@[c_sls_fm_dt], 'YYYYMMDD')
+				AND CTRT_EXP_DT < TO_DATE(@[c_sls_to_dt], 'YYYYMMDD') + 1 
+		) HDR
+		-- VW_PROP_KEY PKEY,
+		, PRI_PRS_CTRT_SMRY SMRY
+		, PRI_PRS_CTRT_SMRY_COST_DTL COST_DTL
+		, PRI_PRS_CTRT_SMRY_SCG_DTL SR_CST_DTL
+		--WHERE HDR.PROP_NO = PKEY.PROP_NO
+	WHERE HDR.RN = 1
+		AND HDR.SC_NO = SMRY.PRC_CTRT_NO
+		AND SMRY.PRC_CTRT_TP_CD = 'S' -- S/C
+		AND (SMRY.PRS_YRMON, SMRY.PRS_WK) IN ( SELECT /*+ QB_NAME(V0) */COST_YRMON, COST_WK FROM VW_CONTRACT_DT_LIST WHERE COST_YRMON IS NOT NULL AND COST_WK IS NOT NULL)
+		AND SMRY.PRS_YRMON = SR_CST_DTL.PRS_YRMON
+		AND SMRY.PRS_WK = SR_CST_DTL.PRS_WK
+		AND SMRY.PRC_CTRT_TP_CD = SR_CST_DTL.PRC_CTRT_TP_CD
+		AND SMRY.PRC_CTRT_NO = SR_CST_DTL.PRC_CTRT_NO
+		 --------------------------------------------
+
+		AND SMRY.PRS_YRMON = COST_DTL.PRS_YRMON
+		AND SMRY.PRS_WK = COST_DTL.PRS_WK
+		AND SMRY.PRC_CTRT_TP_CD = COST_DTL.PRC_CTRT_TP_CD
+		AND SMRY.PRC_CTRT_NO = COST_DTL.PRC_CTRT_NO
+
+		AND COST_DTL.PRS_YRMON = SR_CST_DTL.PRS_YRMON
+		AND COST_DTL.PRS_WK = SR_CST_DTL.PRS_WK
+		AND COST_DTL.PRC_CTRT_TP_CD = SR_CST_DTL.PRC_CTRT_TP_CD
+		AND COST_DTL.PRC_CTRT_NO = SR_CST_DTL.PRC_CTRT_NO
+
+		AND COST_DTL.SVC_SCP_CD = SR_CST_DTL.SVC_SCP_CD
+		AND COST_DTL.VSL_SLAN_DIR_CD = SR_CST_DTL.VSL_SLAN_DIR_CD
+		AND COST_DTL.TRD_CD = SR_CST_DTL.TRD_CD
+		AND COST_DTL.SUB_TRD_CD = SR_CST_DTL.SUB_TRD_CD
+		AND COST_DTL.RLANE_CD = SR_CST_DTL.RLANE_CD
+		AND COST_DTL.PRC_CGO_TP_CD = SR_CST_DTL.PRC_CGO_TP_CD
+		AND COST_DTL.ORG_LOC_TP_CD = SR_CST_DTL.ORG_LOC_TP_CD
+		AND COST_DTL.ORG_LOC_DEF_CD = SR_CST_DTL.ORG_LOC_DEF_CD
+		AND COST_DTL.DEST_LOC_TP_CD = SR_CST_DTL.DEST_LOC_TP_CD
+		AND COST_DTL.DEST_LOC_DEF_CD = SR_CST_DTL.DEST_LOC_DEF_CD
+
+		--------------------------------------------
+
+		AND HDR.SC_NO IS NOT NULL
+		AND SR_CST_DTL.TRD_CD = @[frm_trd_cd]
+		AND SR_CST_DTL.VSL_SLAN_DIR_CD = @[frm_dir_cd]
+
+		AND HDR.SC_NO IN (SELECT PRC_CTRT_NO FROM PRI_PRS_CM_SMRY_SIM_TMP WHERE PRC_CTRT_TP_CD = 'S')
+
+		#if(${frm_sub_trd_cd} != '')
+			AND SR_CST_DTL.SUB_TRD_CD = @[frm_sub_trd_cd]
+		#end
+		#if(${frm_rlane_cd} != '')
+			AND SR_CST_DTL.RLANE_CD IN (
+				#foreach( ${key} in ${rlane_list}) 
+					#if($velocityCount != 1 ) 
+						UNION ALL
+					#end
+					SELECT 
+							 '$key' 
+					FROM DUAL
+				#end
+			)
+		#end
+			 
+		#if(${frm_customer_type} == 'B')
+					AND SMRY.PRS_CUST_TP_CD IN ('I','A','O')
+		#elseif(${frm_customer_type} == 'N')
+					AND SMRY.PRS_CUST_TP_CD IN ('N')
+		#else 
+				AND SMRY.PRS_CUST_TP_CD IN ('I','A','O','N')
+		#end
+		#if(${frm_prop_ofc_cd} != '')
+					AND SMRY.PROP_OFC_CD = @[frm_prop_ofc_cd] -- REQUEST
+		#end
+
+		#if(${frm_prop_srep_cd} != '')
+					AND SMRY.RESPB_SREP_CD = @[frm_prop_srep_cd]
+		#end
+		#if(${frm_prop_apro_ofc_cd} != '')
+					AND SMRY.PROP_APRO_OFC_CD = @[frm_prop_apro_ofc_cd]
+		#end
+
+		#if( $cust_list.size() != 0 ) 
+			AND (SMRY.CUST_CNT_CD , SMRY.CUST_SEQ) IN (
+			#foreach( ${key} in ${cust_list}) 
+				#if($velocityCount != 1 ) 
+					UNION ALL
+				#end
+				SELECT 
+						substr('$key',1,2),substr('$key',3)
+				FROM DUAL
+			#end
+			)
+		#end 
+		-- BY CARGO TYPE
+		#if (${crg_tp_str} != '' )
+			AND SR_CST_DTL.PRC_CGO_TP_CD IN ( ${crg_tp_str} )
+		#end
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'S' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+ 
+
+)
+--- 계약번호당 실적이 총 몇주차 인지 ESTIMATE에 쓰일 총 주차가 몇주차인지 계산한다.
+,
+VW_TOT_WEEK_PER_SC_NO AS (
+	SELECT /*+ MATERIALIZE */PROP_NO, AMDT_SEQ, SC_NO
+		, ACTUAL_WK_CNT 
+		, DECODE(ESTIMATE_WK_CNT, 1, 0, ESTIMATE_WK_CNT) AS ESTIMATE_WK_CNT -- 현재주차만 걸릴경우 제외시킨다.
+		, REFER_WK_CNT
+	FROM (
+		SELECT PROP_NO,	AMDT_SEQ, SC_NO 
+			,SUM(
+				CASE WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= PRD.SLS_TO_DT	AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= PRD.SLS_FM_DT 
+				THEN 0
+				--WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT AND PRD.SLS_TO_DT >= SDT.SLS_FM_DT THEN 1
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT AND PRD.SLS_TO_DT >= @[s_sls_fm_dt]
+				THEN 1
+				ELSE 0
+				END
+			) AS ACTUAL_WK_CNT ,
+			SUM(
+				CASE WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= PRD.SLS_TO_DT AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= PRD.SLS_FM_DT
+				THEN 1
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT 
+				THEN 0
+				--WHEN PRD.SLS_TO_DT <= SDT.SLS_TO_DT THEN 1
+				WHEN PRD.SLS_TO_DT <=  @[s_sls_to_dt]
+				THEN 1
+				ELSE 0
+				END
+			) AS ESTIMATE_WK_CNT ,
+			SUM(
+				CASE WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') <= PRD.SLS_TO_DT AND TO_CHAR(SYSDATE, 'YYYYMMDD') >= PRD.SLS_FM_DT
+				THEN 0
+				--WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT AND PRD.SLS_FM_DT >= RDT.SLS_FM_DT AND PRD.SLS_FM_DT <= RDT.SLS_TO_DT THEN 1
+				WHEN TO_CHAR(SYSDATE, 'YYYYMMDD') > PRD.SLS_TO_DT AND PRD.SLS_FM_DT >= @[r_sls_fm_dt] AND PRD.SLS_FM_DT <= @[r_sls_to_dt]
+				THEN 1
+				ELSE 0
+				END
+			) AS REFER_WK_CNT
+		FROM (	SELECT DISTINCT SC_NO, PROP_NO, AMDT_SEQ, CTRT_EFF_DT, CTRT_EXP_DT FROM VW_KEY_LIST ) DUR
+			--, VW_CONTRACT_KEY KLIST,
+			,
+			MAS_WK_PRD PRD
+			--, VW_SUMMARY_DT SDT, VW_REFERENCE_DT RDT
+
+			--                 WHERE DUR.PROP_NO = KLIST.PROP_NO
+
+			--                   AND DUR.AMDT_SEQ = KLIST.AMDT_SEQ
+		WHERE ( 
+				(	TO_CHAR(DUR.CTRT_EFF_DT, 'YYYYMMDD') >= PRD.SLS_FM_DT
+					AND TO_CHAR(DUR.CTRT_EFF_DT, 'YYYYMMDD') <= PRD.SLS_TO_DT
+				) OR (
+					TO_CHAR(DUR.CTRT_EXP_DT, 'YYYYMMDD') >= PRD.SLS_FM_DT
+					AND TO_CHAR(DUR.CTRT_EXP_DT, 'YYYYMMDD') <= PRD.SLS_TO_DT
+				) OR ( 
+					TO_CHAR(DUR.CTRT_EFF_DT, 'YYYYMMDD') <= PRD.SLS_FM_DT
+					AND TO_CHAR(DUR.CTRT_EXP_DT, 'YYYYMMDD') >= PRD.SLS_TO_DT
+				) 
+			)
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'S' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+		GROUP BY PROP_NO, AMDT_SEQ, SC_NO
+	)
+)
+-- 1.정상적으로 REFERENCE 기간에에서 조회 되는 참조값을 SELECT해서 ESTIMATE에서 보여져야 할 값을 만든다.
+,
+VW_EST_ACT_1ST_VALUE AS (
+	SELECT /*+ MATERIALIZE */
+		 MN.PRC_CTRT_TP_CD
+		, MN.PRC_CTRT_NO
+		, MN.SVC_SCP_CD
+		, MN.VSL_SLAN_DIR_CD
+		, MN.TRD_CD
+		, MN.SUB_TRD_CD
+		, MN.RLANE_CD
+		, MN.PRC_CGO_TP_CD 
+		, MN.ORG_LOC_TP_CD
+		, MN.ORG_LOC_DEF_CD
+		, MN.DEST_LOC_TP_CD
+		, MN.DEST_LOC_DEF_CD
+		, MN.CHG_CD
+		, MN.SCG_AMT
+		, MN.REFER_WK_CNT 
+		, MN.ESTIMATE_WK_CNT
+		, MN.PROP_APRO_OFC_CD
+		, MN.PRS_CUST_TP_CD
+	FROM (
+		SELECT MN.PRC_CTRT_TP_CD
+			, MN.PRC_CTRT_NO
+			, MN.SVC_SCP_CD
+			, MN.VSL_SLAN_DIR_CD
+			, MN.TRD_CD
+			, MN.SUB_TRD_CD
+			, MN.RLANE_CD 
+			, MN.PRC_CGO_TP_CD
+			, MN.ORG_LOC_TP_CD
+			, MN.ORG_LOC_DEF_CD
+			, MN.DEST_LOC_TP_CD
+			, MN.DEST_LOC_DEF_CD
+			, MN.CHG_CD 
+			, (MN.SCG_AMT/ MN.REFER_WK_CNT)   / (PRS_CRNT_LOD_QTY/ MN.REFER_WK_CNT )  AS SCG_AMT
+			, MN.REFER_WK_CNT
+			, MN.ESTIMATE_WK_CNT
+			, MN.PROP_APRO_OFC_CD
+			, MN.PRS_CUST_TP_CD
+		FROM (	
+			SELECT CKEY.PRC_CTRT_TP_CD
+				, CKEY.PRC_CTRT_NO
+				, CKEY.SVC_SCP_CD
+				, CKEY.VSL_SLAN_DIR_CD
+				, CKEY.TRD_CD
+				, CKEY.SUB_TRD_CD 
+				, CKEY.RLANE_CD
+				, CKEY.PRC_CGO_TP_CD
+				, CKEY.ORG_LOC_TP_CD
+				, CKEY.ORG_LOC_DEF_CD
+				, CKEY.DEST_LOC_TP_CD 
+				, CKEY.DEST_LOC_DEF_CD
+				, CKEY.CHG_CD
+				, CKEY.PROP_APRO_OFC_CD
+				, CKEY.PRS_CUST_TP_CD
+				, SUM(PRS_CRNT_LOD_QTY) AS PRS_CRNT_LOD_QTY
+				, SUM( CKEY.SCG_AMT*PRS_CRNT_LOD_QTY)		AS SCG_AMT 
+				, MAX(WK_PER_SC.REFER_WK_CNT) AS REFER_WK_CNT
+				, MAX(WK_PER_SC.ESTIMATE_WK_CNT) AS ESTIMATE_WK_CNT
+			FROM VW_KEY_LIST CKEY
+				--, VW_REFERENCE_WEEK WK
+				, VW_TOT_WEEK_PER_SC_NO WK_PER_SC
+				--WHERE (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) >= WK.SLS_FM_YRWK
+			WHERE (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) >=  @[r_fm_yrwk] 
+				--AND (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) <= WK.SLS_TO_YRWK
+				AND (SUBSTR(CKEY.PRS_YRMON, 1, 4) || CKEY.PRS_WK) <= @[r_to_yrwk]
+				AND CKEY.SC_NO = WK_PER_SC.SC_NO
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'S' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+			GROUP BY CKEY.PRC_CTRT_TP_CD
+				, CKEY.PRC_CTRT_NO
+				, CKEY.SVC_SCP_CD
+				, CKEY.VSL_SLAN_DIR_CD
+				, CKEY.TRD_CD
+				, CKEY.SUB_TRD_CD
+				, CKEY.RLANE_CD
+				, CKEY.PRC_CGO_TP_CD
+				, CKEY.ORG_LOC_TP_CD
+				, CKEY.ORG_LOC_DEF_CD
+				, CKEY.DEST_LOC_TP_CD 
+				, CKEY.DEST_LOC_DEF_CD
+				, CKEY.CHG_CD
+				, CKEY.PROP_APRO_OFC_CD
+				, CKEY.PRS_CUST_TP_CD
+		) MN
+	) MN
+)
+-- 2. 정상적으로 REFERENCE 기간에에서 조회 되는 참조값이 없을때 contract모든 기간을 뒤져서 해당 실적이 있는지 확인후 있으면 그 데이터를 기초해
+
+--  ESTIMATE값을 만들어 낸다.
+  ,
+VW_EST_ACT_2ND_VALUE AS (
+	SELECT /*+ MATERIALIZE */
+		 MN.PRC_CTRT_TP_CD
+		, MN.PRC_CTRT_NO
+		, MN.SVC_SCP_CD
+		, MN.VSL_SLAN_DIR_CD
+		, MN.TRD_CD
+		, MN.SUB_TRD_CD
+		, MN.RLANE_CD
+		, MN.PRC_CGO_TP_CD 
+		, MN.ORG_LOC_TP_CD
+		, MN.ORG_LOC_DEF_CD
+		, MN.DEST_LOC_TP_CD
+		, MN.DEST_LOC_DEF_CD
+		, MN.CHG_CD
+		, MN.SCG_AMT
+		, MN.REFER_WK_CNT 
+		, MN.ESTIMATE_WK_CNT
+		, MN.PROP_APRO_OFC_CD
+		, MN.PRS_CUST_TP_CD
+	FROM (
+		SELECT MN.PRC_CTRT_TP_CD
+			, MN.PRC_CTRT_NO
+			, MN.SVC_SCP_CD
+			, MN.VSL_SLAN_DIR_CD
+			, MN.TRD_CD
+			, MN.SUB_TRD_CD
+			, MN.RLANE_CD 
+			, MN.PRC_CGO_TP_CD
+			, MN.ORG_LOC_TP_CD
+			, MN.ORG_LOC_DEF_CD
+			, MN.DEST_LOC_TP_CD
+			, MN.DEST_LOC_DEF_CD
+			, MN.CHG_CD 
+			, (MN.SCG_AMT/ MN.REFER_WK_CNT)   / (PRS_CRNT_LOD_QTY/ MN.REFER_WK_CNT )  AS SCG_AMT
+			, MN.REFER_WK_CNT
+			, MN.ESTIMATE_WK_CNT
+			, MN.PROP_APRO_OFC_CD
+			, MN.PRS_CUST_TP_CD
+		FROM (
+			SELECT /*+ ORDERED SWAP_JOIN_INPUTS(@V1) USE_HASH(CKEY WK_PER_SC) */
+				 CKEY.PRC_CTRT_TP_CD
+				, CKEY.PRC_CTRT_NO
+				, CKEY.SVC_SCP_CD
+				, CKEY.VSL_SLAN_DIR_CD
+				, CKEY.TRD_CD
+				, CKEY.SUB_TRD_CD 
+				, CKEY.RLANE_CD
+				, CKEY.PRC_CGO_TP_CD
+				, CKEY.ORG_LOC_TP_CD
+				, CKEY.ORG_LOC_DEF_CD
+				, CKEY.DEST_LOC_TP_CD 
+				, CKEY.DEST_LOC_DEF_CD
+				, CKEY.CHG_CD
+				, CKEY.PROP_APRO_OFC_CD
+				, CKEY.PRS_CUST_TP_CD
+				, SUM(PRS_CRNT_LOD_QTY) AS PRS_CRNT_LOD_QTY
+				, SUM( CKEY.SCG_AMT*PRS_CRNT_LOD_QTY)		AS SCG_AMT 
+				, MAX(WK_PER_SC.ACTUAL_WK_CNT + WK_PER_SC.ESTIMATE_WK_CNT) AS REFER_WK_CNT 
+				, MAX(WK_PER_SC.ESTIMATE_WK_CNT) AS ESTIMATE_WK_CNT
+			FROM VW_KEY_LIST CKEY
+				, VW_TOT_WEEK_PER_SC_NO WK_PER_SC
+			WHERE NOT EXISTS( SELECT /*+ QB_NAME(V1) */'F' FROM VW_EST_ACT_1ST_VALUE V1 WHERE V1.PRC_CTRT_NO = CKEY.PRC_CTRT_NO )
+				AND CKEY.SC_NO = WK_PER_SC.SC_NO
+		#if(${frm_contract_type} == 'B' || ${frm_contract_type} == 'S' )
+			AND 1=1
+		#else
+			AND 1=0
+		#end
+			GROUP BY CKEY.PRC_CTRT_TP_CD
+				, CKEY.PRC_CTRT_NO
+				, CKEY.SVC_SCP_CD
+				, CKEY.VSL_SLAN_DIR_CD
+				, CKEY.TRD_CD
+				, CKEY.SUB_TRD_CD
+				, CKEY.RLANE_CD
+				, CKEY.PRC_CGO_TP_CD
+				, CKEY.ORG_LOC_TP_CD
+				, CKEY.ORG_LOC_DEF_CD
+				, CKEY.DEST_LOC_TP_CD 
+				, CKEY.DEST_LOC_DEF_CD
+				, CKEY.CHG_CD
+				, CKEY.PROP_APRO_OFC_CD
+				, CKEY.PRS_CUST_TP_CD
+		) MN
+	) MN
+)
+SELECT COST_YRMON
+	, COST_WK
+	, PRC_CTRT_TP_CD
+	, PRC_CTRT_NO
+	, SVC_SCP_CD
+	, VSL_SLAN_DIR_CD
+	, TRD_CD
+	, SUB_TRD_CD
+	, RLANE_CD
+	, PRC_CGO_TP_CD 
+	, ORG_LOC_TP_CD
+	, ORG_LOC_DEF_CD
+	, DEST_LOC_TP_CD
+	, DEST_LOC_DEF_CD
+	, CHG_CD
+	, SCG_AMT
+	, PROP_APRO_OFC_CD
+	, PRS_CUST_TP_CD
+	, SLS_FM_DT 
+	, SLS_TO_DT
+	, @[usr_id]
+	, SYSDATE
+	, 'N'
+	, SYSDATE
+FROM (
+	SELECT DT_LIST.COST_YRMON
+		, DT_LIST.COST_WK
+		, MN.PRC_CTRT_TP_CD
+		, MN.PRC_CTRT_NO
+		, MN.SVC_SCP_CD
+		, MN.VSL_SLAN_DIR_CD
+		, MN.TRD_CD 
+		, MN.SUB_TRD_CD
+		, MN.RLANE_CD
+		, MN.PRC_CGO_TP_CD
+		, MN.ORG_LOC_TP_CD
+		, MN.ORG_LOC_DEF_CD
+		, MN.DEST_LOC_TP_CD
+		, MN.DEST_LOC_DEF_CD 
+		, MN.CHG_CD
+		, MN.SCG_AMT 
+		, RANK() OVER(PARTITION BY MN.PRC_CTRT_TP_CD, MN.PRC_CTRT_NO, MN.SVC_SCP_CD, MN.VSL_SLAN_DIR_CD, MN.TRD_CD, MN.SUB_TRD_CD, MN.RLANE_CD, MN.PRC_CGO_TP_CD, MN.ORG_LOC_TP_CD, MN.ORG_LOC_DEF_CD, MN.DEST_LOC_TP_CD, MN.DEST_LOC_DEF_CD, MN.CHG_CD ORDER BY DT_LIST.COST_YRMON , DT_LIST.COST_WK) RN 
+		, MN.REFER_WK_CNT
+		, MN.ESTIMATE_WK_CNT
+		, PROP_APRO_OFC_CD
+		, PRS_CUST_TP_CD
+		, DT_LIST.SLS_FM_DT
+		, DT_LIST.SLS_TO_DT
+	FROM (
+		SELECT PRC_CTRT_TP_CD
+			, PRC_CTRT_NO
+			, SVC_SCP_CD
+			, VSL_SLAN_DIR_CD
+			, TRD_CD
+			, SUB_TRD_CD
+			, RLANE_CD
+			, PRC_CGO_TP_CD
+			, ORG_LOC_TP_CD 
+			, ORG_LOC_DEF_CD
+			, DEST_LOC_TP_CD
+			, DEST_LOC_DEF_CD
+			, CHG_CD
+			, SCG_AMT
+			, REFER_WK_CNT
+			, ESTIMATE_WK_CNT
+			, PROP_APRO_OFC_CD 
+			, PRS_CUST_TP_CD
+		FROM VW_EST_ACT_1ST_VALUE
+		UNION ALL
+		SELECT PRC_CTRT_TP_CD
+			, PRC_CTRT_NO
+			, SVC_SCP_CD
+			, VSL_SLAN_DIR_CD
+			, TRD_CD
+			, SUB_TRD_CD
+			, RLANE_CD
+			, PRC_CGO_TP_CD
+			, ORG_LOC_TP_CD 
+			, ORG_LOC_DEF_CD
+			, DEST_LOC_TP_CD
+			, DEST_LOC_DEF_CD
+			, CHG_CD
+			, SCG_AMT
+			, REFER_WK_CNT
+			, ESTIMATE_WK_CNT
+			, PROP_APRO_OFC_CD 
+			, PRS_CUST_TP_CD
+		FROM VW_EST_ACT_2ND_VALUE
+	) MN
+	, VW_ESTIMATE_DT_LIST DT_LIST
+)
+WHERE RN <= ESTIMATE_WK_CNT
+UNION ALL
+SELECT COST_YRMON
+	, COST_WK
+	, PRC_CTRT_TP_CD
+	, PRC_CTRT_NO
+	, SVC_SCP_CD
+	, VSL_SLAN_DIR_CD
+	, TRD_CD
+	, SUB_TRD_CD
+	, RLANE_CD
+	, PRC_CGO_TP_CD 
+	, ORG_LOC_TP_CD
+	, ORG_LOC_DEF_CD
+	, DEST_LOC_TP_CD
+	, DEST_LOC_DEF_CD
+	, CHG_CD
+	, SCG_AMT
+	, PROP_APRO_OFC_CD
+	, PRS_CUST_TP_CD
+	, SLS_FM_DT 
+	, SLS_TO_DT
+	, @[usr_id]
+	, SYSDATE
+	, 'N'
+	, SYSDATE
+FROM (
+		SELECT DT_LIST.COST_YRMON
+			, DT_LIST.COST_WK
+			, MN.PRC_CTRT_TP_CD
+			, MN.PRC_CTRT_NO
+			, MN.SVC_SCP_CD
+			, MN.VSL_SLAN_DIR_CD
+			, MN.TRD_CD 
+			, MN.SUB_TRD_CD
+			, MN.RLANE_CD
+			, MN.PRC_CGO_TP_CD
+			, MN.ORG_LOC_TP_CD
+			, MN.ORG_LOC_DEF_CD
+			, MN.DEST_LOC_TP_CD
+			, MN.DEST_LOC_DEF_CD 
+			, MN.CHG_CD
+			, MN.SCG_AMT 
+			, RANK() OVER(PARTITION BY MN.PRC_CTRT_TP_CD, MN.PRC_CTRT_NO, MN.SVC_SCP_CD, MN.VSL_SLAN_DIR_CD, MN.TRD_CD, MN.SUB_TRD_CD, MN.RLANE_CD, MN.PRC_CGO_TP_CD, MN.ORG_LOC_TP_CD, MN.ORG_LOC_DEF_CD, MN.DEST_LOC_TP_CD, MN.DEST_LOC_DEF_CD, MN.CHG_CD ORDER BY DT_LIST.COST_YRMON , DT_LIST.COST_WK) RN 
+			, MN.REFER_WK_CNT
+			, MN.ESTIMATE_WK_CNT
+			, PROP_APRO_OFC_CD
+			, PRS_CUST_TP_CD
+			, DT_LIST.SLS_FM_DT
+			, DT_LIST.SLS_TO_DT
+		FROM (
+		SELECT PRC_CTRT_TP_CD
+			, PRC_CTRT_NO
+			, SVC_SCP_CD
+			, VSL_SLAN_DIR_CD
+			, TRD_CD
+			, SUB_TRD_CD
+			, RLANE_CD
+			, PRC_CGO_TP_CD
+			, ORG_LOC_TP_CD 
+			, ORG_LOC_DEF_CD
+			, DEST_LOC_TP_CD
+			, DEST_LOC_DEF_CD
+			, CHG_CD
+			, SCG_AMT
+			, REFER_WK_CNT
+			, ESTIMATE_WK_CNT
+			, PROP_APRO_OFC_CD 
+			, PRS_CUST_TP_CD
+		FROM VW_RFA_EST_ACT_1ST_VALUE
+		UNION ALL
+		SELECT PRC_CTRT_TP_CD
+			, PRC_CTRT_NO
+			, SVC_SCP_CD
+			, VSL_SLAN_DIR_CD
+			, TRD_CD
+			, SUB_TRD_CD
+			, RLANE_CD
+			, PRC_CGO_TP_CD
+			, ORG_LOC_TP_CD 
+			, ORG_LOC_DEF_CD
+			, DEST_LOC_TP_CD
+			, DEST_LOC_DEF_CD
+			, CHG_CD
+			, SCG_AMT
+			, REFER_WK_CNT
+			, ESTIMATE_WK_CNT
+			, PROP_APRO_OFC_CD 
+			, PRS_CUST_TP_CD
+		FROM VW_RFA_EST_ACT_2ND_VALUE
+	) MN 
+	, VW_ESTIMATE_DT_LIST DT_LIST
+)
+WHERE RN <= ESTIMATE_WK_CNT			]]></sql>
+			<params>
+				<param name="frm_ctrt_eff_yr" type="12" value="" out="N"/>
+				<param name="frm_ctrt_eff_wk" type="12" value="" out="N"/>
+				<param name="frm_ctrt_exp_yr" type="12" value="" out="N"/>
+				<param name="frm_ctrt_exp_wk" type="12" value="" out="N"/>
+				<param name="frm_smr_eff_yr" type="12" value="" out="N"/>
+				<param name="frm_smr_eff_wk" type="12" value="" out="N"/>
+				<param name="frm_smr_exp_yr" type="12" value="" out="N"/>
+				<param name="frm_smr_exp_wk" type="12" value="" out="N"/>
+				<param name="c_sls_fm_dt" type="12" value="" out="N"/>
+				<param name="c_sls_to_dt" type="12" value="" out="N"/>
+				<param name="frm_trd_cd" type="12" value="" out="N"/>
+				<param name="frm_dir_cd" type="12" value="" out="N"/>
+				<param name="frm_sub_trd_cd" type="12" value="" out="N"/>
+				<param name="frm_prop_ofc_cd" type="12" value="" out="N"/>
+				<param name="frm_prop_srep_cd" type="12" value="" out="N"/>
+				<param name="frm_prop_apro_ofc_cd" type="12" value="" out="N"/>
+				<param name="s_sls_fm_dt" type="12" value="" out="N"/>
+				<param name="s_sls_to_dt" type="12" value="" out="N"/>
+				<param name="r_sls_fm_dt" type="12" value="" out="N"/>
+				<param name="r_sls_to_dt" type="12" value="" out="N"/>
+				<param name="r_fm_yrwk" type="12" value="" out="N"/>
+				<param name="r_to_yrwk" type="12" value="" out="N"/>
+				<param name="usr_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

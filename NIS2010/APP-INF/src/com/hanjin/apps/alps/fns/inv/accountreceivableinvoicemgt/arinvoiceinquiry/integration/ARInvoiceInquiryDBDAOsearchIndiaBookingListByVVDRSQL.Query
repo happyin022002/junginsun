@@ -1,0 +1,522 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ARInvoiceInquiryDBDAOsearchIndiaBookingListByVVDRSQL">
+			<desc><![CDATA[ARInvoiceInquiryDBDAOsearchIndiaBookingListByVVDRSQL]]></desc>
+			<sql><![CDATA[
+#if (${date_option} == 'V') 
+          SELECT BL_NO 
+			   , CEIL(CNT20) AS CNT20
+			   , CEIL(CNT40) AS CNT40
+               , SUM(NVL(P_USD_AMT,0)) P_USD_AMT, SUM(NVL(P_EQV_AMT,0)) P_EQV_AMT, SUM(NVL(P_INR_AMT,0)) P_INR_AMT, SUM(NVL(P_INR_TOT,0)) P_INR_TOT
+               , SUM(NVL(C_USD_AMT,0)) C_USD_AMT, SUM(NVL(C_EQV_AMT,0)) C_EQV_AMT, SUM(NVL(C_INR_AMT,0)) C_INR_AMT, SUM(NVL(C_INR_TOT,0)) C_INR_TOT
+               , SUM((NVL(P_INR_TOT,0) + NVL(C_INR_TOT,0))) as S_INR_TOT
+               , INV_XCH_RT EX_RATE
+                 FROM
+          (SELECT P.BL_NO BL_NO, S.CNT20 CNT20, T.CNT40 CNT40	
+               , P.P_USD_AMT P_USD_AMT
+               , ROUND(P.P_USD_AMT * E.INV_XCH_RT, 2) P_EQV_AMT	
+               , P.P_INR_AMT + NVL(Q.P_OTH_AMT, 0) P_INR_AMT
+               , ROUND(P.P_USD_AMT * E.INV_XCH_RT + P.P_INR_AMT + NVL(Q.P_OTH_AMT, 0), 2) P_INR_TOT
+               , P.C_USD_AMT C_USD_AMT
+               , ROUND(P.C_USD_AMT * DECODE(@[bound],'I', F.INV_XCH_RT, E.INV_XCH_RT), 2) C_EQV_AMT	
+               , P.C_INR_AMT + NVL(R.C_OTH_AMT, 0) C_INR_AMT
+               , ROUND(P.C_USD_AMT * DECODE(@[bound],'I', F.INV_XCH_RT, E.INV_XCH_RT) + P.C_INR_AMT + NVL(R.C_OTH_AMT, 0), 2) C_INR_TOT
+          #if (${bound} == 'O') 
+               , E.INV_XCH_RT	INV_XCH_RT
+          #else 
+               , F.INV_XCH_RT	INV_XCH_RT
+          #end
+            FROM (SELECT A.BL_NO BL_NO
+                       , SUM(DECODE(B.FRT_TERM_CD, 'P', DECODE(B.CURR_CD, 'USD', B.CHG_AMT, 0), 0)) P_USD_AMT
+                       , SUM(DECODE(B.FRT_TERM_CD, 'P', DECODE(B.CURR_CD, 'USD', B.CHG_AMT, 0), 0)) P_EQV_AMT
+                       , SUM(DECODE(B.FRT_TERM_CD, 'P', DECODE(B.CURR_CD, 'INR', B.CHG_AMT, 0), 0)) P_INR_AMT
+                       , SUM(DECODE(B.FRT_TERM_CD, 'C', DECODE(B.CURR_CD, 'USD', B.CHG_AMT, 0), 0)) C_USD_AMT  
+                       , SUM(DECODE(B.FRT_TERM_CD, 'C', DECODE(B.CURR_CD, 'USD', B.CHG_AMT, 0), 0)) C_EQV_AMT               
+                       , SUM(DECODE(B.FRT_TERM_CD, 'C', DECODE(B.CURR_CD, 'INR', B.CHG_AMT, 0), 0)) C_INR_AMT
+                       , C.POL_CD, C.POD_CD, A.SVC_SCP_CD SVC_SCP_CD
+                  FROM BKG_BOOKING A, BKG_CHG_RT B, BKG_VVD C, BKG_RATE D
+                 WHERE A.BKG_NO  = B.BKG_NO	
+          		   AND A.BKG_NO  = C.BKG_NO	
+                   AND A.BKG_NO  = D.BKG_NO	
+                   AND DECODE(@[bound],'O', D.PPD_RCV_OFC_CD, D.CLT_OFC_CD) IN (SELECT OFC_CD FROM MDM_ORGANIZATION WHERE AR_OFC_CD IN ('BOMSC','BOMBA'))
+                   AND B.FRT_TERM_CD LIKE DECODE(@[bound],'I','C','%')	
+                --   AND B.CHG_CD NOT IN ( 'IOT', 'IDT', 'IOI', 'IDI', 'IRC', 'IDC', 'ITT' ) 	
+                   --AND B.CHG_CD||B.CURR_CD <> 'GSTINR' 			
+                   --AND B.CHG_CD||B.CURR_CD <> 'GSTUSD' 
+				   AND B.CHG_CD||B.CURR_CD NOT IN ('GSTINR','SBCINR') 			
+                   AND B.CHG_CD||B.CURR_CD NOT IN ('GSTUSD','SBCUSD')  	
+                   AND A.BKG_STS_CD IN ('S','F') 
+                   AND B.FRT_INCL_XCLD_DIV_CD ='N'   
+                 --AND B.CURR_CD IN ('USD', 'INR') 2010.03.19
+                   AND C.VSL_CD       = SUBSTR(@[vvd], 1, 4)	
+          		   AND C.SKD_VOY_NO   = SUBSTR(@[vvd], 5, 4)
+          		   AND C.SKD_DIR_CD   = SUBSTR(@[vvd], 9, 1)   
+                   AND DECODE(@[bound],'O', C.POL_CD, C.POD_CD) LIKE @[port]||'%'
+              GROUP BY A.BL_NO, C.POL_CD, C.POD_CD, A.SVC_SCP_CD) P,			
+          	  (SELECT A.BL_NO BL_NO, 	
+                      SUM(DECODE(NVL(D.USD_LOCL_XCH_RT,0), 0, 0, ROUND((NVL(B.CHG_AMT,0) / D.USD_LOCL_XCH_RT) * F.USD_LOCL_XCH_RT, 2)))  P_OTH_AMT			
+          		 FROM BKG_BOOKING A, BKG_CHG_RT B, BKG_VVD C, GL_MON_XCH_RT D, GL_MON_XCH_RT F, BKG_RATE H	
+          		WHERE A.BKG_NO  = B.BKG_NO	
+          	      AND A.BKG_NO  = C.BKG_NO	
+                  AND A.BKG_NO  = H.BKG_NO	
+          		  AND C.VSL_CD = SUBSTR(@[vvd], 1, 4)	
+          		  AND C.SKD_VOY_NO  = SUBSTR(@[vvd], 5, 4)	
+          		  AND C.SKD_DIR_CD  = SUBSTR(@[vvd], 9, 1)	
+                  AND DECODE(@[bound],'O', C.POL_CD, C.POD_CD) LIKE @[port]||'%'		
+          	      AND H.PPD_RCV_OFC_CD IN ( SELECT OFC_CD FROM MDM_ORGANIZATION WHERE AR_OFC_CD IN ('BOMSC','BOMBA'))
+               --   AND B.CHG_CD NOT IN ( 'IOT', 'IDT', 'IOI', 'IDI', 'IRC', 'IDC', 'ITT' )		
+                  AND B.CURR_CD NOT IN ('USD', 'INR')
+          		  AND B.FRT_INCL_XCLD_DIV_CD = 'N'
+          		  AND B.FRT_TERM_CD = 'P'
+                  AND D.ACCT_XCH_RT_YRMON = (SELECT TO_CHAR(E.VPS_ETD_DT, 'YYYYMM') -- USD @[ 3RD 경리환율	
+                                               FROM VSK_VSL_PORT_SKD E		
+                                         	  WHERE  E.VSL_CD(+)    = C.VSL_CD	
+                                          	    AND E.SKD_VOY_NO(+) = C.SKD_VOY_NO	
+                                          	    AND E.SKD_DIR_CD(+) = C.SKD_DIR_CD	
+                                          	    AND E.VPS_PORT_CD(+)= DECODE(@[bound],'O', C.POL_CD, C.POD_CD)	
+                                          	    AND E.CLPT_IND_SEQ(+) = 1	
+                                          	    AND E.VPS_ETD_DT IS NOT NULL	
+                                          	    AND ROWNUM=1 )	
+                  AND D.ACCT_XCH_RT_LVL = '1'		
+                  AND D.CURR_CD = B.CURR_CD		
+                  AND F.ACCT_XCH_RT_YRMON = (SELECT TO_CHAR(E.VPS_ETD_DT, 'YYYYMM') -- USD @[ INR 경리환율		
+                                               FROM VSK_VSL_PORT_SKD E		
+                                              WHERE  E.VSL_CD(+)    = C.VSL_CD	
+                                             	AND E.SKD_VOY_NO(+) = C.SKD_VOY_NO	
+                                            	AND E.SKD_DIR_CD(+) = C.SKD_DIR_CD	
+                                            	AND E.VPS_PORT_CD(+) = DECODE(@[bound],'O', C.POL_CD, C.POD_CD)	
+                                            	AND E.CLPT_IND_SEQ(+) = 1	
+                                            	AND E.VPS_ETD_DT IS NOT NULL	
+                                            	AND ROWNUM=1 )	
+                  AND F.ACCT_XCH_RT_LVL = '1'		
+                  AND F.CURR_CD = 'INR'		
+                --AND A.BKG_STS_CD <> 'X'   
+                  AND A.BKG_STS_CD IN ('S','F') 
+          	 GROUP BY A.BL_NO) Q,	
+              (SELECT A.BL_NO BL_NO
+                    , SUM(DECODE(NVL(D.USD_LOCL_XCH_RT,0), 0, 0, ROUND((NVL(B.CHG_AMT,0) / D.USD_LOCL_XCH_RT) * F.USD_LOCL_XCH_RT, 2)))  C_OTH_AMT			
+          	    FROM BKG_BOOKING A, BKG_CHG_RT B, BKG_VVD C, GL_MON_XCH_RT D, GL_MON_XCH_RT F, BKG_RATE H	
+          	   WHERE A.BKG_NO       = B.BKG_NO	
+          		 AND A.BKG_NO       = C.BKG_NO	
+                 AND A.BKG_NO       = H.BKG_NO	
+          	     AND C.VSL_CD = SUBSTR(@[vvd], 1, 4)	
+          	     AND C.SKD_VOY_NO   = SUBSTR(@[vvd], 5, 4)	
+          	     AND C.SKD_DIR_CD   = SUBSTR(@[vvd], 9, 1)	
+                 AND DECODE(@[bound],'O', C.POL_CD, C.POD_CD) LIKE @[port]||'%'			
+          	     AND H.PPD_RCV_OFC_CD IN ( SELECT OFC_CD FROM MDM_ORGANIZATION WHERE AR_OFC_CD IN ('BOMSC','BOMBA'))
+             --  AND B.CHG_CD NOT IN ( 'IOT', 'IDT', 'IOI', 'IDI', 'IRC', 'IDC', 'ITT' )		
+                 AND B.CURR_CD NOT IN ('USD', 'INR')
+          	     AND B.FRT_INCL_XCLD_DIV_CD = 'N'
+          	     AND B.FRT_TERM_CD = 'C'
+                 AND D.ACCT_XCH_RT_YRMON = (SELECT TO_CHAR(E.VPS_ETD_DT, 'YYYYMM') -- USD @[ 3RD 경리환율	
+                                              FROM VSK_VSL_PORT_SKD E		
+                                         	 WHERE  E.VSL_CD(+)    = C.VSL_CD	
+                                           	   AND E.SKD_VOY_NO(+) = C.SKD_VOY_NO	
+                                          	   AND E.SKD_DIR_CD(+) = C.SKD_DIR_CD	
+                                          	   AND E.VPS_PORT_CD(+)= DECODE(@[bound],'O', C.POL_CD, C.POD_CD)	
+                                          	   AND E.CLPT_IND_SEQ(+) = 1	
+                                          	   AND E.VPS_ETD_DT IS NOT NULL	
+                                          	   AND ROWNUM=1 )	
+                AND D.ACCT_XCH_RT_LVL = '1'		
+                AND D.CURR_CD = B.CURR_CD		
+                AND F.ACCT_XCH_RT_YRMON = (SELECT TO_CHAR(E.VPS_ETD_DT, 'YYYYMM') -- USD @[ INR 경리환율		
+                                             FROM VSK_VSL_PORT_SKD E		
+                                          	WHERE E.VSL_CD(+)     = C.VSL_CD	
+                                          	  AND E.SKD_VOY_NO(+) = C.SKD_VOY_NO	
+                                          	  AND E.SKD_DIR_CD(+) = C.SKD_DIR_CD	
+                                          	  AND E.VPS_PORT_CD(+) = DECODE(@[bound],'O', C.POL_CD, C.POD_CD)	
+                                          	  AND E.CLPT_IND_SEQ(+) = 1	
+                                          	  AND E.VPS_ETD_DT IS NOT NULL	
+                                          	  AND ROWNUM=1 )	
+                 AND F.ACCT_XCH_RT_LVL = '1'		
+                 AND F.CURR_CD = 'INR'		
+               --AND A.BKG_STS_CD <> 'X'   
+          		 AND A.BKG_STS_CD IN ('S','F') 
+          	GROUP BY A.BL_NO) R,
+            (SELECT PORT_CD , SVC_SCP_CD, INV_XCH_RT	
+               FROM INV_VVD_XCH_RT	
+              WHERE VSL_CD = SUBSTR( @[vvd], 1, 4 )
+                AND SKD_VOY_NO = SUBSTR( @[vvd], 5, 4 )
+                AND SKD_DIR_CD = SUBSTR( @[vvd], 9, 1 )
+                AND LOCL_CURR_CD = 'INR' 
+                AND CHG_CURR_CD = 'USD'
+                AND IO_BND_CD = 'O' ) E,	
+            (SELECT PORT_CD , SVC_SCP_CD, INV_XCH_RT	
+               FROM INV_VVD_XCH_RT	
+              WHERE VSL_CD = SUBSTR( @[vvd], 1, 4 )
+                AND SKD_VOY_NO = SUBSTR( @[vvd], 5, 4 )
+                AND SKD_DIR_CD = SUBSTR( @[vvd], 9, 1 )
+                AND LOCL_CURR_CD = 'INR' 
+                AND CHG_CURR_CD = 'USD'
+                AND IO_BND_CD = 'I' ) F,
+            (SELECT A.BL_NO BL_NO, SUM(DECODE(SUBSTR(E.CNTR_TPSZ_CD,2,1), '2', E.OP_CNTR_QTY, 0)) CNT20
+               FROM BKG_BOOKING A, BKG_QUANTITY E, BKG_VVD C  
+              WHERE A.BKG_NO       = E.BKG_NO	
+                AND A.BKG_NO       = C.BKG_NO	
+                AND C.VSL_CD       = SUBSTR(@[vvd], 1, 4)	
+          		AND C.SKD_VOY_NO   = SUBSTR(@[vvd], 5, 4)
+          		AND C.SKD_DIR_CD   = SUBSTR(@[vvd], 9, 1)   
+                AND DECODE(@[bound],'O', C.POL_CD, C.POD_CD) LIKE @[port]||'%'      
+             GROUP BY A.BL_NO) S,
+           (SELECT A.BL_NO BL_NO, SUM(DECODE(SUBSTR(E.CNTR_TPSZ_CD,2,1), '2', 0, E.OP_CNTR_QTY)) CNT40
+              FROM BKG_BOOKING A, BKG_QUANTITY E, BKG_VVD C  
+             WHERE A.BKG_NO       = E.BKG_NO	
+               AND A.BKG_NO       = C.BKG_NO	
+               AND C.VSL_CD       = SUBSTR(@[vvd], 1, 4)	
+          	   AND C.SKD_VOY_NO   = SUBSTR(@[vvd], 5, 4)
+          	   AND C.SKD_DIR_CD   = SUBSTR(@[vvd], 9, 1)   
+               AND DECODE(@[bound],'O', C.POL_CD, C.POD_CD) LIKE @[port]||'%'      
+             GROUP BY A.BL_NO) T             
+       WHERE P.BL_NO = Q.BL_NO(+)
+         AND P.BL_NO = R.BL_NO(+)
+         AND P.BL_NO = S.BL_NO(+)
+         AND P.BL_NO = T.BL_NO(+)
+         AND P.POL_CD    = E.PORT_CD(+)	
+         AND P.POD_CD    = F.PORT_CD(+)
+         AND P.SVC_SCP_CD = E.SVC_SCP_CD(+)
+         AND P.SVC_SCP_CD = F.SVC_SCP_CD(+) 
+	UNION ALL
+		SELECT  BL_NO, CNT20, CNT40, 
+                O_USD_AMT P_USD_AMT, O_EQV_AMT P_EQV_AMT, (O_INR_AMT + O_OTH_AMT) P_INR_AMT, ROUND((O_USD_AMT * USD_XCH_RT) + O_INR_AMT + O_OTH_AMT,2) P_INR_TOT,
+                I_USD_AMT C_USD_AMT, I_EQV_AMT C_EQV_AMT, (I_INR_AMT + I_OTH_AMT) C_INR_AMT, ROUND((I_USD_AMT * USD_XCH_RT) + I_INR_AMT + I_OTH_AMT,2) C_INR_TOT,
+                USD_XCH_RT INV_XCH_RT
+        FROM   (          
+                 SELECT  BL_NO, USD_XCH_RT,
+                         SUM(CNT20) CNT20, SUM(CNT40) CNT40,
+                         SUM(I_USD_AMT) I_USD_AMT, SUM(I_EQV_AMT) I_EQV_AMT, SUM(I_INR_AMT) I_INR_AMT, SUM(I_OTH_AMT) I_OTH_AMT, 
+                         SUM(O_USD_AMT) O_USD_AMT, SUM(O_EQV_AMT) O_EQV_AMT, SUM(O_INR_AMT) O_INR_AMT, SUM(O_OTH_AMT) O_OTH_AMT
+                 FROM    (  
+                           SELECT MN.BL_SRC_NO BL_NO, MN.USD_XCH_RT,
+                                  0 CNT20, 0 CNT40,
+                                  SUM(DECODE(MN.IO_BND_CD, 'I', DECODE(CHG.CURR_CD, 'USD', CHG.CHG_AMT, 0), 0)) I_USD_AMT,
+                                  SUM(DECODE(MN.IO_BND_CD, 'I', DECODE(CHG.CURR_CD, 'USD', ROUND(CHG.CHG_AMT * NVL(MN.USD_XCH_RT,0),2), 0), 0)) I_EQV_AMT,
+                                  SUM(DECODE(MN.IO_BND_CD, 'I', DECODE(CHG.CURR_CD, 'INR', CHG.CHG_AMT, 0), 0)) I_INR_AMT,
+                                  SUM(DECODE(MN.IO_BND_CD, 'I', DECODE(CHG.CURR_CD, 'USD', 0 , 'INR', 0, DECODE(NVL(MN.USD_XCH_RT,0), 0, 0, ROUND(((NVL(CHG.CHG_AMT,0) / NVL(MN.USD_XCH_RT,1)) * NVL(CHG.INV_XCH_RT,1)), 2))),0))  I_OTH_AMT,
+                                  SUM(DECODE(MN.IO_BND_CD, 'O', DECODE(CHG.CURR_CD, 'USD', CHG.CHG_AMT, 0), 0)) O_USD_AMT,
+                                  SUM(DECODE(MN.IO_BND_CD, 'O', DECODE(CHG.CURR_CD, 'USD', ROUND(CHG.CHG_AMT * NVL(MN.USD_XCH_RT,0),2), 0), 0)) O_EQV_AMT,
+                                  SUM(DECODE(MN.IO_BND_CD, 'O', DECODE(CHG.CURR_CD, 'INR', CHG.CHG_AMT, 0), 0)) O_INR_AMT,
+                                  SUM(DECODE(MN.IO_BND_CD, 'O', DECODE(CHG.CURR_CD, 'USD', 0 , 'INR', 0, DECODE(NVL(MN.USD_XCH_RT,0), 0, 0, ROUND(((NVL(CHG.CHG_AMT,0) / NVL(MN.USD_XCH_RT,1)) * NVL(CHG.INV_XCH_RT,1)), 2))),0))  O_OTH_AMT	
+                           FROM   INV_AR_MN MN,
+                                  INV_AR_CHG CHG
+                           WHERE  1=1
+                           AND    MN.AR_IF_NO = CHG.AR_IF_NO
+                           AND    MN.AR_OFC_CD IN ('BOMSC','BOMBA')
+                           AND    MN.IO_BND_CD = @[bound]
+                           AND    MN.VSL_CD       = SUBSTR(@[vvd], 1, 4)	
+                           AND    MN.SKD_VOY_NO   = SUBSTR(@[vvd], 5, 4)
+                           AND    MN.SKD_DIR_CD   = SUBSTR(@[vvd], 9, 1)
+                           AND    DECODE(@[bound],'O', MN.POL_CD, MN.POD_CD)  like @[port]||'%'    
+                           AND    MN.REV_TP_CD = 'M'
+                           AND    MN.REV_SRC_CD <> 'RD'
+                           AND    NVL(MN.INV_DELT_DIV_CD,'N') <> 'Y'
+                           --AND    CHG.CHG_CD <> 'GST'
+						   AND    CHG.CHG_CD NOT IN('GST','SBC')
+                           GROUP BY MN.BL_SRC_NO, MN.USD_XCH_RT
+                           UNION ALL
+                           SELECT A.BL_NO, A.USD_XCH_RT, 
+                                  SUM(DECODE(SUBSTR(CNTR.CNTR_TPSZ_CD,2,1), 2,1,0)) CNT20,
+                                  SUM(DECODE(SUBSTR(CNTR.CNTR_TPSZ_CD,2,1), 2,0,1)) CNT40,
+                                  0 I_USD_AMT,
+                                  0 I_EQV_AMT,
+                                  0 I_INR_AMT,
+                                  0 I_OTH_AMT,
+                                  0 O_USD_AMT,
+                                  0 O_EQV_AMT,
+                                  0 O_INR_AMT,
+                                  0 O_OTH_AMT  
+                           FROM   (                                               
+                                    SELECT MN.BL_SRC_NO BL_NO, MN.USD_XCH_RT, MAX(AR_IF_NO) AR_IF_NO
+                                    FROM   INV_AR_MN MN
+                                    WHERE  1=1
+                                    AND    MN.AR_OFC_CD IN ('BOMSC','BOMBA')
+                                    AND    MN.IO_BND_CD = @[bound]
+                                    AND    MN.VSL_CD       = SUBSTR(@[vvd], 1, 4)	
+                                    AND    MN.SKD_VOY_NO   = SUBSTR(@[vvd], 5, 4)
+                                    AND    MN.SKD_DIR_CD   = SUBSTR(@[vvd], 9, 1)
+                                    AND    DECODE(@[bound],'O', MN.POL_CD, MN.POD_CD)  like @[port]||'%'    
+                                    AND    MN.REV_TP_CD = 'M'
+                                    AND    MN.REV_SRC_CD <> 'RD'
+                                    AND    NVL(MN.INV_DELT_DIV_CD,'N') <> 'Y'
+                                    GROUP BY MN.BL_SRC_NO, MN.USD_XCH_RT
+                                  ) A,
+                                   INV_AR_CNTR CNTR
+                            WHERE   A.AR_IF_NO = CNTR.AR_IF_NO
+                            GROUP BY A.BL_NO, A.USD_XCH_RT
+                          )
+                 GROUP BY BL_NO, USD_XCH_RT
+            )
+	   ) 
+       WHERE (P_USD_AMT <> 0 OR  P_EQV_AMT <> 0 OR P_INR_AMT <> 0 OR 
+              C_USD_AMT <> 0 OR  C_EQV_AMT <> 0 OR C_INR_AMT <> 0   )   
+       GROUP BY BL_NO, CEIL(CNT20), CEIL(CNT40), INV_XCH_RT
+	   ORDER BY BL_NO
+#else 
+      SELECT BL_NO
+			, CEIL(CNT20) CNT20
+            , CEIL(CNT40) CNT40
+            , SUM(NVL(P_USD_AMT,0)) P_USD_AMT, SUM(NVL(P_EQV_AMT,0)) P_EQV_AMT, SUM(NVL(P_INR_AMT,0)) P_INR_AMT, SUM(NVL(P_INR_TOT,0)) P_INR_TOT
+            , SUM(NVL(C_USD_AMT,0)) C_USD_AMT, SUM(NVL(C_EQV_AMT,0)) C_EQV_AMT, SUM(NVL(C_INR_AMT,0)) C_INR_AMT, SUM(NVL(C_INR_TOT,0)) C_INR_TOT
+            , SUM((NVL(P_INR_TOT,0) + NVL(C_INR_TOT,0))) as S_INR_TOT
+            , EX_RATE
+      FROM (
+              SELECT VVD as BL_NO
+                   ,SUM(CNT20) as CNT20 
+                   ,SUM(CNT40) as CNT40  
+                   ,SUM(P_USD_AMT) as P_USD_AMT
+                   ,SUM(P_EQV_AMT) as P_EQV_AMT
+                   ,SUM(P_INR_AMT) as P_INR_AMT
+                   ,(SUM(P_EQV_AMT)+SUM(P_INR_AMT)) as P_INR_TOT
+                   ,SUM(C_USD_AMT) as C_USD_AMT
+                   ,SUM(C_EQV_AMT) as C_EQV_AMT
+                   ,SUM(C_INR_AMT) as C_INR_AMT
+                   ,(SUM(C_EQV_AMT)+SUM(C_INR_AMT)) as C_INR_TOT
+                   ,INV_XCH_RT as EX_RATE
+              FROM (
+                  SELECT MA.BL_NO, MA.CNT20, MA.CNT40
+                        ,MA.VSL_CD||MA.SKD_VOY_NO||MA.SKD_DIR_CD VVD
+                        ,MA.P_USD_AMT
+                        ,ROUND(MA.P_USD_AMT * NVL(V1.INV_XCH_RT,0),2) P_EQV_AMT
+                        ,MA.P_INR_AMT
+                        ,MA.C_USD_AMT
+                        ,ROUND(MA.C_USD_AMT * DECODE(@[bound],'I',  NVL(V2.INV_XCH_RT,0), NVL(V1.INV_XCH_RT,0)),2) C_EQV_AMT
+                        ,MA.C_INR_AMT
+                  #if (${bound} == 'O') 
+                       , NVL(V1.INV_XCH_RT,0) INV_XCH_RT
+                  #else 
+                       , NVL(V2.INV_XCH_RT,0) INV_XCH_RT
+                  #end
+                   FROM
+                  (SELECT P.BKG_NO, P.BL_NO BL_NO, P.VSL_CD,P.SKD_VOY_NO,P.SKD_DIR_CD
+                         ,(SELECT SUM(DECODE(SUBSTR(E.CNTR_TPSZ_CD,2,1), '2', E.OP_CNTR_QTY, 0)) CNT20
+                             FROM BKG_QUANTITY E 
+                            WHERE E.BKG_NO(+) =  P.BKG_NO) as CNT20
+                         ,(SELECT SUM(DECODE(SUBSTR(E.CNTR_TPSZ_CD,2,1), '2', 0, E.OP_CNTR_QTY)) CNT40
+                             FROM BKG_QUANTITY E 
+                            WHERE E.BKG_NO(+) =  P.BKG_NO) as CNT40
+                         ,P.POL_CD, P.POD_CD, P.SVC_SCP_CD
+                         ,P.P_USD_AMT P_USD_AMT
+                         ,P.P_INR_AMT + NVL(Q.P_OTH_AMT, 0) P_INR_AMT
+                         ,P.C_USD_AMT C_USD_AMT
+                         ,P.C_INR_AMT + NVL(R.C_OTH_AMT, 0) C_INR_AMT
+                  
+                    FROM (SELECT   A.BKG_NO, A.BL_NO BL_NO, C.VSL_CD, C.SKD_VOY_NO, C.SKD_DIR_CD
+                                   , SUM(DECODE(B.FRT_TERM_CD, 'P', DECODE(B.CURR_CD, 'USD', B.CHG_AMT, 0), 0)) P_USD_AMT
+                                   , SUM(DECODE(B.FRT_TERM_CD, 'P', DECODE(B.CURR_CD, 'INR', B.CHG_AMT, 0), 0)) P_INR_AMT
+                                   , SUM(DECODE(B.FRT_TERM_CD, 'C', DECODE(B.CURR_CD, 'USD', B.CHG_AMT, 0), 0)) C_USD_AMT  
+                                   , SUM(DECODE(B.FRT_TERM_CD, 'C', DECODE(B.CURR_CD, 'INR', B.CHG_AMT, 0), 0)) C_INR_AMT
+                                   , C.POL_CD, C.POD_CD, A.SVC_SCP_CD SVC_SCP_CD
+                                FROM BKG_BOOKING A, BKG_CHG_RT B, BKG_VVD C, BKG_RATE D, VSK_VSL_PORT_SKD V
+                               WHERE A.BKG_NO  = B.BKG_NO	
+                  			         AND A.BKG_NO  = C.BKG_NO	
+                                 AND A.BKG_NO  = D.BKG_NO	
+                                 AND DECODE(@[bound],'O', D.PPD_RCV_OFC_CD, D.CLT_OFC_CD) IN (SELECT OFC_CD FROM MDM_ORGANIZATION WHERE AR_OFC_CD IN ('BOMSC','BOMBA'))
+                                 AND B.FRT_TERM_CD LIKE DECODE(@[bound],'I','C','%')	
+				   				 AND B.CHG_CD||B.CURR_CD NOT IN ('GSTINR','SBCINR') 			
+                   				 AND B.CHG_CD||B.CURR_CD NOT IN ('GSTUSD','SBCUSD') 
+                                 --AND B.CHG_CD||B.CURR_CD <> 'GSTINR' 			
+                                 --AND B.CHG_CD||B.CURR_CD <> 'GSTUSD' 	
+                                 AND A.BKG_STS_CD IN ('S','F') 
+                                 AND B.FRT_INCL_XCLD_DIV_CD ='N'   
+                  			     AND C.VSL_CD     = V.VSL_CD
+                                 AND C.SKD_VOY_NO = V.SKD_VOY_NO
+                                 AND C.SKD_DIR_CD = V.SKD_DIR_CD
+                                 AND DECODE(@[bound], 'O', C.POL_CD, C.POD_CD)  = V.VPS_PORT_CD
+                  	             AND DECODE(@[bound], 'O', V.VPS_ETD_DT, V.VPS_ETA_DT) BETWEEN TO_DATE( REPLACE(@[from_date],'-',''), 'YYYYMMDD' ) AND TO_DATE( REPLACE(@[to_date],'-',''), 'YYYYMMDD' ) + 0.999999
+                                 AND V.CLPT_IND_SEQ = 1
+                                 AND DECODE(@[bound], 'O', C.POL_CD, C.POD_CD) LIKE @[port]||'%'
+                               GROUP BY A.BKG_NO, A.BL_NO, C.POL_CD, C.POD_CD, A.SVC_SCP_CD,  C.VSL_CD, C.SKD_VOY_NO, C.SKD_DIR_CD ) P,			
+                  		   (SELECT A.BL_NO BL_NO,  C.VSL_CD, C.SKD_VOY_NO, C.SKD_DIR_CD	
+                                  ,SUM(DECODE(NVL(D.USD_LOCL_XCH_RT,0), 0, 0, ROUND((NVL(B.CHG_AMT,0) / D.USD_LOCL_XCH_RT) * F.USD_LOCL_XCH_RT, 2)))  P_OTH_AMT			
+                  		      FROM BKG_BOOKING A, BKG_CHG_RT B, BKG_VVD C, GL_MON_XCH_RT D, GL_MON_XCH_RT F, BKG_RATE H, VSK_VSL_PORT_SKD V
+                  		     WHERE A.BKG_NO     = B.BKG_NO	
+                  		       AND A.BKG_NO     = C.BKG_NO	
+                               AND A.BKG_NO     = H.BKG_NO	
+                  	           AND C.VSL_CD     = V.VSL_CD
+                               AND C.SKD_VOY_NO = V.SKD_VOY_NO
+                               AND C.SKD_DIR_CD = V.SKD_DIR_CD
+                               AND DECODE(@[bound], 'O', C.POL_CD, C.POD_CD)  = V.VPS_PORT_CD
+                               AND DECODE(@[bound], 'O', V.VPS_ETD_DT, V.VPS_ETA_DT) BETWEEN TO_DATE( REPLACE(@[from_date],'-',''), 'YYYYMMDD' ) AND TO_DATE( REPLACE(@[to_date],'-',''), 'YYYYMMDD' ) + 0.999999
+                               AND V.CLPT_IND_SEQ = 1
+                  	           AND DECODE(@[bound], 'O', C.POL_CD, C.POD_CD) LIKE @[port]||'%'		
+                  		       AND H.PPD_RCV_OFC_CD IN ( SELECT OFC_CD FROM MDM_ORGANIZATION WHERE AR_OFC_CD IN ('BOMSC','BOMBA'))
+                     		   AND B.CURR_CD NOT IN ('USD', 'INR')
+                  		       AND B.FRT_INCL_XCLD_DIV_CD = 'N'
+                  		       AND B.FRT_TERM_CD = 'P'
+                               AND D.ACCT_XCH_RT_YRMON = (SELECT TO_CHAR(E.VPS_ETD_DT, 'YYYYMM') -- USD @[ 3RD 경리환율	
+                                                            FROM VSK_VSL_PORT_SKD E		
+                                                           WHERE  E.VSL_CD(+)     = C.VSL_CD	
+                                                  	         AND E.SKD_VOY_NO(+)  = C.SKD_VOY_NO	
+                                                  	         AND E.SKD_DIR_CD(+)  = C.SKD_DIR_CD	
+                                                  	         AND E.VPS_PORT_CD(+) = DECODE(@[bound],'O', C.POL_CD, C.POD_CD)	
+                                                  	         AND E.CLPT_IND_SEQ(+) = 1	
+                                                  	         AND E.VPS_ETD_DT IS NOT NULL	
+                                                  	         AND ROWNUM=1 )	
+                               AND D.ACCT_XCH_RT_LVL = '1'		
+                               AND D.CURR_CD = B.CURR_CD		
+                               AND F.ACCT_XCH_RT_YRMON = (SELECT TO_CHAR(E.VPS_ETD_DT, 'YYYYMM') -- USD @[ INR 경리환율		
+                                                            FROM VSK_VSL_PORT_SKD E		
+                                                           WHERE  E.VSL_CD(+)    = C.VSL_CD	
+                                                             AND E.SKD_VOY_NO(+) = C.SKD_VOY_NO	
+                                                  	         AND E.SKD_DIR_CD(+) = C.SKD_DIR_CD	
+                                                  	         AND E.VPS_PORT_CD(+)= DECODE(@[bound],'O', C.POL_CD, C.POD_CD)	
+                                                  	         AND E.CLPT_IND_SEQ(+) = 1	
+                                                  	         AND E.VPS_ETD_DT IS NOT NULL	
+                                                  	         AND ROWNUM=1 )	
+                               AND F.ACCT_XCH_RT_LVL = '1'		
+                               AND F.CURR_CD = 'INR'		
+                               AND A.BKG_STS_CD IN ('S','F') 
+                  	       GROUP BY A.BL_NO,  C.VSL_CD, C.SKD_VOY_NO, C.SKD_DIR_CD ) Q,	
+                             (SELECT A.BL_NO BL_NO,  C.VSL_CD, C.SKD_VOY_NO, C.SKD_DIR_CD
+                                   , SUM(DECODE(NVL(D.USD_LOCL_XCH_RT,0), 0, 0, ROUND((NVL(B.CHG_AMT,0) / D.USD_LOCL_XCH_RT) * F.USD_LOCL_XCH_RT, 2)))  C_OTH_AMT			
+                  		      FROM BKG_BOOKING A, BKG_CHG_RT B, BKG_VVD C, GL_MON_XCH_RT D, GL_MON_XCH_RT F, BKG_RATE H, VSK_VSL_PORT_SKD V
+                  		     WHERE A.BKG_NO = B.BKG_NO	
+                  		       AND A.BKG_NO = C.BKG_NO	
+                               AND A.BKG_NO = H.BKG_NO	
+                  		       AND C.VSL_CD     = V.VSL_CD
+                               AND C.SKD_VOY_NO = V.SKD_VOY_NO
+                               AND C.SKD_DIR_CD = V.SKD_DIR_CD
+                               AND DECODE(@[bound], 'O', C.POL_CD, C.POD_CD)  = V.VPS_PORT_CD
+                  	           AND DECODE(@[bound], 'O', V.VPS_ETD_DT, V.VPS_ETA_DT) BETWEEN TO_DATE( REPLACE(@[from_date],'-',''), 'YYYYMMDD' ) AND TO_DATE( REPLACE(@[to_date],'-',''), 'YYYYMMDD' ) + 0.999999
+                               AND V.CLPT_IND_SEQ = 1
+                  	           AND DECODE(@[bound], 'O', C.POL_CD, C.POD_CD) LIKE @[port]||'%'		
+                  		       AND H.PPD_RCV_OFC_CD IN ( SELECT OFC_CD FROM MDM_ORGANIZATION WHERE AR_OFC_CD IN ('BOMSC','BOMBA'))
+                     		   AND B.CURR_CD NOT IN ('USD', 'INR')
+                  		       AND B.FRT_INCL_XCLD_DIV_CD = 'N'
+                  		       AND B.FRT_TERM_CD = 'C'
+                               AND D.ACCT_XCH_RT_YRMON = (SELECT TO_CHAR(E.VPS_ETD_DT, 'YYYYMM') -- USD @[ 3RD 경리환율	
+                                                            FROM VSK_VSL_PORT_SKD E		
+                                                           WHERE  E.VSL_CD(+)      = C.VSL_CD	
+                                                  	         AND E.SKD_VOY_NO(+)   = C.SKD_VOY_NO	
+                                                  	         AND E.SKD_DIR_CD(+)   = C.SKD_DIR_CD	
+                                                  	         AND E.VPS_PORT_CD(+)  = DECODE(@[bound],'O', C.POL_CD, C.POD_CD)	
+                                                  	         AND E.CLPT_IND_SEQ(+) = 1	
+                                                  	         AND E.VPS_ETD_DT IS NOT NULL	
+                                                  	         AND ROWNUM=1 )	
+                               AND D.ACCT_XCH_RT_LVL = '1'		
+                               AND D.CURR_CD = B.CURR_CD		
+                               AND F.ACCT_XCH_RT_YRMON = (SELECT TO_CHAR(E.VPS_ETD_DT, 'YYYYMM') -- USD @[ INR 경리환율		
+                                                            FROM VSK_VSL_PORT_SKD E		
+                                                           WHERE  E.VSL_CD(+)      = C.VSL_CD	
+                                                             AND E.SKD_VOY_NO(+)   = C.SKD_VOY_NO	
+                                                  	         AND E.SKD_DIR_CD(+)   = C.SKD_DIR_CD	
+                                                  	         AND E.VPS_PORT_CD(+)  = DECODE(@[bound],'O', C.POL_CD, C.POD_CD)	
+                                                  	         AND E.CLPT_IND_SEQ(+) = 1	
+                                                  	         AND E.VPS_ETD_DT IS NOT NULL	
+                                                  	         AND ROWNUM=1 )	
+                               AND F.ACCT_XCH_RT_LVL = '1'		
+                               AND F.CURR_CD = 'INR'		
+                               AND A.BKG_STS_CD IN ('S','F') 
+                  	      GROUP BY A.BL_NO,  C.VSL_CD, C.SKD_VOY_NO, C.SKD_DIR_CD ) R            
+                   WHERE P.BL_NO = Q.BL_NO(+)
+                     AND P.VSL_CD = Q.VSL_CD(+)
+                     AND P.SKD_VOY_NO = Q.SKD_VOY_NO(+)
+                     AND P.SKD_DIR_CD = Q.SKD_DIR_CD(+)
+                     AND P.BL_NO  = R.BL_NO(+)
+                     AND P.VSL_CD = R.VSL_CD(+)
+                     AND P.SKD_VOY_NO = R.SKD_VOY_NO(+)
+                     AND P.SKD_DIR_CD = R.SKD_DIR_CD(+)
+              ) MA,  INV_VVD_XCH_RT	V1, INV_VVD_XCH_RT	V2 
+              WHERE  MA.VSL_CD = V1.VSL_CD(+)
+                AND  MA.SKD_VOY_NO =  V1.SKD_VOY_NO(+)
+                AND  MA.SKD_DIR_CD = V1.SKD_DIR_CD(+)
+                AND  V1.LOCL_CURR_CD(+) = 'INR' 
+                AND  V1.CHG_CURR_CD(+)  = 'USD'
+                AND  V1.IO_BND_CD(+) = 'O'
+                AND  MA.POL_CD     = V1.PORT_CD(+)	
+                AND  MA.SVC_SCP_CD = V1.SVC_SCP_CD(+)
+                AND  MA.VSL_CD     = V2.VSL_CD(+)
+                AND  MA.SKD_VOY_NO =  V2.SKD_VOY_NO(+)
+                AND  MA.SKD_DIR_CD = V2.SKD_DIR_CD(+)
+                AND  V2.LOCL_CURR_CD(+) = 'INR' 
+                AND  V2.CHG_CURR_CD(+)  = 'USD'
+                AND  V2.IO_BND_CD(+) = 'I'
+                AND  MA.POD_CD     = V2.PORT_CD(+)
+                AND  MA.SVC_SCP_CD = V2.SVC_SCP_CD(+)
+              )
+      GROUP BY VVD, INV_XCH_RT 
+	UNION ALL
+      SELECT  VVD BL_NO, CNT20, CNT40, 
+              O_USD_AMT P_USD_AMT, O_EQV_AMT P_EQV_AMT, (O_INR_AMT + O_OTH_AMT) P_INR_AMT, ROUND((O_USD_AMT * USD_XCH_RT) + O_INR_AMT + O_OTH_AMT,2) P_INR_TOT,
+              I_USD_AMT C_USD_AMT, I_EQV_AMT C_EQV_AMT, (I_INR_AMT + I_OTH_AMT) C_INR_AMT, ROUND((I_USD_AMT * USD_XCH_RT) + I_INR_AMT + I_OTH_AMT,2) C_INR_TOT,
+              USD_XCH_RT EX_RATE
+      FROM   (          
+               SELECT  VSL_CD||SKD_VOY_NO||SKD_DIR_CD VVD, USD_XCH_RT, 
+                       SUM(CNT20) CNT20, SUM(CNT40) CNT40,
+                       SUM(I_USD_AMT) I_USD_AMT, SUM(I_EQV_AMT) I_EQV_AMT, SUM(I_INR_AMT) I_INR_AMT, SUM(I_OTH_AMT) I_OTH_AMT, 
+                       SUM(O_USD_AMT) O_USD_AMT, SUM(O_EQV_AMT) O_EQV_AMT, SUM(O_INR_AMT) O_INR_AMT, SUM(O_OTH_AMT) O_OTH_AMT
+               FROM  (  
+                       SELECT  MN.BL_SRC_NO BL_NO, MN.USD_XCH_RT, MN.VSL_CD, MN.SKD_VOY_NO, MN.SKD_DIR_CD, 
+                               0 CNT20, 0 CNT40,
+                               SUM(DECODE(MN.IO_BND_CD, 'I', DECODE(CHG.CURR_CD, 'USD', CHG.CHG_AMT, 0), 0)) I_USD_AMT,
+                               SUM(DECODE(MN.IO_BND_CD, 'I', DECODE(CHG.CURR_CD, 'USD', ROUND(CHG.CHG_AMT * NVL(MN.USD_XCH_RT,0),2), 0), 0)) I_EQV_AMT,
+                               SUM(DECODE(MN.IO_BND_CD, 'I', DECODE(CHG.CURR_CD, 'INR', CHG.CHG_AMT, 0), 0)) I_INR_AMT,
+                               SUM(DECODE(MN.IO_BND_CD, 'I', DECODE(CHG.CURR_CD, 'USD', 0 , 'INR', 0, DECODE(NVL(MN.USD_XCH_RT,0), 0, 0, ROUND(((NVL(CHG.CHG_AMT,0) / NVL(MN.USD_XCH_RT,1)) * NVL(CHG.INV_XCH_RT,1)), 2))),0))  I_OTH_AMT,
+                               SUM(DECODE(MN.IO_BND_CD, 'O', DECODE(CHG.CURR_CD, 'USD', CHG.CHG_AMT, 0), 0)) O_USD_AMT,
+                               SUM(DECODE(MN.IO_BND_CD, 'O', DECODE(CHG.CURR_CD, 'USD', ROUND(CHG.CHG_AMT * NVL(MN.USD_XCH_RT,0),2), 0), 0)) O_EQV_AMT,
+                               SUM(DECODE(MN.IO_BND_CD, 'O', DECODE(CHG.CURR_CD, 'INR', CHG.CHG_AMT, 0), 0)) O_INR_AMT,
+                               SUM(DECODE(MN.IO_BND_CD, 'O', DECODE(CHG.CURR_CD, 'USD', 0 , 'INR', 0, DECODE(NVL(MN.USD_XCH_RT,0), 0, 0, ROUND(((NVL(CHG.CHG_AMT,0) / NVL(MN.USD_XCH_RT,1)) * NVL(CHG.INV_XCH_RT,1)), 2))),0))  O_OTH_AMT	
+                       FROM   (
+                                SELECT AR_IF_NO, BL_SRC_NO, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, USD_XCH_RT, IO_BND_CD                                                
+                                FROM   INV_AR_MN
+                                WHERE  1=1
+                                AND    AR_OFC_CD IN ('BOMSC','BOMBA')
+                                AND    IO_BND_CD = @[bound]
+                                AND    TO_DATE(SAIL_ARR_DT, 'YYYYMMDD') BETWEEN TO_DATE( REPLACE(@[from_date],'-',''), 'YYYYMMDD' ) AND TO_DATE( REPLACE(@[to_date],'-',''), 'YYYYMMDD' ) + 0.999999
+                                AND    DECODE(@[bound],'O', POL_CD, POD_CD)  like @[port]||'%'    
+                                AND    REV_TP_CD = 'M'
+                                AND    REV_SRC_CD <> 'RD'
+                                AND    NVL(INV_DELT_DIV_CD,'N') <> 'Y'
+                               ) MN,
+                                 INV_AR_CHG CHG
+                       WHERE  1=1
+                       AND    MN.AR_IF_NO = CHG.AR_IF_NO
+                       AND    CHG.CHG_CD NOT IN('GST','SBC')
+                       GROUP BY MN.BL_SRC_NO, MN.USD_XCH_RT, MN.VSL_CD, MN.SKD_VOY_NO, MN.SKD_DIR_CD
+                     UNION ALL
+                       SELECT  A.BL_NO, A.USD_XCH_RT, A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD,
+                               SUM(DECODE(SUBSTR(CNTR.CNTR_TPSZ_CD,2,1), '2',1,0)) CNT20,
+                               SUM(DECODE(SUBSTR(CNTR.CNTR_TPSZ_CD,2,1), '2',0,1)) CNT40,
+                               0 I_USD_AMT,
+                               0 I_EQV_AMT,
+                               0 I_INR_AMT,
+                               0 I_OTH_AMT,
+                               0 O_USD_AMT,
+                               0 O_EQV_AMT,
+                               0 O_INR_AMT,
+                               0 O_OTH_AMT  
+                       FROM   (                                               
+                                SELECT  MN.BL_SRC_NO BL_NO, MN.VSL_CD, MN.SKD_VOY_NO, MN.SKD_DIR_CD, MN.USD_XCH_RT, MAX(AR_IF_NO) AR_IF_NO
+                                FROM    INV_AR_MN MN
+                                WHERE   1=1
+                                AND     MN.AR_OFC_CD IN ('BOMSC','BOMBA')
+                                AND     MN.IO_BND_CD = @[bound]
+                                AND     TO_DATE(MN.SAIL_ARR_DT, 'YYYYMMDD') BETWEEN TO_DATE( REPLACE(@[from_date],'-',''), 'YYYYMMDD' ) AND TO_DATE( REPLACE(@[to_date],'-',''), 'YYYYMMDD' ) + 0.999999
+                                AND     DECODE(@[bound],'O', MN.POL_CD, MN.POD_CD)  like @[port]||'%'    
+                                AND     MN.REV_TP_CD = 'M'
+                                AND     MN.REV_SRC_CD <> 'RD'
+                                AND     NVL(MN.INV_DELT_DIV_CD,'N') <> 'Y'
+                                GROUP BY MN.BL_SRC_NO, MN.USD_XCH_RT, MN.VSL_CD, MN.SKD_VOY_NO, MN.SKD_DIR_CD
+                              ) A,
+                                INV_AR_CNTR CNTR
+                       WHERE   A.AR_IF_NO = CNTR.AR_IF_NO
+                       GROUP BY A.BL_NO, A.USD_XCH_RT, A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD
+                     )
+             GROUP BY VSL_CD||SKD_VOY_NO||SKD_DIR_CD, USD_XCH_RT
+         )
+	)
+      WHERE (P_USD_AMT <> 0 OR  P_EQV_AMT <> 0 OR P_INR_AMT <> 0 OR 
+             C_USD_AMT <> 0 OR  C_EQV_AMT <> 0 OR C_INR_AMT <> 0   )   
+	  GROUP BY BL_NO, CEIL(CNT20), CEIL(CNT40), EX_RATE       
+	  ORDER BY BL_NO 
+#end			]]></sql>
+			<params>
+				<param name="bound" type="12" value="O" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="port" type="12" value="IN" out="N"/>
+				<param name="from_date" type="12" value="" out="N"/>
+				<param name="to_date" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

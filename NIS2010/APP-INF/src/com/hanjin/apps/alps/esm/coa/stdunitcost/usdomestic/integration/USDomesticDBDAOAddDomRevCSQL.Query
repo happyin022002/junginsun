@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="USDomesticDBDAOAddDomRevCSQL">
+			<desc><![CDATA[AddDomRev]]></desc>
+			<sql><![CDATA[
+-- HJL Billing report 로부터 Rev. I/F-- 
+INSERT INTO COA_USA_DMST_UT_COST
+      ( COST_YRMON
+      , ORG_RAIL_LOC_CD
+      , COST_LOC_GRP_CD 
+      , CNTR_TPSZ_CD
+      , DMST_VOL_QTY
+      , RAILG_AMT
+      , EQ_RNTL_SCG_AMT
+      , FUEL_SCG_AMT
+      , HZD_MTRL_SCG_AMT
+      , DMST_TTL_FRT_REV_AMT
+      , CRE_USR_ID
+      , CRE_DT
+      , UPD_USR_ID
+      , UPD_DT
+      ) 
+SELECT REPLACE(@[f_cost_yrmon], '-', '')         AS COST_YRMON
+     , TT.ORG_RAIL_LOC_CD
+     , 'C' --location level
+     , TT.CNTRTP2457
+     , COUNT(TT.INVNO)     AS VOL --VOLUME
+     , SUM(TT.GRATE)       AS RAILAGE  --RAILAGE
+     , SUM(TT.EQAMT)       AS EQAMT --EQ RENTAL
+     , SUM(TT.FSCAMT)      AS FSCAMT 
+     , SUM(TT.HAZAMT)      AS HAZAMT
+     , SUM(TT.TAMT)        AS TAMT
+     , @[upd_usr_id]
+     , SYSDATE
+     , @[cre_usr_id]
+     , SYSDATE
+  FROM ( SELECT /*+ ORDERED */0 AS CHK
+              , DB.ORG_RAIL_LOC_CD --ORG LOC          
+              , ID.INV_NO INVNO --INV NO
+              , NVL(ID.RAILG_RT_AMT, 0) IRATE --INVOICE RATE
+              , NVL(GR.RAILG_RT_AMT, 0) GRATE --RAILAGE
+              , NVL(EQ.SCG_AMT, 0) EQAMT --EQ RENTAL
+              , ROUND(DECODE(FS.DMST_SCG_TP_CD, 'P', (NVL(GR.RAILG_RT_AMT, 0) * DECODE(FS.SCG_AMT, 0, 100, FS.SCG_AMT))/100 , NVL(FS.SCG_AMT, 0)), 2) FSCAMT
+              , NVL(ID.HZD_MTRL_SCG_RT_AMT, 0) HAZAMT --HAZMAT
+              , DECODE(NVL(GR.RAILG_RT_AMT, 0), 0, 0, NVL(GR.RAILG_RT_AMT, 0) + NVL(EQ.SCG_AMT, 0) + NVL(ID.HZD_MTRL_SCG_RT_AMT, 0) + ROUND(DECODE(FS.DMST_SCG_TP_CD, 'P', (NVL(GR.RAILG_RT_AMT, 0) * DECODE(FS.SCG_AMT, 0, 100, FS.SCG_AMT))/100 , NVL(FS.SCG_AMT, 0)), 2)) TAMT
+              , DB.DMST_BKG_NO BKGNO
+              , DECODE(DB.CNTR_TPSZ_CD, 'D7', 'D7', 'D5', 'D5', 'D4', 'D4', 'D2', 'D2', 'F2', 'OT', 'F4', 'OT', 'R2', 'OT', 'O2', 'OT', 'P2', 'OT', 'O4', 'OT', 'P4', 'OT'
+                                      , 'T2', 'OT', 'T4', 'OT', 'R4', 'OT', 'R5', 'OT', 'R7', 'OT', 'S2', 'OT', 'S4', 'OT', 'D8', 'OT', 'D9', 'OT', 'A2', 'OT', 'A4', 'OT', 'F5', 'OT', 'Q5', 'OT' , 'D3', 'OT', 'DX', 'OT', 'R1', 'OT', 'R9', 'OT') CNTRTP2457
+           FROM DOM_FRT_INV IH
+              , DOM_FRT_INV_DTL ID
+              , DOM_BOOKING DB
+              , DOM_GEN_RT GR
+              , DOM_SURCHARGE EQ
+              , DOM_KNTR_PTY KP
+              , DOM_SURCHARGE FS
+          WHERE DB.DMST_BKG_NO = ID.DMST_BKG_NO
+            AND IH.INV_NO = ID.INV_NO
+            AND IH.INV_CXL_FLG = 'N'
+            AND DB.DMST_CUST_CD = KP.DMST_KNTR_PTY_CD(+)
+            AND DB.DMST_CUST_SEQ = KP.DMST_KNTR_PTY_SEQ(+)
+            AND DB.ORG_RAIL_LOC_CD = GR.FM_LOC_CD
+            AND DB.DEST_RAIL_LOC_CD = GR.TO_LOC_CD
+            AND GR.DMST_GEN_RT_TP_CD = 'S'
+            AND DECODE(DB.TRP_BKG_FLG, 'Y', 'TRP', 'N', 'HRP') = GR.DMST_BKG_TP_CD
+            AND IH.CRE_DT BETWEEN GR.EFF_DT AND GR.EXP_DT + 0.99999
+            AND DB.DMST_RAIL_SVC_TP_CD = GR.DMST_RAIL_SVC_TP_CD
+            AND DECODE(DB.CNTR_FULL_FLG, 'Y', 'F', 'M') = GR.FULL_MTY_CD
+            AND DB.CNTR_TPSZ_CD = GR.CNTR_TPSZ_CD
+            AND DB.CNTR_OWNR_CO_CD = GR.CNTR_OWNR_CO_CD
+            AND EQ.DMST_SCG_CD(+) = 'E'
+            AND IH.RT_APLY_DT BETWEEN EQ.EFF_DT(+) AND EQ.EXP_DT(+) + 0.99999
+            AND EQ.DELT_FLG(+) = 'N'
+            AND FS.DMST_SCG_CD(+) = 'F'
+            AND IH.RT_APLY_DT BETWEEN FS.EFF_DT(+) AND FS.EXP_DT(+) + 0.99999
+            AND FS.DELT_FLG(+) = 'N'
+            AND DB.ORG_RAIL_LOC_CD IS NOT NULL --ORG LOC
+            AND IH.CRE_DT BETWEEN TO_DATE(@[f_cre_start_dt]||'01', 'YYYY-MM-DD') AND LAST_DAY(TO_DATE(@[f_cre_end_dt], 'YYYY-MM'))+0.99999
+            AND NVL(ID.HJS_RAILG_RT_AMT, 0) = 0
+        
+        UNION ALL
+        
+         SELECT 0 AS CHK
+              , DB.ORG_RAIL_LOC_CD --ORG LOC
+              , ID.INV_NO INVNO --INV NO
+              , NVL(ID.RAILG_RT_AMT, 0) IRATE -- INVOICE RATE
+              , NVL(ID.HJS_RAILG_RT_AMT, 0) GRATE --RAILAGE
+              , NVL(EQ.SCG_AMT, 0) EQAMT --EQ RENTAL
+              , ROUND(DECODE(FS.DMST_SCG_TP_CD, 'P', (NVL(ID.HJS_RAILG_RT_AMT, 0) * DECODE(FS.SCG_AMT, 0, 100, FS.SCG_AMT))/100 , NVL(FS.SCG_AMT, 0)), 2) FSCAMT
+              , NVL(ID.HZD_MTRL_SCG_RT_AMT, 0) HAZAMT --HAZMAT
+              , DECODE(NVL(ID.HJS_RAILG_RT_AMT, 0), 0, 0, NVL(ID.HJS_RAILG_RT_AMT, 0) + NVL(EQ.SCG_AMT, 0) + NVL(ID.HZD_MTRL_SCG_RT_AMT, 0) + ROUND(DECODE(FS.DMST_SCG_TP_CD, 'P', (NVL(ID.HJS_RAILG_RT_AMT, 0) * DECODE(FS.SCG_AMT, 0, 100, FS.SCG_AMT))/100 , NVL(FS.SCG_AMT, 0)), 2)) TAMT
+              , DB.DMST_BKG_NO BKGNO
+              , DECODE(DB.CNTR_TPSZ_CD, 'D7', 'D7', 'D5', 'D5', 'D4', 'D4', 'D2', 'D2', 'F2', 'OT', 'F4', 'OT', 'R2', 'OT', 'O2', 'OT', 'P2', 'OT', 'O4', 'OT', 'P4', 'OT'
+                                      , 'T2', 'OT', 'T4', 'OT', 'R4', 'OT', 'R5', 'OT', 'R7', 'OT', 'S2', 'OT', 'S4', 'OT', 'D8', 'OT', 'D9', 'OT', 'A2', 'OT', 'A4', 'OT', 'F5', 'OT', 'Q5', 'OT' , 'D3', 'OT', 'DX', 'OT', 'R1', 'OT', 'R9', 'OT') CNTRTP2457 --Dry 이외 CNTR는 Other로 변경 (Rail report와 기준 통일- COA only)
+           FROM DOM_FRT_INV IH
+              , DOM_FRT_INV_DTL ID
+              , DOM_BOOKING DB
+              , DOM_SURCHARGE EQ
+              , DOM_KNTR_PTY KP
+              , DOM_SURCHARGE FS
+          WHERE DB.DMST_BKG_NO = ID.DMST_BKG_NO
+            AND IH.INV_NO = ID.INV_NO
+            AND IH.INV_CXL_FLG = 'N'
+            AND DB.DMST_CUST_CD = KP.DMST_KNTR_PTY_CD(+)
+            AND DB.DMST_CUST_SEQ = KP.DMST_KNTR_PTY_SEQ(+)
+            AND EQ.DMST_SCG_CD(+) = 'E'
+            AND IH.RT_APLY_DT BETWEEN EQ.EFF_DT(+) AND EQ.EXP_DT(+) + 0.99999
+            AND EQ.DELT_FLG(+) = 'N'
+            AND FS.DMST_SCG_CD(+) = 'F'
+            AND IH.RT_APLY_DT BETWEEN FS.EFF_DT(+) AND FS.EXP_DT(+) + 0.99999
+            AND FS.DELT_FLG(+) = 'N'
+            AND DB.ORG_RAIL_LOC_CD IS NOT NULL --ORG LOC
+            AND IH.CRE_DT BETWEEN TO_DATE(@[f_cre_start_dt]||'01', 'YYYY-MM-DD') AND LAST_DAY(TO_DATE(@[f_cre_end_dt], 'YYYY-MM'))+0.99999
+            AND NVL(ID.HJS_RAILG_RT_AMT, 0) <> 0
+        
+        UNION ALL
+        
+         SELECT 1 AS CHK
+              , DB.ORG_RAIL_LOC_CD --ORG LOC
+              , ID.INV_NO INVNO --INV NO
+              , NVL(ID.RAILG_RT_AMT, 0) IRATE --INVOICE RATE
+              , NVL(GR.RAILG_RT_AMT, 0) GRATE --RAILAGE
+              , NVL(EQ.SCG_AMT, 0) EQAMT --EQ RENTAL
+              , ROUND(DECODE(FS.DMST_SCG_TP_CD, 'P', (NVL(ID.HJS_RAILG_RT_AMT, 0) * DECODE(FS.SCG_AMT, 0, 100, FS.SCG_AMT))/100 , NVL(FS.SCG_AMT, 0)), 2) FSCAMT
+              , NVL(ID.HZD_MTRL_SCG_RT_AMT, 0) HAZAMT --HAZMAT
+              , DECODE(NVL(ID.HJS_RAILG_RT_AMT, 0), 0, 0, NVL(ID.HJS_RAILG_RT_AMT, 0) + NVL(EQ.SCG_AMT, 0) + NVL(ID.HZD_MTRL_SCG_RT_AMT, 0) + ROUND(DECODE(FS.DMST_SCG_TP_CD, 'P', (NVL(ID.HJS_RAILG_RT_AMT, 0) * DECODE(FS.SCG_AMT, 0, 100, FS.SCG_AMT))/100 , NVL(FS.SCG_AMT, 0)), 2)) TAMT
+              , DB.DMST_BKG_NO BKGNO
+              , DECODE(DB.CNTR_TPSZ_CD, 'D7', 'D7', 'D5', 'D5', 'D4', 'D4', 'D2', 'D2', 'F2', 'OT', 'F4', 'OT', 'R2', 'OT', 'O2', 'OT', 'P2', 'OT', 'O4', 'OT', 'P4', 'OT'
+                                      , 'T2', 'OT', 'T4', 'OT', 'R4', 'OT', 'R5', 'OT', 'R7', 'OT', 'S2', 'OT', 'S4', 'OT', 'D8', 'OT', 'D9', 'OT', 'A2', 'OT', 'A4', 'OT', 'F5', 'OT', 'Q5', 'OT' , 'D3', 'OT', 'DX', 'OT', 'R1', 'OT', 'R9', 'OT') CNTRTP2457
+           FROM DOM_FRT_INV IH
+              , DOM_FRT_INV_DTL ID
+              , DOM_BOOKING DB
+              , DOM_GEN_RT GR
+              , DOM_SURCHARGE EQ
+              , DOM_KNTR_PTY KP
+              , DOM_SURCHARGE FS
+          WHERE DB.DMST_BKG_NO = ID.DMST_BKG_NO
+            AND IH.INV_NO = ID.INV_NO
+            AND IH.INV_CXL_FLG = 'N'
+            AND DB.DMST_CUST_CD = KP.DMST_KNTR_PTY_CD(+)
+            AND DB.DMST_CUST_SEQ = KP.DMST_KNTR_PTY_SEQ(+)
+            AND DB.ORG_RAIL_LOC_CD = GR.FM_LOC_CD(+)
+            AND DB.DEST_RAIL_LOC_CD = GR.TO_LOC_CD(+)
+            AND GR.DMST_GEN_RT_TP_CD(+) = 'S'
+            AND DECODE(DB.TRP_BKG_FLG, 'Y', 'TRP', 'N', 'HRP') = GR.DMST_BKG_TP_CD(+)
+            AND DB.DMST_RAIL_SVC_TP_CD = GR.DMST_RAIL_SVC_TP_CD(+)
+            AND DECODE(DB.CNTR_FULL_FLG, 'Y', 'F', 'M') = GR.FULL_MTY_CD(+)
+            AND DB.CNTR_TPSZ_CD = GR.CNTR_TPSZ_CD(+)
+            AND DB.CNTR_OWNR_CO_CD = GR.CNTR_OWNR_CO_CD(+)
+            AND GR.RAILG_RT_AMT IS NULL
+            AND EQ.DMST_SCG_CD(+) = 'E'
+            AND IH.RT_APLY_DT BETWEEN EQ.EFF_DT(+) AND EQ.EXP_DT(+) + 0.99999
+            AND EQ.DELT_FLG(+) = 'N'
+            AND FS.DMST_SCG_CD(+) = 'F'
+            AND IH.RT_APLY_DT BETWEEN FS.EFF_DT(+) AND FS.EXP_DT(+) + 0.99999
+            AND FS.DELT_FLG(+) = 'N'
+            AND DB.ORG_RAIL_LOC_CD IS NOT NULL --ORG LOC
+            AND IH.CRE_DT BETWEEN TO_DATE(@[f_cre_start_dt]||'01', 'YYYY-MM-DD') AND LAST_DAY(TO_DATE(@[f_cre_end_dt], 'YYYY-MM'))+0.99999
+            AND NVL(ID.HJS_RAILG_RT_AMT, 0) = 0 ) TT 
+  WHERE  TT.CNTRTP2457 <> 'OT'
+ GROUP BY TT.ORG_RAIL_LOC_CD , TT.CNTRTP2457			]]></sql>
+			<params>
+				<param name="f_cost_yrmon" type="12" value="" out="N"/>
+				<param name="upd_usr_id" type="12" value="" out="N"/>
+				<param name="cre_usr_id" type="12" value="" out="N"/>
+				<param name="f_cre_start_dt" type="12" value="" out="N"/>
+				<param name="f_cre_end_dt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

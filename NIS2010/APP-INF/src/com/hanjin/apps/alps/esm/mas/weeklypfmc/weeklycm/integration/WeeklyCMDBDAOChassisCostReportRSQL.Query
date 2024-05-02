@@ -1,0 +1,490 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="WeeklyCMDBDAOChassisCostReportRSQL">
+			<desc><![CDATA[Chassis Cost Report 를 조회한다.
+[CHM-201538347] cost가 0인 항목은 제외]]></desc>
+			<sql><![CDATA[
+#if (${f_revyrmon} != '' && ${f_fmyearmonth} == '' && ${f_toyearmonth} == '')
+/* MVMT(Date) 안들어오고 RMONTH 들어오면 */
+
+
+SELECT SC_NO,
+       CASE WHEN SC_NO IS NOT NULL THEN
+
+           (SELECT I.CUST_LGL_ENG_NM
+              FROM PRI_SP_MN       M
+                 , PRI_SP_CTRT_PTY D
+                 , PRI_SP_HDR      H
+                 , MDM_CUSTOMER    I                 
+             WHERE M.PROP_STS_CD        = 'F'
+               AND M.PROP_NO            = D.PROP_NO
+               AND M.AMDT_SEQ           = D.AMDT_SEQ
+               AND H.PROP_NO            = D.PROP_NO
+               AND I.CUST_CNT_CD        = D.CUST_CNT_CD
+               AND I.CUST_SEQ           = D.CUST_SEQ
+               AND I.DELT_FLG           = 'N'
+               --AND D.PRC_CTRT_PTY_TP_CD = 'C'
+               AND H.SC_NO              = A.SC_NO
+               AND ROWNUM               = 1       
+            )
+       ELSE
+            ''
+       END SC_CUST_NM,
+       
+       RFA_NO,
+       CASE WHEN RFA_NO IS NOT NULL THEN
+           (
+            SELECT I.CUST_LGL_ENG_NM
+              FROM PRI_RP_HDR              HDR
+                 , PRI_RP_MN               MN
+                 , MDM_CUSTOMER            I
+             WHERE HDR.PROP_NO       = MN.PROP_NO
+               AND MN.PROP_STS_CD    = 'A'
+               --AND MN.RFA_CTRT_TP_CD = 'C'
+               AND I.CUST_CNT_CD     = MN.CTRT_CUST_CNT_CD
+               AND I.CUST_SEQ        = MN.CTRT_CUST_SEQ
+               AND I.DELT_FLG        = 'N'  
+               AND HDR.RFA_NO        = A.RFA_NO
+               AND ROWNUM            = 1
+           )
+       ELSE
+            ''
+       END RFA_CUST_NM,
+       
+       POR_CD,
+       DEL_CD,
+       CTRT_OFC_CD,
+       CNTR_TPSZ_CD,
+       BKG_BND_CD||DECODE(LVL,0,'/B') AS BKG_BND_CD,
+       DIV,       
+       TERM, 
+       COST_YRMON,       
+       BKG_QTY,
+       CHSS_COST,
+       COMM_COST,
+       COST_TTL,
+       CPB,
+       LVL   -- LVL = 1 이면 Sub Total
+  FROM (
+        SELECT SC_NO,
+               RFA_NO,
+               POR_CD,
+               DEL_CD,
+               CTRT_OFC_CD,
+               CNTR_TPSZ_CD,
+               BKG_BND_CD,
+               DIV,       
+               TERM,
+               COST_YRMON,       
+               SUM(BKG_QTY)   AS BKG_QTY,
+               SUM(CHSS_COST) AS CHSS_COST,
+               SUM(COMM_COST) AS COMM_COST,
+        
+               SUM(CHSS_COST) + SUM(COMM_COST) AS COST_TTL,
+               DECODE(NVL(SUM(BKG_QTY),0),0,0,(SUM(CHSS_COST) + SUM(COMM_COST)) / SUM(BKG_QTY)) AS CPB,
+               GROUPING(POR_CD) AS LVL
+          FROM (
+        
+                SELECT SC_NO,
+                       RFA_NO,
+                       POR_CD,
+                       DEL_CD,
+                       CTRT_OFC_CD,
+                       CNTR_TPSZ_CD,
+                       BKG_BND_CD,
+                       CASE WHEN TERM = 'D' THEN
+                                 'CH'
+                            WHEN DECODE(SUBSTR(CNTR_TPSZ_CD,1,2),'RD','D',SUBSTR(CNTR_TPSZ_CD,1,1)) = 'R' THEN 
+                                 'CH'
+                            WHEN TERM = 'Y' AND
+                                      (SELECT 1
+                                         FROM MAS_CHSS_EXPT_LIST ME
+                                        WHERE A.COST_YRMON = ME.COST_YRMON
+                                          AND A.SC_NO      = ME.SC_NO
+                                          AND MAS_LOC_FNC(US_LOC, 'SCC') = ME.SCC_CD
+                                      ) IS NOT NULL THEN
+                                'CH'
+                            ELSE
+                                'MH'
+                       END  DIV,
+                       
+                       --TERM,
+                       
+                       CASE WHEN TERM = 'D' THEN
+                                 'Door Term'
+                            WHEN DECODE(SUBSTR(CNTR_TPSZ_CD,1,2),'RD','D',SUBSTR(CNTR_TPSZ_CD,1,1)) = 'R' THEN 
+                                 'Live Reefer'
+                            WHEN TERM = 'Y' AND
+                                      (SELECT 1
+                                         FROM MAS_CHSS_EXPT_LIST ME
+                                        WHERE A.COST_YRMON = ME.COST_YRMON
+                                          AND A.SC_NO      = ME.SC_NO
+                                          AND MAS_LOC_FNC(US_LOC, 'SCC') = ME.SCC_CD
+                                      ) IS NOT NULL THEN
+                                'CY exempted'
+                            ELSE
+                                'CY non exemted'
+                       END AS TERM,
+                                    
+                       COST_YRMON,       
+                       BKG_QTY,
+                       BKG_NO,
+                       CHSS_COST,
+                       COMM_COST
+                  FROM (    
+                        SELECT COST_YRMON,     
+                               BKG_NO,
+                               CNTR_TPSZ_CD,
+                               POR_CD,
+                               DEL_CD,
+                               CTRT_OFC_CD,
+                               SC_NO,
+                               RFA_NO,
+                               BKG_BND_CD,
+                               TERM,
+                               US_LOC,
+                               COUNT(CNTR_NO) AS BKG_QTY,
+                               SUM(CHSS_COST) AS CHSS_COST,
+                               SUM(COMM_COST) AS COMM_COST  
+                          FROM (                                              
+                                SELECT A.COST_YRMON,     
+                                       A.BKG_NO,
+                                       B.CNTR_NO,
+                                       A.CNTR_TPSZ_CD,
+                                       A.POR_CD,
+                                       A.DEL_CD,
+                                       A.CTRT_OFC_CD,
+                                       A.SC_NO,
+                                       A.RFA_NO,
+                                       B.BKG_BND_CD,
+                                       A.TERM,
+                                       A.US_LOC,
+                                       --MAX(A.BKG_QTY)   AS BKG_QTY, 
+                                       SUM(DECODE(SUBSTR(B.ITM_NM,5),'CHSS_ST',B.COST_TTL_AMT,0))  AS CHSS_COST,
+                                       SUM(DECODE(SUBSTR(B.ITM_NM,5),'CHSS_COM',B.COST_TTL_AMT,0)) AS COMM_COST  
+                                  FROM (
+                                        SELECT /*+ INDEX(A XAK3MAS_BKG_EXPN_DTL) */
+                                               B.COST_YRMON,     
+                                               B.BKG_NO,
+                                               B.CNTR_TPSZ_CD,
+                                               B.BKG_POR_CD   AS POR_CD,
+                                               B.BKG_DEL_CD   AS DEL_CD,
+                                               B.CTRT_OFC_CD,
+                                               B.SC_NO,
+                                               B.RFA_NO,
+                                               DECODE(SUBSTR(B.BKG_POR_CD,1,2),'US',B.BKG_RCV_TERM_CD,B.BKG_DE_TERM_CD) AS TERM,
+                                               DECODE(SUBSTR(B.BKG_POR_CD,1,2),'US',B.BKG_POR_CD,B.BKG_DEL_CD) AS US_LOC,
+                                               SUM(B.BKG_QTY)   AS BKG_QTY
+                                          FROM MAS_BKG_EXPN_DTL B                                   
+                                         WHERE COST_YRMON       = @[f_revyrmon]
+                                           AND (B.BKG_POR_CD LIKE 'US%' OR B.BKG_DEL_CD LIKE 'US%')
+                                        #if (${f_sc} != '')
+                                           AND SC_NO         LIKE @[f_sc]||'%'
+                                        #end   
+                                        #if (${f_rfa} != '')   
+                                           AND RFA_NO        LIKE @[f_rfa]||'%'
+                                        #end   
+                                        #if (${f_por} != '')   
+                                           AND BKG_POR_CD    LIKE @[f_por]||'%'
+                                        #end   
+                                        #if (${f_del} != '')   
+                                           AND BKG_DEL_CD    LIKE @[f_del]||'%'
+                                        #end   
+                                        #if (${f_tpsz} != '')   
+                                           AND CNTR_TPSZ_CD  LIKE @[f_tpsz]||'%'
+                                        #end   
+                                        #if (${f_c_ofc} != '')   
+                                           AND B.CTRT_OFC_CD LIKE @[f_c_ofc]||'%'
+                                        #end
+                                         GROUP BY B.COST_YRMON,     
+                                               B.BKG_NO,
+                                               B.CNTR_TPSZ_CD,
+                                               B.BKG_POR_CD,
+                                               B.BKG_DEL_CD,
+                                               B.CTRT_OFC_CD,
+                                               B.SC_NO,
+                                               B.RFA_NO,
+                                               DECODE(SUBSTR(B.BKG_POR_CD,1,2),'US',B.BKG_RCV_TERM_CD,B.BKG_DE_TERM_CD),
+                                               DECODE(SUBSTR(B.BKG_POR_CD,1,2),'US',B.BKG_POR_CD,B.BKG_DEL_CD)
+                                       ) A, MAS_DMDT_COST_RPT_BKG_DTL B
+                                 WHERE A.BKG_NO       = B.BKG_NO
+                                   AND A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD
+                                   AND B.CNTR_FM_MVMT_STS_CD IN ('ID','OP')
+                                 GROUP BY A.COST_YRMON,     
+                                       A.BKG_NO,
+                                       B.CNTR_NO,
+                                       A.CNTR_TPSZ_CD,
+                                       A.POR_CD,
+                                       A.DEL_CD,
+                                       A.CTRT_OFC_CD,
+                                       A.SC_NO,
+                                       A.RFA_NO,
+                                       B.BKG_BND_CD,
+                                       A.TERM,
+                                       A.US_LOC
+                               )
+                         GROUP BY COST_YRMON,     
+                               BKG_NO,
+                               CNTR_TPSZ_CD,
+                               POR_CD,
+                               DEL_CD,
+                               CTRT_OFC_CD,
+                               SC_NO,
+                               RFA_NO,
+                               BKG_BND_CD,
+                               TERM,
+                               US_LOC
+                       ) A 
+               )
+         WHERE CHSS_COST <> 0 OR COMM_COST <> 0
+         GROUP BY GROUPING SETS (
+                                 (SC_NO,RFA_NO,POR_CD,DEL_CD,CTRT_OFC_CD,CNTR_TPSZ_CD,BKG_BND_CD,DIV, TERM,COST_YRMON),
+                                 (SC_NO,RFA_NO)
+                                )
+       ) A  
+ ORDER BY SC_NO,
+       RFA_NO,
+       POR_CD,
+       DEL_CD,
+       CTRT_OFC_CD,
+       CNTR_TPSZ_CD,
+       BKG_BND_CD,
+       DIV,       
+       TERM,
+       COST_YRMON         
+                               
+
+#else
+/* RMONTH, MVMT(Date) 2개다 들어오거나 MVMT(Date) 이것이 들어오면 */
+
+
+SELECT SC_NO,
+       CASE WHEN SC_NO IS NOT NULL THEN
+
+           (SELECT I.CUST_LGL_ENG_NM
+              FROM PRI_SP_MN       M
+                 , PRI_SP_CTRT_PTY D
+                 , PRI_SP_HDR      H
+                 , MDM_CUSTOMER    I
+             WHERE M.PROP_STS_CD        = 'F'
+               AND M.PROP_NO            = D.PROP_NO
+               AND M.AMDT_SEQ           = D.AMDT_SEQ
+               AND H.PROP_NO            = D.PROP_NO
+               AND I.CUST_CNT_CD        = D.CUST_CNT_CD
+               AND I.CUST_SEQ           = D.CUST_SEQ
+               AND I.DELT_FLG           = 'N'
+               --AND D.PRC_CTRT_PTY_TP_CD = 'C'
+               AND H.SC_NO              = A.SC_NO
+               AND ROWNUM               = 1       
+           )
+       ELSE
+            ''
+       END SC_CUST_NM,
+       
+       RFA_NO,
+       CASE WHEN RFA_NO IS NOT NULL THEN
+           (
+            SELECT I.CUST_LGL_ENG_NM
+              FROM PRI_RP_HDR              HDR
+                 , PRI_RP_MN               MN
+                 , MDM_CUSTOMER            I
+             WHERE HDR.PROP_NO       = MN.PROP_NO
+               AND MN.PROP_STS_CD    = 'A'
+               --AND MN.RFA_CTRT_TP_CD = 'C'
+               AND I.CUST_CNT_CD     = MN.CTRT_CUST_CNT_CD
+               AND I.CUST_SEQ        = MN.CTRT_CUST_SEQ
+               AND I.DELT_FLG        = 'N'  
+               AND HDR.RFA_NO        = A.RFA_NO
+               AND ROWNUM            = 1
+           )
+       ELSE
+            ''
+       END RFA_CUST_NM,
+       
+       POR_CD,
+       DEL_CD,
+       CTRT_OFC_CD,
+       CNTR_TPSZ_CD,
+       BKG_BND_CD||DECODE(LVL,0,'/B') AS BKG_BND_CD,
+       DIV,      
+       TERM,        
+       COST_YRMON,       
+       BKG_QTY,
+       CHSS_COST,
+       COMM_COST,
+       COST_TTL,
+       CPB,
+       LVL    -- LVL = 1 이면 Sub Total
+  FROM (
+        SELECT SC_NO,
+               RFA_NO,
+               POR_CD,
+               DEL_CD,
+               CTRT_OFC_CD,
+               CNTR_TPSZ_CD,
+               BKG_BND_CD,
+               DIV,       
+               TERM,
+               COST_YRMON,       
+               SUM(BKG_QTY)   AS BKG_QTY,
+               SUM(CHSS_COST) AS CHSS_COST,
+               SUM(COMM_COST) AS COMM_COST,
+        
+               SUM(CHSS_COST) + SUM(COMM_COST) AS COST_TTL,
+               DECODE(NVL(SUM(BKG_QTY),0),0,0,(SUM(CHSS_COST) + SUM(COMM_COST)) / SUM(BKG_QTY)) AS CPB,
+               GROUPING(POR_CD) AS LVL
+          FROM (
+        
+                SELECT SC_NO,
+                       RFA_NO,
+                       POR_CD,
+                       DEL_CD,
+                       CTRT_OFC_CD,
+                       CNTR_TPSZ_CD,
+                       BKG_BND_CD,
+                       CASE WHEN TERM = 'D' THEN
+                                 'CH'
+                            WHEN DECODE(SUBSTR(CNTR_TPSZ_CD,1,2),'RD','D',SUBSTR(CNTR_TPSZ_CD,1,1)) = 'R' THEN 
+                                 'CH'
+                            WHEN TERM = 'Y' AND
+                                      (SELECT 1
+                                         FROM MAS_CHSS_EXPT_LIST ME
+                                        WHERE A.COST_YRMON = ME.COST_YRMON
+                                          AND A.SC_NO      = ME.SC_NO
+                                          AND MAS_LOC_FNC(US_LOC, 'SCC') = ME.SCC_CD
+                                      ) IS NOT NULL THEN
+                                'CH'
+                            ELSE
+                                'MH'
+                       END  DIV,
+                       
+                       CASE WHEN TERM = 'D' THEN
+                                 'Door Term'
+                            WHEN DECODE(SUBSTR(CNTR_TPSZ_CD,1,2),'RD','D',SUBSTR(CNTR_TPSZ_CD,1,1)) = 'R' THEN 
+                                 'Live Reefer'
+                            WHEN TERM = 'Y' AND
+                                      (SELECT 1
+                                         FROM MAS_CHSS_EXPT_LIST ME
+                                        WHERE A.COST_YRMON = ME.COST_YRMON
+                                          AND A.SC_NO      = ME.SC_NO
+                                          AND MAS_LOC_FNC(US_LOC, 'SCC') = ME.SCC_CD
+                                      ) IS NOT NULL THEN
+                                'CY exempted'
+                            ELSE
+                                'CY non exemted'
+                       END AS TERM,
+                       
+                       COST_YRMON,       
+                       BKG_QTY,
+                       BKG_NO,
+                       CHSS_COST,
+                       COMM_COST
+                  FROM (
+                        SELECT B.COST_YRMON,     
+                               B.BKG_NO,
+                               B.CNTR_TPSZ_CD,
+                               B.BKG_POR_CD   AS POR_CD,
+                               B.BKG_DEL_CD   AS DEL_CD,
+                               B.CTRT_OFC_CD,
+                               B.SC_NO,
+                               B.RFA_NO,
+                               A.BKG_BND_CD,
+                               DECODE(SUBSTR(B.BKG_POR_CD,1,2),'US',B.BKG_RCV_TERM_CD,B.BKG_DE_TERM_CD) AS TERM,
+                               DECODE(SUBSTR(B.BKG_POR_CD,1,2),'US',B.BKG_POR_CD,B.BKG_DEL_CD) AS US_LOC,
+                               COUNT(CNTR_NO)             AS BKG_QTY,
+                               NVL(SUM(A.CHSS_ST_AMT),0)  AS CHSS_COST,
+                               NVL(SUM(A.CHSS_COM_AMT),0) AS COMM_COST
+                               
+                               --SUM(B.BKG_QTY)   AS BKG_QTY, 
+                               --NVL(MAX(A.CHSS_ST_AMT),0)  AS CHSS_COST,
+                               --NVL(MAX(A.CHSS_COM_AMT),0) AS COMM_COST
+                          FROM (
+                                SELECT BKG_NO,
+                                       CNTR_NO,
+                                       CNTR_TPSZ_CD,
+                                       BKG_BND_CD,
+                                       SUM(DECODE(SUBSTR(ITM_NM,5),'CHSS_ST',COST_TTL_AMT,0))  AS CHSS_ST_AMT,
+                                       SUM(DECODE(SUBSTR(ITM_NM,5),'CHSS_COM',COST_TTL_AMT,0)) AS CHSS_COM_AMT                       
+                                  FROM MAS_DMDT_COST_RPT_BKG_DTL
+                                 WHERE 1 = 1
+                                   AND CNTR_FM_DT BETWEEN TO_DATE(@[f_fmyearmonth], 'YYYY-MM-DD') AND TO_DATE(@[f_toyearmonth], 'YYYY-MM-DD')
+                                   AND CNTR_FM_MVMT_STS_CD IN ('ID','OP')
+                               #if (${f_tpsz} != '')
+                                   AND CNTR_TPSZ_CD LIKE @[f_tpsz]||'%'
+                               #end               
+                                 GROUP BY BKG_NO,
+                                       CNTR_NO,
+                                       CNTR_TPSZ_CD,
+                                       BKG_BND_CD
+                               ) A, MAS_BKG_EXPN_DTL B
+                         WHERE A.BKG_NO       = B.BKG_NO
+                           AND A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD
+                           AND (B.BKG_POR_CD  LIKE 'US%' OR B.BKG_DEL_CD LIKE 'US%')
+                     #if (${f_por} != '')
+                           AND B.BKG_POR_CD   LIKE @[f_por]||'%'
+                     #end
+                     #if (${f_del} != '')
+                           AND B.BKG_DEL_CD   LIKE @[f_del]||'%'
+                     #end      
+                     #if (${f_sc} != '')      
+                           AND B.SC_NO        LIKE @[f_sc]||'%'
+                     #end
+                     #if (${f_rfa} != '')
+                           AND B.RFA_NO       LIKE @[f_rfa]||'%'
+                     #end      
+                     #if (${f_tpsz} != '')
+                           AND B.CNTR_TPSZ_CD LIKE @[f_tpsz]||'%'
+                     #end
+                     #if (${f_revyrmon} != '')
+                           AND B.COST_YRMON   LIKE @[f_revyrmon]||'%'
+                     #end      
+                     #if (${f_c_ofc} != '')
+                           AND B.CTRT_OFC_CD  LIKE @[f_c_ofc]||'%'
+                     #end
+                           
+                         GROUP BY B.COST_YRMON,     
+                               B.BKG_NO,
+                               B.CNTR_TPSZ_CD,
+                               B.BKG_POR_CD,
+                               B.BKG_DEL_CD,
+                               B.CTRT_OFC_CD,
+                               B.SC_NO,
+                               B.RFA_NO,
+                               A.BKG_BND_CD,
+                               DECODE(SUBSTR(B.BKG_POR_CD,1,2),'US',B.BKG_RCV_TERM_CD,B.BKG_DE_TERM_CD),
+                               DECODE(SUBSTR(B.BKG_POR_CD,1,2),'US',B.BKG_POR_CD,B.BKG_DEL_CD) 
+                        ) A 
+               )
+         WHERE CHSS_COST <> 0 OR COMM_COST <> 0
+         GROUP BY GROUPING SETS (
+                                 (SC_NO,RFA_NO,POR_CD,DEL_CD,CTRT_OFC_CD,CNTR_TPSZ_CD,BKG_BND_CD,DIV, TERM,COST_YRMON),
+                                 (SC_NO,RFA_NO)
+                                )
+       ) A   
+ ORDER BY SC_NO,
+       RFA_NO,
+       POR_CD,
+       DEL_CD,
+       CTRT_OFC_CD,
+       CNTR_TPSZ_CD,
+       BKG_BND_CD,
+       DIV,       
+       TERM,
+       COST_YRMON
+
+#end			]]></sql>
+			<params>
+				<param name="f_revyrmon" type="12" value="" out="N"/>
+				<param name="f_sc" type="12" value="" out="N"/>
+				<param name="f_rfa" type="12" value="" out="N"/>
+				<param name="f_por" type="12" value="" out="N"/>
+				<param name="f_del" type="12" value="" out="N"/>
+				<param name="f_tpsz" type="12" value="" out="N"/>
+				<param name="f_c_ofc" type="12" value="" out="N"/>
+				<param name="f_fmyearmonth" type="12" value="" out="N"/>
+				<param name="f_toyearmonth" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

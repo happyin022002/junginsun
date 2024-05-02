@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="OwnContainerBookingForecastMgtDBDAOCBFIFSummaryIfBkgWgtGroupSummaryCSQL">
+			<desc><![CDATA[CBF의 WEIGHT GROUP SUMMARY 데이터를 입력하기 위함.
+CHK - N : BKG의 QTY만큼 C'NTR 수량이 입력되지 않은 경우, BKG의 QTY = CNTR입력된 QTY 일치하지만 CNTR WGT가 0 이거나 NULL 인 경우
+CHKG - Y : BKG의 QTY만큼 C'NTR 수량이 입력 일치하고 CNTR WGT가 들어오는 경우
+     -- SPLIT CNTR일지라도 BKG의 수량은 정수일때 있음. DLC600244305 ,
+SEL660808100,SEL660808101]]></desc>
+			<sql><![CDATA[
+INSERT INTO OPF_CGO_BKG_FCAST_WGT_GRP_SMRY ( VSL_CD ,
+                                             SKD_VOY_NO ,
+                                             SKD_DIR_CD,
+                                             YD_CD,
+                                             POL_CLPT_IND_SEQ,
+                                             CRR_CD,
+                                             POD_CD,
+                                             BLCK_STWG_CD,
+                                             CNTR_SZ_CD,
+                                             FULL_MTY_CD,
+                                             CNTR_WGT_GRP_CD,
+                                             CNTR_QTY,
+                                             CNTR_GRS_WGT,
+                                             WGT_UT_CD,
+                                             CRE_USR_ID,
+                                             CRE_DT,
+                                             UPD_USR_ID,
+                                             UPD_DT )
+                                             
+WITH  
+  COPY_T AS (
+    SELECT ROWNUM AS RN
+      FROM MDM_YARD
+     WHERE ROWNUM <1000 ) ,
+  V_INF AS ( 
+    SELECT XX.BKG_NO, XX.TTLQTY, XX.MLB, XX.POD_CD,  
+           CASE WHEN CNT >  YY.OP_CNTR_QTY THEN CNT 
+                ELSE YY.OP_CNTR_QTY 
+           END AS QTY, BKG_CGO_TP_CD , CHK,
+           DECODE(XX.RD_CGO_FLG,'Y',DECODE(SUBSTR(YY.CNTR_TPSZ_CD,1,1),'R',SUBSTR(YY.EQ_SUBST_CNTR_TPSZ_CD,1,1)||SUBSTR(YY.CNTR_TPSZ_CD,2,1),YY.CNTR_TPSZ_CD),YY.CNTR_TPSZ_CD) CNTR_TPSZ_CD
+      FROM (  SELECT DISTINCT X.BKG_NO, TTLQTY , MLB, POD_CD, BKG_CRE_TP_CD, BKG_CGO_TP_CD,RD_CGO_FLG,CNTR_TPSZ_CD,
+                     CASE WHEN ( X.QTY  <>  X.CNT OR X.CNTR_WGT = 0 OR X.CNTR_WGT IS NULL OR CNTR_NO IS NULL) THEN 'N'
+                          WHEN ( X.QTY  =  X.CNT AND X.CNTR_WGT <> 0 AND X.CNTR_WGT IS NOT NULL AND CNTR_NO IS NOT NULL) THEN 'Y'
+                          ELSE 'Y'
+                          END AS CHK, CNT 
+                FROM (  SELECT  MOD(QTY.OP_CNTR_QTY,1) DIVQTY, BKG.BKG_CRE_TP_CD, BKG.BKG_NO ,  
+                                QTY.OP_CNTR_QTY QTY , 
+                                OPF_BLCK_STWG_CD(VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD, VVD.POL_YD_CD, VVD.POL_CLPT_IND_SEQ, BKG.BKG_NO) AS MLB , 
+                                VVD.POD_CD  , BKG.RD_CGO_FLG,
+                                BKG.BKG_CGO_TP_CD, 
+                                (SELECT SUM(OP_CNTR_QTY) FROM BKG_QUANTITY WHERE BKG_NO = BKG.BKG_NO) AS TTLQTY,QTY.CNTR_TPSZ_CD ,
+                                BCN.CNTR_NO ,
+                                CASE WHEN BCN.CNTR_NO IS NULL THEN 0 
+                                     ELSE COUNT(1) OVER(PARTITION BY BCN.BKG_NO, BCN.CNTR_TPSZ_CD  ) 
+                                END AS CNT, 
+                                BCN.CNTR_WGT
+                           FROM BKG_VVD       VVD, 
+                                BKG_BOOKING   BKG,
+                                BKG_QUANTITY  QTY,
+                                BKG_CONTAINER BCN
+                          WHERE VVD.VSL_CD                          = @[vsl_cd]
+                            AND VVD.SKD_VOY_NO                      = @[skd_voy_no]
+                            AND VVD.SKD_DIR_CD                      = @[skd_dir_cd]
+                            AND VVD.POL_YD_CD||VVD.POL_CLPT_IND_SEQ = @[yd_cd]           
+                            AND VVD.BKG_NO                          = BKG.BKG_NO 
+                            #if(${bkg_sts_cd} != 'All')
+                            AND BKG.BKG_STS_CD = @[bkg_sts_cd]
+                            #end
+                            AND BKG.BKG_STS_CD                      <> 'X'
+                            AND BKG.BKG_NO                          = QTY.BKG_NO   
+                            AND QTY.CNTR_TPSZ_CD                    NOT LIKE 'Q%' 
+                            AND MOD(QTY.OP_CNTR_QTY,1)              = 0 
+                            AND BKG.BKG_CGO_TP_CD                   <> 'P'
+                            AND QTY.BKG_NO                          = BCN.BKG_NO(+)
+                            AND QTY.CNTR_TPSZ_CD                   = BCN.CNTR_TPSZ_CD(+) ) X  ) XX, BKG_QUANTITY YY
+     WHERE XX.BKG_NO        = YY.BKG_NO
+       AND YY.CNTR_TPSZ_CD  NOT LIKE 'Q%'  
+       AND XX.CNTR_TPSZ_CD  = YY.CNTR_TPSZ_CD   )
+                                                      
+SELECT @[vsl_cd],          @[skd_voy_no],    @[skd_dir_cd],       @[pol_cd],         @[pol_clpt_ind_seq],
+       'SML',              XX.POD_CD,        SUBSTR(XX.MLB,3,3) , 
+        CASE WHEN ZZ.CNTR_SZ_CD = '2' THEN ZZ.CNTR_SZ_CD
+             WHEN ZZ.CNTR_SZ_CD = '4' THEN ZZ.CNTR_SZ_CD
+             WHEN XX.CNTR_TPSZ_CD IN ('R8','R9') OR ZZ.CNTR_SZ_CD = '5' THEN '5'
+             WHEN XX.CNTR_TPSZ_CD NOT IN('R8','R9') AND ZZ.CNTR_SZ_CD IN ('6','7','8','9','W','X') THEN '6'
+        END,   'F', 
+        YY.CNTR_WGT_GRP_CD, COUNT(1) AS QTY,  ROUND(SUM(WGT)/COUNT(1),2),            'KGS',             @[cre_usr_id],
+        SYSDATE,            @[upd_usr_id],    SYSDATE
+ FROM (
+    SELECT  X.*, Y.CNTR_SZ_CD,
+            CASE WHEN  X.WGT_UT_CD = 'LBS' THEN 
+                       NVL(CNTR_WGT* 0.453592 ,BL_WGT* 0.453592 + Y.CNTR_TPSZ_TARE_WGT ) 
+                 ELSE  NVL(CNTR_WGT,BL_WGT+Y.CNTR_TPSZ_TARE_WGT)
+            END AS WGT     
+     FROM (  
+            SELECT CNTR_TPSZ_CD, MLB, POD_CD, NVL(CNTR_NO,ROWNUM) AS CNTR_NO, BKG_CGO_TP_CD, SUM(BL_WGT) AS BL_WGT, SUM(CNTR_WGT) AS CNTR_WGT, WGT_UT_CD
+              FROM ( 
+                     SELECT AA.* ,
+                            ROUND((SELECT ACT_WGT FROM BKG_BL_DOC WHERE BKG_NO = AA.BKG_NO)/ AA.TTLQTY ) AS BL_WGT, 
+                           (SELECT WGT_UT_CD FROM BKG_BL_DOC WHERE BKG_NO = AA.BKG_NO) AS WGT_UT_CD
+                       FROM (  
+                            SELECT X.BKG_NO, X.CNTR_TPSZ_CD, X.QTY, X.MLB, X.POD_CD, X.SEQ, 
+                                   ROUND(Y.CNTR_WGT) AS CNTR_WGT, Y.CNTR_NO, Y.NSEQ, X.TTLQTY,X.BKG_CGO_TP_CD
+                              FROM  (  SELECT B.* , ROW_NUMBER() OVER(PARTITION BY B.BKG_NO, B.CNTR_TPSZ_CD ORDER BY B.BKG_NO, B.CNTR_TPSZ_CD) AS SEQ
+                                         FROM COPY_T A, V_INF B
+                                        WHERE A.RN <= B.QTY 
+                                          AND B.CHK ='N') X,   
+                                   (  SELECT NVL(B.VGM_WGT,B.CNTR_WGT+C.CNTR_TPSZ_TARE_WGT) AS CNTR_WGT, A.BKG_NO, A.CNTR_TPSZ_CD, B.CNTR_NO,
+                                             ROW_NUMBER() OVER(PARTITION BY A.BKG_NO, A.CNTR_TPSZ_CD ORDER BY A.BKG_NO, A.CNTR_TPSZ_CD) AS NSEQ
+                                        FROM V_INF A, BKG_CONTAINER B, MDM_CNTR_TP_SZ C
+                                       WHERE A.BKG_NO       = B.BKG_NO
+                                         AND A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD 
+                                         AND A.CHK          = 'N'
+			                             AND A.CNTR_TPSZ_CD = C.CNTR_TPSZ_CD )  Y 
+                            WHERE X.BKG_NO       = Y.BKG_NO(+)
+                              AND X.CNTR_TPSZ_CD = Y.CNTR_TPSZ_CD(+)
+                              AND X.SEQ          = Y.NSEQ(+) ) AA 
+                      UNION 
+                      SELECT BB.* , 
+                             ROUND((SELECT ACT_WGT FROM BKG_BL_DOC WHERE BKG_NO = BB.BKG_NO)/ BB.TTLQTY  ), 
+                            (SELECT WGT_UT_CD FROM BKG_BL_DOC WHERE BKG_NO = BB.BKG_NO) AS WGT_UT_CD
+                       FROM ( 
+                            SELECT X.BKG_NO, X.CNTR_TPSZ_CD, X.QTY, X.MLB, X.POD_CD, X.SEQ,  
+                                   ROUND(Y.CNTR_WGT), Y.CNTR_NO, Y.NSEQ, X.TTLQTY,X.BKG_CGO_TP_CD
+                              FROM (  SELECT B.* , ROW_NUMBER() OVER(PARTITION BY B.BKG_NO, B.CNTR_TPSZ_CD ORDER BY B.BKG_NO, B.CNTR_TPSZ_CD) AS SEQ
+                                        FROM COPY_T A, V_INF B
+                                       WHERE A.RN <= B.QTY 
+                                         AND B.CHK ='Y') X,
+                                   (  SELECT NVL(B.VGM_WGT,B.CNTR_WGT+C.CNTR_TPSZ_TARE_WGT) AS CNTR_WGT, A.BKG_NO, A.CNTR_TPSZ_CD, B.CNTR_NO,
+                                             ROW_NUMBER() OVER(PARTITION BY A.BKG_NO, A.CNTR_TPSZ_CD ORDER BY A.BKG_NO, A.CNTR_TPSZ_CD) AS NSEQ
+                                        FROM V_INF A, BKG_CONTAINER B, MDM_CNTR_TP_SZ C
+                                       WHERE A.BKG_NO       = B.BKG_NO
+                                         AND A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD 
+			                             AND A.CNTR_TPSZ_CD = C.CNTR_TPSZ_CD
+                                         AND A.CHK          = 'N')  Y 
+                             WHERE X.BKG_NO       = Y.BKG_NO(+)
+                               AND X.CNTR_TPSZ_CD = Y.CNTR_TPSZ_CD(+)
+                               AND X.SEQ          = Y.NSEQ(+) ) BB 
+                       UNION 
+                       SELECT MIN(BCT.BKG_NO),
+                              DECODE(BKG.RD_CGO_FLG,'Y',DECODE(SUBSTR(QTY.CNTR_TPSZ_CD,1,1),'R',SUBSTR(QTY.EQ_SUBST_CNTR_TPSZ_CD,1,1)||SUBSTR(QTY.CNTR_TPSZ_CD,2,1),QTY.CNTR_TPSZ_CD),QTY.CNTR_TPSZ_CD) CNTR_TPSZ_CD ,
+                              1 QTY,   OPF_BLCK_STWG_CD(VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD, VVD.POL_YD_CD, VVD.POL_CLPT_IND_SEQ, BKG.BKG_NO) AS MLB , 
+                              VVD.POD_CD, 1 SEQ,  SUM(BCT.CNTR_WGT), BCT.CNTR_NO,  1 NSEQ, 1 TTLQTY,  BKG.BKG_CGO_TP_CD, SUM(NVL(BCT.VGM_WGT,BCT.CNTR_WGT+MCT.CNTR_TPSZ_TARE_WGT)),
+                              CASE WHEN BCT.VGM_WGT IS NOT NULL THEN 
+                                        NVL(BCT.VGM_WGT_UT_CD,'KGS')
+                                   ELSE NVL(BCT.WGT_UT_CD,'KGS')
+                                   END AS WGT_UT_CD
+                        FROM BKG_VVD       VVD, 
+                             BKG_BOOKING   BKG,
+                             BKG_QUANTITY  QTY,
+                             BKG_CONTAINER BCT,
+		                     MDM_CNTR_TP_SZ MCT
+                       WHERE VVD.VSL_CD                          = @[vsl_cd]    
+                         AND VVD.SKD_VOY_NO                      = @[skd_voy_no]    
+                         AND VVD.SKD_DIR_CD                      = @[skd_dir_cd]   
+                         AND VVD.POL_YD_CD||VVD.POL_CLPT_IND_SEQ = @[yd_cd]           
+                         AND VVD.BKG_NO                          = BKG.BKG_NO
+                         AND BKG.BKG_STS_CD                      <> 'X'
+                         #if(${bkg_sts_cd} != 'All')
+                         AND BKG.BKG_STS_CD = @[bkg_sts_cd]
+                         #end
+                         AND BKG.BKG_NO                          = QTY.BKG_NO  
+                         AND BKG.BKG_CGO_TP_CD                   <> 'P'
+                         AND QTY.CNTR_TPSZ_CD                    NOT LIKE 'Q%' 
+                         AND MOD(QTY.OP_CNTR_QTY,1)              <> 0   
+                         AND BKG.BKG_NO                          = BCT.BKG_NO
+                         AND QTY.CNTR_TPSZ_CD                    = BCT.CNTR_TPSZ_CD
+		                 AND MCT.CNTR_TPSZ_CD                    = BCT.CNTR_TPSZ_CD
+                       GROUP BY  BKG.BKG_CGO_TP_CD, BCT.CNTR_NO, 
+                                 DECODE(BKG.RD_CGO_FLG,'Y',DECODE(SUBSTR(QTY.CNTR_TPSZ_CD,1,1),'R',SUBSTR(QTY.EQ_SUBST_CNTR_TPSZ_CD,1,1)||SUBSTR(QTY.CNTR_TPSZ_CD,2,1),QTY.CNTR_TPSZ_CD),QTY.CNTR_TPSZ_CD),
+                                 OPF_BLCK_STWG_CD(VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD, VVD.POL_YD_CD, VVD.POL_CLPT_IND_SEQ, BKG.BKG_NO), VVD.POD_CD,    
+                                 CASE WHEN BCT.VGM_WGT IS NOT NULL THEN 
+                                           NVL(BCT.VGM_WGT_UT_CD,'KGS')
+                                      ELSE NVL(BCT.WGT_UT_CD,'KGS')
+                                 END     )
+              GROUP BY CNTR_TPSZ_CD, MLB, POD_CD,  NVL(CNTR_NO,ROWNUM), BKG_CGO_TP_CD, WGT_UT_CD) X, MDM_CNTR_TP_SZ Y
+           WHERE X.CNTR_TPSZ_CD  = Y.CNTR_TPSZ_CD ) XX, OPF_CGO_BKG_FCAST_WGT_GRP YY , MDM_CNTR_TP_SZ ZZ
+  WHERE YY.SLAN_CD     = ( SELECT VSL_SLAN_CD 
+                             FROM VSK_VSL_SKD
+                            WHERE VSL_CD     = @[vsl_cd]
+                              AND SKD_VOY_NO = @[skd_voy_no]
+                              AND SKD_DIR_CD = @[skd_dir_cd] )
+    AND YY.SKD_DIR_CD  = @[skd_dir_cd]   
+    AND YY.POL_CD      = substr(@[yd_cd],1,5)
+    AND YY.FULL_MTY_CD = 'F'
+    AND YY.CNTR_SZ_CD  = DECODE( SUBSTR(XX.CNTR_TPSZ_CD,2,1),2,2,4) 
+    AND DECODE(XX.WGT,0,1,XX.WGT/1000)       > YY.FM_LMT_WGT 
+    AND XX.WGT/1000       <= NVL(YY.TO_LMT_WGT,9999999999  )
+    AND XX.CNTR_TPSZ_CD   = ZZ.CNTR_TPSZ_CD
+ GROUP BY CASE WHEN ZZ.CNTR_SZ_CD = '2' THEN ZZ.CNTR_SZ_CD
+               WHEN ZZ.CNTR_SZ_CD = '4' THEN ZZ.CNTR_SZ_CD
+               WHEN XX.CNTR_TPSZ_CD IN ('R8','R9') OR ZZ.CNTR_SZ_CD = '5' THEN '5'
+               WHEN XX.CNTR_TPSZ_CD NOT IN('R8','R9') AND ZZ.CNTR_SZ_CD IN ('6','7','8','9','W','X') THEN '6'
+          END , XX.MLB, XX.POD_CD, YY.CNTR_WGT_GRP_CD
+ UNION ALL
+   SELECT  @[vsl_cd],  @[skd_voy_no],    @[skd_dir_cd],    @[pol_cd],         @[pol_clpt_ind_seq],
+           'SML',     X.POD_CD, X.MLB,   
+           CASE WHEN Y.CNTR_SZ_CD = '2' THEN Y.CNTR_SZ_CD
+                WHEN Y.CNTR_SZ_CD = '4' THEN Y.CNTR_SZ_CD
+                WHEN X.CNTR_TPSZ_CD IN ('R8','R9') OR Y.CNTR_SZ_CD = '5' THEN '5'
+                WHEN X.CNTR_TPSZ_CD NOT IN('R8','R9') AND Y.CNTR_SZ_CD IN ('6','7','8','9','W','X') THEN '6'
+            END AS CNTR_SZ_CD, 'E','E',SUM(QTY), SUM(TTL_WGT),
+           'KGS',      @[cre_usr_id],    SYSDATE,          @[upd_usr_id],     SYSDATE
+  FROM (
+   SELECT  VVD.POD_CD,       SUBSTR(OPF_BLCK_STWG_CD(VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD, VVD.POL_YD_CD, VVD.POL_CLPT_IND_SEQ, BKG.BKG_NO),3,3) AS MLB ,
+           DECODE(BKG.RD_CGO_FLG,'Y',DECODE(SUBSTR(QTY.CNTR_TPSZ_CD,1,1),'R',SUBSTR(QTY.EQ_SUBST_CNTR_TPSZ_CD,1,1)||SUBSTR(QTY.CNTR_TPSZ_CD,2,1),QTY.CNTR_TPSZ_CD),QTY.CNTR_TPSZ_CD) CNTR_TPSZ_CD ,
+           SUM(QTY.OP_CNTR_QTY) AS QTY,         SUM(QTY.OP_CNTR_QTY*CTS.CNTR_TPSZ_TARE_WGT) AS TTL_WGT
+     FROM BKG_VVD        VVD, 
+          BKG_BOOKING    BKG,
+          BKG_QUANTITY   QTY,
+          MDM_CNTR_TP_SZ CTS
+    WHERE VVD.VSL_CD                             = @[vsl_cd]
+         AND VVD.SKD_VOY_NO                      = @[skd_voy_no]
+         AND VVD.SKD_DIR_CD                      = @[skd_dir_cd]
+         AND VVD.POL_YD_CD||VVD.POL_CLPT_IND_SEQ = @[yd_cd]          
+         AND VVD.BKG_NO                          = BKG.BKG_NO
+         #if(${bkg_sts_cd} != 'All')
+         AND BKG.BKG_STS_CD = @[bkg_sts_cd]
+         #end
+         AND BKG.BKG_STS_CD                      <> 'X'
+         AND BKG.BKG_NO                          = QTY.BKG_NO  
+         AND BKG.BKG_CGO_TP_CD                   = 'P'
+         AND QTY.CNTR_TPSZ_CD                    NOT LIKE 'Q%'
+         AND CTS.CNTR_TPSZ_CD                    = QTY.CNTR_TPSZ_CD 
+   GROUP BY  DECODE(BKG.RD_CGO_FLG,'Y',DECODE(SUBSTR(QTY.CNTR_TPSZ_CD,1,1),'R',SUBSTR(QTY.EQ_SUBST_CNTR_TPSZ_CD,1,1)||SUBSTR(QTY.CNTR_TPSZ_CD,2,1),QTY.CNTR_TPSZ_CD),QTY.CNTR_TPSZ_CD),
+             OPF_BLCK_STWG_CD(VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD, VVD.POL_YD_CD, VVD.POL_CLPT_IND_SEQ, BKG.BKG_NO), VVD.POD_CD	) X, MDM_CNTR_TP_SZ Y
+ WHERE X.CNTR_TPSZ_CD  = Y.CNTR_TPSZ_CD
+GROUP BY X.POD_CD, X.MLB,   
+         CASE WHEN Y.CNTR_SZ_CD = '2' THEN Y.CNTR_SZ_CD
+              WHEN Y.CNTR_SZ_CD = '4' THEN Y.CNTR_SZ_CD
+              WHEN X.CNTR_TPSZ_CD IN ('R8','R9') OR Y.CNTR_SZ_CD = '5' THEN '5'
+              WHEN X.CNTR_TPSZ_CD NOT IN('R8','R9') AND Y.CNTR_SZ_CD IN ('6','7','8','9','W','X') THEN '6'
+         END			]]></sql>
+			<params>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="yd_cd" type="12" value="" out="N"/>
+				<param name="bkg_sts_cd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="pol_clpt_ind_seq" type="12" value="" out="N"/>
+				<param name="cre_usr_id" type="12" value="" out="N"/>
+				<param name="upd_usr_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

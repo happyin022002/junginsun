@@ -1,0 +1,982 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="MTYEquipmentForecastDBDAOsearchMtyBalanceRepoListRSQL">
+			<desc><![CDATA[1. 정의
+- EQR의 Execution Plan에서 생성된 ECC별 MTY 선적 및 양하 계획을 조회한다
+- BALANCE 의 REPO IN 팝업화면
+
+2. 수정
+2012-10-17, 소팅기준에 ETB 추가, 신용찬 수석 ]]></desc>
+			<sql><![CDATA[
+WITH DIVISION AS 
+(
+	SELECT	L4, L3, L2, L1, M0, R1, R2
+	FROM	(
+				SELECT  LAG(PLN_YR||PLN_WK,4)		OVER (ORDER BY PLN_YR,PLN_WK)	L4,
+                        LAG(PLN_YR||PLN_WK,3)		OVER (ORDER BY PLN_YR,PLN_WK)	L3,
+						LAG(PLN_YR||PLN_WK,2)		OVER (ORDER BY PLN_YR,PLN_WK)	L2,
+						LAG(PLN_YR||PLN_WK,1)		OVER (ORDER BY PLN_YR,PLN_WK)	L1,
+						PLN_YR||PLN_WK										        M0,
+						LEAD(PLN_YR||PLN_WK,1)		OVER (ORDER BY PLN_YR,PLN_WK)	R1,
+						LEAD(PLN_YR||PLN_WK,2)		OVER (ORDER BY PLN_YR,PLN_WK)	R2
+				FROM	EQR_WK_PRD
+			)
+	WHERE   M0  = @[fcast_yrwk] 	
+)	
+
+,REPOIN_VVD AS
+(
+	SELECT DISTINCT VVD
+    FROM
+    (
+    SELECT WEEKDIVISION
+          ,WEEK
+          ,DIV
+          ,VVD
+          ,LANE
+          ,REMARKFLAG
+          ,DCLPTSQL
+          ,REMARK
+          ,CODCFMCTSCD
+          ,FIRSTETB
+          ,MNLINPFLG
+    FROM
+    (
+        SELECT WEEKDIVISION
+              ,WEEK
+              ,DIV
+              ,VVD
+              ,LANE
+              ,REMARKFLAG
+              ,DCLPTSQL
+              ,REMARK
+              ,CODCFMCTSCD
+              ,FIRSTETB
+              ,MNLINPFLG
+              ,ROW_NUMBER() OVER(PARTITION BY WEEKDIVISION, WEEK, VVD, LANE, REMARKFLAG, DCLPTSQL, REMARK ORDER BY FIRSTETB ASC) RN -- ETB 가 다르고 동일 VVD 출현시 제거		
+        FROM
+        (  
+        SELECT
+        		/*+	ORDERED USE_NL ( DST ORG  OCNT OSCNT WEK EVD RMK )
+        		INDEX ( ORG XPKVSK_VSL_PORT_SKD )
+        		INDEX ( OCNT XPKMDM_COUNTRY )
+        		INDEX ( OSCNT XPKMDM_SUBCONTINENT )
+        		INDEX ( WEK XAK1EQR_WK_PRD )
+        		*/
+        
+        		DECODE( WEK.PLN_YR||WEK.PLN_WK, DIV.L4,	'-1', 
+												DIV.L3,	'0', 
+                                                DIV.L2,	'1',
+        										DIV.L1,	'2',
+        										DIV.M0,	'3',
+        										DIV.R1,	'4',
+        										DIV.R2,	'5',
+        												NULL) weekDivision,
+        												/*	WEEK_DIV	*/
+        
+        		WEK.PLN_YR||WEK.PLN_WK			week,	/*	WEEK		*/
+        
+        		NVL(EVD.COD_CFM_STS_CD,'I')		div,	/*	DIV			*/
+        
+        		ORG.VSL_CD||ORG.SKD_VOY_NO||ORG.SKD_DIR_CD vvd,
+        		ORG.SLAN_CD						lane,	/*	LANE		*/
+        
+        		DECODE(NVL(RMK.DIFF_RMK,'N'),'N','N','Y') remarkFlag,			/*	REMARK_FLAG	*/	
+        		DST.CLPT_SEQ			dclptsql,	/* Asis First Port Seq */
+        		RMK.DIFF_RMK			remark,
+        		DECODE( EVD.COD_CFM_STS_CD, NULL, '1', '2' ) codcfmctscd,		/* WORK_FLAG : 1:BayPlan, 2:Simulated, 3:MTY BKG, 4:Tuning VVD */
+        		DST.VPS_ETB_DT			firstetb,
+        		EVD.MNL_INP_FLG			mnlInpFlg
+        
+        FROM	
+        		(
+        
+        			SELECT	
+        					/*+  ORDERED USE_NL ( PERIOD VPS2 CNT2 SCNT2 ) */
+        					VPS2.SLAN_CD							SLAN_CD     ,
+        					VPS2.VSL_CD								VSL_CD      ,			
+        					VPS2.SKD_VOY_NO							SKD_VOY_NO  ,		
+        					VPS2.SKD_DIR_CD							SKD_DIR_CD	, 
+        					TO_CHAR(VPS2.VPS_ETB_DT,'YYYYMMDD')		VPS_ETB_DT	,
+        					
+        					VPS2.CLPT_SEQ							CLPT_SEQ    ,	
+        					/*
+        					VPS2.VPS_PORT_CD						VPS_PORT_CD ,
+        					*/
+        					(
+        						SELECT  /*+ INDEX_DESC( VPS1 XAK4VSK_VSL_PORT_SKD ) */
+        								VPS1.VPS_PORT_CD||VPS1.CLPT_IND_SEQ
+        						FROM    VSK_VSL_PORT_SKD    VPS1
+        						WHERE   VPS2.VSL_CD				=	VPS1.VSL_CD
+        						AND		VPS2.SKD_VOY_NO			=	VPS1.SKD_VOY_NO
+        						AND		VPS2.SKD_DIR_CD			=	VPS1.SKD_DIR_CD
+        						AND		VPS2.CLPT_SEQ			>	VPS1.CLPT_SEQ
+        					--	AND     NVL(VPS1.SKD_CNG_STS_CD,	' ') <> 'S' /* 2010.05.10 Display All Port */
+        						AND     NVL(VPS1.VPS_PORT_CD,	' ') NOT IN ('PAPAC', 'EGSUZ', 'EGPSD')
+        						AND		SUBSTR(VPS1.VPS_PORT_CD,1,2) NOT IN ( 'SA','AE','AU','IN','IR','PK','ES' ) /* 2010.03.23 By YHNam : Skip Ports In ( 'SA','AE','AU','IN','IR','PK' ) */ 
+        						AND     ROWNUM = 1
+        
+        					)										FM_PKEY												
+        			FROM	
+        					(
+        						SELECT	M2_START	START_DATE,
+        								P2_END 		END_DATE				
+        						FROM	(
+        									SELECT  /*+ INDEX_FFS( EQR_WK_PRD  XAK2EQR_WK_PRD ) */ 
+        											LAG(WK_ST_DT,3)		OVER (ORDER BY PLN_YR,PLN_WK)	M2_START, -- -3주차부터 조회                                            
+        											PLN_YR||PLN_WK										CUR_WEEK,
+        											LEAD(WK_END_DT,2)	OVER (ORDER BY PLN_YR,PLN_WK)	P2_END                                                                                 
+        									FROM	EQR_WK_PRD    
+        								)
+        						WHERE	CUR_WEEK	=	@[fcast_yrwk]
+        					)					PERIOD	,
+        
+        					VSK_VSL_PORT_SKD	VPS2,	
+        					MDM_COUNTRY			CNT2,	
+        					MDM_SUBCONTINENT	SCNT2			
+        
+        			WHERE	VPS2.VPS_ETB_DT		BETWEEN	TO_DATE(PERIOD.START_DATE,	'YYYYMMDD')
+        										AND		TO_DATE(PERIOD.END_DATE,	'YYYYMMDD') + 0.99999
+        		--	AND		NVL(VPS2.SKD_CNG_STS_CD,' ') <> 'S' /* 2010.05.10 Display All Port */
+        			AND     NVL(VPS2.VPS_PORT_CD,	' ') NOT IN ('PAPAC', 'EGSUZ', 'EGPSD')
+        			AND		SUBSTR(VPS2.VPS_PORT_CD,1,2) NOT IN ( 'SA','AE','AU','IN','IR','PK','ES' ) /* 2010.03.23 By YHNam : Skip Ports In ( 'SA','AE','AU','IN','IR','PK' ) */
+        			AND		VPS2.CLPT_SEQ		<>	'1'
+        			AND		CNT2.CNT_CD			=	SUBSTR(VPS2.VPS_PORT_CD, 1, 2)
+        			AND		CNT2.SCONTI_CD		=	SCNT2.SCONTI_CD
+        			AND     ( SCNT2.CONTI_CD		=    'A'  or ( SCNT2.CONTI_CD = 'F'  and CNT2.CNT_CD = 'ZA' and VPS2.SLAN_CD = 'SFX' ) )    
+        		
+        		)					DST		,
+        		VSK_VSL_PORT_SKD	ORG		,
+        		MDM_COUNTRY			OCNT	,	
+        		MDM_SUBCONTINENT	OSCNT	,
+        		--MDM_DTL_REV_LANE	RLN		,
+        		(
+                    SELECT	/*+ INDEX_FFS( BSA_VVD_MST XPKBSA_VVD_MST ) */ 
+        					DISTINCT TRD_CD, SUBSTR(RLANE_CD,1, 3) LANE_CD
+                    FROM	BSA_VVD_MST   -- 108 건
+        			WHERE   SUBSTR(RLANE_CD,1, 3) <> 'SFX'			
+        		)                   TRD     ,
+        		EQR_WK_PRD			WEK		,
+        		DIVISION            DIV     ,
+        		EQR_MTY_COD_VVD		EVD		,
+        		EQR_MTY_COD_RMK     RMK
+        WHERE   ORG.VSL_CD			=	DST.VSL_CD
+        AND		ORG.SKD_VOY_NO		=	DST.SKD_VOY_NO
+        AND		ORG.SKD_DIR_CD		=	DST.SKD_DIR_CD
+        AND		ORG.VPS_PORT_CD		=	SUBSTR(DST.FM_PKEY,1,5)
+        AND		ORG.CLPT_IND_SEQ	=	SUBSTR(DST.FM_PKEY,6,2)
+        AND		OCNT.CNT_CD			=	SUBSTR(ORG.VPS_PORT_CD, 1, 2)
+        AND		OCNT.SCONTI_CD		=	OSCNT.SCONTI_CD
+        -- AND     OSCNT.CONTI_CD		<>    'A'  
+        
+        AND		ORG.SLAN_CD			=	TRD.LANE_CD
+        AND	(
+		       ( SUBSTR(TRD.TRD_CD,2,1) = 'P' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) =  'M' )
+		       OR		
+		       ( SUBSTR(TRD.TRD_CD,2,1) = 'E' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) =  'E' )
+               OR
+               ( SUBSTR(TRD.TRD_CD,2,1) = 'M' AND TRD.TRD_CD != 'EMS' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) =  'M' )
+		       OR 
+               ( SUBSTR(TRD.TRD_CD,2,1) = 'M' AND TRD.TRD_CD = 'EMS' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) IN ('M', 'E')  )
+               
+        -- 러시아 NAKHODKA(나홋카) 벙커링 추가, 2013-08-14, 신용찬
+        -- 러시아 SLAVYANKA(슬라브양카) 벙커링 추가, 2013-09-06, 신용찬
+		OR
+	    ( SUBSTR(TRD.TRD_CD,2,1) = 'P' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) =  'E'                                AND (SUBSTR(DST.FM_PKEY,1,5)= 'RUNJK' OR SUBSTR(DST.FM_PKEY,1,5)= 'RUSKA')) 
+		OR		
+		( SUBSTR(TRD.TRD_CD,2,1) = 'E' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) =  'E'                                AND (SUBSTR(DST.FM_PKEY,1,5)= 'RUNJK' OR SUBSTR(DST.FM_PKEY,1,5)= 'RUSKA'))
+        OR
+        ( SUBSTR(TRD.TRD_CD,2,1) = 'M' AND TRD.TRD_CD != 'EMS' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) =  'E'        AND (SUBSTR(DST.FM_PKEY,1,5)= 'RUNJK' OR SUBSTR(DST.FM_PKEY,1,5)= 'RUSKA'))
+		OR 
+        ( SUBSTR(TRD.TRD_CD,2,1) = 'M' AND TRD.TRD_CD = 'EMS' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) IN ('M', 'E')  AND (SUBSTR(DST.FM_PKEY,1,5)= 'RUNJK' OR SUBSTR(DST.FM_PKEY,1,5)= 'RUSKA'))	
+
+        		
+            )
+        AND     TRD.TRD_CD IN ('TPS','AES','IAS','EMS') 
+        AND		DST.VPS_ETB_DT		BETWEEN		WEK.WK_ST_DT
+        							AND			WEK.WK_END_DT
+        AND		ORG.VSL_CD			=	EVD.VSL_CD			(+)
+        AND		ORG.SKD_VOY_NO		=	EVD.SKD_VOY_NO		(+)
+        AND		ORG.SKD_DIR_CD		=	EVD.SKD_DIR_CD		(+)
+        AND		'S'					=	EVD.COD_CFM_DIV_CD	(+)
+        AND		ORG.VSL_CD			=	RMK.VSL_CD			(+)
+        AND		ORG.SKD_VOY_NO		=	RMK.SKD_VOY_NO		(+)
+        AND		ORG.SKD_DIR_CD		=	RMK.SKD_DIR_CD		(+)
+        AND		'S'					=	RMK.COD_CFM_DIV_CD	(+) 
+        UNION ALL
+        SELECT	DISTINCT	/*__________________________________________________________________________________ MTY BKG Data */
+        
+        		DECODE( VD.N1ST_ETB_YRWK	,	DV.L4,	'-1',	
+												DV.L3,	'0',
+                                                DV.L2,	'1',
+        										DV.L1,	'2',
+        										DV.M0,	'3',
+        										DV.R1,	'4',
+        										DV.R2,	'5',
+        											NULL)	weekDivision,		/*	WEEK_DIV	*/
+        		VD.N1ST_ETB_YRWK							week,				/*	WEEK		*/
+        		NVL(SV.COD_CFM_STS_CD,VD.COD_CFM_STS_CD)	div,				/*	DIV			*/
+        		VD.VSL_CD||VD.SKD_VOY_NO||VD.SKD_DIR_CD 	vvd,				/*	VSL_CD		*/			
+        		VD.SLAN_CD									lane,				/*	LANE		*/
+        		DECODE(NVL(RMK.DIFF_RMK,'N'),'N','N','Y') 	remarkFlag,			/*	REMARK_FLAG	*/
+        	--	1 dclptsql,
+        		(
+        			SELECT	/*+ INDEX ( VPS1 XAK4VSK_VSL_PORT_SKD ) */
+        					VPS1.CLPT_SEQ
+        			FROM	VSK_VSL_PORT_SKD	VPS1,
+        			        MDM_COUNTRY         CNT,    
+        					MDM_SUBCONTINENT    SCT   
+        
+        			WHERE	VPS1.VSL_CD			=	VD.VSL_CD              
+        			AND		VPS1.SKD_VOY_NO		=	VD.SKD_VOY_NO          
+        			AND		VPS1.SKD_DIR_CD		=	VD.SKD_DIR_CD
+        			AND     NVL(VPS1.VPS_PORT_CD,     ' ') NOT IN ('LKCMB', 'JOAQJ')    
+        			AND		SUBSTR(VPS1.VPS_PORT_CD,1,2) NOT IN ( 'SA','AE','AU','IN','IR','PK','ES' )
+        							/* 2010.03.23 By YHNam : Skip Ports In ( 'SA','AE','AU','IN','IR','PK' ) */ 
+        			AND     SUBSTR(VPS1.VPS_PORT_CD,1,2) = CNT.CNT_CD
+                    AND     CNT.SCONTI_CD		=    SCT.SCONTI_CD
+        			AND     ( SCT.CONTI_CD        =    'A' or ( SCT.CONTI_CD = 'F'  and CNT.CNT_CD = 'ZA' and VPS1.SLAN_CD = 'SFX' ) )                    /* Only Asisa Port */
+        			AND		ROWNUM				=	1
+        		)											dclptsql,
+        		RMK.DIFF_RMK								remark,				/*	REMARK		*/
+        		
+        		DECODE( SV.COD_CFM_STS_CD, NULL, '3', '2' ) codcfmctscd,		/*	_______________________________________> WORK_FLAG	*/
+        		'21001231'				firstetb,
+        		VD.MNL_INP_FLG			mnlInpFlg
+        FROM    DIVISION            DV,
+        		EQR_MTY_COD_VVD		VD,
+        		EQR_MTY_COD_PORT	PT,
+        		EQR_MTY_COD_VVD		SV,
+        		EQR_MTY_COD_RMK     RMK
+        WHERE	VD.N1ST_ETB_YRWK IN ( DV.L4, DV.L3, DV.L2, DV.L1, DV.M0, DV.R1, DV.R2 )
+        AND		VD.COD_CFM_DIV_CD	=	'B'			/*	SIMULATION DIVISION */
+        --AND		VD.COD_CFM_STS_CD	=	'B'			/*	MTY BKG DATA		 */
+        AND		VD.VSL_CD			=	PT.VSL_CD		
+        AND		VD.SKD_VOY_NO		=	PT.SKD_VOY_NO	
+        AND		VD.SKD_DIR_CD		=	PT.SKD_DIR_CD	
+        AND		VD.COD_CFM_DIV_CD	=	PT.COD_CFM_DIV_CD	
+        AND		'D'					=	PT.LODG_DCHG_DIV_CD
+        AND		VD.VSL_CD			=	SV.VSL_CD			(+)
+        AND		VD.SKD_VOY_NO		=	SV.SKD_VOY_NO		(+)
+        AND		VD.SKD_DIR_CD		=	SV.SKD_DIR_CD		(+)
+        AND		'S'					=	SV.COD_CFM_DIV_CD	(+)
+        AND	 	'N'     			= 	SV.MNL_INP_FLG (+)                /* <================================ 추가 */
+        AND		VD.VSL_CD			=	RMK.VSL_CD  (+)
+        AND		VD.SKD_VOY_NO		=	RMK.SKD_VOY_NO (+)
+        AND		VD.SKD_DIR_CD		=	RMK.SKD_DIR_CD (+)
+        AND		'S'	                =	RMK.COD_CFM_DIV_CD (+)
+        
+        UNION ALL
+        
+        /* To Get Arelady Simulated Data Without Vessel Schedule */
+        
+        SELECT	/*+ ORDERED USE_NL( DV VD PT ) INDEX( VD XAK1EQR_MTY_COD_VVD ) */
+                DISTINCT		
+        		DECODE	( 
+        					VD.N1ST_ETB_YRWK , 
+                            DV.L4, '-1',
+                            DV.L3, '0',
+                            DV.L2, '1',
+        					DV.L1, '2',
+        					DV.M0, '3',
+        					DV.R1, '4',
+        					DV.R2, '5',
+        					NULL
+        				)									weekDivision,	/* WEEK_DIV */
+        		VD.N1ST_ETB_YRWK							week		,	/* WEEK  */
+        		VD.COD_CFM_STS_CD							div			,	/* DIV   */
+        		VD.VSL_CD||VD.SKD_VOY_NO||VD.SKD_DIR_CD		vvd			,	/* VSL_CD  */   
+        		VD.SLAN_CD									lane		,	/* LANE  */
+        		DECODE(NVL(RMK.DIFF_RMK,'N'),'N','N','Y')	remarkFlag	,   /* REMARK_FLAG */
+        		1 dclptsql,
+        		RMK.DIFF_RMK									remark		,	/* REMARK  */
+        		'4'											codcfmctscd	,	/* WORK_FLAG : 1:BayPlan, 2:Simulated, 3:MTY BKG, 4:Tuning VVD */
+        		VD.N1ST_ETB_YRWK							firstetb,
+        		VD.MNL_INP_FLG								mnlinpflg
+        
+        FROM    DIVISION            DV,
+        		EQR_MTY_COD_VVD		VD,
+        		EQR_MTY_COD_PORT	PT,
+        		EQR_MTY_COD_RMK     RMK
+        WHERE	VD.N1ST_ETB_YRWK IN ( DV.L4, DV.L3, DV.L2, DV.L1, DV.M0, DV.R1, DV.R2 )
+        AND		VD.COD_CFM_DIV_CD   =	'S'   /* SIMULATION DIVISION */
+        AND		VD.VSL_CD			=	PT.VSL_CD  
+        AND		VD.SKD_VOY_NO		=	PT.SKD_VOY_NO 
+        AND		VD.SKD_DIR_CD		=	PT.SKD_DIR_CD 
+        AND		VD.COD_CFM_DIV_CD	=	PT.COD_CFM_DIV_CD 
+        AND		'D'					=	PT.LODG_DCHG_DIV_CD
+        AND		'Y'     			= 	VD.MNL_INP_FLG                 /* <================================ 추가 */
+        AND		VD.VSL_CD			=	RMK.VSL_CD  (+)
+        AND		VD.SKD_VOY_NO		=	RMK.SKD_VOY_NO (+)
+        AND		VD.SKD_DIR_CD		=	RMK.SKD_DIR_CD (+)
+        AND		VD.COD_CFM_DIV_CD	=	RMK.COD_CFM_DIV_CD (+)
+        ) 
+    ) 
+    WHERE RN=1 -- ETB 가 다르고 동일 VVD 출현시 제거
+    )
+)
+
+
+,REPO_IN_RESULT AS (           
+
+#if(${curr_flag} =='T')  -- 입력주차가 현재주차 아닌 경우
+
+    SELECT B.YD_CD YARD
+          ,B.SLAN_CD LANE
+          ,B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD VVD
+
+          ,TO_CHAR(B.ETB_DT, 'YYYY-MM-DD') ETB
+          ,SUBSTR(TO_CHAR(B.ETB_DT, 'DAY', 'NLS_DATE_LANGUAGE=ENGLISH'), 1,3) ETB_DAY      
+          ,B.POD_CD  -- HIDDEN
+          ,B.DIV     -- HIDDEN
+           -- RI 수량 - VD 수량 빼기(0 보다 작으면 0처리)                                                                 
+          ,CASE WHEN SUM(NVL(B.D2_QTY,0)-NVL(A.D2_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.D2_QTY,0)-NVL(A.D2_QTY,0)) END D2_QTY
+          ,CASE WHEN SUM(NVL(B.D4_QTY,0)-NVL(A.D4_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.D4_QTY,0)-NVL(A.D4_QTY,0)) END D4_QTY
+          ,CASE WHEN SUM(NVL(B.D5_QTY,0)-NVL(A.D5_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.D5_QTY,0)-NVL(A.D5_QTY,0)) END D5_QTY
+          ,CASE WHEN SUM(NVL(B.D7_QTY,0)-NVL(A.D7_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.D7_QTY,0)-NVL(A.D7_QTY,0)) END D7_QTY
+          ,CASE WHEN SUM(NVL(B.R2_QTY,0)-NVL(A.R2_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.R2_QTY,0)-NVL(A.R2_QTY,0)) END R2_QTY
+          ,CASE WHEN SUM(NVL(B.R5_QTY,0)-NVL(A.R5_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.R5_QTY,0)-NVL(A.R5_QTY,0)) END R5_QTY
+          ,CASE WHEN SUM(NVL(B.R9_QTY,0)-NVL(A.R9_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.R9_QTY,0)-NVL(A.R9_QTY,0)) END R9_QTY
+          ,CASE WHEN SUM(NVL(B.O2_QTY,0)-NVL(A.O2_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.O2_QTY,0)-NVL(A.O2_QTY,0)) END O2_QTY
+          ,CASE WHEN SUM(NVL(B.O4_QTY,0)-NVL(A.O4_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.O4_QTY,0)-NVL(A.O4_QTY,0)) END O4_QTY
+          ,CASE WHEN SUM(NVL(B.S2_QTY,0)-NVL(A.S2_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.S2_QTY,0)-NVL(A.S2_QTY,0)) END S2_QTY
+          ,CASE WHEN SUM(NVL(B.S4_QTY,0)-NVL(A.S4_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.S4_QTY,0)-NVL(A.S4_QTY,0)) END S4_QTY
+          ,CASE WHEN SUM(NVL(B.F2_QTY,0)-NVL(A.F2_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.F2_QTY,0)-NVL(A.F2_QTY,0)) END F2_QTY
+          ,CASE WHEN SUM(NVL(B.F4_QTY,0)-NVL(A.F4_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.F4_QTY,0)-NVL(A.F4_QTY,0)) END F4_QTY
+          ,CASE WHEN SUM(NVL(B.F5_QTY,0)-NVL(A.F5_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.F5_QTY,0)-NVL(A.F5_QTY,0)) END F5_QTY
+          ,CASE WHEN SUM(NVL(B.A2_QTY,0)-NVL(A.A2_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.A2_QTY,0)-NVL(A.A2_QTY,0)) END A2_QTY
+          ,CASE WHEN SUM(NVL(B.A4_QTY,0)-NVL(A.A4_QTY,0)) < 0 THEN 0 ELSE SUM(NVL(B.A4_QTY,0)-NVL(A.A4_QTY,0)) END A4_QTY               
+          ,B.REMARK
+    FROM
+    (   
+        -- MVMT VD  
+        SELECT A.VSL_CD
+              ,A.SKD_VOY_NO
+              ,A.SKD_DIR_CD
+              ,A.VSL_LANE_CD 
+              ,A.YD_CD
+              ,A.ETD_DT ETB_DT
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'D2', A.CNTR_QTY)),0) D2_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'D4', A.CNTR_QTY)),0) D4_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'D5', A.CNTR_QTY)),0) D5_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'D7', A.CNTR_QTY)),0) D7_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'R2', A.CNTR_QTY)),0) R2_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'R5', A.CNTR_QTY)),0) R5_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'R9', A.CNTR_QTY)),0) R9_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'O2', A.CNTR_QTY)),0) O2_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'S2', A.CNTR_QTY)),0) S2_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'O4', A.CNTR_QTY)),0) O4_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'S4', A.CNTR_QTY)),0) S4_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'F2', A.CNTR_QTY)),0) F2_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'A2', A.CNTR_QTY)),0) A2_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'F4', A.CNTR_QTY)),0) F4_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'A4', A.CNTR_QTY)),0) A4_QTY
+              ,NVL(SUM(DECODE(A.CNTR_TPSZ_CD, 'F5', A.CNTR_QTY)),0) F5_QTY
+
+         
+        FROM EQR_MTY_BAL_RPT_DCHG_SNAP A                                               
+        WHERE A.ETD_DT BETWEEN TO_DATE(@[wk_st_dt], 'YYYYMMDD') AND TO_DATE((SELECT TO_CHAR(NEXT_DAY(SYSDATE, 2)-7, 'YYYYMMDD') FROM DUAL), 'YYYYMMDD')+0.99999  -- LCC별 시작일부터 이번주 월요일까지                        
+		GROUP BY A.VSL_CD
+                ,A.SKD_VOY_NO
+                ,A.SKD_DIR_CD
+                ,A.VSL_LANE_CD
+                ,A.YD_CD
+                ,A.ETD_DT
+
+    ) A
+   ,(
+        SELECT A.YD_CD 
+              ,A.SLAN_CD 
+              ,A.VSL_CD
+              ,A.SKD_VOY_NO
+              ,A.SKD_DIR_CD
+              ,A.ETB_DT 
+              ,A.POD_CD  -- HIDDEN
+              ,A.DIV     -- HIDDEN
+              ,A.D2_QTY
+              ,A.D4_QTY
+              ,A.D5_QTY
+              ,A.D7_QTY
+              ,A.R2_QTY
+              ,A.R4_QTY      
+              ,A.R5_QTY
+              ,A.R9_QTY
+              ,A.O2_QTY
+              ,A.S2_QTY
+              ,A.O4_QTY
+              ,A.S4_QTY
+              ,A.F2_QTY
+              ,A.A2_QTY
+              ,A.F4_QTY
+              ,A.A4_QTY
+              ,A.F5_QTY
+              ,A.REMARK
+        FROM 
+        ( 
+
+            -- BAY PLAN, I
+            SELECT A.VSL_CD
+                  ,A.SKD_VOY_NO
+                  ,A.SKD_DIR_CD
+                  ,B.SLAN_CD
+                  ,A.POD_CD
+                  ,B.YD_CD
+                  ,B.VPS_ETB_DT ETB_DT
+                  ,'I' DIV
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'D2',1,0))	D2_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'D4',1,0))	D4_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'D5',1,0))	D5_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'D7',1,0))	D7_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'R2',1,0))	R2_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'R4',1,0))	R4_QTY      
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'R5',1,0))	R5_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'R9',1,0))	R9_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'O2',1,0))	O2_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'S2',1,0))	S2_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'O4',1,0))	O4_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'S4',1,0))	S4_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'F2',1,0))	F2_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'A2',1,0))	A2_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'F4',1,0))	F4_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'A4',1,0))	A4_QTY
+                  ,SUM(DECODE(A.CNTR_TPSZ_CD,'F5',1,0))	F5_QTY
+                  ,'' REMARK
+            FROM OPF_BAY_PLN_LDIS A,
+            (
+                SELECT A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.SLAN_CD, A.VPS_PORT_CD, A.YD_CD, A.VPS_ETB_DT 
+                FROM VSK_VSL_PORT_SKD A
+                    ,REPOIN_VVD Z
+                WHERE A.VSL_CD     = SUBSTR(Z.VVD, 0, 4)
+                AND   A.SKD_VOY_NO = SUBSTR(Z.VVD, 5, 4)
+                AND   A.SKD_DIR_CD = SUBSTR(Z.VVD, 9, 1)
+                AND   A.VPS_PORT_CD IN (
+                                        SELECT LOC_CD FROM MDM_LOCATION 
+                                        WHERE SCC_CD IN ( 
+                                                             SELECT SCC_CD 
+                                                             FROM MDM_EQ_ORZ_CHT 
+        													 WHERE 1=1
+        #if(${loc_grp_cd} == 'S')
+                        									 AND SCC_CD = @[loc_cd]  -- IF GRP_CD=S
+        #elseif(${loc_grp_cd} == 'E')
+                       										 AND ECC_CD = @[loc_cd]  -- IF GRP_CD=E
+        #elseif(${loc_grp_cd} == 'L')
+                        									 AND LCC_CD = @[loc_cd]  -- IF GRP_CD=L
+        #end                                                                                                                   
+                                                         )
+                                     )
+                AND   A.CLPT_IND_SEQ = '1'	
+                AND   A.VPS_ETB_DT BETWEEN TO_DATE(@[wk_st_dt], 'YYYYMMDD') AND TO_DATE(@[wk_end_dt], 'YYYYMMDD')+0.99999
+        		    
+            ) B
+            WHERE A.LODG_DCHG_IND_CD =	'C'
+            AND	  A.FULL_MTY_CD	     =	'E'
+            AND	  A.CRR_CD		     =	'SML'
+            AND   A.VSL_CD           = B.VSL_CD
+            AND   A.SKD_VOY_NO       = B.SKD_VOY_NO
+            AND   A.SKD_DIR_CD       = B.SKD_DIR_CD
+            AND   A.POD_CD           = B.VPS_PORT_CD
+            GROUP BY A.VSL_CD
+                    ,A.SKD_VOY_NO
+                    ,A.SKD_DIR_CD
+                    ,B.SLAN_CD
+                    ,A.POD_CD
+                    ,B.YD_CD
+                    ,B.VPS_ETB_DT
+            
+                    
+            UNION ALL
+            
+            -- SIMULATION, CONFIRMATION, BASIC 
+          --  SELECT V.VSL_CD
+          --        ,V.SKD_VOY_NO
+          --        ,V.SKD_DIR_CD
+          --        ,V.SLAN_CD
+          --        ,P.PORT_CD POD_CD
+          --        ,P.YD_CD
+          --        ,Z.ETB_DT
+
+            SELECT Z.VSL_CD
+                  ,Z.SKD_VOY_NO
+                  ,Z.SKD_DIR_CD
+                  ,Z.SLAN_CD
+                  ,Z.VPS_PORT_CD POD_CD
+                  ,Z.YD_CD
+                  ,Z.ETB_DT
+                  ,P.COD_CFM_DIV_CD DIV
+                  ,P.D2_QTY
+                  ,P.D4_QTY
+                  ,P.D5_QTY
+                  ,P.D7_QTY
+                  ,P.R2_QTY
+                  ,P.R4_QTY  
+                  ,P.R5_QTY
+                  ,P.R9_QTY
+                  ,P.O2_QTY
+                  ,P.S2_QTY
+                  ,P.O4_QTY
+                  ,P.S4_QTY
+                  ,P.F2_QTY
+                  ,P.A2_QTY
+                  ,P.F4_QTY
+                  ,P.A4_QTY
+                  ,P.F5_QTY
+                  ,R.DIFF_RMK REMARK
+            FROM EQR_MTY_COD_VVD  V,
+                 EQR_MTY_COD_PORT P,
+                 EQR_MTY_COD_RMK  R,
+                (
+                     SELECT A.VSL_CD
+                           ,A.SKD_VOY_NO
+                           ,A.SKD_DIR_CD
+                           ,A.SLAN_CD
+                           ,A.VPS_PORT_CD
+                           ,A.YD_CD
+                           ,A.VPS_ETB_DT ETB_DT
+                     FROM VSK_VSL_PORT_SKD A  
+                         ,REPOIN_VVD Z     
+                     WHERE A.VSL_CD     = SUBSTR(Z.VVD, 0, 4)
+                     AND   A.SKD_VOY_NO = SUBSTR(Z.VVD, 5, 4)
+                     AND   A.SKD_DIR_CD = SUBSTR(Z.VVD, 9, 1)                                                                
+                     AND   A.VPS_PORT_CD IN (
+                                               SELECT LOC_CD FROM MDM_LOCATION 
+                                               WHERE SCC_CD IN ( 
+                                                                   SELECT SCC_CD 
+                                                                   FROM MDM_EQ_ORZ_CHT 
+        #if(${loc_grp_cd} == 'S')
+                        							               WHERE SCC_CD = @[loc_cd]  -- IF GRP_CD=S
+        #elseif(${loc_grp_cd} == 'E')
+                       								               WHERE ECC_CD = @[loc_cd]  -- IF GRP_CD=E
+        #elseif(${loc_grp_cd} == 'L')
+                        							               WHERE LCC_CD = @[loc_cd]  -- IF GRP_CD=L
+        #end                                                                                                                                
+                                                                )
+                                             )     
+                     AND   A.CLPT_IND_SEQ = '1'                                                                 
+                     AND   A.VPS_ETB_DT BETWEEN TO_DATE(@[wk_st_dt], 'YYYYMMDD') AND TO_DATE(@[wk_end_dt], 'YYYYMMDD')+0.99999                                  
+        			    
+                ) Z         
+        
+            WHERE V.VSL_CD			= P.VSL_CD
+            AND	  V.SKD_VOY_NO		= P.SKD_VOY_NO
+            AND	  V.SKD_DIR_CD		= P.SKD_DIR_CD
+            AND	  V.COD_CFM_DIV_CD	= P.COD_CFM_DIV_CD
+            AND	  'D'				= P.LODG_DCHG_DIV_CD
+            AND   P.VSL_CD          = Z.VSL_CD
+            AND   P.SKD_VOY_NO      = Z.SKD_VOY_NO
+            AND   P.SKD_DIR_CD      = Z.SKD_DIR_CD
+            AND   P.PORT_CD         = Z.VPS_PORT_CD  
+            AND	  V.VSL_CD			= R.VSL_CD  (+)
+            AND	  V.SKD_VOY_NO		= R.SKD_VOY_NO (+)
+            AND	  V.SKD_DIR_CD		= R.SKD_DIR_CD (+)
+            AND	  V.COD_CFM_DIV_CD	= R.COD_CFM_DIV_CD (+)
+
+        ) A,
+        (
+            SELECT VSL_CD
+                  ,SKD_VOY_NO
+                  ,SKD_DIR_CD
+                  ,VPS_PORT_CD
+                  ,DIV
+            FROM 
+            (    
+                -- VVD 별 I/S/C 확인
+                SELECT ROW_NUMBER() OVER(PARTITION BY B.VSL_CD, B.SKD_VOY_NO, B.SKD_DIR_CD, B.VPS_PORT_CD ORDER BY NVL(A.COD_CFM_STS_CD,'I') DESC) RN
+                      ,B.VSL_CD
+                      ,B.SKD_VOY_NO
+                      ,B.SKD_DIR_CD
+                      ,B.VPS_PORT_CD
+                      ,NVL(A.COD_CFM_STS_CD,'I') DIV
+                      
+                FROM EQR_MTY_COD_VVD A
+                    ,VSK_VSL_PORT_SKD B
+                WHERE B.VSL_CD     = A.VSL_CD(+)
+                AND   B.SKD_VOY_NO = A.SKD_VOY_NO(+)
+                AND   B.SKD_DIR_CD = A.SKD_DIR_CD(+)
+                AND   B.VPS_PORT_CD IN (
+                                         SELECT LOC_CD FROM MDM_LOCATION 
+                                         WHERE SCC_CD IN ( 
+                                                             SELECT SCC_CD 
+                                                             FROM MDM_EQ_ORZ_CHT 
+            												 WHERE 1=1
+            #if(${loc_grp_cd} == 'S')
+                            								 AND SCC_CD = @[loc_cd]  -- IF GRP_CD=S
+            #elseif(${loc_grp_cd} == 'E')
+                           									 AND ECC_CD = @[loc_cd]  -- IF GRP_CD=E
+            #elseif(${loc_grp_cd} == 'L')
+                            								 AND LCC_CD = @[loc_cd]  -- IF GRP_CD=L
+            #end                                                                                               
+                                                         )
+                                       )
+                AND   B.VPS_ETB_DT BETWEEN TO_DATE(@[wk_st_dt], 'YYYYMMDD') AND TO_DATE(@[wk_end_dt], 'YYYYMMDD')+0.99999
+                AND   B.CLPT_IND_SEQ = '1'
+                AND   NVL(B.SKD_CNG_STS_CD,' ') <> 'S' -- SKIP SKD 제외
+            ) 
+            WHERE RN = 1 -- 동일vvd 에서 B,C 가 동시에 출현하는 경우 C 만 수집   
+        ) B
+        WHERE A.VSL_CD     = B.VSL_CD
+        AND   A.SKD_VOY_NO = B.SKD_VOY_NO
+        AND   A.SKD_DIR_CD = B.SKD_DIR_CD
+        AND   A.POD_CD     = B.VPS_PORT_CD
+        AND   A.DIV        = B.DIV
+    ) B
+    WHERE  A.VSL_CD     (+) = B.VSL_CD
+    AND    A.SKD_VOY_NO (+) = B.SKD_VOY_NO
+    AND    A.SKD_DIR_CD (+) = B.SKD_DIR_CD
+    AND    A.VSL_LANE_CD(+) = B.SLAN_CD
+    AND    A.YD_CD      (+) = B.YD_CD
+    GROUP BY B.YD_CD 
+            ,B.SLAN_CD 
+            ,B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD             
+            ,B.ETB_DT
+            ,B.POD_CD  -- HIDDEN
+            ,B.DIV     -- HIDDEN
+            ,B.REMARK
+
+
+
+
+#elseif(${curr_flag} =='F')  -- 입력주차가 현재주차가 아니거나 WEEK 가 현재주가 아닌 경우
+
+
+    SELECT A.YD_CD YARD
+          ,A.SLAN_CD LANE
+          ,A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD VVD
+          ,TO_CHAR(A.ETB_DT, 'YYYY-MM-DD') ETB
+          ,SUBSTR(TO_CHAR(A.ETB_DT, 'DAY', 'NLS_DATE_LANGUAGE=ENGLISH'), 1,3) ETB_DAY      
+          ,A.POD_CD  -- HIDDEN
+          ,A.DIV     -- HIDDEN
+          ,A.D2_QTY
+          ,A.D4_QTY
+          ,A.D5_QTY
+          ,A.D7_QTY
+          ,A.R2_QTY
+          ,A.R4_QTY      
+          ,A.R5_QTY
+          ,A.R9_QTY
+          ,A.O2_QTY
+          ,A.S2_QTY
+          ,A.O4_QTY
+          ,A.S4_QTY
+          ,A.F2_QTY
+          ,A.A2_QTY
+          ,A.F4_QTY
+          ,A.A4_QTY
+          ,A.F5_QTY
+          ,A.REMARK
+    FROM 
+    (            
+        -- BAY PLAN, I
+        SELECT A.VSL_CD
+              ,A.SKD_VOY_NO
+              ,A.SKD_DIR_CD
+              ,B.SLAN_CD
+              ,A.POD_CD
+              ,B.YD_CD
+              ,B.VPS_ETB_DT ETB_DT
+              ,'I' DIV
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'D2',1,0))	D2_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'D4',1,0))	D4_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'D5',1,0))	D5_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'D7',1,0))	D7_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'R2',1,0))	R2_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'R4',1,0))	R4_QTY      
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'R5',1,0))	R5_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'R9',1,0))	R9_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'O2',1,0))	O2_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'S2',1,0))	S2_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'O4',1,0))	O4_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'S4',1,0))	S4_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'F2',1,0))	F2_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'A2',1,0))	A2_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'F4',1,0))	F4_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'A4',1,0))	A4_QTY
+              ,SUM(DECODE(A.CNTR_TPSZ_CD,'F5',1,0))	F5_QTY
+              ,'' REMARK
+        FROM OPF_BAY_PLN_LDIS A,
+        (
+            SELECT A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.SLAN_CD, A.VPS_PORT_CD, A.YD_CD, A.VPS_ETB_DT 
+            FROM VSK_VSL_PORT_SKD A
+                ,REPOIN_VVD Z
+            WHERE A.VSL_CD     = SUBSTR(Z.VVD, 0, 4)
+            AND   A.SKD_VOY_NO = SUBSTR(Z.VVD, 5, 4)
+            AND   A.SKD_DIR_CD = SUBSTR(Z.VVD, 9, 1)
+            AND   A.VPS_PORT_CD IN (
+                                    SELECT LOC_CD FROM MDM_LOCATION 
+                                    WHERE SCC_CD IN ( 
+                                                         SELECT SCC_CD 
+                                                         FROM MDM_EQ_ORZ_CHT 
+    													 WHERE 1=1
+    #if(${loc_grp_cd} == 'S')
+                    									 AND SCC_CD = @[loc_cd]  -- IF GRP_CD=S
+    #elseif(${loc_grp_cd} == 'E')
+                   										 AND ECC_CD = @[loc_cd]  -- IF GRP_CD=E
+    #elseif(${loc_grp_cd} == 'L')
+                    									 AND LCC_CD = @[loc_cd]  -- IF GRP_CD=L
+    #end                                                                                                                   
+                                                     )
+                                 )
+            AND   A.CLPT_IND_SEQ = '1'	
+            AND   A.VPS_ETB_DT BETWEEN TO_DATE(@[wk_st_dt], 'YYYYMMDD') AND TO_DATE(@[wk_end_dt], 'YYYYMMDD')+0.99999
+    		    
+        ) B
+        WHERE A.LODG_DCHG_IND_CD =	'C'
+        AND	  A.FULL_MTY_CD	     =	'E'
+        AND	  A.CRR_CD		     =	'SML'
+        AND   A.VSL_CD           = B.VSL_CD
+        AND   A.SKD_VOY_NO       = B.SKD_VOY_NO
+        AND   A.SKD_DIR_CD       = B.SKD_DIR_CD
+        AND   A.POD_CD           = B.VPS_PORT_CD
+        GROUP BY A.VSL_CD
+                ,A.SKD_VOY_NO
+                ,A.SKD_DIR_CD
+                ,B.SLAN_CD
+                ,A.POD_CD
+                ,B.YD_CD
+                ,B.VPS_ETB_DT
+        
+                
+        UNION ALL
+        
+        -- SIMULATION, CONFIRMATION, BASIC 
+        SELECT Z.VSL_CD
+              ,Z.SKD_VOY_NO
+              ,Z.SKD_DIR_CD
+              ,Z.SLAN_CD
+              ,Z.VPS_PORT_CD POD_CD
+              ,Z.YD_CD
+              ,Z.ETB_DT
+              ,P.COD_CFM_DIV_CD DIV
+              ,P.D2_QTY
+              ,P.D4_QTY
+              ,P.D5_QTY
+              ,P.D7_QTY
+              ,P.R2_QTY
+              ,P.R4_QTY  
+              ,P.R5_QTY
+              ,P.R9_QTY
+              ,P.O2_QTY
+              ,P.S2_QTY
+              ,P.O4_QTY
+              ,P.S4_QTY
+              ,P.F2_QTY
+              ,P.A2_QTY
+              ,P.F4_QTY
+              ,P.A4_QTY
+              ,P.F5_QTY
+              ,R.DIFF_RMK REMARK
+        FROM EQR_MTY_COD_VVD  V,
+             EQR_MTY_COD_PORT P,
+             EQR_MTY_COD_RMK  R,
+            (
+                 SELECT A.VSL_CD
+                       ,A.SKD_VOY_NO
+                       ,A.SKD_DIR_CD
+                       ,A.SLAN_CD
+                       ,A.VPS_PORT_CD
+                       ,A.YD_CD
+                       ,A.VPS_ETB_DT ETB_DT
+                 FROM VSK_VSL_PORT_SKD A  
+                     ,REPOIN_VVD Z     
+                 WHERE A.VSL_CD     = SUBSTR(Z.VVD, 0, 4)
+                 AND   A.SKD_VOY_NO = SUBSTR(Z.VVD, 5, 4)
+                 AND   A.SKD_DIR_CD = SUBSTR(Z.VVD, 9, 1)                                                                
+                 AND   A.VPS_PORT_CD IN (
+                                           SELECT LOC_CD FROM MDM_LOCATION 
+                                           WHERE SCC_CD IN ( 
+                                                               SELECT SCC_CD 
+                                                               FROM MDM_EQ_ORZ_CHT 
+    #if(${loc_grp_cd} == 'S')
+                    							               WHERE SCC_CD = @[loc_cd]  -- IF GRP_CD=S
+    #elseif(${loc_grp_cd} == 'E')
+                   								               WHERE ECC_CD = @[loc_cd]  -- IF GRP_CD=E
+    #elseif(${loc_grp_cd} == 'L')
+                    							               WHERE LCC_CD = @[loc_cd]  -- IF GRP_CD=L
+    #end                                                                                                                                
+                                                            )
+                                         )     
+                 AND   A.CLPT_IND_SEQ = '1'                                                                 
+                 AND   A.VPS_ETB_DT BETWEEN TO_DATE(@[wk_st_dt], 'YYYYMMDD') AND TO_DATE(@[wk_end_dt], 'YYYYMMDD')+0.99999                                  
+    			    
+            ) Z         
+    
+        WHERE V.VSL_CD			= P.VSL_CD
+        AND	  V.SKD_VOY_NO		= P.SKD_VOY_NO
+        AND	  V.SKD_DIR_CD		= P.SKD_DIR_CD
+        AND	  V.COD_CFM_DIV_CD	= P.COD_CFM_DIV_CD
+        AND	  'D'				= P.LODG_DCHG_DIV_CD
+        AND   P.VSL_CD          = Z.VSL_CD
+        AND   P.SKD_VOY_NO      = Z.SKD_VOY_NO
+        AND   P.SKD_DIR_CD      = Z.SKD_DIR_CD
+        AND   P.PORT_CD         = Z.VPS_PORT_CD  
+        AND	  V.VSL_CD			= R.VSL_CD  (+)
+        AND	  V.SKD_VOY_NO		= R.SKD_VOY_NO (+)
+        AND	  V.SKD_DIR_CD		= R.SKD_DIR_CD (+)
+        AND	  V.COD_CFM_DIV_CD	= R.COD_CFM_DIV_CD (+)
+    
+    ) A,
+    (
+        SELECT VSL_CD
+              ,SKD_VOY_NO
+              ,SKD_DIR_CD
+              ,VPS_PORT_CD
+              ,DIV
+        FROM 
+        (    
+            -- VVD 별 I/S/C 확인
+            SELECT ROW_NUMBER() OVER(PARTITION BY B.VSL_CD, B.SKD_VOY_NO, B.SKD_DIR_CD, B.VPS_PORT_CD ORDER BY NVL(A.COD_CFM_STS_CD,'I') DESC) RN
+                  ,B.VSL_CD
+                  ,B.SKD_VOY_NO
+                  ,B.SKD_DIR_CD
+                  ,B.VPS_PORT_CD
+                  ,NVL(A.COD_CFM_STS_CD,'I') DIV
+                  
+            FROM EQR_MTY_COD_VVD A
+                ,VSK_VSL_PORT_SKD B
+            WHERE B.VSL_CD     = A.VSL_CD(+)
+            AND   B.SKD_VOY_NO = A.SKD_VOY_NO(+)
+            AND   B.SKD_DIR_CD = A.SKD_DIR_CD(+)
+            AND   B.VPS_PORT_CD IN (
+                                     SELECT LOC_CD FROM MDM_LOCATION 
+                                     WHERE SCC_CD IN ( 
+                                                         SELECT SCC_CD 
+                                                         FROM MDM_EQ_ORZ_CHT 
+        												 WHERE 1=1
+        #if(${loc_grp_cd} == 'S')
+                        								 AND SCC_CD = @[loc_cd]  -- IF GRP_CD=S
+        #elseif(${loc_grp_cd} == 'E')
+                       									 AND ECC_CD = @[loc_cd]  -- IF GRP_CD=E
+        #elseif(${loc_grp_cd} == 'L')
+                        								 AND LCC_CD = @[loc_cd]  -- IF GRP_CD=L
+        #end                                                                                               
+                                                     )
+                                   )
+            AND   B.VPS_ETB_DT BETWEEN TO_DATE(@[wk_st_dt], 'YYYYMMDD') AND TO_DATE(@[wk_end_dt], 'YYYYMMDD')+0.99999
+            AND   B.CLPT_IND_SEQ = '1'
+            AND   NVL(B.SKD_CNG_STS_CD,' ') <> 'S' -- SKIP SKD 제외
+        ) 
+        WHERE RN = 1 -- 동일vvd 에서 B,C 가 동시에 출현하는 경우 C 만 수집   
+    ) B
+    WHERE A.VSL_CD     = B.VSL_CD
+    AND   A.SKD_VOY_NO = B.SKD_VOY_NO
+    AND   A.SKD_DIR_CD = B.SKD_DIR_CD
+    AND   A.POD_CD     = B.VPS_PORT_CD
+    AND   A.DIV        = B.DIV
+
+#end
+
+)
+
+
+SELECT LVL
+      ,TO_YD_CD
+      ,VSL_LANE_CD
+      ,VVD
+      ,TO_ETB_DT
+      ,TO_ETB_DAY
+      ,D2_FCAST_QTY
+      ,D4_FCAST_QTY
+      ,D5_FCAST_QTY
+      ,D7_FCAST_QTY
+      ,R2_FCAST_QTY
+      ,R5_FCAST_QTY
+      ,R9_FCAST_QTY
+      ,O2_FCAST_QTY
+      ,S2_FCAST_QTY
+      ,O4_FCAST_QTY
+      ,S4_FCAST_QTY
+      ,F2_FCAST_QTY
+      ,A2_FCAST_QTY
+      ,F4_FCAST_QTY
+      ,A4_FCAST_QTY
+      ,F5_FCAST_QTY
+      ,REMARK
+	  ,WK_ST_DT
+      ,WK_END_DT
+      ,@[curr_flag] CURR_FLAG
+FROM
+(
+    SELECT '000000' LVL
+          ,YARD		TO_YD_CD
+          ,LANE	    VSL_LANE_CD
+          ,VVD
+          ,ETB		TO_ETB_DT
+          ,ETB_DAY	TO_ETB_DAY
+          ,D2_QTY	  D2_FCAST_QTY
+          ,D4_QTY	  D4_FCAST_QTY
+          ,D5_QTY	  D5_FCAST_QTY
+          ,D7_QTY	  D7_FCAST_QTY
+          ,R2_QTY	  R2_FCAST_QTY 
+          ,R5_QTY	  R5_FCAST_QTY
+          ,R9_QTY	  R9_FCAST_QTY
+          ,O2_QTY	  O2_FCAST_QTY
+          ,S2_QTY	  S2_FCAST_QTY
+          ,O4_QTY	  O4_FCAST_QTY
+          ,S4_QTY	  S4_FCAST_QTY
+          ,F2_QTY	  F2_FCAST_QTY
+          ,A2_QTY	  A2_FCAST_QTY
+          ,F4_QTY	  F4_FCAST_QTY
+          ,A4_QTY	  A4_FCAST_QTY
+          ,F5_QTY	  F5_FCAST_QTY
+          ,REMARK	
+    	  ,TO_CHAR(TO_DATE(@[wk_st_dt], 'YYYYMMDD'), 'YYYY/MM/DD') 	WK_ST_DT
+          ,TO_CHAR(TO_DATE(@[wk_end_dt], 'YYYYMMDD'), 'YYYY/MM/DD')		WK_END_DT
+    FROM REPO_IN_RESULT       
+    WHERE  (
+               D2_QTY
+              +D4_QTY
+              +D5_QTY
+              +D7_QTY
+              +R2_QTY  
+              +R5_QTY
+              +R9_QTY
+              +O2_QTY
+              +S2_QTY
+              +O4_QTY
+              +S4_QTY
+              +F2_QTY
+              +A2_QTY
+              +F4_QTY
+              +A4_QTY
+              +F5_QTY 
+           ) > 0  -- 0보다 큰것만 수집
+    UNION ALL
+    -- TOTAL
+    SELECT '111111' LVL
+          ,'' TO_YD_CD
+          ,'' VSL_LANE_CD
+          ,'' VVD
+          ,'' TO_ETB_DT
+          ,'' TO_ETB_DAY
+          ,SUM(D2_QTY) D2_FCAST_QTY
+          ,SUM(D4_QTY) D4_FCAST_QTY
+          ,SUM(D5_QTY) D5_FCAST_QTY
+          ,SUM(D7_QTY) D7_FCAST_QTY
+          ,SUM(R2_QTY) R2_FCAST_QTY  
+          ,SUM(R5_QTY) R5_FCAST_QTY
+          ,SUM(R9_QTY) R9_FCAST_QTY
+          ,SUM(O2_QTY) O2_FCAST_QTY
+          ,SUM(S2_QTY) S2_FCAST_QTY
+          ,SUM(O4_QTY) O4_FCAST_QTY
+          ,SUM(S4_QTY) S4_FCAST_QTY
+          ,SUM(F2_QTY) F2_FCAST_QTY
+          ,SUM(A2_QTY) A2_FCAST_QTY
+          ,SUM(F4_QTY) F4_FCAST_QTY
+          ,SUM(A4_QTY) A4_FCAST_QTY
+          ,SUM(F5_QTY) F5_FCAST_QTY
+          ,'' REMARK
+    	  ,TO_CHAR(TO_DATE(@[wk_st_dt], 'YYYYMMDD'), 'YYYY/MM/DD')	WK_ST_DT
+          ,TO_CHAR(TO_DATE(@[wk_end_dt], 'YYYYMMDD'), 'YYYY/MM/DD')		WK_END_DT
+    FROM REPO_IN_RESULT 
+) 
+ORDER BY LVL, TO_ETB_DT ASC			]]></sql>
+			<params>
+				<param name="fcast_yrwk" type="12" value="" out="N"/>
+				<param name="wk_st_dt" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="wk_end_dt" type="12" value="" out="N"/>
+				<param name="curr_flag" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,374 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="DailyForecastInquiryDBDAOSpcFcastOfcPolMapgVORSQL">
+			<desc><![CDATA[Lee Sang-Yong : [프로젝트] Ticket ID : CHM-201004171 53ft 추가
+2010.11.16 남궁진호 [CHM-201007114-01] SPC_CONTI_CONV_FNC Function 사용 
+2011.01.03 최윤성 [CHM-201008093-01] Office Level Table 생성
+ - SPC_ORGANIZATION_V 대신 SPC_OFC_LVL 로 대체
+2011.04.11 김종준 [CHM-201110033-01] ALPS/SPC의 TS booking status 기능보완 요청 
+ -T/S VVD 및 T/S ETB DATE  필드 추가 
+2011.05.06 최성민[CHM-201110577-01] ALPS/SPC의 TS booking status 기능보완 요청 
+ - Pre/Post T/S ETB Date 항목 추가 
+-2011.06.01 [ CHM-201111305-01] 김종준 R5와 동일하게 R9이 적용될 수 있도록 쿼리수정
+-2012.12.03 [CHM-201221639] 김시몬 R9와 동일하게 R8이 적용될 수 있도록 쿼리수정
+2013.11.26 진마리아 [CHM-201326854] SAQ project로 인한 SPC 변경건_FNC 우선제거
+* 2014.11.14 신자영 [CHM-201432770] T/S Booking Report 개선
+2014.12.22 박은주 [CHM-201433402] TS BKG status(new) 기능 추가 요청 (쿼리 튜닝 및 conti로만 조회 하도록 쿼리 변경)]]></desc>
+			<sql><![CDATA[
+WITH WEEKS AS (
+    SELECT PRD.cost_yr
+          ,PRD.cost_wk
+          ,@[lane]     AS TLANE
+          ,@[rhq_cd]   AS RHQ_CD
+          ,@[ofc_cd]   AS OFC_CD
+          ,@[ts_conti] AS TS_CONTI
+          ,@[pol1]     AS TS_PORT
+          ,@[del]      AS DEL
+          ,(PRD.SLS_FM_DT) AS SLS_FM_DT
+          ,(PRD.SLS_TO_DT) AS SLS_TO_DT
+      FROM MAS_WK_PRD PRD
+     WHERE 1=1
+       and prd.cost_yr  = @[year]
+       and PRD.COST_WK >= @[week]
+       and prd.cost_yr||prd.cost_wk >= @[year]||@[week]
+       AND ROWNUM <= @[duration]
+    )
+, BKG_BASE AS (
+    SELECT BKG.BKG_NO
+          ,WK.COST_YR
+          ,WK.COST_WK
+          ,SKD.VSL_CD AS VSL_CD
+          ,SKD.SKD_VOY_NO AS SKD_VOY_NO
+          ,SKD.SKD_DIR_CD AS SKD_DIR_CD
+#if (${ts_conti} != '')     
+          ,NVL2(WK.TS_PORT, WK.TS_PORT, LOC.LOC_CD) TS_PORT
+#else
+          ,WK.TS_PORT
+#end
+          ,WK.DEL
+          ,WK.TS_CONTI
+          ,WK.RHQ_CD
+          ,WK.TLANE
+          ,WK.OFC_CD
+          ,SKD.YD_CD
+          ,SKD.CLPT_IND_SEQ
+          ,SKD.VPS_ETB_DT
+          ,BKG.POL_CD
+          ,BKG.POD_CD
+          ,BKG.DEL_CD
+          ,BKG.SLAN_CD
+          ,BKG.OB_SLS_OFC_CD
+          ,BKG.VSL_CD||BKG.SKD_VOY_NO||BKG.SKD_DIR_CD AS TRUNK_VVD 
+          ,WK.SLS_FM_DT
+          ,WK.SLS_TO_DT
+      FROM WEEKS WK
+          ,VSK_VSL_PORT_SKD SKD
+          ,BKG_VVD VVD
+          ,BKG_BOOKING BKG
+#if (${ts_conti} != '')
+          ,MDM_LOCATION LOC
+#end
+     WHERE BKG.BKG_NO           = VVD.BKG_NO
+       AND BKG.POD_CD          <> VVD.POD_CD
+
+       AND VVD.VSL_CD           = SKD.VSL_CD
+       AND VVD.SKD_VOY_NO       = SKD.SKD_VOY_NO
+       AND VVD.SKD_DIR_CD       = SKD.SKD_DIR_CD
+       AND VVD.POD_CD           = SKD.VPS_PORT_CD
+       AND VVD.POD_CLPT_IND_SEQ = SKD.CLPT_IND_SEQ
+#if (${pol1} != '')
+       AND VVD.POD_CD           = WK.TS_PORT
+       AND SKD.VPS_PORT_CD      = WK.TS_PORT
+#end
+       AND SKD.VPS_ETB_DT       BETWEEN TO_DATE(WK.SLS_FM_DT, 'YYYY-MM-DD HH24:MI:SS') AND  TO_DATE(WK.SLS_TO_DT || '235959', 'YYYY-MM-DD HH24:MI:SS')
+       AND BKG.DEL_CD           LIKE WK.DEL||'%'
+       AND BKG.BKG_STS_CD       IN ('W','F')
+       AND BKG.BKG_CGO_TP_CD    IN ('F', 'B', 'R')
+#if (${ts_conti} != '')
+
+       AND SKD.VPS_PORT_CD      = LOC.LOC_CD
+       AND LOC.CONTI_CD         = WK.TS_CONTI
+       AND LOC.DELT_FLG         = 'N'
+#end
+)
+, BKG AS (
+    SELECT YRWK    ,
+--           RLANE_CD,
+           Z.VVD   ,
+           TSLAN_CD,
+           NVL(PRE_SLAN, 'FDR')  AS PRE_SLAN,           
+           PRE_VVD   ,
+           PRE_ETB_DT,
+           NVL(POST_SLAN, 'FDR') AS POST_SLAN,
+           POST_VVD ,
+           POST_ETB_DT,           
+           POL_CD  ,
+           POD_CD  ,
+           DEL_CD  ,           
+           TS_PORT   ,
+           DECODE(Z.OFC_CD, NULL, O.N4TH_PRNT_OFC_CD, NVL(O.N5TH_PRNT_OFC_CD, SLS_OFC_CD)) AS SLS_OFC_CD,
+           Z.OFC_CD       ,
+           BKG_TTL_QTY    ,
+           BKG_RF20_QTY   ,
+           BKG_RF40_QTY   ,
+           BKG_TTL_WGT    ,
+           BKG_20FT_QTY   ,
+           BKG_40FT_QTY   ,
+           BKG_40FT_HC_QTY,
+           BKG_45FT_HC_QTY,
+           --BKG_53FT_QTY   ,
+           BKG_DG_QTY,
+           BKG_AK_QTY
+      FROM (
+              SELECT COST_YR||COST_WK AS YRWK,
+                     RHQ_CD  ,
+--                     RLANE_CD,
+                     VVD     ,
+                     TSLAN_CD,
+                     PRE_SLAN ,
+                     POST_SLAN,
+                     PRE_VVD   ,
+                     POST_VVD   ,
+                     PRE_ETB_DT,
+                     POST_ETB_DT,
+                     POL_CD  ,
+                     POD_CD  ,
+                     DEL_CD  ,
+                     TS_PORT,
+                     OB_SLS_OFC_CD AS SLS_OFC_CD,
+                     OFC_CD     ,
+                     SUM(TO_NUMBER(NVL(SUBSTR(VAL,  1, 14), 0))) AS BKG_TTL_QTY    ,
+                     SUM(TO_NUMBER(NVL(SUBSTR(VAL, 15, 14), 0))) AS BKG_20FT_QTY   ,
+                     SUM(TO_NUMBER(NVL(SUBSTR(VAL, 29, 14), 0))) AS BKG_40FT_QTY   ,
+                     SUM(TO_NUMBER(NVL(SUBSTR(VAL, 43, 14), 0))) AS BKG_40FT_HC_QTY,
+                     SUM(TO_NUMBER(NVL(SUBSTR(VAL, 57, 14), 0))) AS BKG_45FT_HC_QTY,
+                     --SUM(TO_NUMBER(NVL(SUBSTR(VAL, 71, 14), 0))) AS BKG_53FT_QTY   ,
+                     SUM(TO_NUMBER(NVL(SUBSTR(VAL, 85, 14), 0))) AS BKG_RF20_QTY   ,
+                     SUM(TO_NUMBER(NVL(SUBSTR(VAL, 99, 14), 0))) AS BKG_RF40_QTY   ,
+                     SUM(TO_NUMBER(NVL(SUBSTR(VAL, 113,14), 0))) AS BKG_DG_QTY,
+                     SUM(TO_NUMBER(NVL(SUBSTR(VAL, 127,14), 0))) AS BKG_AK_QTY,
+                     SUM(TO_NUMBER(NVL(SUBSTR(VAL, 141, 14), 0))) AS BKG_TTL_WGT
+                FROM (
+                        SELECT C.BKG_NO,
+                               C.COST_YR,
+                               C.COST_WK,
+                               C.RHQ_CD ,
+--                               C.RLANE_CD,
+                               DECODE(BV1.VSL_PRE_PST_CD,'T',BV1.VSL_CD||BV1.SKD_VOY_NO||BV1.SKD_DIR_CD,C.TRUNK_VVD) AS VVD,
+                               DECODE(BV1.VSL_PRE_PST_CD,'T',BV1.SLAN_CD,C.SLAN_CD) AS TSLAN_CD,
+                               --V.VSL_CD||V.SKD_VOY_NO||V.SKD_DIR_CD AS VVD,
+                               BV1.SLAN_CD AS PRE_SLAN,
+                               BV.SLAN_CD  AS POST_SLAN,
+                               C.CLPT_IND_SEQ,
+                               DECODE(C.TS_PORT, BV1.POD_CD, BV1.POD_CLPT_IND_SEQ, BV.POL_CLPT_IND_SEQ) SEQ,
+                               BV1.POL_CLPT_IND_SEQ AS PRE_SEQ,
+                               BV1.VSL_CD||BV1.SKD_VOY_NO||BV1.SKD_DIR_CD AS PRE_VVD,
+                               BV.VSL_CD||BV.SKD_VOY_NO||BV.SKD_DIR_CD    AS POST_VVD,
+                               (SELECT TO_CHAR(VPS_ETB_DT , 'YYYYMMDD')
+                                  FROM VSK_VSL_PORT_SKD
+                                 WHERE VSL_CD       = BV1.VSL_CD
+                                   AND SKD_VOY_NO   = BV1.SKD_VOY_NO
+                                   AND SKD_DIR_CD   = BV1.SKD_DIR_CD
+                                   AND VPS_PORT_CD  = BV1.POD_CD
+                                   AND CLPT_IND_SEQ = BV1.POD_CLPT_IND_SEQ
+                                   AND 'S' <> NVL(SKD_CNG_STS_CD, 'X')) AS PRE_ETB_DT,                             
+                               (SELECT TO_CHAR(VPS_ETB_DT , 'YYYYMMDD')
+                                  FROM VSK_VSL_PORT_SKD
+                                 WHERE VSL_CD       = BV.VSL_CD
+                                   AND SKD_VOY_NO   = BV.SKD_VOY_NO
+                                   AND SKD_DIR_CD   = BV.SKD_DIR_CD
+                                   AND VPS_PORT_CD  = BV.POL_CD
+                                   AND CLPT_IND_SEQ = BV.POL_CLPT_IND_SEQ
+                                   AND 'S' <> NVL(SKD_CNG_STS_CD, 'X')) AS POST_ETB_DT,  
+                               C.POL_CD AS POL_CD,
+                               C.POD_CD AS POD_CD,
+                               C.DEL_CD AS DEL_CD,
+                               --BV.POL_CD AS TS_PORT,
+							   C.TS_PORT AS TS_PORT,
+                               SPC_SCR_OFC_CONV_FNC(C.OB_SLS_OFC_CD) AS OB_SLS_OFC_CD,
+                               C.OFC_CD,
+                               (
+                                 SELECT    TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '2', 1, 2) * Q.OP_CNTR_QTY), 'FM0000000000.000')
+                                        || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '2', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')
+                                        || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '4', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')
+										|| TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '5', Q.OP_CNTR_QTY, '9', Q.OP_CNTR_QTY, '8', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')	--R9,R8에 대해서 R5과 동일하게 HC으로 처리되도록 추가
+                                        || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '7', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')
+                                        || TO_CHAR(SUM(DECODE(Q.CNTR_TPSZ_CD, 'DW', Q.OP_CNTR_QTY, 'DX', Q.OP_CNTR_QTY, 0)), 'FM0000000000.000')
+                                        || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_TP_FNC(Q.CNTR_TPSZ_CD), 'R', DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '2', Q.OP_CNTR_QTY - Q.EQ_SUBST_CGO_QTY, 0), 0)), 'FM0000000000.000')
+                                        || TO_CHAR(SUM(DECODE(SPC_GET_CNTR_TP_FNC(Q.CNTR_TPSZ_CD), 'R', DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '2', 0, Q.OP_CNTR_QTY - Q.EQ_SUBST_CGO_QTY), 0)), 'FM0000000000.000')
+                                        
+                                        || TO_CHAR(SUM(Q.DCGO_QTY),    'FM0000000000.000') -- DG
+                                        || TO_CHAR(SUM(Q.AWK_CGO_QTY), 'FM0000000000.000') -- AW
+                                        
+                                        || TO_CHAR((R.ACT_WGT * DECODE(R.ACT_WGT,'LBS', 0.00045, 0.001)) + SUM(Q.OP_CNTR_QTY * ( SELECT TS.CNTR_TPSZ_TARE_WGT
+                                                                                                                                   FROM MDM_CNTR_TP_SZ TS
+                                                                                                                                  WHERE TS.CNTR_TPSZ_CD = Q.CNTR_TPSZ_CD)) * 0.001, 'FM0000000000.000')
+                                   FROM BKG_QUANTITY Q
+                                  WHERE C.BKG_NO = Q.BKG_NO
+                               ) VAL,
+                               C.TS_CONTI
+                          FROM BKG_BASE     C
+                              ,BKG_BL_DOC   R 
+                              ,BKG_VVD      BV  -- pre
+                              ,BKG_VVD      BV1 --post
+                         WHERE 1=1
+                           AND C.BKG_NO     = R.BKG_NO 
+                           AND C.BKG_NO     = BV.BKG_NO 
+                           AND C.BKG_NO     = BV1.BKG_NO
+                           AND BV1.POD_CD   = C.TS_PORT -- TS 직전 배
+                           AND BV.POL_CD    = C.TS_PORT -- TS 다음 배
+--                           AND c.CLPT_IND_SEQ = DECODE(C.TS_PORT, BV1.POD_CD, BV1.POD_CLPT_IND_SEQ, BV.POL_CLPT_IND_SEQ) -- 더블콜링하는 경우 제외 로직
+--                           and b.BKG_NO IN ('NYC411630100','ATL412337700','ATL413505500','CHI413100500')
+                     )
+               WHERE TSLAN_CD     LIKE @[lane]||'%'
+--                 AND CLPT_IND_SEQ = PRE_SEQ -- 더블콜링하는 경우 제외 로직
+            GROUP BY COST_YR||COST_WK,
+                     RHQ_CD  ,
+--                     RLANE_CD,
+                     VVD     ,
+                     TSLAN_CD,
+                     PRE_SLAN ,
+                     POST_SLAN,
+                     POST_VVD   ,
+                     POST_ETB_DT,
+                     PRE_VVD   ,
+                     PRE_ETB_DT,
+                     POL_CD  ,
+                     POD_CD  ,
+                     DEL_CD  ,
+                     TS_PORT ,
+                     OB_SLS_OFC_CD,
+                     OFC_CD
+           ) Z,
+           SPC_OFC_LVL O
+     WHERE O.OFC_CD = Z.SLS_OFC_CD
+       AND (Z.OFC_CD IS NULL OR O.N4TH_PRNT_OFC_CD = Z.OFC_CD) 
+	   AND (Z.RHQ_CD IS NULL OR Z.RHQ_CD = O.N2ND_PRNT_OFC_CD)     
+       AND Z.YRWK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+) 
+, BKG_LIST  AS (
+  SELECT YRWK,
+         DECODE(PRE_SLAN, 'RBC', 'FDR', PRE_SLAN) AS PRE_SLAN,
+         PRE_VVD,         
+		 PRE_ETB_DT,
+         DECODE(POST_SLAN, 'RBC', 'FDR', POST_SLAN) AS POST_SLAN,
+         POST_VVD,
+		 POST_ETB_DT,		 
+		 TS_PORT,
+		 POL_CD,
+		 POD_CD,
+		 DEL_CD,         
+         SLS_OFC_CD,
+         TSLAN_CD,
+         VVD,
+         7 AS LVL,
+         --ROUND(7 - LOG(2, GROUPING_ID(YRWK, PRE_VVD, POST_VVD, TS_PORT, POL_CD, DEL_CD, SLS_OFC_CD, VVD) + 1), 0) AS LVL,
+         SUM(BKG_TTL_QTY)     AS BKG_TTL_QTY    ,
+         SUM(BKG_TTL_WGT)     AS BKG_TTL_WGT    ,
+         SUM(BKG_20FT_QTY)    AS BKG_20FT_QTY   ,
+         SUM(BKG_40FT_QTY)    AS BKG_40FT_QTY   ,
+         SUM(BKG_40FT_HC_QTY) AS BKG_40FT_HC_QTY,
+         SUM(BKG_45FT_HC_QTY) AS BKG_45FT_HC_QTY,
+         --SUM(BKG_53FT_QTY)    AS BKG_53FT_QTY   ,
+         SUM(BKG_RF20_QTY)    AS BKG_RF20_QTY   ,
+         SUM(BKG_RF40_QTY)    AS BKG_RF40_QTY   ,
+         SUM(BKG_DG_QTY)      AS BKG_DG_QTY,
+         SUM(BKG_AK_QTY)      AS BKG_AK_QTY
+    FROM BKG B
+GROUP BY YRWK, PRE_SLAN, PRE_VVD, PRE_ETB_DT, POST_SLAN, POST_VVD, POST_ETB_DT, TS_PORT, POL_CD, POD_CD, DEL_CD, SLS_OFC_CD, TSLAN_CD, VVD
+ORDER BY YRWK,
+         NVL(PRE_VVD, 	'000000000'),
+         NVL(POST_VVD,  '000000000'),
+         NVL(TS_PORT, 	'00000'),
+         NVL(POL_CD, 	'00000'),
+         NVL(POD_CD, 	'00000'),
+         NVL(DEL_CD, 	'00000'),
+         NVL(SLS_OFC_CD,'00000'),
+         NVL(TSLAN_CD  ,'00000'),
+         VVD,
+         LVL
+)
+SELECT 
+    YRWK,    
+    CASE WHEN TRUNC(LVL)  = 1 THEN
+        PRE_SLAN
+    ELSE
+        NVL(PRE_SLAN,'-')
+    END PRE_SLAN,
+    CASE WHEN TRUNC(LVL)  = 1 THEN
+        PRE_VVD
+    ELSE
+        NVL(PRE_VVD,'-')
+    END PRE_VVD,
+    CASE WHEN TRUNC(LVL) = 1 THEN
+        PRE_ETB_DT
+    ELSE
+        NVL(PRE_ETB_DT,'-')
+    END PRE_ETB_DT, --ts_etb_de ==> pre_etb_dt 
+    CASE WHEN TRUNC(LVL) IN (1,2) THEN
+        POST_SLAN
+    ELSE
+        NVL(POST_SLAN,'-')
+    END POST_SLAN,
+    CASE WHEN TRUNC(LVL) IN (1,2) THEN
+        POST_VVD
+    ELSE
+        NVL(POST_VVD,'-')
+    END POST_VVD,
+    CASE WHEN TRUNC(LVL) IN (1,2) THEN
+        POST_ETB_DT
+    ELSE
+        NVL(POST_ETB_DT,'-')
+    END POST_ETB_DT, --ts2_etb_de ==> post_etb_dt 
+--    TS_PORT,
+	CASE WHEN TRUNC(LVL) IN (1,2,3) THEN
+        TS_PORT
+    ELSE
+        NVL(TS_PORT,'-')
+    END TS_PORT,
+    CASE WHEN TRUNC(LVL) IN (1,2,3,4) THEN
+        POL_CD
+    ELSE
+        NVL(POL_CD,'-')
+    END POL_CD,
+    CASE WHEN TRUNC(LVL) IN (1,2,3,4) THEN
+        POD_CD
+    ELSE
+        NVL(POD_CD,'-')
+    END POD_CD,
+    CASE WHEN TRUNC(LVL) IN (1,2,3,4,5) THEN
+        DEL_CD
+    ELSE
+        NVL(DEL_CD,'-')
+    END DEL_CD,
+    SLS_OFC_CD,
+    TSLAN_CD,
+    VVD,
+    LVL,
+    BKG_TTL_QTY    ,
+    BKG_TTL_WGT    ,
+    BKG_20FT_QTY   ,
+    BKG_40FT_QTY   ,
+    BKG_40FT_HC_QTY,
+    BKG_45FT_HC_QTY,
+    --BKG_53FT_QTY   ,
+    BKG_RF20_QTY   ,
+    BKG_RF40_QTY   ,  
+    BKG_DG_QTY     ,
+    BKG_AK_QTY
+FROM BKG_LIST			]]></sql>
+			<params>
+				<param name="lane" type="12" value="" out="N"/>
+				<param name="rhq_cd" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="ts_conti" type="12" value="" out="N"/>
+				<param name="pol1" type="12" value="" out="N"/>
+				<param name="del" type="12" value="" out="N"/>
+				<param name="year" type="12" value="" out="N"/>
+				<param name="week" type="12" value="" out="N"/>
+				<param name="duration" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

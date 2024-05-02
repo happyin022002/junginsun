@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SettlementProcessDBDAOMvntEvntDateRSQL">
+			<desc><![CDATA[Movement Event Date 조회]]></desc>
+			<sql><![CDATA[
+WITH PRE_VVD AS ( 
+	SELECT DISTINCT  
+	   VSL_CD
+	  ,TURN_SKD_VOY_NO AS SKD_VOY_NO
+	  ,TURN_SKD_DIR_CD AS SKD_DIR_CD
+	FROM VSK_VSL_PORT_SKD
+	WHERE 1=1
+	AND LEVEL <= FLOOR(TO_NUMBER('3')/2)
+	AND (TURN_SKD_VOY_NO IS NOT NULL OR TURN_SKD_DIR_CD IS NOT NULL) START WITH VSL_CD = SUBSTR(@[vvd],1,4)
+	AND SKD_VOY_NO = SUBSTR(@[vvd],5,4)
+	AND SKD_DIR_CD = SUBSTR(@[vvd],9,1)
+	AND TURN_PORT_IND_CD IN ('Y','N') CONNECT BY PRIOR TURN_SKD_VOY_NO = SKD_VOY_NO
+	AND PRIOR TURN_SKD_DIR_CD = SKD_DIR_CD
+	AND PRIOR VSL_CD = VSL_CD
+	AND TURN_PORT_IND_CD IN ('Y','N')
+	AND LEVEL <= FLOOR(TO_NUMBER('3')/2)
+), NEXT_VVD AS (
+SELECT
+     AA.VSL_CD
+    ,AA.SKD_VOY_NO
+    ,AA.SKD_DIR_CD
+    FROM
+    (
+            SELECT       
+            A.*
+            FROM
+            (
+                SELECT
+                VSL_CD, SKD_VOY_NO, SKD_DIR_CD, MAX(VPS_ETD_DT) AS VPS_ETD_DT
+                FROM VSK_VSL_PORT_SKD
+                WHERE VSL_CD = SUBSTR(@[vvd],1,4)
+                AND SKD_VOY_NO >= SUBSTR(@[vvd],5,4)
+                AND TURN_PORT_IND_CD IN ('Y','N')
+                GROUP BY VSL_CD, SKD_VOY_NO, SKD_DIR_CD
+            ) A 
+            WHERE 1=1
+            AND VPS_ETD_DT >  ( SELECT MAX(VPS_ETD_DT) 
+                                  FROM VSK_VSL_PORT_SKD
+                                  WHERE VSL_CD = SUBSTR(@[vvd],1,4)
+                                  AND SKD_VOY_NO = SUBSTR(@[vvd],5,4)
+                                  AND SKD_DIR_CD = SUBSTR(@[vvd],9,1)
+                              )                
+            ORDER BY VPS_ETD_DT ASC
+    ) AA
+    WHERE ROWNUM =1    
+), CTM AS (
+    SELECT *
+    FROM CTM_MOVEMENT A  
+    WHERE 1=1
+    AND A.MVMT_STS_CD IN ('VL','VD')
+    AND (
+            (  A.CRNT_VSL_CD = (SELECT VSL_CD FROM PRE_VVD) AND A.CRNT_SKD_VOY_NO = (SELECT SKD_VOY_NO FROM PRE_VVD) AND A.CRNT_SKD_DIR_CD = (SELECT SKD_DIR_CD FROM PRE_VVD) )
+            OR
+            (  A.CRNT_VSL_CD = SUBSTR(@[vvd],1,4) AND A.CRNT_SKD_VOY_NO = SUBSTR(@[vvd],5,4) AND A.CRNT_SKD_DIR_CD = SUBSTR(@[vvd],9,1) )        
+            OR        
+            (  A.CRNT_VSL_CD = (SELECT VSL_CD FROM NEXT_VVD) AND A.CRNT_SKD_VOY_NO = (SELECT SKD_VOY_NO FROM NEXT_VVD) AND A.CRNT_SKD_DIR_CD = (SELECT SKD_DIR_CD FROM NEXT_VVD) )
+        )  
+), MVMT_DT AS (
+    SELECT
+     AA.CNTR_NO
+    ,AA.CNMV_YR
+    ,AA.CNMV_ID_NO
+    ,AA.MVMT_STS_CD
+    ,AA.CNMV_EVNT_DT
+    ,AA.ORG_YD_CD
+    ,AA.CRNT_VSL_CD
+    ,AA.CRNT_SKD_VOY_NO
+    ,AA.CRNT_SKD_DIR_CD     
+    ,MAX(CLPT_IND_SEQ2) AS CLPT_IND_SEQ2
+    ,MAX(CLPT_IND_SEQ3) AS CLPT_IND_SEQ3
+    ,MAX(CNMV_DT) AS CNMV_DT
+    FROM
+    (
+        SELECT 
+             A.CNTR_NO
+            ,A.CNMV_YR
+            ,A.CNMV_ID_NO
+            ,A.MVMT_STS_CD
+            ,TO_CHAR(A.CNMV_EVNT_DT,'YYYYMMDDHH24MISS') AS CNMV_EVNT_DT ---
+            ,A.ORG_YD_CD
+            ,A.CRNT_VSL_CD
+            ,A.CRNT_SKD_VOY_NO
+            ,A.CRNT_SKD_DIR_CD
+            ,V.VPS_ETA_DT     
+            ,V.VPS_ETD_DT
+            ,V.CLPT_IND_SEQ
+            ,V.YD_CD        
+            ,(  CASE WHEN TO_NUMBER(TO_CHAR(A.CNMV_EVNT_DT,'YYYYMMDDHH24MISS')) >= TO_NUMBER(TO_CHAR(V.VPS_ETA_DT,'YYYYMMDDHH24MISS'))    AND 
+                          TO_NUMBER(TO_CHAR(A.CNMV_EVNT_DT,'YYYYMMDDHH24MISS')) <= TO_NUMBER(TO_CHAR(V.VPS_ETD_DT,'YYYYMMDDHH24MISS')) 
+                     THEN V.CLPT_IND_SEQ
+                     ELSE '0'
+                     END 
+             ) CLPT_IND_SEQ2            
+            ,J.CLPT_IND_SEQ AS CLPT_IND_SEQ3
+			,TO_CHAR(J.CNMV_DT,'YYYYMMDDHH24MISS') AS CNMV_DT -----
+        FROM CTM A, VSK_VSL_PORT_SKD V, JOO_CNTR_MVMT_EVNT_DT J
+        WHERE 1=1 
+        AND A.CNTR_NO = J.CNTR_NO(+)
+        AND A.CNMV_YR = J.CNMV_YR(+)
+        AND A.CNMV_ID_NO = J.CNMV_ID_NO(+)    
+        AND V.VSL_CD = A.CRNT_VSL_CD
+        AND V.SKD_VOY_NO = A.CRNT_SKD_VOY_NO
+        AND V.SKD_DIR_CD = A.CRNT_SKD_DIR_CD
+        AND V.VPS_PORT_CD = SUBSTR(A.ORG_YD_CD,1,5)
+        AND V.YD_CD = A.ORG_YD_CD     
+		--AND J.CLPT_IND_SEQ IS NULL
+        --AND J.CLPT_IND_SEQ IS NOT NULL
+		#if (${inp_yd_cd} != '')
+		AND A.ORG_YD_CD = @[inp_yd_cd]
+		#end
+     ) AA
+     WHERE 1=1
+     GROUP BY CNTR_NO, CNMV_YR, CNMV_ID_NO, MVMT_STS_CD, CNMV_EVNT_DT, ORG_YD_CD, CRNT_VSL_CD, CRNT_SKD_VOY_NO, CRNT_SKD_DIR_CD
+), MVMT_DT2 AS (
+SELECT DISTINCT
+     A.CNTR_NO
+    ,A.CNMV_YR
+    ,A.CNMV_ID_NO
+    ,A.MVMT_STS_CD
+    ,A.CNMV_EVNT_DT
+    ,A.ORG_YD_CD    AS INP_YD_CD
+    ,A.CRNT_VSL_CD
+    ,A.CRNT_SKD_VOY_NO
+    ,A.CRNT_SKD_DIR_CD
+    ,A.CLPT_IND_SEQ2
+    ,A.CLPT_IND_SEQ3
+    ,DECODE(A.CLPT_IND_SEQ2,'0',A.CNMV_DT,A.CNMV_EVNT_DT) AS CNMV_DT
+FROM MVMT_DT A
+WHERE 1=1
+#if (${clpt_ind_seq2} != '')
+AND A.CLPT_IND_SEQ2 = TO_NUMBER(@[clpt_ind_seq2])
+#end
+)
+SELECT A.*
+FROM MVMT_DT2 A
+ORDER BY A.CNMV_EVNT_DT ASC			]]></sql>
+			<params>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="inp_yd_cd" type="12" value="" out="N"/>
+				<param name="clpt_ind_seq2" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,354 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="MTYEquipmentForecastDBDAOsearchOpmgFcstReference2BkgRSQL">
+			<desc><![CDATA[OPMG Forecast 화면의 Reference 2 의 BKG 데이터를 조회한다.]]></desc>
+			<sql><![CDATA[
+/*
+    -- FLWMAD : Feeder Arrival at POL
+    -- FORRAD : Rail O/B Arrival
+    -- FOTMAD : Truck Gate In to O/B Terminal
+    -- FOTRAD : Truck Gate In to O/B Rail Ramp
+    -- FOTYAD : Truck Gate In to O/B CY
+*/
+
+WITH LV_REPO_IN_WEEK AS 
+(
+    SELECT TO_DATE(A.WK_ST_DT, 'YYYYMMDD')-10   WK_ST_DT,
+           TO_DATE(A.WK_END_DT,'YYYYMMDD')+30   WK_ED_DT  -- +4WEEK
+    FROM EQR_WK_PRD A
+    WHERE A.PLN_YR = SUBSTR(@[repo_pln_yrwk],1,4)  -- repo week 검색값
+    AND   A.PLN_WK = SUBSTR(@[repo_pln_yrwk],5,2)  -- repo week 검색값
+)
+
+,LV_YD_LIST AS
+(
+	SELECT /*+ use_nl(a b c) */ 
+	       C.YD_CD
+	     , A.SCC_CD
+	FROM MDM_EQ_ORZ_CHT A
+	    ,MDM_LOCATION B
+	    ,MDM_YARD C
+
+#if(${loc_grp_cd}=='L')
+	WHERE A.LCC_CD = @[loc_cd] -- LOC CODE
+#elseif(${loc_grp_cd}=='E')
+	WHERE A.ECC_CD = @[loc_cd] -- LOC CODE
+#elseif(${loc_grp_cd}=='S')
+	WHERE A.SCC_CD = @[loc_cd] -- LOC CODE
+#end
+	AND   A.SCC_CD = B.SCC_CD
+	AND   B.LOC_CD = C.LOC_CD
+	AND   C.DELT_FLG = 'N'
+)
+
+,DUMMY_BKG AS 
+(  
+    SELECT B.COP_NO
+          ,B.COP_DTL_SEQ
+          ,B.ACT_CD
+          ,A.ESTM_DT
+          ,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE TO_CHAR(A.ESTM_DT, 'YYYYMMDD') BETWEEN WK_ST_DT AND WK_END_DT) ESTM_WEEK
+          ,A.ACT_DT
+          ,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE TO_CHAR(A.ACT_DT, 'YYYYMMDD') BETWEEN WK_ST_DT AND WK_END_DT) ACT_WEEK
+          
+          ,B.ACT_STS_CD
+          -- 2: OP
+          -- 3: OC
+          -- 4: REST
+          ,DECODE(B.ACT_CD    , 'MOTYDO', 2
+                              , 'FLWMAD', 3  
+                              , 'FORRAD', 3  
+                              , 'FOTMAD', 3  
+                              , 'FOTRAD', 3  
+                              , 'FOTYAD', 3  
+                              , 4
+                 ) OPOC_DIV
+          
+          ,A.BKG_NO
+          ,A.CNTR_TPSZ_CD
+          ,A.CNTR_NO
+    FROM
+    (
+        SELECT COP_NO
+              ,COP_DTL_SEQ
+              ,ACT_CD
+              ,ESTM_DT
+              ,ACT_DT
+              ,ACT_STS_CD
+              ,BKG_NO
+              ,CNTR_TPSZ_CD
+              ,CNTR_NO
+              ,NVL(LAST_ACT_CD, 'MOTYDO') LAST_ACT_CD
+        FROM
+        (    
+            SELECT A.COP_NO
+                  ,A.COP_DTL_SEQ
+                  ,A.ACT_CD
+                  ,A.ESTM_DT
+                  ,A.ACT_DT              
+                  ,A.ACT_STS_CD
+                  
+                  ,B.BKG_NO
+                  ,B.CNTR_TPSZ_CD
+                  ,B.CNTR_NO
+        
+                  ,(
+                      SELECT /*+ INDEX_DESC(A1 XPKSCE_COP_DTL) */
+                             NVL(A1.ACT_CD, 'MOTYDO') ACT_CD
+                      FROM SCE_COP_DTL A1
+                      WHERE A.COP_NO      = A1.COP_NO
+                      AND   A1.ACT_STS_CD = 'F' -- FINISH
+                      AND   A1.ACT_DT IS NOT NULL
+                      AND   ROWNUM = 1                                     -- 하드코딩
+                  ) LAST_ACT_CD
+            FROM  LV_YD_LIST Y
+                 ,LV_REPO_IN_WEEK F 
+                 ,SCE_COP_DTL A
+                 ,SCE_COP_HDR B 
+            WHERE A.COP_NO      = B.COP_NO
+            AND   A.ACT_CD      = 'MOTYDO'                  -- 하드코딩, (OP TTL : O/B Empty Container Released)
+            AND   A.ACT_STS_CD IN     ('N','C', 'F')        -- 하드코딩, C : CURRENT, N : NEXT, F : FINISH
+            AND   B.COP_STS_CD NOT IN ('X', 'O')            -- 하드코딩, X : CANCEL, O : ORPHANED
+            AND   A.ESTM_DT  BETWEEN  F.WK_ST_DT+0.0 AND F.WK_ED_DT +0.99999    --+,-30일, 하드코딩
+            AND   Y.YD_CD = A.NOD_CD 
+	    )
+    ) A
+    ,SCE_COP_DTL B
+    WHERE A.COP_NO = B.COP_NO
+    AND   A.LAST_ACT_CD = B.ACT_CD
+     
+)
+
+
+SELECT A.NAME
+      ,A.SUB_NAME
+      ,A.CODE
+      ,@[w1] W1_WK
+      ,@[w2] W2_WK
+      ,@[w3] W3_WK
+      ,@[w4] W4_WK
+      ,DECODE(B.CODE,1,B.W1_D2,DECODE(@[w1_f],'Y',NVL(B.W1_D2,0),'')) W1_D2
+      ,DECODE(B.CODE,1,B.W1_D4,DECODE(@[w1_f],'Y',NVL(B.W1_D4,0),'')) W1_D4
+      ,DECODE(B.CODE,1,B.W1_D5,DECODE(@[w1_f],'Y',NVL(B.W1_D5,0),'')) W1_D5
+      ,DECODE(B.CODE,1,B.W1_D7,DECODE(@[w1_f],'Y',NVL(B.W1_D7,0),'')) W1_D7
+      ,DECODE(B.CODE,1,B.W1_R2,DECODE(@[w1_f],'Y',NVL(B.W1_R2,0),'')) W1_R2
+      ,DECODE(B.CODE,1,B.W1_R5,DECODE(@[w1_f],'Y',NVL(B.W1_R5,0),'')) W1_R5
+      ,DECODE(B.CODE,1,B.W1_R9,DECODE(@[w1_f],'Y',NVL(B.W1_R9,0),'')) W1_R9
+      ,DECODE(B.CODE,1,B.W1_O2,DECODE(@[w1_f],'Y',NVL(B.W1_O2,0),'')) W1_O2
+      ,DECODE(B.CODE,1,B.W1_S2,DECODE(@[w1_f],'Y',NVL(B.W1_S2,0),'')) W1_S2
+      ,DECODE(B.CODE,1,B.W1_O4,DECODE(@[w1_f],'Y',NVL(B.W1_O4,0),'')) W1_O4
+      ,DECODE(B.CODE,1,B.W1_S4,DECODE(@[w1_f],'Y',NVL(B.W1_S4,0),'')) W1_S4
+      ,DECODE(B.CODE,1,B.W1_F2,DECODE(@[w1_f],'Y',NVL(B.W1_F2,0),'')) W1_F2
+      ,DECODE(B.CODE,1,B.W1_A2,DECODE(@[w1_f],'Y',NVL(B.W1_A2,0),'')) W1_A2
+      ,DECODE(B.CODE,1,B.W1_F4,DECODE(@[w1_f],'Y',NVL(B.W1_F4,0),'')) W1_F4
+      ,DECODE(B.CODE,1,B.W1_A4,DECODE(@[w1_f],'Y',NVL(B.W1_A4,0),'')) W1_A4
+      ,DECODE(B.CODE,1,B.W1_A5,DECODE(@[w1_f],'Y',NVL(B.W1_A5,0),'')) W1_A5
+      ,DECODE(B.CODE,1,B.W1_F5,DECODE(@[w1_f],'Y',NVL(B.W1_F5,0),'')) W1_F5
+      ,DECODE(B.CODE,1,B.W1_O5,DECODE(@[w1_f],'Y',NVL(B.W1_O5,0),'')) W1_O5 
+
+      ,DECODE(B.CODE,1,B.W2_D2,DECODE(@[w2_f],'Y',NVL(B.W2_D2,0),'')) W2_D2
+      ,DECODE(B.CODE,1,B.W2_D4,DECODE(@[w2_f],'Y',NVL(B.W2_D4,0),'')) W2_D4
+      ,DECODE(B.CODE,1,B.W2_D5,DECODE(@[w2_f],'Y',NVL(B.W2_D5,0),'')) W2_D5
+      ,DECODE(B.CODE,1,B.W2_D7,DECODE(@[w2_f],'Y',NVL(B.W2_D7,0),'')) W2_D7
+      ,DECODE(B.CODE,1,B.W2_R2,DECODE(@[w2_f],'Y',NVL(B.W2_R2,0),'')) W2_R2
+      ,DECODE(B.CODE,1,B.W2_R5,DECODE(@[w2_f],'Y',NVL(B.W2_R5,0),'')) W2_R5
+      ,DECODE(B.CODE,1,B.W2_R9,DECODE(@[w2_f],'Y',NVL(B.W2_R9,0),'')) W2_R9
+      ,DECODE(B.CODE,1,B.W2_O2,DECODE(@[w2_f],'Y',NVL(B.W2_O2,0),'')) W2_O2
+      ,DECODE(B.CODE,1,B.W2_S2,DECODE(@[w2_f],'Y',NVL(B.W2_S2,0),'')) W2_S2
+      ,DECODE(B.CODE,1,B.W2_O4,DECODE(@[w2_f],'Y',NVL(B.W2_O4,0),'')) W2_O4
+      ,DECODE(B.CODE,1,B.W2_S4,DECODE(@[w2_f],'Y',NVL(B.W2_S4,0),'')) W2_S4
+      ,DECODE(B.CODE,1,B.W2_F2,DECODE(@[w2_f],'Y',NVL(B.W2_F2,0),'')) W2_F2
+      ,DECODE(B.CODE,1,B.W2_A2,DECODE(@[w2_f],'Y',NVL(B.W2_A2,0),'')) W2_A2
+      ,DECODE(B.CODE,1,B.W2_F4,DECODE(@[w2_f],'Y',NVL(B.W2_F4,0),'')) W2_F4
+      ,DECODE(B.CODE,1,B.W2_A4,DECODE(@[w2_f],'Y',NVL(B.W2_A4,0),'')) W2_A4
+      ,DECODE(B.CODE,1,B.W2_A5,DECODE(@[w2_f],'Y',NVL(B.W2_A5,0),'')) W2_A5
+      ,DECODE(B.CODE,1,B.W2_F5,DECODE(@[w2_f],'Y',NVL(B.W2_F5,0),'')) W2_F5
+      ,DECODE(B.CODE,1,B.W2_O5,DECODE(@[w2_f],'Y',NVL(B.W2_O5,0),'')) W2_O5
+      
+      ,DECODE(B.CODE,1,B.W3_D2,DECODE(@[w3_f],'Y',NVL(B.W3_D2,0),'')) W3_D2
+      ,DECODE(B.CODE,1,B.W3_D4,DECODE(@[w3_f],'Y',NVL(B.W3_D4,0),'')) W3_D4
+      ,DECODE(B.CODE,1,B.W3_D5,DECODE(@[w3_f],'Y',NVL(B.W3_D5,0),'')) W3_D5
+      ,DECODE(B.CODE,1,B.W3_D7,DECODE(@[w3_f],'Y',NVL(B.W3_D7,0),'')) W3_D7
+      ,DECODE(B.CODE,1,B.W3_R2,DECODE(@[w3_f],'Y',NVL(B.W3_R2,0),'')) W3_R2
+      ,DECODE(B.CODE,1,B.W3_R5,DECODE(@[w3_f],'Y',NVL(B.W3_R5,0),'')) W3_R5
+      ,DECODE(B.CODE,1,B.W3_R9,DECODE(@[w3_f],'Y',NVL(B.W3_R9,0),'')) W3_R9
+      ,DECODE(B.CODE,1,B.W3_O2,DECODE(@[w3_f],'Y',NVL(B.W3_O2,0),'')) W3_O2
+      ,DECODE(B.CODE,1,B.W3_S2,DECODE(@[w3_f],'Y',NVL(B.W3_S2,0),'')) W3_S2
+      ,DECODE(B.CODE,1,B.W3_O4,DECODE(@[w3_f],'Y',NVL(B.W3_O4,0),'')) W3_O4
+      ,DECODE(B.CODE,1,B.W3_S4,DECODE(@[w3_f],'Y',NVL(B.W3_S4,0),'')) W3_S4
+      ,DECODE(B.CODE,1,B.W3_F2,DECODE(@[w3_f],'Y',NVL(B.W3_F2,0),'')) W3_F2
+      ,DECODE(B.CODE,1,B.W3_A2,DECODE(@[w3_f],'Y',NVL(B.W3_A2,0),'')) W3_A2
+      ,DECODE(B.CODE,1,B.W3_F4,DECODE(@[w3_f],'Y',NVL(B.W3_F4,0),'')) W3_F4
+      ,DECODE(B.CODE,1,B.W3_A4,DECODE(@[w3_f],'Y',NVL(B.W3_A4,0),'')) W3_A4
+      ,DECODE(B.CODE,1,B.W3_A5,DECODE(@[w3_f],'Y',NVL(B.W3_A5,0),'')) W3_A5
+      ,DECODE(B.CODE,1,B.W3_F5,DECODE(@[w3_f],'Y',NVL(B.W3_F5,0),'')) W3_F5
+      ,DECODE(B.CODE,1,B.W3_O5,DECODE(@[w3_f],'Y',NVL(B.W3_O5,0),'')) W3_O5
+      
+      ,DECODE(B.CODE,1,B.W4_D2,DECODE(@[w4_f],'Y',NVL(B.W4_D2,0),'')) W4_D2
+      ,DECODE(B.CODE,1,B.W4_D4,DECODE(@[w4_f],'Y',NVL(B.W4_D4,0),'')) W4_D4
+      ,DECODE(B.CODE,1,B.W4_D5,DECODE(@[w4_f],'Y',NVL(B.W4_D5,0),'')) W4_D5
+      ,DECODE(B.CODE,1,B.W4_D7,DECODE(@[w4_f],'Y',NVL(B.W4_D7,0),'')) W4_D7
+      ,DECODE(B.CODE,1,B.W4_R2,DECODE(@[w4_f],'Y',NVL(B.W4_R2,0),'')) W4_R2
+      ,DECODE(B.CODE,1,B.W4_R5,DECODE(@[w4_f],'Y',NVL(B.W4_R5,0),'')) W4_R5
+      ,DECODE(B.CODE,1,B.W4_R9,DECODE(@[w4_f],'Y',NVL(B.W4_R9,0),'')) W4_R9
+      ,DECODE(B.CODE,1,B.W4_O2,DECODE(@[w4_f],'Y',NVL(B.W4_O2,0),'')) W4_O2
+      ,DECODE(B.CODE,1,B.W4_S2,DECODE(@[w4_f],'Y',NVL(B.W4_S2,0),'')) W4_S2
+      ,DECODE(B.CODE,1,B.W4_O4,DECODE(@[w4_f],'Y',NVL(B.W4_O4,0),'')) W4_O4
+      ,DECODE(B.CODE,1,B.W4_S4,DECODE(@[w4_f],'Y',NVL(B.W4_S4,0),'')) W4_S4
+      ,DECODE(B.CODE,1,B.W4_F2,DECODE(@[w4_f],'Y',NVL(B.W4_F2,0),'')) W4_F2
+      ,DECODE(B.CODE,1,B.W4_A2,DECODE(@[w4_f],'Y',NVL(B.W4_A2,0),'')) W4_A2
+      ,DECODE(B.CODE,1,B.W4_F4,DECODE(@[w4_f],'Y',NVL(B.W4_F4,0),'')) W4_F4
+      ,DECODE(B.CODE,1,B.W4_A4,DECODE(@[w4_f],'Y',NVL(B.W4_A4,0),'')) W4_A4
+      ,DECODE(B.CODE,1,B.W4_A5,DECODE(@[w4_f],'Y',NVL(B.W4_A5,0),'')) W4_A5
+      ,DECODE(B.CODE,1,B.W4_F5,DECODE(@[w4_f],'Y',NVL(B.W4_F5,0),'')) W4_F5
+      ,DECODE(B.CODE,1,B.W4_O5,DECODE(@[w4_f],'Y',NVL(B.W4_O5,0),'')) W4_O5            
+FROM
+(
+    SELECT 1 CODE, 'OP' NAME, 'TTL'          SUB_NAME FROM DUAL 
+    UNION ALL
+    SELECT 2 CODE, 'OP' NAME, 'MT Picked Up' SUB_NAME FROM DUAL 
+    UNION ALL
+    SELECT 3 CODE, 'OP' NAME, 'Full Gate-In' SUB_NAME FROM DUAL 
+    UNION ALL
+    SELECT 4 CODE, 'OP' NAME, 'The rest'     SUB_NAME FROM DUAL     
+) A
+,(
+      
+    ---- BKG TOTAL, OP, OC -------------------------------------------
+    --- TOTAL   
+    SELECT CODE
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'D2', CNTR_QTY))),0) W1_D2
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'D4', CNTR_QTY))),0) W1_D4
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'D5', CNTR_QTY))),0) W1_D5
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'D7', CNTR_QTY))),0) W1_D7 
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'R2', CNTR_QTY))),0) W1_R2
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'R5', CNTR_QTY))),0) W1_R5
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'R9', CNTR_QTY))),0) W1_R9
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'O2', CNTR_QTY))),0) W1_O2 
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'S2', CNTR_QTY))),0) W1_S2
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'O4', CNTR_QTY))),0) W1_O4
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'S4', CNTR_QTY))),0) W1_S4
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'F2', CNTR_QTY))),0) W1_F2 
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'A2', CNTR_QTY))),0) W1_A2
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'F4', CNTR_QTY))),0) W1_F4
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'A4', CNTR_QTY))),0) W1_A4
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'A5', CNTR_QTY))),0) W1_A5
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'F5', CNTR_QTY))),0) W1_F5 
+          ,NVL(SUM(DECODE(WEEK, @[w1], DECODE(CNTR_TPSZ_CD, 'O5', CNTR_QTY))),0) W1_O5  
+          
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'D2', CNTR_QTY))),0) W2_D2
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'D4', CNTR_QTY))),0) W2_D4
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'D5', CNTR_QTY))),0) W2_D5
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'D7', CNTR_QTY))),0) W2_D7 
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'R2', CNTR_QTY))),0) W2_R2
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'R5', CNTR_QTY))),0) W2_R5
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'R9', CNTR_QTY))),0) W2_R9
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'O2', CNTR_QTY))),0) W2_O2 
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'S2', CNTR_QTY))),0) W2_S2
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'O4', CNTR_QTY))),0) W2_O4
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'S4', CNTR_QTY))),0) W2_S4
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'F2', CNTR_QTY))),0) W2_F2 
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'A2', CNTR_QTY))),0) W2_A2
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'F4', CNTR_QTY))),0) W2_F4
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'A4', CNTR_QTY))),0) W2_A4
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'A5', CNTR_QTY))),0) W2_A5
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'F5', CNTR_QTY))),0) W2_F5 
+          ,NVL(SUM(DECODE(WEEK, @[w2], DECODE(CNTR_TPSZ_CD, 'O5', CNTR_QTY))),0) W2_O5 
+          
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'D2', CNTR_QTY))),0) W3_D2
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'D4', CNTR_QTY))),0) W3_D4
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'D5', CNTR_QTY))),0) W3_D5
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'D7', CNTR_QTY))),0) W3_D7 
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'R2', CNTR_QTY))),0) W3_R2
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'R5', CNTR_QTY))),0) W3_R5
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'R9', CNTR_QTY))),0) W3_R9
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'O2', CNTR_QTY))),0) W3_O2 
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'S2', CNTR_QTY))),0) W3_S2
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'O4', CNTR_QTY))),0) W3_O4
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'S4', CNTR_QTY))),0) W3_S4
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'F2', CNTR_QTY))),0) W3_F2 
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'A2', CNTR_QTY))),0) W3_A2
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'F4', CNTR_QTY))),0) W3_F4
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'A4', CNTR_QTY))),0) W3_A4
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'A5', CNTR_QTY))),0) W3_A5
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'F5', CNTR_QTY))),0) W3_F5 
+          ,NVL(SUM(DECODE(WEEK, @[w3], DECODE(CNTR_TPSZ_CD, 'O5', CNTR_QTY))),0) W3_O5 
+          
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'D2', CNTR_QTY))),0) W4_D2
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'D4', CNTR_QTY))),0) W4_D4
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'D5', CNTR_QTY))),0) W4_D5
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'D7', CNTR_QTY))),0) W4_D7 
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'R2', CNTR_QTY))),0) W4_R2
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'R5', CNTR_QTY))),0) W4_R5
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'R9', CNTR_QTY))),0) W4_R9
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'O2', CNTR_QTY))),0) W4_O2 
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'S2', CNTR_QTY))),0) W4_S2
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'O4', CNTR_QTY))),0) W4_O4
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'S4', CNTR_QTY))),0) W4_S4
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'F2', CNTR_QTY))),0) W4_F2 
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'A2', CNTR_QTY))),0) W4_A2
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'F4', CNTR_QTY))),0) W4_F4
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'A4', CNTR_QTY))),0) W4_A4
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'A5', CNTR_QTY))),0) W4_A5
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'F5', CNTR_QTY))),0) W4_F5 
+          ,NVL(SUM(DECODE(WEEK, @[w4], DECODE(CNTR_TPSZ_CD, 'O5', CNTR_QTY))),0) W4_O5                                          
+    FROM
+    (      
+
+        SELECT DECODE(ACT_WEEK, NULL, ESTM_WEEK, ACT_WEEK ) WEEK 
+              ,1 CODE 
+              ,CNTR_TPSZ_CD
+              ,COUNT(CNTR_NO ) CNTR_QTY
+        FROM DUMMY_BKG 
+        GROUP BY DECODE(ACT_WEEK, NULL, ESTM_WEEK, ACT_WEEK )
+                ,CNTR_TPSZ_CD
+        UNION ALL
+        SELECT DECODE(ACT_WEEK, NULL, ESTM_WEEK, ACT_WEEK ) WEEK 
+              ,2 CODE 
+              ,CNTR_TPSZ_CD
+              ,COUNT(CNTR_NO ) CNTR_QTY 
+        FROM DUMMY_BKG 
+        WHERE OPOC_DIV = 2
+        GROUP BY DECODE(ACT_WEEK, NULL, ESTM_WEEK, ACT_WEEK )
+                ,CNTR_TPSZ_CD  
+        UNION ALL
+        SELECT DECODE(ACT_WEEK, NULL, ESTM_WEEK, ACT_WEEK ) WEEK 
+              ,3 CODE 
+              ,CNTR_TPSZ_CD
+              ,COUNT(CNTR_NO ) CNTR_QTY 
+        FROM DUMMY_BKG 
+        WHERE OPOC_DIV = 3
+        GROUP BY DECODE(ACT_WEEK, NULL, ESTM_WEEK, ACT_WEEK )
+                ,CNTR_TPSZ_CD        
+        UNION ALL
+        SELECT DECODE(ACT_WEEK, NULL, ESTM_WEEK, ACT_WEEK ) WEEK 
+              ,4 CODE 
+              ,CNTR_TPSZ_CD
+              ,COUNT(CNTR_NO ) CNTR_QTY 
+        FROM DUMMY_BKG 
+        WHERE OPOC_DIV = 4
+        GROUP BY DECODE(ACT_WEEK, NULL, ESTM_WEEK, ACT_WEEK )
+                ,CNTR_TPSZ_CD              
+        
+    )
+    GROUP BY CODE
+
+) B
+WHERE A.CODE = B.CODE(+)
+ORDER BY A.CODE			]]></sql>
+			<params>
+				<param name="repo_pln_yrwk" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="w1" type="12" value="" out="N"/>
+				<param name="w2" type="12" value="" out="N"/>
+				<param name="w3" type="12" value="" out="N"/>
+				<param name="w4" type="12" value="" out="N"/>
+				<param name="w1_f" type="12" value="" out="N"/>
+				<param name="w2_f" type="12" value="" out="N"/>
+				<param name="w3_f" type="12" value="" out="N"/>
+				<param name="w4_f" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

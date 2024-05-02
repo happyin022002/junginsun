@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="Edi315SendDBDAOSearch315DetailListRSQL">
+			<desc><![CDATA[Edi315SendDBDAOSearch315DetailListRSQL]]></desc>
+			<sql><![CDATA[
+WITH A AS (SELECT DISTINCT  
+                  G.EDI_GRP_CD EDI_GRP_CD,  
+                  G.CUST_TRD_PRNR_ID CUST_TP_ID,  
+                  G.PROV_TRD_PRNR_ID HOST_TP_ID,    
+                  MAX(COALESCE(E.E, E.S, E.C, E.F, E.N, E.A)) CUST_CNT_CD  
+             FROM (SELECT E.EDI_GRP_CD EDI_GROUP_CD, E.CGO_TRC_SVC_FLG, E.IB_SVC_FLG,
+                          MAX(DECODE(B.BKG_CUST_TP_CD,'E',LPAD(B.CUST_CNT_CD,2,' ')||LPAD(B.CUST_SEQ,6,'0'))) E,
+                          MAX(DECODE(B.BKG_CUST_TP_CD,'S',LPAD(B.CUST_CNT_CD,2,' ')||LPAD(B.CUST_SEQ,6,'0'))) S,
+                          MAX(DECODE(B.BKG_CUST_TP_CD,'C',LPAD(B.CUST_CNT_CD,2,' ')||LPAD(B.CUST_SEQ,6,'0'))) C,
+                          MAX(DECODE(B.BKG_CUST_TP_CD,'F',LPAD(B.CUST_CNT_CD,2,' ')||LPAD(B.CUST_SEQ,6,'0'))) F,
+                          MAX(DECODE(B.BKG_CUST_TP_CD,'N',LPAD(B.CUST_CNT_CD,2,' ')||LPAD(B.CUST_SEQ,6,'0'))) N,
+                          MAX(DECODE(B.BKG_CUST_TP_CD,'A',LPAD(B.CUST_CNT_CD,2,' ')||LPAD(B.CUST_SEQ,6,'0'))) A
+                     FROM BKG_CUSTOMER B, EDI_GRP_CUST E  
+                    WHERE B.BKG_NO         =  @[bkg_no]
+                      AND B.CUST_CNT_CD    = E.CUST_CNT_CD  
+                      AND B.CUST_SEQ        = E.CUST_SEQ 
+                      AND NVL(E.BKG_CUST_TP_DESC, B.BKG_CUST_TP_CD) LIKE '%'||B.BKG_CUST_TP_CD||'%'
+                      GROUP BY E.EDI_GRP_CD, CGO_TRC_SVC_FLG, IB_SVC_FLG
+                    UNION  
+                   SELECT E.EDI_GRP_CD EDI_GROUP_CD, E.CGO_TRC_SVC_FLG, E.IB_SVC_FLG
+                          ,'','','','','',''
+                     FROM BKG_BOOKING B, EDI_GRP_CUST E  
+                    WHERE B.BKG_NO        = @[bkg_no]
+                      AND E.SC_NO         = DECODE(E.BKG_CTRT_DIV_CD,'1',B.SC_NO,'2',B.RFA_NO)  
+                   ) E, EDI_GROUP G  
+             WHERE G.EDI_GRP_CD = E.EDI_GROUP_CD  
+               AND G.DELT_FLG <> 'Y'  
+               AND E.CGO_TRC_SVC_FLG <> 'N'  
+               AND E.IB_SVC_FLG <> 'Y'
+			 GROUP BY  G.EDI_GRP_CD, G.CUST_TRD_PRNR_ID, G.PROV_TRD_PRNR_ID   
+           )
+    , B AS (SELECT * FROM (SELECT '1' SRC,EDI_STS_SEQ,ORG_EDI_STS_CD ORG_STS,EDI_PRE_STS_CD SEND_STS,EDI_PRE_SAV_FLG SAVE_FLG, PRE_EDI_GRP_CD EDI_GRP_CD
+                             FROM SCE_EDI_MNG_STS
+                            WHERE ORG_EDI_STS_CD = @[edi_status]
+                              AND EDI_PRE_STS_CD IS NOT NULL
+                              AND NVL(EDI_AUTO_SND_FLG, 'N') = 'N'
+                           UNION ALL
+                           SELECT '2' SRC,1,@[edi_status],@[edi_status],'' ,''
+                             FROM  DUAL
+                           UNION ALL
+                           SELECT '3' SRC,EDI_STS_SEQ,ORG_EDI_STS_CD,EDI_PST_STS_CD,EDI_PST_SAV_FLG, PST_EDI_GRP_CD EDI_GRP_CD
+                             FROM SCE_EDI_MNG_STS
+                            WHERE ORG_EDI_STS_CD = @[edi_status]
+                              AND EDI_PST_STS_CD IS NOT NULL
+                              AND NVL(EDI_AUTO_SND_FLG, 'N') = 'N'
+                           UNION ALL
+                           SELECT DISTINCT 'AMS' SRC,0,M.EDI_ORG_STS_CD, M.EDI_EVNT_STS_CD,'' ,M.EDI_GRP_CD-- 추후 EDI_GRP_CD 컬럼 추가 
+                             FROM SCE_EDI_MNG_AMS_STS M , SCE_EDI_SND_RSLT R, SCE_COP_HDR H
+                            WHERE EDI_ORG_STS_CD = @[edi_status]
+                              AND R.BKG_NO =  @[bkg_no]
+                              AND R.CNTR_NO = @[cntr_no] 
+                              AND R.EDI_STS_CD IN M.EDI_PRE_SNT_STS_CD
+							  AND NVL2(M.EDI_GRP_CD, R.EDI_GRP_CD, '1') = NVL2(M.EDI_GRP_CD, M.EDI_GRP_CD, '1') -- AV Logic 수정 (2014.12.23)
+                              AND H.BKG_NO =  R.BKG_NO
+                              AND H.CNTR_NO = R.CNTR_NO
+                              AND COP_IB_RAIL_CHK_CD = SUBSTR(H.COP_RAIL_CHK_CD,2,1)
+                           UNION ALL
+                           SELECT 'COP' SRC, 0,@[edi_status], ACT_CD ,''  ,''
+                             FROM SCE_COP_DTL
+                            WHERE COP_NO = @[cop_no]
+                              AND COP_DTL_SEQ = @[cop_dtl_seq]
+                           )
+            ORDER BY SRC,EDI_STS_SEQ
+           )
+      -- 2013.01.31 자동전송 EDI STATUS 에 다른 EDI STATUS 자동전송 기능 추가 
+      , D AS (SELECT * FROM (SELECT '4' SRC,EDI_STS_SEQ,ORG_EDI_STS_CD ORG_STS,EDI_PRE_STS_CD SEND_STS,EDI_PRE_SAV_FLG SAVE_FLG, PRE_EDI_GRP_CD EDI_GRP_CD
+                               FROM SCE_EDI_MNG_STS
+                              WHERE NVL(EDI_AUTO_SND_FLG, 'N') = 'Y'
+                                AND EDI_PRE_STS_CD IS NOT NULL
+                             UNION ALL
+                             SELECT '5' SRC,EDI_STS_SEQ,ORG_EDI_STS_CD,EDI_PST_STS_CD,EDI_PST_SAV_FLG, PST_EDI_GRP_CD EDI_GRP_CD
+                               FROM SCE_EDI_MNG_STS
+                              WHERE NVL(EDI_AUTO_SND_FLG, 'N') = 'Y'
+                                AND EDI_PST_STS_CD IS NOT NULL                           
+                            )
+               ORDER BY SRC,EDI_STS_SEQ
+           )
+           
+SELECT TO_CHAR(SYSDATE , 'YYYYMMDD') RCV_DT
+     , SCE_EDI_HIS_DTL_SEQ.NEXTVAL RCV_DTL_SEQ
+     , TAG.*
+  FROM (
+        SELECT ORG.* 
+         FROM (SELECT A.EDI_GRP_CD
+                    , A.HOST_TP_ID
+                    , A.CUST_TP_ID   
+                    , A.CUST_CNT_CD CUST_NO
+                    , B.ORG_STS			ORG_EDI_STS
+                    , CASE WHEN NVL(B.SAVE_FLG,'N')    = 'Y' THEN 'Y' 
+                           WHEN NVL(C.EDI_SND_FLG,'N') = 'N' THEN 'Y' 
+                           ELSE 'N'
+                      END LOG_FLG 
+                   , C.EDI_STND_STS_CD 	EDI_STS 
+                   , C.CUST_EDI_STS_CD
+                   , C.CO_DIV_CD
+                   , C.EDI_EVNT_CD
+                   , C.EDI_VSL_TP_CD
+                   , CASE WHEN SUBSTR(NVL(C.EDI_SND_ITVAL_HRMNT,'0'),-1,1) = 'D'
+                            THEN TO_NUMBER(SUBSTR(EDI_SND_ITVAL_HRMNT, 1, LENGTH(EDI_SND_ITVAL_HRMNT)-1)) * 24
+                          ELSE TO_NUMBER(SUBSTR(EDI_SND_ITVAL_HRMNT, 1, LENGTH(EDI_SND_ITVAL_HRMNT)-1))
+                     END EDI_SND_ITVAL_HRMNT 
+                   , EDI_CNTR_SND_TP_CD
+                   , C.ORG_CONTI_DESC
+                   , C.ORG_DEST_CNT_DESC
+                   , C.DEST_CONTI_DESC
+                   , C.DEST_CNT_DESC
+                   , C.EDI_CGO_RMK
+                   , NVL(C.EDI_AUTO_SND_FLG,'N') EDI_AUTO_SND_FLG
+                   , NVL(C.STS_SND_TP_CD,'1') STS_SND_TP_CD
+               FROM A, B, EDI_GRP_CGO C
+              WHERE A.EDI_GRP_CD = C.EDI_GRP_CD
+                AND B.SEND_STS = C.EDI_STND_STS_CD
+          --	AND NVL(C.EDI_SND_FLG,'N') = 'Y'
+                AND NVL(B.EDI_GRP_CD,A.EDI_GRP_CD) = A.EDI_GRP_CD
+              ORDER BY A.EDI_GRP_CD,B.SRC,B.EDI_STS_SEQ 
+              ) ORG
+          WHERE 1=1
+           AND (
+                (ORG_EDI_STS =  'VE' AND EDI_AUTO_SND_FLG = 'Y') OR --예) VE 로 VDL 보내는 경우
+                (ORG_EDI_STS =  'VE' AND EDI_STS = 'VE') OR         --예) 그냥 VE 전송
+                (ORG_EDI_STS <> 'VE')    						    --VE 전송 이외의 케이스
+               )
+#if (${cre_usr_id} == 'APLUNET_HANES')
+	       and cust_tp_id = 'APLUNET_HANES'
+#end          
+        UNION ALL
+        -- 2013.01.31 자동전송 EDI STATUS 에 다른 EDI STATUS 자동전송 기능 추가  
+        SELECT AUT.* 
+         FROM (SELECT A.EDI_GRP_CD
+                    , A.HOST_TP_ID
+                    , A.CUST_TP_ID   
+                    , A.CUST_CNT_CD CUST_NO
+                    , D.ORG_STS			ORG_EDI_STS
+                    , CASE WHEN NVL(D.SAVE_FLG,'N')    = 'Y' THEN 'Y' 
+                           WHEN NVL(C.EDI_SND_FLG,'N') = 'N' THEN 'Y' 
+                           ELSE 'N'
+                      END LOG_FLG 
+                   , C.EDI_STND_STS_CD 	EDI_STS 
+                   , C.CUST_EDI_STS_CD
+                   , C.CO_DIV_CD
+                   , C.EDI_EVNT_CD
+                   , C.EDI_VSL_TP_CD
+                   , CASE WHEN SUBSTR(NVL(C.EDI_SND_ITVAL_HRMNT,'0'),-1,1) = 'D'
+                            THEN TO_NUMBER(SUBSTR(EDI_SND_ITVAL_HRMNT, 1, LENGTH(EDI_SND_ITVAL_HRMNT)-1)) * 24
+                          ELSE TO_NUMBER(SUBSTR(EDI_SND_ITVAL_HRMNT, 1, LENGTH(EDI_SND_ITVAL_HRMNT)-1))
+                     END EDI_SND_ITVAL_HRMNT 
+                   , EDI_CNTR_SND_TP_CD
+                   , C.ORG_CONTI_DESC
+                   , C.ORG_DEST_CNT_DESC
+                   , C.DEST_CONTI_DESC
+                   , C.DEST_CNT_DESC
+                   , C.EDI_CGO_RMK
+                   , NVL(C.EDI_AUTO_SND_FLG,'N') EDI_AUTO_SND_FLG
+                   , NVL(C.STS_SND_TP_CD,'1') STS_SND_TP_CD
+               FROM A, B, EDI_GRP_CGO C, D
+              WHERE A.EDI_GRP_CD = D.EDI_GRP_CD
+                AND C.EDI_GRP_CD = D.EDI_GRP_CD
+                AND B.SRC IN ('AMS')
+                AND D.SEND_STS = C.EDI_STND_STS_CD
+                AND B.SEND_STS = D.ORG_STS
+          --	AND NVL(C.EDI_SND_FLG,'N') = 'Y'
+              ORDER BY A.EDI_GRP_CD,D.SRC,D.EDI_STS_SEQ 
+              ) AUT
+          WHERE 1=1
+           AND (
+                (ORG_EDI_STS =  'VE' AND EDI_AUTO_SND_FLG = 'Y') OR --예) VE 로 VDL 보내는 경우
+                (ORG_EDI_STS =  'VE' AND EDI_STS = 'VE') OR         --예) 그냥 VE 전송
+                (ORG_EDI_STS <> 'VE')    						    --VE 전송 이외의 케이스
+               )
+#if (${cre_usr_id} == 'APLUNET_HANES')
+	       and cust_tp_id = 'APLUNET_HANES'
+#end
+       ) TAG			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="SZPZ2150313" out="N"/>
+				<param name="edi_status" type="12" value="VE" out="N"/>
+				<param name="cntr_no" type="12" value="CLHU2065229" out="N"/>
+				<param name="cop_no" type="12" value="" out="N"/>
+				<param name="cop_dtl_seq" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

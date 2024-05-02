@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AgentCanalTransitFeeBCDBDAOsearchMsaBalRSQL">
+			<desc><![CDATA[searchMsaBal]]></desc>
+			<sql><![CDATA[
+SELECT  A.MSA_SEQ
+       ,A.PSO_MSA_AMT_TP_CD
+       ,A.ITEM
+       ,(CASE WHEN B.TTL_AMT<0 THEN ABS(B.TTL_AMT) ELSE 0 END) AMOUNT_DEBIT
+       ,(CASE WHEN B.TTL_AMT>=0 THEN ABS(B.TTL_AMT) ELSE 0 END) AMOUNT_CREDIT
+       ,B.DIFF_RMK
+       ,@[rev_yrmon] REV_YRMON
+       ,@[vndr_seq] VNDR_SEQ
+       ,B.PSO_MSA_STS_CD
+       ,B.EXIST
+  FROM (
+        --ITEM
+         SELECT  LEVEL MSA_SEQ
+                ,DECODE(LEVEL,1,'A',2,'B',3,'C',4,'O') PSO_MSA_AMT_TP_CD
+                ,DECODE(LEVEL,1,'BEGINNING BALANCE',
+                             2,'REMITTANCE FROM HANJIN',
+                             3,'DISBURSEMENT',
+                             4,'OTHERS'                           
+                ) ITEM
+           FROM DUAL 
+        CONNECT BY LEVEL <= 4
+       ) A, 
+       ( --존재할경우
+        SELECT  T2.PSO_MSA_AMT_TP_CD
+               ,DECODE(T2.PSO_MSA_AMT_TP_CD,'B',(-1)*ABS(T2.TTL_AMT),'C',ABS(T2.TTL_AMT),T2.TTL_AMT) TTL_AMT  --Remittance는 무조건 -, Disbursement는 무조건 +
+               ,T2.DIFF_RMK
+               ,T1.PSO_MSA_STS_CD
+               ,'Y' EXIST
+          FROM PSO_MSA T1, PSO_MSA_DTL T2
+         WHERE 1=1
+           AND T1.REV_YRMON = T2.REV_YRMON
+           AND T1.VNDR_SEQ = T2.VNDR_SEQ
+           AND T1.REV_YRMON = @[rev_yrmon]
+           AND T1.VNDR_SEQ = @[vndr_seq]
+		   AND T1.PSO_MSA_STS_CD <> 'R'
+         UNION ALL
+        --존재하지않을경우
+        SELECT  PSO_MSA_AMT_TP_CD
+               ,TTL_AMT
+               ,'' DIFF_RMK
+               ,'' PSO_MSA_STS_CD
+               ,'N' EXIST
+          FROM (   
+                SELECT 'A' PSO_MSA_AMT_TP_CD
+                       ,(SUM(DECODE(PSO_MSA_AMT_TP_CD,'B',TTL_AMT,'0'))
+                        -SUM(DECODE(PSO_MSA_AMT_TP_CD,'C',TTL_AMT,'0'))
+                        +SUM(DECODE(PSO_MSA_AMT_TP_CD,'A',TTL_AMT,'0'))
+                        +SUM(DECODE(PSO_MSA_AMT_TP_CD,'O',TTL_AMT,'0'))
+                       ) TTL_AMT
+                  FROM PSO_MSA_DTL
+                 WHERE 1=1
+                   AND REV_YRMON = TO_CHAR(TO_DATE(@[rev_yrmon],'YYYYMM')-1,'YYYYMM')
+                   AND VNDR_SEQ = @[vndr_seq]
+                 UNION ALL
+                SELECT 'B' PSO_MSA_AMT_TP_CD
+                       ,ABS(NVL(SUM(B.RQST_AMT),0))*(-1) TTL_AMT  --Remittance는 무조건 -
+                  FROM PSO_CNL_TZ_FEE A, PSO_CNL_TZ_FEE_DTL B  
+                 WHERE 1=1
+                   AND A.REV_YRMON = @[rev_yrmon]
+                   AND A.VNDR_SEQ = @[vndr_seq]     
+                   AND A.CNL_TZ_BZTP_CD = 'E'
+                   AND A.CNL_TZ_PROC_STS_CD IN ('A','P')
+                   AND A.PSO_BZTP_CD = 5
+                   AND A.PSO_BZTP_CD = B.PSO_BZTP_CD
+                   AND A.VSL_CD = B.VSL_CD
+                   AND A.SKD_VOY_NO = B.SKD_VOY_NO
+                   AND A.SKD_DIR_CD = B.SKD_DIR_CD
+                   AND A.YD_CD = B.YD_CD
+                   AND A.CALL_SEQ = B.CALL_SEQ
+				   AND A.BUD_SCNR_NO 		= '999912'
+				   AND A.BUD_SCNR_NO 		= B.BUD_SCNR_NO
+                 UNION ALL
+                SELECT 'C' PSO_MSA_AMT_TP_CD
+                       ,ABS(NVL(SUM(B.RQST_AMT),0)) TTL_AMT  --Disbursement는 무조건 +
+                  FROM PSO_CNL_TZ_FEE A, PSO_CNL_TZ_FEE_DTL B  
+                 WHERE 1=1
+                   AND A.REV_YRMON = @[rev_yrmon]
+                   AND A.VNDR_SEQ = @[vndr_seq]     
+                   AND A.CNL_TZ_BZTP_CD = 'I'
+                   AND A.CNL_TZ_PROC_STS_CD = 'A' 
+                   AND A.PSO_BZTP_CD = 5
+                   AND A.PSO_BZTP_CD = B.PSO_BZTP_CD
+                   AND A.VSL_CD = B.VSL_CD
+                   AND A.SKD_VOY_NO = B.SKD_VOY_NO
+                   AND A.SKD_DIR_CD = B.SKD_DIR_CD
+                   AND A.YD_CD = B.YD_CD
+                   AND A.CALL_SEQ = B.CALL_SEQ
+				   AND A.BUD_SCNR_NO 		= '999912'
+				   AND A.BUD_SCNR_NO 		= B.BUD_SCNR_NO
+               ) X
+         WHERE 1=1
+           AND 0 = (SELECT COUNT(REV_YRMON) 
+                      FROM PSO_MSA 
+                     WHERE REV_YRMON = @[rev_yrmon] 
+                       AND VNDR_SEQ = @[vndr_seq]
+					   AND PSO_MSA_STS_CD <> 'R'
+                   )        
+       ) B
+ WHERE 1=1
+   AND A.PSO_MSA_AMT_TP_CD = B.PSO_MSA_AMT_TP_CD(+)			]]></sql>
+			<params>
+				<param name="rev_yrmon" type="12" value="200905" out="N"/>
+				<param name="vndr_seq" type="12" value="2132" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

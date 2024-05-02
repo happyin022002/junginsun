@@ -1,0 +1,250 @@
+/*=========================================================
+ *Copyright(c) 2009 CyberLogitec
+ *@FileName : CountryCode.java
+ *@FileTitle : CountryCode
+ *Open Issues :
+ *Change history :
+ *@LastModifyDate : 2009.04.29
+ *@LastModifier : 이수빈
+ *@LastVersion : 1.0
+ * 2009.04.23 이수빈
+ * 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.bkg.common;
+
+/**
+ * 국가 코드 모음<br>
+ * 
+ * @author Lee Subin
+ * @see 각 DAO 클래스 참조
+ * @since J2EE 1.4
+ */
+public final class CountryCode {
+
+	public static final String KR = "KR";       // KOREA REPUBLIC OF   
+	public static final String JP = "JP";       // JAPAN               
+	public static final String AF = "AF";       // AFGHANISTAN         
+	public static final String AE = "AE";       // United Arab Emirates
+	public static final String AL = "AL";       // ALBANIA             
+	public static final String AM = "AM";       // ARMENIA             
+	public static final String AO = "AO";       // ANGOLA              
+	public static final String AT = "AT";       // AUSTRIA             
+	public static final String AU = "AU";       // AUSTRALIA           
+	public static final String BA = "BA";       // Bosnia and Herzegovi
+	public static final String BD = "BD";       // BANGLADESH          
+	public static final String BE = "BE";       // BELGIUM             
+	public static final String BG = "BG";       // BULGARIA            
+	public static final String BH = "BH";       // BAHRAIN             
+	public static final String BM = "BM";       // BERMUDA             
+	public static final String BN = "BN";       // BRUNEI DARUSSALAM   
+	public static final String BO = "BO";       // BOLIVIA             
+	public static final String BR = "BR";       // BRAZIL              
+	public static final String BS = "BS";       // BAHAMAS             
+	public static final String BT = "BT";       // BHUTAN              
+	public static final String BW = "BW";       // BOTSWANA            
+	public static final String CA = "CA";       // CANADA              
+	public static final String CF = "CF";       // Central African Repu
+	public static final String CG = "CG";       // CONGO               
+	public static final String CH = "CH";       // SWITZERLAND         
+	public static final String CI = "CI";       // COTE D'IVOIRE       
+	public static final String CL = "CL";       // CHILE               
+	public static final String CM = "CM";       // CAMEROON            
+	public static final String CN = "CN";       // CHINA               
+	public static final String CR = "CR";       // COSTA RICA          
+	public static final String CU = "CU";       // CUBA                
+	public static final String CY = "CY";       // CYPRUS              
+	public static final String CZ = "CZ";       // CZECH REPUBLIC      
+	public static final String DE = "DE";       // GERMANY             
+	public static final String DK = "DK";       // DENMARK             
+	public static final String DM = "DM";       // DOMINICA            
+	public static final String DO = "DO";       // DOMINICAN REPUBLIC  
+	public static final String DZ = "DZ";       // ALGERIA             
+	public static final String EC = "EC";       // ECUADOR             
+	public static final String EE = "EE";       // ESTONIA             
+	public static final String ES = "ES";       // SPAIN               
+	public static final String ET = "ET";       // ETHIOPIA            
+	public static final String FI = "FI";       // FINLAND             
+	public static final String FJ = "FJ";       // FIJI                
+	public static final String FR = "FR";       // FRANCE              
+	public static final String GA = "GA";       // GABON               
+	public static final String GB = "GB";       // United Kingdom      
+	public static final String GD = "GD";       // GRENADA             
+	public static final String GM = "GM";       // GAMBIA              
+	public static final String GN = "GN";       // GUINEA              
+	public static final String GR = "GR";       // GREECE              
+	public static final String GT = "GT";       // GUATEMALA           
+	public static final String GU = "GU";       // GUAM                
+	public static final String GW = "GW";       // GUINEA-BISSAU       
+	public static final String HN = "HN";       // HONDURAS            
+	public static final String HR = "HR";       // CROATIA             
+	public static final String HT = "HT";       // HAITI               
+	public static final String HU = "HU";       // HUNGARY             
+	public static final String IE = "IE";       // IRELAND             
+	public static final String IN = "IN";       // INDIA               
+	public static final String IQ = "IQ";       // IRAQ                
+	public static final String IR = "IR";       // Iran, Islamic Republ
+	public static final String IS = "IS";       // ICELAND             
+	public static final String IT = "IT";       // ITALY               
+	public static final String JM = "JM";       // JAMAICA             
+	public static final String KE = "KE";       // KENYA               
+	public static final String KH = "KH";       // CAMBODIA            
+	public static final String KP = "KP";       // Korea, Democratic Pe
+	public static final String KZ = "KZ";       // KAZAKHSTAN          
+	public static final String LA = "LA";       // Lao People's Democra
+	public static final String LB = "LB";       // LEBANON             
+	public static final String LK = "LK";       // SRI LANKA           
+	public static final String LR = "LR";       // LIBERIA             
+	public static final String LT = "LT";       // LITHUANIA           
+	public static final String LU = "LU";       // LUXEMBOURG          
+	public static final String MA = "MA";       // MOROCCO             
+	public static final String MC = "MC";       // MONACO              
+	public static final String MD = "MD";       // Moldova, Republic of
+	public static final String MG = "MG";       // MADAGASCAR          
+	public static final String MH = "MH";       // MARSHALL ISLANDS    
+	public static final String ML = "ML";       // MALI                
+	public static final String MM = "MM";       // MYANMAR             
+	public static final String MN = "MN";       // MONGOLIA            
+	public static final String MO = "MO";       // Macao               
+	public static final String MX = "MX";       // MEXICO              
+	public static final String MZ = "MZ";       // MOZAMBIQUE          
+	public static final String NA = "NA";       // NAMIBIA             
+	public static final String NG = "NG";       // NIGERIA             
+	public static final String NI = "NI";       // NICARAGUA           
+	public static final String NL = "NL";       // NETHERLANDS         
+	public static final String NP = "NP";       // NEPAL               
+	public static final String NZ = "NZ";       // NEW ZEALAND         
+	public static final String OM = "OM";       // OMAN                
+	public static final String PA = "PA";       // PANAMA              
+	public static final String PE = "PE";       // PERU                
+	public static final String PF = "PF";       // FRENCH POLYNESIA    
+	public static final String PG = "PG";       // PAPUA NEW GUINEA    
+	public static final String PH = "PH";       // PHILIPPINES         
+	public static final String PK = "PK";       // PAKISTAN            
+	public static final String PR = "PR";       // PUERTO RICO         
+	public static final String PT = "PT";       // PORTUGAL            
+	public static final String PY = "PY";       // PARAGUAY            
+	public static final String QA = "QA";       // QATAR               
+	public static final String RO = "RO";       // ROMANIA             
+	public static final String SA = "SA";       // SAUDI ARABIA        
+	public static final String SB = "SB";       // SOLOMON ISLANDS     
+	public static final String SD = "SD";       // SUDAN               
+	public static final String SE = "SE";       // SWEDEN              
+	public static final String SK = "SK";       // SLOVAKIA            
+	public static final String SL = "SL";       // SIERRA LEONE        
+	public static final String SN = "SN";       // SENEGAL             
+	public static final String SO = "SO";       // SOMALIA             
+	public static final String SR = "SR";       // SURINAME            
+	public static final String SV = "SV";       // EL SALVADOR         
+	public static final String SY = "SY";       // Syrian Arab Republic
+	public static final String TG = "TG";       // TOGO                
+	public static final String TH = "TH";       // THAILAND            
+	public static final String TJ = "TJ";       // TAJIKISTAN          
+	public static final String TN = "TN";       // TUNISIA             
+	public static final String TO = "TO";       // TONGA               
+	public static final String TR = "TR";       // TURKEY              
+	public static final String TZ = "TZ";       // Tanzania, United Rep
+	public static final String UG = "UG";       // UGANDA              
+	public static final String US = "US";       // UNITED STATES       
+	public static final String UY = "UY";       // URUGUAY             
+	public static final String UZ = "UZ";       // UZBEKISTAN          
+	public static final String VA = "VA";       // Holy See (Vatican Ci
+	public static final String VE = "VE";       // VENEZUELA           
+	public static final String VG = "VG";       // Virgin Islands, Brit
+	public static final String VI = "VI";       // Virgin Islands, U.S.
+	public static final String VN = "VN";       // Viet Nam            
+	public static final String VU = "VU";       // VANUATU             
+	public static final String WS = "WS";       // SAMOA               
+	public static final String YE = "YE";       // YEMEN               
+	public static final String ZA = "ZA";       // SOUTH AFRICA        
+	public static final String ZM = "ZM";       // ZAMBIA              
+	public static final String ZR = "ZR";       // ZAIRE               
+	public static final String ZW = "ZW";       // ZIMBABWE            
+	public static final String AW = "AW";       // ARUBA               
+	public static final String ZY = "ZY";       // EDI PURPOSE COUNTRY*
+	public static final String BB = "BB";       // BARBADOS            
+	public static final String BI = "BI";       // BURUNDI             
+	public static final String BZ = "BZ";       // BELIZE              
+	public static final String CV = "CV";       // CAPE VERDE          
+	public static final String DJ = "DJ";       // DJIBOUTI            
+	public static final String GI = "GI";       // GIBRALTAR           
+	public static final String GY = "GY";       // GUYANA              
+	public static final String KM = "KM";       // COMOROS             
+	public static final String MR = "MR";       // MAURITANIA          
+	public static final String MU = "MU";       // MAURITIUS           
+	public static final String MV = "MV";       // MALDIVES            
+	public static final String MW = "MW";       // MALAWI              
+	public static final String RW = "RW";       // RWANDA              
+	public static final String SC = "SC";       // SEYCHELLES          
+	public static final String SH = "SH";       // Saint Helena        
+	public static final String SI = "SI";       // SLOVENIA            
+	public static final String ST = "ST";       // Sao Tome and Princip
+	public static final String TT = "TT";       // TRINIDAD AND TOBAGO 
+	public static final String GQ = "GQ";       // EQUATORIAL GUINEA   
+	public static final String EU = "EU";       // EUROPEAN COMMUNITY  
+	public static final String AG = "AG";       // ANTIGUA AND BARBUDA 
+	public static final String AN = "AN";       // NETHERLANDS ANTILLES
+	public static final String AS = "AS";       // American Samoa      
+	public static final String AZ = "AZ";       // Azerbaijan          
+	public static final String BF = "BF";       // BURKINA FASO        
+	public static final String BJ = "BJ";       // BENIN               
+	public static final String CC = "CC";       // Cocos (Keeling) Isla
+	public static final String CK = "CK";       // COOK ISLANDS        
+	public static final String CX = "CX";       // Christmas Island    
+	public static final String EH = "EH";       // WESTERN SAHARA      
+	public static final String ER = "ER";       // ERITREA             
+	public static final String GE = "GE";       // GEORGIA             
+	public static final String GL = "GL";       // GREENLAND           
+	public static final String HQ = "HQ";       // SEOUL HEAD QUARTERS 
+	public static final String KG = "KG";       // KYRGYZSTAN          
+	public static final String KI = "KI";       // KIRIBATI            
+	public static final String KY = "KY";       // CAYMAN ISLANDS      
+	public static final String LC = "LC";       // SAINT LUCIA         
+	public static final String LI = "LI";       // LIECHTENSTEIN       
+	public static final String LS = "LS";       // LESOTHO             
+	public static final String MQ = "MQ";       // MARTINIQUE          
+	public static final String NC = "NC";       // NEW CALEDONIA       
+	public static final String NE = "NE";       // NIGER               
+	public static final String NF = "NF";       // NORFOLK ISLAND      
+	public static final String NR = "NR";       // NAURU               
+	public static final String PW = "PW";       // PALAU               
+	public static final String SM = "SM";       // SAN MARINO          
+	public static final String TD = "TD";       // CHAD                
+	public static final String TM = "TM";       // TURKMENISTAN        
+	public static final String TV = "TV";       // TUVALU              
+	public static final String VC = "VC";       // Saint Vincent and th
+	public static final String MK = "MK";       // Macedonia, The forme
+	public static final String BY = "BY";       // BELARUS             
+	public static final String LV = "LV";       // LATVIA              
+	public static final String MT = "MT";       // MALTA               
+	public static final String MY = "MY";       // MALAYSIA            
+	public static final String PL = "PL";       // POLAND              
+	public static final String RU = "RU";       // RUSSIAN FEDERATION  
+	public static final String SZ = "SZ";       // SWAZILAND           
+	public static final String UA = "UA";       // UKRAINE             
+	public static final String YU = "YU";       // YUGOSLAVIA          
+	public static final String TB = "TB";       // TPB DUMMY COUNTRY   
+	public static final String RS = "RS";       // REPUBLIC OF SERBIA  
+	public static final String FK = "FK";       // Falkland Islands (Ma
+	public static final String FM = "FM";       // Micronesia, Federate
+	public static final String FO = "FO";       // FAROE ISLANDS       
+	public static final String IO = "IO";       // British Indian Ocean
+	public static final String KN = "KN";       // Saint Kitts and Nevi
+	public static final String MP = "MP";       // Northern Mariana Isl
+	public static final String PN = "PN";       // PITCAIRN            
+	public static final String RE = "RE";       // REUNION             
+	public static final String JO = "JO";       // JORDAN              
+	public static final String ME = "ME";       // MONTENEGRO          
+	public static final String AD = "AD";       // ANDORRA             
+	public static final String IM = "IM";       // ISEL OF MAN         
+	public static final String AR = "AR";       // ARGENTINA           
+	public static final String CO = "CO";       // COLOMBIA            
+	public static final String EG = "EG";       // EGYPT               
+	public static final String GH = "GH";       // GHANA               
+	public static final String ID = "ID";       // INDONESIA           
+	public static final String KW = "KW";       // KUWAIT              
+	public static final String LY = "LY";       // Libyan Arab Jamahiri
+	public static final String NO = "NO";       // NORWAY              
+	public static final String SG = "SG";       // SINGAPORE           
+	public static final String TW = "TW";       // TAIWAN              
+	public static final String IL = "IL";       // ISRAEL              
+}

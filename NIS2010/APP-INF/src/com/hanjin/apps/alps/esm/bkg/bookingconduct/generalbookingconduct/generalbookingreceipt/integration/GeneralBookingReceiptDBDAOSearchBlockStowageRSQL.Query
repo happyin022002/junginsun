@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="GeneralBookingReceiptDBDAOSearchBlockStowageRSQL">
+			<desc><![CDATA[2017.11.20 iylee 로직 정리(PRD-Block Stowage Group Creation & Inquiry)]]></desc>
+			<sql><![CDATA[
+SELECT AAA.BLCK_STWG_CD
+  FROM (
+        SELECT AA.BLCK_STWG_CD, ORD_FIRST, ORD, RNK
+             , RANK() OVER(ORDER BY AA.ORD_FIRST, AA.ORD, AA.RNK) RK_ORD
+          FROM (
+              -- 1. INLAND 구간이 존재 할 경우
+              SELECT A.BLCK_STWG_CD BLCK_STWG_CD
+                   , RANK() OVER(ORDER BY DECODE(A.STWG_CD, 'ALL', 2, 1)
+                                        , (CASE WHEN DECODE(A.PORT_CD, 'ALL', NULL, A.PORT_CD) <> DECODE(A.HUB_LOC_CD, 'ALL', NULL, A.HUB_LOC_CD)  THEN 1 ELSE 2 END) -- 내륙운송이 있으면 ALL보다 ROUTE를 우선 순위로 한다.
+                                        , DECODE(A.VSL_SLAN_CD, 'ALL', 2, 1)
+                                        , D.PCTL_SEQ) RNK
+                   , 1 ORD
+                   , 1 ORD_FIRST           
+               FROM  PRD_BLCK_STWG A
+                   , PRD_INLND_ROUT_MST C
+                   , PRD_PROD_CTL_ROUT_DTL D
+              WHERE 1=1
+              AND D.PCTL_NO = @[pctl_no]
+              AND D.TRSP_MOD_CD <> 'X'
+              AND D.PCTL_IO_BND_CD = 'I'
+              AND NVL(A.DELT_FLG, 'N')    <>'Y'
+              AND A.PORT_CD IN (SUBSTR(C.ROUT_ORG_NOD_CD,1,5), 'ALL')
+              AND A.HUB_LOC_CD IN (DECODE(SUBSTR(C.HUB_NOD_CD,1,5),NULL,SUBSTR(C.ROUT_ORG_NOD_CD,1,5),SUBSTR(C.HUB_NOD_CD,1,5)), 'ALL')     
+              AND D.ROUT_ORG_NOD_CD  = C.ROUT_ORG_NOD_CD
+              AND D.ROUT_DEST_NOD_CD = C.ROUT_DEST_NOD_CD
+              AND D.ROUT_SEQ         = C.ROUT_SEQ    
+              AND C.INLND_ROUT_BKG_FLG ='Y'
+              AND NVL(C.DELT_FLG, 'N') <>'Y'     
+              AND C.PCTL_IO_BND_CD = 'I'
+              AND A.VSL_SLAN_CD  IN ((SELECT VSL_SLAN_CD
+                                        FROM (SELECT RANK() OVER(ORDER BY RK, ARR_ST_DT DESC) RK, VSL_SLAN_CD
+                                                FROM (SELECT /*+ INDEX_DESC (Y XAK4VSK_VSL_PORT_SKD) */
+                                                             1 RK
+                                                            ,X.VSL_SLAN_CD
+                                                            ,X.UPD_DT ARR_ST_DT  
+                                                        FROM VSK_VSL_SKD X
+                                                            ,VSK_VSL_PORT_SKD Y
+                                                       WHERE X.VSL_CD = Y.VSL_CD
+                                                         AND X.SKD_VOY_NO = Y.SKD_VOY_NO
+                                                         AND X.SKD_DIR_CD = Y.SKD_DIR_CD
+                                                         AND X.VSL_CD     = SUBSTR(@[bkg_trunk_vvd], 1, 4)
+                                                         AND X.SKD_VOY_NO = SUBSTR(@[bkg_trunk_vvd], 5, 4)
+                                                         AND X.SKD_DIR_CD = SUBSTR(@[bkg_trunk_vvd], 9, 1)
+                                                         AND Y.VPS_PORT_CD = @[bkg_pod_cd]
+                                                         AND ROWNUM = 1 
+                                                       UNION                                       
+                                                      SELECT 2 RK, VSL_SLAN_CD, ARR_ST_DT
+                                                        FROM PRD_PROD_CTL_ROUT_DTL 
+                                                       WHERE PCTL_NO = @[pctl_no] 
+                                                         AND SUBSTR(DEST_NOD_CD,1,5) = @[bkg_pod_cd]
+                                                         AND TRSP_MOD_CD = 'VD'                                  
+                                                    )
+                                             )
+                                       WHERE RK = 1 
+                                     ), 'ALL')
+              AND A.STWG_CD IN (@[stwg_cd], 'ALL')
+              UNION ALL
+              -- INLAND 구간이 없거나 ALL 인 경우
+              SELECT BLCK_STWG_CD
+                   , RANK() OVER(ORDER BY DECODE(STWG_CD, 'ALL', 2, 1)
+                                        , DECODE(PORT_CD||HUB_LOC_CD, 'ALLALL', 2, 1)
+                                        , DECODE(VSL_SLAN_CD, 'ALL', 2, 1)) RNK    
+                   , 2 ORD
+                   , DECODE(PORT_CD, 'ALL', 0, 1) ORD_FIRST           
+                FROM PRD_BLCK_STWG A
+               WHERE 1=1
+                 AND NVL(DELT_FLG, 'N')    <>'Y'
+                 AND PORT_CD IN (@[bkg_pod_cd], 'ALL')
+                 AND HUB_LOC_CD IN (@[bkg_del_cd], 'ALL')
+                 AND STWG_CD IN (@[stwg_cd], 'ALL')  
+                 AND DELT_FLG = 'N'         
+                 AND VSL_SLAN_CD  IN ((SELECT VSL_SLAN_CD
+                                         FROM (SELECT RANK() OVER(ORDER BY RK, ARR_ST_DT DESC) RK, VSL_SLAN_CD
+                                                FROM (SELECT /*+ INDEX_DESC (Y XAK4VSK_VSL_PORT_SKD) */
+                                                             1 RK
+                                                            ,X.VSL_SLAN_CD
+                                                            ,X.UPD_DT ARR_ST_DT  
+                                                        FROM VSK_VSL_SKD X
+                                                            ,VSK_VSL_PORT_SKD Y
+                                                       WHERE X.VSL_CD = Y.VSL_CD
+                                                         AND X.SKD_VOY_NO = Y.SKD_VOY_NO
+                                                         AND X.SKD_DIR_CD = Y.SKD_DIR_CD
+                                                         AND X.VSL_CD     = SUBSTR(@[bkg_trunk_vvd], 1, 4)
+                                                         AND X.SKD_VOY_NO = SUBSTR(@[bkg_trunk_vvd], 5, 4)
+                                                         AND X.SKD_DIR_CD = SUBSTR(@[bkg_trunk_vvd], 9, 1)
+                                                         AND Y.VPS_PORT_CD = @[bkg_pod_cd]
+                                                         AND ROWNUM = 1 
+                                                       UNION                                       
+                                                      SELECT 2 RK, VSL_SLAN_CD, ARR_ST_DT
+                                                        FROM PRD_PROD_CTL_ROUT_DTL 
+                                                       WHERE PCTL_NO = @[pctl_no]
+                                                         AND SUBSTR(DEST_NOD_CD,1,5) = @[bkg_pod_cd]
+                                                         AND TRSP_MOD_CD = 'VD'                                  
+                                                    )
+                                             )
+                                       WHERE RK = 1 
+                                     ), 'ALL')
+        ) AA
+        WHERE RNK = 1
+) AAA
+WHERE AAA.RK_ORD = 1			]]></sql>
+			<params>
+				<param name="pctl_no" type="12" value="" out="N"/>
+				<param name="bkg_trunk_vvd" type="12" value="HNCH0070E" out="N"/>
+				<param name="bkg_pod_cd" type="12" value="" out="N"/>
+				<param name="stwg_cd" type="12" value="" out="N"/>
+				<param name="bkg_del_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="EqInterchangeDBDAOEqInterchangeContainerDetailRSQL">
+			<desc><![CDATA[Sub Lease 자사장비 및 Mis Use 타사장비의 상세내역을 조회합니다.
+2010.12.01 박명신 [CHM-201007443-01] REF_NO 항목 추가
+2010.12.13 신자영 [CHM-201007442-01] LT일때 Per-Diem LCC로 변경]]></desc>
+			<sql><![CDATA[
+SELECT  ROW_SEQ
+        , CNTR_NO, CNTR_STS_CD, CNTR_TPSZ_CD, LSTM_CD 
+        , CNTR_STS_EVNT_DT, CNTR_RTN_EVNT_DT, RCC_CD, LCC_CD, SCC_CD, LOC_CD
+        , YD_CD, RTN_YD_CD, CNTRY_CD
+        , LSI_AGMT_CTY_CD, LSI_AGMT_SEQ, LSI_AGMT_NO, LSI_REF_NO
+        , AGMT_CTY_CD    , AGMT_SEQ    , AGMT_NO    , REF_NO
+        , VNDR_SEQ, VNDR_ABBR_NM, CNTR_FULL_FLG
+        , RNTL_CHG_FREE_DYS
+        , TTL_USE_DYS
+        , PDM_AMT, LON_AMT, LOF_AMT, DOC_AMT
+        , NVL(PDM_AMT, 0) + LON_AMT + LOF_AMT + DOC_AMT AS TTL_AMT
+FROM   (SELECT /*+ ORDERED */ 
+               ROWNUM 																	AS ROW_SEQ
+               , B.CNTR_NO, B.CNTR_STS_CD, A.CNTR_TPSZ_CD, A.LSTM_CD
+               , B.RCC_CD, B.LCC_CD, B.SCC_CD, B.YD_CD, B.LOC_CD
+               , TO_CHAR(B.CNTR_STS_EVNT_DT,'YYYYMMDD') 								AS CNTR_STS_EVNT_DT 
+               , TO_CHAR(E.CNTR_STS_EVNT_DT,'YYYYMMDD') 								AS CNTR_RTN_EVNT_DT
+               , SUBSTR(B.LOC_CD,1,2) 													AS CNTRY_CD
+               , A.AGMT_CTY_CD AS LSI_AGMT_CTY_CD, A.AGMT_SEQ AS LSI_AGMT_SEQ, A.AGMT_CTY_CD||LPAD(A.AGMT_SEQ, 6, '0') 	AS LSI_AGMT_NO, F.REF_NO AS LSI_REF_NO
+               , B.AGMT_CTY_CD                   , B.AGMT_SEQ                , B.AGMT_CTY_CD||LPAD(B.AGMT_SEQ, 6, '0') 	AS AGMT_NO    , C.REF_NO
+               , C.VNDR_SEQ, SUBSTR(NVL(D.VNDR_ABBR_NM, D.VNDR_SEQ),0,8) 				AS VNDR_ABBR_NM
+               , B.CNTR_FULL_FLG
+               , B.RNTL_CHG_FREE_DYS
+               , E.YD_CD 							AS RTN_YD_CD
+               , ROUND(NVL(E.CNTR_STS_EVNT_DT, SYSDATE) - B.CNTR_STS_EVNT_DT) AS TTL_USE_DYS
+               , NVL((SELECT (TRUNC(NVL(E.CNTR_STS_EVNT_DT,SYSDATE) - B.CNTR_STS_EVNT_DT  + NVL(B.RNTL_CHG_FREE_DYS , 0))) + 1 * RT.N1ST_CHG_AMT
+                     FROM    LSE_AGMT_RT RT
+                     WHERE   RT.AGMT_CTY_CD 				= B.AGMT_CTY_CD
+                     AND     RT.AGMT_SEQ 					= B.AGMT_SEQ
+                     AND     RT.LOC_CD 						= DECODE(A.LSTM_CD, 'LT', B.LCC_CD, 'KRSEL')
+                     AND     RT.CNTR_TPSZ_CD 				= A.CNTR_TPSZ_CD
+                     AND     RT.CNTR_RNTL_CHG_TP_CD 		= 'PDGV'
+                     AND     RT.AGMT_CHG_VAL = 1),
+                    (SELECT (TRUNC(NVL(E.CNTR_STS_EVNT_DT,SYSDATE) - B.CNTR_STS_EVNT_DT + NVL(B.RNTL_CHG_FREE_DYS , 0))) + 1 * AVG(RT.N1ST_CHG_AMT)
+                     FROM    LSE_AGMT_RT RT
+                     WHERE   RT.AGMT_CTY_CD 				= B.AGMT_CTY_CD
+                     AND     RT.AGMT_SEQ 					= B.AGMT_SEQ
+                     AND     RT.CNTR_TPSZ_CD 				= A.CNTR_TPSZ_CD
+                     AND     RT.CNTR_RNTL_CHG_TP_CD 		= 'PDGV'
+                     AND     RT.AGMT_CHG_VAL 				= 1)) AS PDM_AMT,
+                NVL(B.CNTR_LFT_CHG_AMT,0) AS LON_AMT,
+                NVL(E.CNTR_LFT_CHG_AMT,0) AS LOF_AMT,
+                NVL(E.CNTR_DRFF_CR_AMT,0) AS DOC_AMT        
+        FROM    MST_CONTAINER    A,
+                MST_CNTR_STS_HIS B,
+                LSE_AGREEMENT    C,
+                MDM_VENDOR       D,
+                MST_CNTR_STS_HIS E,
+                LSE_AGREEMENT    F
+        WHERE   A.CNTR_NO      = B.CNTR_NO
+        AND     B.AGMT_CTY_CD  = C.AGMT_CTY_CD
+        AND     B.AGMT_SEQ     = C.AGMT_SEQ
+        AND     C.VNDR_SEQ     = D.VNDR_SEQ
+        AND     A.AGMT_CTY_CD  = F.AGMT_CTY_CD
+        AND     A.AGMT_SEQ     = F.AGMT_SEQ
+        AND     A.HJS_CRE_FLG  = 'N'
+#if (${cntr_sts_cd} == '(SB|MU)O' || ${cntr_sts_cd} == 'SBO' || ${cntr_sts_cd} == 'MUO')
+        AND     B.CNTR_NO      = E.CNTR_NO		(+)
+        AND     B.CNTR_STS_SEQ = E.PRNR_STS_SEQ	(+)
+	#if (${lst_sts_flg} == '01')
+        AND     A.LST_STS_SEQ  = B.CNTR_STS_SEQ
+	#end
+	#if (${cntr_sts_cd} == '(SB|MU)O' )
+        AND		B.CNTR_STS_CD IN('SBO','MUO')
+	#else
+        AND		B.CNTR_STS_CD = @[cntr_sts_cd]
+	#end
+	#if (${total_flg} != 'Y')
+		#if (${loc_tp} == '0' && ${loc_cd} != '')
+	        AND     B.RCC_CD = @[loc_cd]
+		#elseif (${loc_tp} == '1' && ${loc_cd} != '')
+	        AND     SUBSTR(B.LOC_CD,1,2) = @[loc_cd]
+		#elseif (${loc_tp} == '2' && ${loc_cd} != '')
+           #if (${ttl_flag} == 'G.Total')
+	        AND     B.RCC_CD = @[loc_cd]
+           #else
+	        AND     B.LCC_CD = @[loc_cd]
+           #end
+		#elseif (${loc_tp} == '3' && ${loc_cd} != '')
+           #if (${ttl_flag} == 'G.Total')
+	        AND     B.LCC_CD = @[loc_cd]
+           #else
+	        AND     B.SCC_CD = @[loc_cd]
+           #end
+		#elseif (${loc_tp} == '4' && ${loc_cd} != '')
+	        AND     B.YD_CD LIKE @[loc_cd] || '%'
+		#elseif (${loc_tp} == '5' && ${loc_cd} != '')
+	        AND     SUBSTR(B.LOC_CD,1,2) = @[loc_cd]
+		#end
+	#else
+	    #if     (${loc_tp} == '2' && ${loc_cd} != '')
+	        AND     B.RCC_CD = @[loc_cd]
+		#elseif (${loc_tp} == '3' && ${loc_cd} != '')
+	        AND     B.LCC_CD = @[loc_cd]
+		#elseif (${loc_tp} == '4' && ${loc_cd} != '')
+	        AND     B.SCC_CD = @[loc_cd]
+		#elseif (${loc_tp} == '5' && ${loc_cd} != '')
+	        AND     SUBSTR(B.LOC_CD,1,2) = @[loc_cd]
+		#end
+	#end
+	#if (${str_evnt_dt} != '')
+        AND     B.CNTR_STS_EVNT_DT BETWEEN TO_DATE(@[str_evnt_dt],'YYYYMMDD')  
+        AND 	TO_DATE(@[end_evnt_dt],'YYYYMMDD')
+	#end
+	#if (${agmt_seq} != '')
+        AND     B.AGMT_CTY_CD = @[agmt_cty_cd]
+        AND     B.AGMT_SEQ    = @[agmt_seq]
+	#end
+	#if (${cntr_full_flg} != '')
+        AND     B.CNTR_FULL_FLG = @[cntr_full_flg]
+	#end
+#else
+        AND     B.CNTR_NO      = E.CNTR_NO
+        AND     B.CNTR_STS_SEQ = E.PRNR_STS_SEQ
+	#if (${lst_sts_flg} == '01')
+        AND     A.LST_STS_SEQ = E.CNTR_STS_SEQ
+	#end
+	#if (${cntr_sts_cd} == '(SB|MU)I' )
+		AND		E.CNTR_STS_CD IN('SBI','MUI')
+	#else
+		AND		E.CNTR_STS_CD = @[cntr_sts_cd]
+	#end
+	#if (${loc_tp} == '0' && ${loc_cd} != '')
+        AND     E.RCC_CD = @[loc_cd]
+	#elseif (${loc_tp} == '1' && ${loc_cd} != '')
+        AND     SUBSTR(E.LOC_CD,1,2) = @[loc_cd]
+	#elseif (${loc_tp} == '2' && ${loc_cd} != '')
+      #if (${ttl_flag} == 'G.Total')
+        AND     E.RCC_CD = @[loc_cd]
+      #else
+        AND     E.LCC_CD = @[loc_cd]
+      #end
+	#elseif (${loc_tp} == '3' && ${loc_cd} != '')
+        AND     E.SCC_CD = @[loc_cd]
+	#elseif (${loc_tp} == '4' && ${loc_cd} != '')
+      #if (${ttl_flag} == 'G.Total')
+        AND     E.SCC_CD = @[loc_cd]
+      #else
+        AND     E.YD_CD = @[loc_cd]
+      #end
+	#elseif (${loc_tp} == '5' && ${loc_cd} != '')
+        AND     SUBSTR(E.LOC_CD,1,2) = @[loc_cd]
+	#end
+	#if (${str_evnt_dt} != '')
+        AND     E.CNTR_STS_EVNT_DT BETWEEN TO_DATE(@[str_evnt_dt],'YYYYMMDD') AND 	TO_DATE(@[end_evnt_dt],'YYYYMMDD')
+	#end
+	#if (${agmt_seq} != '')
+        AND     E.AGMT_CTY_CD 	= @[agmt_cty_cd]
+        AND     E.AGMT_SEQ    	= @[agmt_seq]
+	#end
+	#if (${cntr_full_flg} != '')
+        AND     E.CNTR_FULL_FLG = @[cntr_full_flg]
+	#end
+#end		
+#if (${lstm_soc_tp} == '03')
+        AND     A.LSTM_CD = 'SH'
+#elseif (${lstm_soc_tp} == '02')
+        AND     A.LSTM_CD 			<> 'SH'
+#end  
+#if (${vndr_seq} != '')
+        AND     C.VNDR_SEQ 			= @[vndr_seq]
+#end
+#if (${onh_free_dys} != '')
+        AND ROUND(NVL(E.CNTR_STS_EVNT_DT, SYSDATE) - B.CNTR_STS_EVNT_DT) >= @[onh_free_dys]
+#elseif (${use_day} == '1')
+        AND ROUND(NVL(E.CNTR_STS_EVNT_DT, SYSDATE) - B.CNTR_STS_EVNT_DT) > B.RNTL_CHG_FREE_DYS
+#end
+#if (${lstm_cd} != '')
+        AND     A.LSTM_CD IN (
+   	#foreach($key IN ${lstm_cd_seq})
+   		#if($velocityCount < $lstm_cd_seq.size())
+   			'$key',
+   		#else
+   			'$key'
+   		#end
+   	#end
+                )
+#end
+#if (${cntr_tpsz_cd} != '')
+        AND     A.CNTR_TPSZ_CD IN (
+   	#foreach($key IN ${cntr_tpsz_cd_seq})
+   		#if($velocityCount < $cntr_tpsz_cd_seq.size())
+   			'$key',
+   		#else
+   			'$key'
+   		#end
+   	#end
+                )
+#end
+)
+#if (${startno} != '') 
+WHERE 	ROW_SEQ BETWEEN  @[startno]  AND  @[endno]
+#end
+			]]></sql>
+			<params>
+				<param name="cntr_sts_cd" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="str_evnt_dt" type="12" value="" out="N"/>
+				<param name="end_evnt_dt" type="12" value="" out="N"/>
+				<param name="agmt_cty_cd" type="12" value="" out="N"/>
+				<param name="agmt_seq" type="2" value="" out="N"/>
+				<param name="cntr_full_flg" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="2" value="" out="N"/>
+				<param name="onh_free_dys" type="2" value="" out="N"/>
+				<param name="startno" type="2" value="" out="N"/>
+				<param name="endno" type="2" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

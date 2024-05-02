@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="BSAManageDBDAOSearchBSATableJOListRSQL">
+			<desc><![CDATA[SearchBSATableJOList
+2014.05.12 JO 계약조회시 현재 유효한 계약만 조회도록 조회 조건 추가
+2015.06.08 김용습 [CHM-201536164] 주간 MAS Open에 따른 타모듈 프로그램 적용 요청]]></desc>
+			<sql><![CDATA[
+SELECT /*+ ORDERED USE_NL(C A) */
+        A.BSA_GROUP 
+      , A.BSA_SEQ 
+      , A.TRD_CD
+      , C.SUB_TRD_CD
+      , A.RLANE_CD
+      , A.DIR_CD
+      , A.VOP_CD
+      , A.VSL_CAPA
+      , A.VVD_CD
+      , A.BSA_FM_DT
+      , A.BSA_TO_DT
+      , A.BSA_CAPA
+      , A.FNL_HJS_BSA_CAPA
+      , A.HJS_BSA_BFR_SUB_CAPA
+      , A.JO_DESC
+      , A.SPC_OTR_SWAP_FLG
+      , A.OWNR_VSL_WGT
+      , A.UPD_USR_ID 
+#set($count = 0) 
+     	#foreach(${keys} IN ${keyList})
+	  , BSA_GET_CRR_CAPA_FNC(A.TRD_CD,A.RLANE_CD,A.DIR_CD,A.VOP_CD,A.VSL_CAPA,A.BSA_SEQ,'${keys.bsaOpJbCd}', '${keys.crrCd}', @[rdoopcd]) AS CRR_BSA_CAPA$count
+#set($count = $count + 1)
+      #end
+   FROM
+        (SELECT DENSE_RANK() OVER(ORDER BY TRD_CD,RLANE_CD,DIR_CD,VOP_CD,VSL_CAPA) AS BSA_GROUP
+              , BSA_SEQ
+              , TRD_CD
+              , RLANE_CD
+              , DIR_CD
+              , VOP_CD
+              , VSL_CAPA
+              , VVD_CD
+              , BSA_FM_DT
+              , BSA_TO_DT
+              , BSA_CAPA
+              , FNL_HJS_BSA_CAPA
+              , HJS_BSA_BFR_SUB_CAPA
+              , JO_DESC
+              , SPC_OTR_SWAP_FLG
+              , OWNR_VSL_WGT
+              , UPD_USR_ID
+           FROM BSA_JNT_OP_BZC
+          WHERE 1=1
+#if (${cobtrade} != '')
+            AND TRD_CD            = @[cobtrade]
+#end
+#if (${coblane} != '')
+            AND RLANE_CD          = @[coblane]
+#end
+#if (${cobdir} != '')
+            AND DIR_CD            = @[cobdir]
+#end
+
+#if (${excludVslCapa} == 'Y')
+AND (TRD_CD ,RLANE_CD ,DIR_CD ,VOP_CD, VSL_CAPA ) 
+                IN (   
+                    SELECT
+                           a.trd_cd,
+                           a.rlane_cd,
+                           a.dir_cd,
+                           b.vop_cd,
+                           DECODE(NVL(b.sub_trd_capa,0),0,NVL(b.stnd_ldb_capa,0),NVL(b.sub_trd_capa,0)) AS vsl_capa
+                      FROM mas_mon_vvd a,
+                           (
+                            SELECT DISTINCT  a.vsl_cd ,
+                                a.sub_trd_cd ,
+                                a.sub_trd_capa ,
+                                a.stnd_ldb_capa ,
+                                a.vop_cd ,
+                               TO_CHAR( a.vsl_aply_fm_dt ,'yyyymmdd') vsl_aply_fom_dt,
+                               TO_CHAR( a.vsl_aply_to_dt ,'yyyymmdd')  vsl_aply_to_dt
+                          FROM (
+                                SELECT x.vsl_cd, y.sub_trd_cd, y.sub_trd_capa, x.stnd_ldb_capa,
+                                       x.vop_cd, x.vsl_aply_fm_dt vsl_aply_fm_dt, x.vsl_aply_to_dt vsl_aply_to_dt
+                                  FROM mas_vsl_rgst x,
+                                       (
+                                        SELECT b.vsl_cd, b.vsl_seq, b.sub_trd_cd, b.sub_trd_capa
+                                          FROM mdm_sub_trd a, mas_vsl_sub_trd_capa b
+                                         WHERE a.delt_flg <> 'Y'
+                                           AND a.sub_trd_cd      = b.sub_trd_cd
+                                       ) y
+                                 WHERE x.vsl_cd             = y.vsl_cd(+)
+                                   AND x.vsl_seq            = y.vsl_seq(+)
+                                   AND NVL(x.delt_flg,'N')  = 'N'
+                                   AND x.vsl_tp_cd          = 'C'
+                                ) a
+                           ) b
+                     WHERE a.vsl_cd            = b.vsl_cd(+)
+                       AND a.sub_trd_cd        = b.sub_trd_cd(+)
+                       AND NVL(a.delt_flg,'N') <> 'Y' 
+#if (${cobtrade} != '')
+                       AND a.trd_cd            = NVL(@[cobtrade] , a.trd_cd)
+#end
+#if (${coblane} != '')
+                       AND a.rlane_cd          = NVL(@[coblane], a.rlane_cd)
+#end
+#if (${cobdir} != '')
+                       AND a.dir_cd            = NVL(@[cobdir] , a.dir_cd)
+#end
+                       AND TO_CHAR(a.n1st_lodg_port_etd_dt,'yyyymmdd') BETWEEN NVL(b.vsl_aply_fom_dt ,'19000101') AND NVL(b.vsl_aply_to_dt , '99991231')
+                       AND TO_CHAR(a.n1st_lodg_port_etd_dt,'yyyymmdd') >= @[txtsdate]
+                       AND EXISTS (SELECT 'OK'
+                                     FROM bsa_jnt_op_bzc d
+                                    WHERE d.trd_cd   = a.trd_cd
+                                      AND d.rlane_cd = a.rlane_cd
+                                      AND d.dir_cd   = a.dir_cd
+                                      AND d.vop_cd   = b.vop_cd
+                                      AND d.vsl_capa = decode(nvl(b.sub_trd_capa,0),0,nvl(b.stnd_ldb_capa,0),nvl(b.sub_trd_capa,0))
+                                  )
+                         GROUP BY
+                               a.trd_cd,
+                               a.rlane_cd,
+                               a.dir_cd,
+                               b.vop_cd,
+                               DECODE(NVL(b.sub_trd_capa,0),0,NVL(b.stnd_ldb_capa,0),NVL(b.sub_trd_capa,0))
+                    ) 
+#end
+
+        ) A
+      , (SELECT DISTINCT TRD_CD
+              , RLANE_CD
+              , DIR_CD
+              , IOC_CD
+              , A.SUB_TRD_CD
+              , A.SLAN_CD
+           FROM MAS_LANE_RGST A
+           FULL OUTER JOIN MAS_LANE_TP_HIS B USING (TRD_CD, RLANE_CD, DIR_CD, IOC_CD)
+          WHERE NVL(B.VSL_LANE_TP_CD, A.VSL_LANE_TP_CD) = 'JO'
+            AND NVL(A.DELT_FLG,'N') = 'N'
+#if (${cobtrade} != '')
+            AND TRD_CD            = @[cobtrade]
+#end
+        ) C
+  WHERE A.TRD_CD            = C.TRD_CD
+    AND A.RLANE_CD          = C.RLANE_CD
+    AND A.DIR_CD            = C.DIR_CD
+    AND A.BSA_TO_DT        >= @[txtsdate]
+#if (${cobtrade} != '')
+    AND A.TRD_CD            = @[cobtrade]
+#end
+#if (${coblane} != '')
+    AND A.RLANE_CD          = @[coblane]
+#end
+#if (${cobdir} != '')
+    AND A.DIR_CD            = @[cobdir]
+#end
+--  GROUP BY A.BSA_GROUP
+--      , A.BSA_SEQ
+--      , A.TRD_CD
+--      , C.SUB_TRD_CD
+--      , A.RLANE_CD
+--      , A.DIR_CD
+--      , A.VOP_CD
+--      , A.VSL_CAPA
+--      , A.VVD_CD
+--      , A.BSA_FM_DT
+--      , A.BSA_TO_DT
+--      , A.BSA_CAPA
+--      , A.FNL_HJS_BSA_CAPA
+--      , A.HJS_BSA_BFR_SUB_CAPA
+--      , A.JO_DESC
+--      , A.SPC_OTR_SWAP_FLG
+--      , A.OWNR_VSL_WGT
+--      , A.UPD_USR_ID
+  ORDER BY A.BSA_GROUP
+      , A.BSA_SEQ			]]></sql>
+			<params>
+				<param name="rdoopcd" type="12" value="" out="N"/>
+				<param name="cobtrade" type="12" value="" out="N"/>
+				<param name="coblane" type="12" value="" out="N"/>
+				<param name="cobdir" type="12" value="" out="N"/>
+				<param name="txtsdate" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

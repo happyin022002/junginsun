@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ARInvoiceInquiryDBDAOARInvoiceListByGoodDateVORSQL">
+			<desc><![CDATA[Invoice Inquiry by VVD & Good Date]]></desc>
+			<sql><![CDATA[
+SELECT /*+ ORDERED */ DISTINCT 			
+#if (${date_option} == 'G') 			
+  A.BL_INV_CFM_DT GOOD_DATE,			
+#elseif (${date_option} == 'I') 			
+  A.BL_INV_IF_DT GOOD_DATE,			
+#elseif (${date_option} == 'E') 			
+  A.GL_EFF_DT GOOD_DATE,			
+#elseif (${date_option} == 'A') 			
+  A.SAIL_ARR_DT GOOD_DATE,			
+#end
+  A.AR_OFC_CD,
+  DECODE(A.IO_BND_CD, 'I', 'I/B', 'O', 'O/B') IO_BND_CD,
+  A.REV_TP_CD||A.REV_SRC_CD TYPE,
+  A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD VVD,
+  A.SAIL_ARR_DT,
+  A.POL_CD,
+  A.POD_CD,
+  A.ACT_CUST_CNT_CD||'-'||LPAD(A.ACT_CUST_SEQ, 6, '0') CUSTOMER,
+  F.CUST_LGL_ENG_NM CUST_NM,
+  A.BL_SRC_NO,
+  A.AR_IF_NO,
+  A.USD_XCH_RT INV_XCH_RT,
+  A.INV_TTL_LOCL_AMT LCL_AMT,
+  -- 2018.05.24 인도지역 Split Invoice Issue 기능 보완 
+  CASE WHEN (SELECT DECODE(A.AR_OFC_CD, 'BOMSC', '', MAX(INV_NO)) FROM INV_AR_SPLIT_ISS WHERE BL_SRC_NO = A.BL_SRC_NO) IS NULL THEN
+     DECODE(A.INV_CLR_FLG, 'Y', 'SYS CLEAR', NVL(A.INV_NO, DECODE(G.DMDT_AR_INV_ISS_FLG, 'N', A.INV_SRC_NO, DECODE(G.N3PTY_BIL_AR_INV_FLG, 'N', A.INV_SRC_NO, DECODE(G.TML_INV_ISS_FLG, 'N', A.INV_SRC_NO, NULL))))) 
+  ELSE
+     (SELECT MAX(INV_NO) FROM INV_AR_SPLIT_ISS WHERE BL_SRC_NO = A.BL_SRC_NO )
+  END INV_NO,
+  -- 2018.05.24 인도지역 Split Invoice Issue 기능 보완 
+  CASE WHEN (SELECT DECODE(A.AR_OFC_CD, 'BOMSC', '', MAX(INV_NO)) FROM INV_AR_SPLIT_ISS WHERE BL_SRC_NO = A.BL_SRC_NO) IS NULL THEN
+     DECODE(A.INV_CLR_FLG, 'Y', A.ISS_DT, NVL(A.ISS_DT, DECODE(G.DMDT_AR_INV_ISS_FLG, 'N', A.ISS_DT, DECODE(G.N3PTY_BIL_AR_INV_FLG, 'N', A.ISS_DT, DECODE(G.TML_INV_ISS_FLG, 'N', A.ISS_DT, NULL))))) 
+  ELSE
+     (SELECT MAX(ISS_DT) FROM INV_AR_SPLIT_ISS WHERE BL_SRC_NO = A.BL_SRC_NO )
+  END ISS_DT,
+  CASE WHEN (SELECT MAX(NVL(AUTO_INV_ISS_FLG,'N')) FROM INV_AR_ISS WHERE INV_NO = A.INV_NO AND ISS_DT = A.ISS_DT) ='Y' THEN 'A'  ELSE 'M'  END  AUTO_INV_ISS_FLG,
+  A.UPD_USR_ID,
+  MAX(D.DP_PRCS_KNT) OVER (PARTITION BY A.LOCL_CURR_CD) DP_PRCS_KNT_LCL,
+  0 DP_PRCS_KNT,
+  --2017.08.01 인도 GST 세법 변경 관련 보완
+  (SELECT MAX(INV_NO)
+   FROM INV_AR_ISS_DTL
+   WHERE AR_IF_NO = A.AR_IF_NO
+   AND LENGTH(INV_NO) = 15
+   AND SUBSTR(INV_NO, 1, 1) = 'P') PRO_INV_NO,
+  (SELECT SUM(IDA_CGST_AMT) FROM INV_AR_CHG WHERE AR_IF_NO = A.AR_IF_NO) IDA_CGST_AMT,
+  (SELECT SUM(IDA_SGST_AMT) FROM INV_AR_CHG WHERE AR_IF_NO = A.AR_IF_NO) IDA_SGST_AMT,
+  (SELECT SUM(IDA_UGST_AMT) FROM INV_AR_CHG WHERE AR_IF_NO = A.AR_IF_NO) IDA_UGST_AMT,
+  (SELECT SUM(IDA_IGST_AMT) FROM INV_AR_CHG WHERE AR_IF_NO = A.AR_IF_NO) IDA_IGST_AMT
+FROM INV_AR_MN A,
+  MDM_CURRENCY D,
+  MDM_CUSTOMER F,
+  INV_AR_STUP_OFC G,
+  (
+    SELECT ROWID RID,
+      AR_IF_NO
+    FROM INV_AR_MN
+#if (${office} != '')
+    WHERE AR_OFC_CD = @[office] -- OFFICE
+#else 
+    WHERE AR_OFC_CD IN ( SELECT OFC_CD -- OFC ALL 선택시 적용..  
+                         FROM MDM_ORGANIZATION
+                         WHERE AR_HD_QTR_OFC_CD = ( SELECT AR_HD_QTR_OFC_CD
+                                                    FROM MDM_ORGANIZATION
+                                                    WHERE OFC_CD = ( SELECT AR_OFC_CD
+                                                                     FROM MDM_ORGANIZATION
+                                                                     WHERE OFC_CD = @[user_ofc_cd]))
+                           AND OFC_CD = AR_OFC_CD )
+#end
+
+
+#if (${from_date} != '' && ${to_date} != '') 									
+#if (${date_option} == 'G') 									
+      AND BL_INV_CFM_DT BETWEEN REPLACE(@[from_date],'-','') AND REPLACE(@[to_date],'-','')									
+#elseif (${date_option} == 'I')									
+      AND BL_INV_IF_DT BETWEEN REPLACE(@[from_date],'-','') AND REPLACE(@[to_date],'-','')									
+#elseif (${date_option} == 'E')									
+      AND GL_EFF_DT BETWEEN REPLACE(@[from_date],'-','') AND REPLACE(@[to_date],'-','')									
+#elseif (${date_option} == 'A')									
+      AND SAIL_ARR_DT BETWEEN REPLACE(@[from_date],'-','') AND REPLACE(@[to_date],'-','')									
+#end									
+#end
+      
+    ) X
+WHERE A.ROWID = X.RID
+  AND A.AR_IF_NO = X.AR_IF_NO
+  AND A.LOCL_CURR_CD = D.CURR_CD
+  AND A.ACT_CUST_CNT_CD = F.CUST_CNT_CD (+)
+  AND A.ACT_CUST_SEQ = F.CUST_SEQ (+)
+  AND A.AR_OFC_CD = G.AR_OFC_CD (+)
+#if (${from_date} != '' && ${to_date} != '') 									
+#if (${date_option} == 'G') 									
+  AND A.BL_INV_CFM_DT BETWEEN REPLACE(@[from_date],'-','') AND REPLACE(@[to_date],'-','')									
+#elseif (${date_option} == 'I')									
+  AND A.BL_INV_IF_DT BETWEEN REPLACE(@[from_date],'-','') AND REPLACE(@[to_date],'-','')									
+#elseif (${date_option} == 'E')									
+  AND A.GL_EFF_DT BETWEEN REPLACE(@[from_date],'-','') AND REPLACE(@[to_date],'-','')									
+#elseif (${date_option} == 'A')									
+  AND A.SAIL_ARR_DT BETWEEN REPLACE(@[from_date],'-','') AND REPLACE(@[to_date],'-','')									
+#end							
+#end
+
+#if (${office} != '')
+  AND A.AR_OFC_CD = @[office] -- OFFICE
+#else 
+  AND A.AR_OFC_CD IN ( SELECT OFC_CD -- OFC ALL 선택시 적용..  
+                       FROM MDM_ORGANIZATION
+                       WHERE AR_HD_QTR_OFC_CD = ( SELECT AR_HD_QTR_OFC_CD
+                                                  FROM MDM_ORGANIZATION
+                                                  WHERE OFC_CD = ( SELECT AR_OFC_CD
+                                                                   FROM MDM_ORGANIZATION
+                                                                   WHERE OFC_CD = @[user_ofc_cd]))
+                         AND OFC_CD = AR_OFC_CD )
+#end
+  AND NVL(A.INV_DELT_DIV_CD, 'N') <> 'Y'
+#if (${issue_flag} != 'A') 
+  AND A.INV_ISS_FLG = @[issue_flag]
+#end
+#if (${date_option} != 'G')
+#if (${good_flag} == 'Y') 
+  AND A.BL_INV_CFM_DT IS NOT NULL
+#elseif (${good_flag} == 'N') 
+  AND A.BL_INV_CFM_DT IS NULL
+#end
+#end
+#if (${act_cust_cnt_cd} != '') 
+  AND A.ACT_CUST_CNT_CD = @[act_cust_cnt_cd]
+#end
+#if (${act_cust_seq} != '') 
+  AND A.ACT_CUST_SEQ = @[act_cust_seq]
+#end
+#if (${rev_tp_cd} != '')
+  AND A.REV_TP_CD = @[rev_tp_cd]
+#end
+#if (${rev_src_cd} != '')
+  AND A.REV_SRC_CD IN (@[rev_src_cd])
+#end
+#if (${vsl_cd} != '') 
+  AND A.VSL_CD = @[vsl_cd]
+#end
+#if (${skd_voy_no} != '') 
+  AND A.SKD_VOY_NO = @[skd_voy_no]
+#end
+#if (${skd_dir_cd} != '') 
+  AND A.SKD_DIR_CD = @[skd_dir_cd]
+#end
+#if (${scope} != '') 
+  AND A.SVC_SCP_CD = @[scope]
+#end
+#if (${bound} != 'A')
+  AND A.IO_BND_CD = @[bound]
+#if ((${bound} == 'I') && (${port} != ''))
+  AND A.POD_CD = @[port]
+#elseif ((${bound} == 'O') && (${port} != ''))
+  AND A.POL_CD = @[port]
+#end
+#else
+#if (${port} != '')
+  AND ((A.IO_BND_CD = 'I' AND A.POD_CD = @[port]) OR (A.IO_BND_CD = 'O' AND A.POL_CD = @[port]))
+#end
+#end
+#if (${inv_clr_flg} == 'N')
+  AND A.INV_CLR_FLG = @[inv_clr_flg]
+#end
+#if (${upd_usr_id} != '') 
+  AND A.UPD_USR_ID LIKE @[upd_usr_id]||'%'
+#end
+ORDER BY GOOD_DATE, AR_OFC_CD, DECODE(IO_BND_CD, 'O/B', 1, 'I/B', 2), TYPE, VVD, SAIL_ARR_DT, POL_CD, POD_CD, CUSTOMER, BL_SRC_NO, AR_IF_NO			]]></sql>
+			<params>
+				<param name="office" type="12" value="" out="N"/>
+				<param name="user_ofc_cd" type="12" value="" out="N"/>
+				<param name="from_date" type="12" value="" out="N"/>
+				<param name="to_date" type="12" value="" out="N"/>
+				<param name="issue_flag" type="12" value="" out="N"/>
+				<param name="act_cust_cnt_cd" type="12" value="" out="N"/>
+				<param name="act_cust_seq" type="12" value="" out="N"/>
+				<param name="rev_tp_cd" type="12" value="" out="N"/>
+				<param name="rev_src_cd" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="scope" type="12" value="" out="N"/>
+				<param name="bound" type="12" value="" out="N"/>
+				<param name="port" type="12" value="" out="N"/>
+				<param name="inv_clr_flg" type="12" value="" out="N"/>
+				<param name="upd_usr_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

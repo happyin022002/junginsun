@@ -1,0 +1,885 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CLLCDLManifestDBDAOaddCdlEdiMainCSQL">
+			<desc><![CDATA[addCdlEdiMain
+1. 2010.12.24 이수진 [CHM-201007772] ALPS CDL screen 비정상 FF 생성
+   : F/F 생성시 해당 문자열이 길이가 4000byte를 넘어 EDI 전송시 Body 정보가 보이지 않는 문제가 발생하여
+    4000byte가 넘는 컬럼을 to_clob으로 변환함.
+  
+2. 2010.1.20 경종윤
+	- [CHM-201108213] CLL/CDL EDI 기능에 Multi Seal 지원 로직 추가
+	- [CHM-201108406] COPRAR EDI issue 관련 보완 요청 - Venterm Terminal (CAVANM2)
+
+3. 2013,2.21
+       - [CHM-201322723] Tare Weight 하드코딩 제거
+
+4. 2013.8.26
+       - [CHM-201322723] 중국지역 customs Description 지역 추가(CNNBO)
+]]></desc>
+			<sql><![CDATA[
+INSERT INTO BKG_CSTMS_TML_EDI_GEN_TMP 
+WITH BKG_CSTMS_TML_EDI_TMP_KEY AS
+    (
+     SELECT  /*+ MATERIALIZE */ 
+             VVD_CD, POD_CD, BKG_NO, CNTR_NO,
+             ROW_NUMBER() OVER (PARTITION BY VVD_CD ORDER BY BKG_NO, CNTR_NO) ORD 
+     FROM    BKG_CSTMS_TML_EDI_TMP
+     ORDER BY BKG_NO, CNTR_NO
+    )
+
+SELECT  0            ORD1, 
+        2            ORD2,
+        1            ORD3,
+        TO_CLOB( NVL(A.PSEUDO_VVD, B.PSEUDO_VVD) )  PSEUDO_VVD
+FROM   (
+		SELECT  MAX( 
+                'BRAC:'||NVL(DECODE(@[in_edi_msg_func], 'ORIGINAL','O',
+                'REPLACE', 'U',
+                'CANCEL',  'C',
+                'CHANGE',  'G',
+                'ADDITION','A', 'O'),'O')||CHR(10)||
+                'VVD:'||NVL(A.VSL_CD,' ')||NVL(A.SKD_VOY_NO,' ')||NVL(A.SKD_DIR_CD,' ')||CHR(10)||
+                'VSL_CALLSIGN:'||NVL(D.CALL_SGN_NO,' ')||CHR(10)||
+                'VSL_LLOYDCODE:'||NVL(D.LLOYD_NO,' ')||CHR(10)||
+                'VSL_FULLNAME:'||NVL(D.VSL_ENG_NM,' ')||CHR(10)||
+                'LANE_CD:'||NVL(A.SLAN_CD,' ')||CHR(10)||
+                'VVD_REF_NO:'||NVL(G.CVY_REF_NO,' ')||CHR(10)||
+                'PORT:'||NVL(DECODE(@[in_pol_cd],NULL,@[in_pod_cd],@[in_pol_cd]),'')||CHR(10)||  
+                'PORTNAME:'||NVL( (SELECT  A.LOC_NM
+                                   FROM    MDM_LOCATION  A
+                                   WHERE   A.LOC_CD = NVL(@[in_pod_cd],@[in_pol_cd])
+                                  ),'')||CHR(10)|| 
+				'POL_YDCD:'||CHR(10)||
+				'POL_YDNM:'||CHR(10)||
+				'POD_YDCD:'||A.YD_CD||CHR(10)||
+				'POD_YDNM:'||(SELECT YD_NM FROM MDM_YARD WHERE YD_CD = A.YD_CD)||CHR(10)||
+                'ETA:'||NVL(TO_CHAR(A.VPS_ETA_DT,'YYYYMMDDHH24MI'),' ')||CHR(10)||
+                'ETD:'||NVL(TO_CHAR(A.VPS_ETD_DT,'YYYYMMDDHH24MI'),' ')||CHR(10)||
+                DECODE(@[in_pol_cd],NULL,'NEXTPORT:'||CHR(10)||
+                'NEXTPORT_ETA:'||CHR(10)||
+                'PREVPORT:'||NVL(B.VPS_PORT_CD,' ')||CHR(10)||
+                'PREVPORT_ETD:'||NVL(TO_CHAR(B.VPS_ETD_DT,'YYYYMMDDHH24MI'),' ')||CHR(10),
+                'NEXTPORT:'||NVL(C.VPS_PORT_CD,' ')||CHR(10)||
+                'NEXTPORT_ETA:'||NVL(TO_CHAR(C.VPS_ETA_DT,'YYYYMMDDHH24MI'),' ')||CHR(10)||
+                'PREVPORT:'||CHR(10)||
+                'PREVPORT_ETD:'||CHR(10)
+                )||
+                'IO_IND:'||'CDL'||CHR(10)||
+                'COMP_ID:'||CHR(10)||
+                'MRN:'||NVL(E.MAPG_CRR_CD,E.CRR_CD)||CHR(10)||
+                'MRN_NAME:'||NVL(E.CRR_NM,' ')||CHR(10)||
+                'CRN_NO:'||F.VSL_CALL_REF_NO||CHR(10)
+                )  PSEUDO_VVD
+        FROM    VSK_VSL_PORT_SKD A,
+                VSK_VSL_PORT_SKD B,
+                VSK_VSL_PORT_SKD C,
+                MDM_VSL_CNTR D,
+                MDM_CARRIER E,
+                BKG_CSTMS_RTM_VSL F,
+				BKG_VSL_DCHG_YD G
+        WHERE   A.VSL_CD                 = SUBSTR(@[in_vvd_cd],1,4)
+        AND     A.SKD_VOY_NO             = SUBSTR(@[in_vvd_cd],5,4)
+        AND     A.SKD_DIR_CD             = SUBSTR(@[in_vvd_cd],9,1)
+        AND     A.CLPT_IND_SEQ           = NVL(DECODE(@[in_pol_cd],null,@[in_pod_split_no],@[in_pol_split_no]),'1')  -- '1'
+        AND     A.VPS_PORT_CD            = NVL(@[in_pol_cd],@[in_pod_cd]) 
+        AND     (A.CLPT_SEQ - 1)         = B.CLPT_SEQ(+)
+        AND     A.VSL_CD                 = B.VSL_CD(+)
+        AND     A.SKD_VOY_NO             = B.SKD_VOY_NO(+)
+        AND     A.SKD_DIR_CD             = B.SKD_DIR_CD(+)
+       -- AND     B.CLPT_IND_SEQ(+)        = '1'
+        AND     (A.CLPT_SEQ + 1)         = C.CLPT_SEQ(+)
+        AND     A.VSL_CD                 = C.VSL_CD(+)
+        AND     A.SKD_VOY_NO             = C.SKD_VOY_NO(+)
+        AND     A.SKD_DIR_CD             = C.SKD_DIR_CD(+)
+       -- AND     C.CLPT_IND_SEQ(+)        = '1'
+        AND     A.VSL_CD                 = D.VSL_CD
+        AND     D.CRR_CD                 = E.CRR_CD
+        AND     A.VSL_CD                 = F.VSL_CD(+)  
+        AND     A.SKD_VOY_NO             = F.SKD_VOY_NO(+)
+        AND     A.SKD_DIR_CD             = F.SKD_DIR_CD(+)
+        AND     F.VSL_CALL_REF_STS_CD(+) = 'Y' 
+        AND	    A.VSL_CD				 = G.VSL_CD(+)
+		AND		A.SKD_VOY_NO			 = G.SKD_VOY_NO(+)
+		AND		A.SKD_DIR_CD			 = G.SKD_DIR_CD(+)
+		AND 	G.PORT_CD(+)             = @[in_pod_cd]
+		AND		A.CLPT_IND_SEQ           = G.CLPT_IND_SEQ(+)  
+       )  A,
+       (SELECT  MAX(
+                'BRAC:'||NVL(DECODE(@[in_edi_msg_func], 'ORIGINAL','O', 'REPLACE','U', 'CANCEL','C', 'O'),'O')||CHR(10)||
+                'VVD:'||SUBSTR(@[in_vvd_cd],1,4)||SUBSTR(@[in_vvd_cd],5,4)||SUBSTR(@[in_vvd_cd],9,1)||CHR(10)||
+                'VSL_CALLSIGN:'||CHR(10)||
+                'VSL_LLOYDCODE:'||CHR(10)||
+                'VSL_FULLNAME:'||NVL(A.VSL_ENG_NM,' ')||CHR(10)||
+                'LANE_CD:'||CHR(10)||
+                'VVD_REF_NO:'||CHR(10)||
+                'PORT:'||NVL(DECODE(@[in_pol_cd], NULL, @[in_pod_cd],@[in_pol_cd]),'')||CHR(10)||
+                'PORTNAME:'||NVL((SELECT  A.LOC_NM
+                                   FROM    MDM_LOCATION  A
+                                   WHERE   A.LOC_CD = NVL(@[in_pod_cd],@[in_pol_cd])
+                                  ),'')||CHR(10)||
+				'POL_YDCD:'||CHR(10)||
+				'POL_YDNM:'||CHR(10)||
+				'POD_YDCD:'||CHR(10)||
+				'POD_YDNM:'||CHR(10)||
+                'ETA:'||CHR(10)||
+                'ETD:'||CHR(10)||
+                'NEXTPORT:'||CHR(10)||
+                'NEXTPORT_ETA:'||CHR(10)||
+                'PREVPORT:'||CHR(10)||
+                'PREVPORT_ETD:'||CHR(10)||
+                'IO_IND:'||'CDL'||CHR(10)||
+                'COMP_ID:'||CHR(10)||
+                'MRN:'||NVL(B.MAPG_CRR_CD,B.CRR_CD)||CHR(10)||
+                'MRN_NAME:'||NVL(B.CRR_NM,' ')||CHR(10)||
+                'CRN_NO:'||CHR(10)
+                )  PSEUDO_VVD
+        FROM     MDM_VSL_CNTR A,
+                 MDM_CARRIER B
+        WHERE    A.VSL_CD(+) = SUBSTR(@[in_vvd_cd],1,4)
+        AND      A.CRR_CD    = B.CRR_CD
+       )  B
+UNION ALL
+SELECT  /*+ ORDERED USE_NL(X B ISS BCS BCC C1 C2 C3 C4 C5 E COM) */
+        X.ORD        ORD1,
+        1            ORD2,
+        1            ORD3,
+        TO_CLOB( '{BL_INFO'||chr(10)||
+        'BLNBR:'||NVL(B.BL_NO,' ')||DECODE(NVL(B.BL_TP_CD,' '),'S',' ',NVL(B.BL_TP_CD,' '))||CHR(10)||
+        'BLPOL:'||NVL(B.POL_CD,' ')||CHR(10)||
+        'POL_AMS:'||C1.LOC_AMS_PORT_CD||CHR(10)||
+        'POL_FULLNAME:'||C1.LOC_NM||CHR(10)||
+        'BLPOD:'||NVL(B.POD_CD,' ')||CHR(10)||
+        'POD_AMS:'||C2.LOC_AMS_PORT_CD||CHR(10)||
+        'POD_FULLNAME:'||C2.LOC_NM||CHR(10)||
+	    'BLCK_STWG_CD:'||B.BLCK_STWG_CD||CHR(10)||
+        'BLPOR:'||NVL(B.POR_CD,' ')||CHR(10)||
+        'POR_AMS:'||C3.LOC_AMS_PORT_CD||CHR(10)||
+        'POR_FULLNAME:'||C3.LOC_NM||CHR(10)||
+        'BLDEL:'||NVL(B.DEL_CD,' ')||CHR(10)||
+        'DEL_AMS:'||C4.LOC_AMS_PORT_CD||CHR(10)||
+        'DEL_FULLNAME:'||C4.LOC_NM||CHR(10)||
+        'BLRLY:'||decode(@[in_pol_cd], NULL,NVL(B.PST_RLY_PORT_CD,' '),NVL(B.PRE_RLY_PORT_CD,' '))||CHR(10)|| 
+        'RLY_AMS:'||C5.LOC_AMS_PORT_CD||CHR(10)||
+        'RLY_FULLNAME:'||C5.LOC_NM||CHR(10)||
+        'BLPLACE:'||NVL(E.LOC_CD,' ')||CHR(10)||
+        'BLDATE:'||NVL(TO_CHAR(ISS.OBL_ISS_DT,'RRMMDD'),' ')||CHR(10)||
+        'SHPRCN:'||NVL(BCS.CUST_CNT_CD,'')||CHR(10)||
+        'SHPRCD:'||DECODE(TO_CHAR(BCS.CUST_SEQ),'0','',TO_CHAR(BCS.CUST_SEQ))||CHR(10)||
+        'SHPR1:'||REPLACE(BKG_TOKEN_NL_FNC(BCS.CUST_NM,1,''),'*','-')||CHR(10)||
+        'SHPR2:'||REPLACE(BKG_TOKEN_NL_FNC(BCS.CUST_NM,2,''),'*','-')||CHR(10)||
+        'SHPR3:'||REPLACE(BKG_TOKEN_NL_FNC(BCS.CUST_ADDR,1,''),'*','-')||CHR(10)||
+        'SHPR4:'||REPLACE(BKG_TOKEN_NL_FNC(BCS.CUST_ADDR,2,''),'*','-')||CHR(10)||
+        'SHPR5:'||REPLACE(BKG_TOKEN_NL_FNC(BCS.CUST_ADDR,3,''),'*','-')||CHR(10)||
+		DECODE(SUBSTR(B.POD_CD,1,2),'CN', 'SHPR6:'||NVL(BCS.CUST_PHN_NO,' ')||CHR(10))||
+		DECODE(SUBSTR(B.POD_CD,1,2),'CN', 'SHPR7:'||NVL(BCS.CUST_FAX_NO,' ')||CHR(10))||
+		DECODE(SUBSTR(B.POD_CD,1,2),'CN', 'SHPR8:'||NVL(BCS.CUST_EML,' ')||CHR(10))||
+		DECODE(SUBSTR(B.POD_CD,1,2),'CN', 'SHPR9:'||NVL(BCS.EUR_CSTMS_ST_NM,' ')||CHR(10))||
+        'SHPRTAXID:'||CHR(10)||
+		DECODE(SUBSTR(B.POD_CD,1,2),'CN', 'SHPRRGSTNO:'||DECODE(BCS.EORI_NO, NULL, ' '||CHR(10)
+																				 , '9999+'||BCS.EORI_NO||CHR(10)
+															   )
+			  )||
+        'CNEECN:'||NVL(BCC.CUST_CNT_CD,'')||CHR(10)||
+        'CNEECD:'||DECODE(TO_CHAR(BCC.CUST_SEQ),'0','',TO_CHAR(BCC.CUST_SEQ))||CHR(10)||
+        'CNEE1:'||REPLACE(BKG_TOKEN_NL_FNC(BCC.CUST_NM,1,''),'*','-')||CHR(10)||
+        'CNEE2:'||REPLACE(BKG_TOKEN_NL_FNC(BCC.CUST_NM,2,''),'*','-')||CHR(10)||
+        'CNEE3:'||REPLACE(BKG_TOKEN_NL_FNC(BCC.CUST_ADDR,1,''),'*','-')||CHR(10)||
+        'CNEE4:'||REPLACE(BKG_TOKEN_NL_FNC(BCC.CUST_ADDR,2,''),'*','-')||CHR(10)||
+        'CNEE5:'||REPLACE(BKG_TOKEN_NL_FNC(BCC.CUST_ADDR,3,''),'*','-')||CHR(10)||
+		DECODE(SUBSTR(B.POD_CD,1,2),'CN', 'CNEE6:'||NVL(BCC.CUST_PHN_NO,' ')||CHR(10))||
+		DECODE(SUBSTR(B.POD_CD,1,2),'CN', 'CNEE7:'||NVL(BCC.CUST_FAX_NO,' ')||CHR(10))||
+		DECODE(SUBSTR(B.POD_CD,1,2),'CN', 'CNEE8:'||NVL(BCC.CUST_EML,' ')||CHR(10))||
+		DECODE(SUBSTR(B.POD_CD,1,2),'CN', 'CNEE9:'||NVL(BCC.EUR_CSTMS_ST_NM,' ')||CHR(10))||
+        'CNEETAXID:'||CHR(10)|| 
+		DECODE(SUBSTR(B.POD_CD,1,2),'CN', 'CNEERGSTNO:'||DECODE(BCC.CO_CHN_TP_CD, 'O', 'OC+'||BCC.EORI_NO||CHR(10) 
+																   				, 'B', '9999+'||BCC.EORI_NO||CHR(10)
+																   				, 'U', 'USCI+'||BCC.EORI_NO||CHR(10)
+																					 , DECODE(BCC.EORI_NO, NULL, ' '||CHR(10)
+																											   , '9999+'||BCC.EORI_NO||CHR(10)
+																							   )
+											   				    )
+              )) BL_INFO
+FROM   (SELECT  BKG_NO,
+                MIN(ORD)  ORD
+        FROM    BKG_CSTMS_TML_EDI_TMP_KEY
+        WHERE   ROWNUM >= 1
+        GROUP BY BKG_NO
+       )  X,
+        BKG_BOOKING      B, 
+        BKG_BL_ISS       ISS,
+        BKG_CUSTOMER     BCS,
+        BKG_CUSTOMER     BCC,
+        MDM_LOCATION     C1,
+        MDM_LOCATION     C2,
+        MDM_LOCATION     C3,
+        MDM_LOCATION     C4,
+        MDM_LOCATION     C5,
+        MDM_ORGANIZATION E,
+        MDM_COMMODITY    COM
+WHERE   X.BKG_NO                = B.BKG_NO
+AND     B.BKG_NO                = ISS.BKG_NO(+)
+AND     B.POL_CD                = C1.LOC_CD(+)
+AND     B.POD_CD                = C2.LOC_CD(+)
+AND     B.POR_CD                = C3.LOC_CD(+)
+AND     B.DEL_CD                = C4.LOC_CD(+)
+AND     DECODE(@[in_pol_cd], NULL, NVL(B.PST_RLY_PORT_CD,' '),NVL(B.PRE_RLY_PORT_CD,' ')) = C5.LOC_CD(+)
+AND     ISS.OBL_ISS_OFC_CD      = E.OFC_CD(+)
+AND     B.CMDT_CD               = COM.CMDT_CD(+)
+AND     B.BKG_NO                = BCS.BKG_NO
+AND     BCS.BKG_CUST_TP_CD      = 'S'
+AND     B.BKG_NO                = BCC.BKG_NO
+AND     BCC.BKG_CUST_TP_CD      = 'C'
+UNION ALL
+SELECT  /*+ ORDERED USE_NL(X BK DOC BL F BCN BCA BCF BCE C1 C2 C3 C4 C5 COM REF) */
+        X.ORD        ORD1,
+        2            ORD2,
+        1            ORD3,
+        TO_CLOB( 'NTFYCN:'||NVL(BCN.CUST_CNT_CD,'')||CHR(10)||
+        'NTFYCD:'||DECODE(TO_CHAR(BCN.CUST_SEQ),'0','',TO_CHAR(BCN.CUST_SEQ))||CHR(10)||
+        'NTFY1:'||REPLACE(BKG_TOKEN_NL_FNC(BCN.CUST_NM,1,''),'*','-')||CHR(10)||
+        'NTFY2:'||REPLACE(BKG_TOKEN_NL_FNC(BCN.CUST_NM,2,''),'*','-')||CHR(10)||
+        'NTFY3:'||REPLACE(BKG_TOKEN_NL_FNC(BCN.CUST_ADDR,1,''),'*','-')||CHR(10)||
+        'NTFY4:'||REPLACE(BKG_TOKEN_NL_FNC(BCN.CUST_ADDR,2,''),'*','-')||CHR(10)||
+        'NTFY5:'||REPLACE(BKG_TOKEN_NL_FNC(BCN.CUST_ADDR,3,''),'*','-')||CHR(10)||
+		DECODE(SUBSTR(BK.POD_CD,1,2),'CN', 'NTFY6:'||NVL(BCN.CUST_PHN_NO,' ')||CHR(10))||
+		DECODE(SUBSTR(BK.POD_CD,1,2),'CN', 'NTFY7:'||NVL(BCN.CUST_FAX_NO,' ')||CHR(10))||
+		DECODE(SUBSTR(BK.POD_CD,1,2),'CN', 'NTFY8:'||NVL(BCN.CUST_EML,' ')||CHR(10))||
+		DECODE(SUBSTR(BK.POD_CD,1,2),'CN', 'NTFY9:'||NVL(BCN.EUR_CSTMS_ST_NM,' ')||CHR(10))||
+        'NTFYTAXID:'||CHR(10)||
+		DECODE(SUBSTR(BK.POD_CD,1,2),'CN', 'NTFYRGSTNO:'||DECODE(BCN.CO_CHN_TP_CD, 'O', 'OC+'||BCN.EORI_NO||CHR(10) 
+																     			 , 'B', '9999+'||BCN.EORI_NO||CHR(10)
+																    			 , 'U', 'USCI+'||BCN.EORI_NO||CHR(10)
+											   						     		      , DECODE(BCN.EORI_NO, NULL, ' '||CHR(10)
+																												, '9999+'||BCN.EORI_NO||CHR(10)
+																								)
+											    				)
+               )|| 
+        'NTFY2CN:'||NVL(BCA.CUST_CNT_CD,'')||CHR(10)||
+        'NTFY2CD:'||DECODE(TO_CHAR(BCA.CUST_SEQ),'0','',TO_CHAR(BCA.CUST_SEQ))||CHR(10)||
+        'NTFY21:'||REPLACE(BKG_TOKEN_NL_FNC(BCA.CUST_NM,1,''),'*','-')||CHR(10)||
+        'NTFY22:'||REPLACE(BKG_TOKEN_NL_FNC(BCA.CUST_NM,2,''),'*','-')||CHR(10)||
+        'NTFY23:'||REPLACE(BKG_TOKEN_NL_FNC(BCA.CUST_NM,3,''),'*','-')||CHR(10)||
+        'NTFY24:'||REPLACE(BKG_TOKEN_NL_FNC(BCA.CUST_NM,4,''),'*','-')||CHR(10)||
+        'NTFY25:'||REPLACE(BKG_TOKEN_NL_FNC(BCA.CUST_NM,5,''),'*','-')||CHR(10)||
+        'FFWDCN:'||NVL(BCF.CUST_CNT_CD,'')||CHR(10)||
+        'FFWDCD:'||DECODE(TO_CHAR(BCF.CUST_SEQ),'0','',TO_CHAR(BCF.CUST_SEQ))||CHR(10)||
+        'FFWD1:'||REPLACE(BKG_TOKEN_NL_FNC(BCF.CUST_NM,1,''),'*','-')||CHR(10)||
+        'FFWD2:'||REPLACE(BKG_TOKEN_NL_FNC(BCF.CUST_NM,2,''),'*','-')||CHR(10)||
+        'FFWD3:'||REPLACE(BKG_TOKEN_NL_FNC(BCF.CUST_NM,3,''),'*','-')||CHR(10)||
+        'FFWD4:'||REPLACE(BKG_TOKEN_NL_FNC(BCF.CUST_NM,4,''),'*','-')||CHR(10)||
+        'FFWD5:'||REPLACE(BKG_TOKEN_NL_FNC(BCF.CUST_NM,5,''),'*','-')||CHR(10)||
+        'EXPOCN:'||NVL(BCE.CUST_CNT_CD,'')||CHR(10)||
+        'EXPOCD:'||DECODE(TO_CHAR(BCE.CUST_SEQ),'0','',TO_CHAR(BCE.CUST_SEQ))||CHR(10)||
+        'EXPO1:'||REPLACE(BKG_TOKEN_NL_FNC(BCE.CUST_NM,1,''),'*','-')||CHR(10)||
+        'EXPO2:'||REPLACE(BKG_TOKEN_NL_FNC(BCE.CUST_NM,2,''),'*','-')||CHR(10)||
+        'EXPO3:'||REPLACE(BKG_TOKEN_NL_FNC(BCE.CUST_NM,3,''),'*','-')||CHR(10)||
+        'EXPO4:'||REPLACE(BKG_TOKEN_NL_FNC(BCE.CUST_NM,4,''),'*','-')||CHR(10)||
+        'EXPO5:'||REPLACE(BKG_TOKEN_NL_FNC(BCE.CUST_NM,5,''),'*','-')||CHR(10)||
+        'BLCOPY:'||NVL(BL.BL_CPY_KNT,0)||CHR(10)||
+        'BLORG:1'||CHR(10)||
+        'BLPKG:'||NVL(DOC.PCK_QTY,0)||CHR(10)||
+        'BLPKGU:'||NVL(DOC.PCK_TP_CD,' ')||CHR(10)||
+        'BLWGT:'||NVL(DOC.ACT_WGT,0)||CHR(10)||
+        'BL_WGT_UNIT:'||NVL(DOC.WGT_UT_CD,' ')||CHR(10)||
+        'BLMEA:'||NVL(DOC.MEAS_QTY,0)||CHR(10)||
+        'BL_MEA_UNIT:'||NVL(DOC.MEAS_UT_CD,' ')||CHR(10)||
+        'RDTYPE:'||NVL(BK.RCV_TERM_CD,' ')||NVL(BK.DE_TERM_CD,' ')||CHR(10)||
+        'CARGOTYPE:'||NVL(BK.BKG_CGO_TP_CD,' ')||CHR(10)||
+        'COMMODITY:'||NVL(BK.CMDT_CD,' ')||CHR(10)||
+        'BLCMD:'||NVL(TRANSLATE(NVL(COM.CMDT_NM,' '),chr(13)||chr(10),' '),' ')||CHR(10)||  
+        'BLREPCMDCD:'||NVL(BK.REP_CMDT_CD,' ')||CHR(10)||
+        'BLREPCMD:'||NVL((SELECT  TRANSLATE(NVL(REP.REP_CMDT_NM,' '),CHR(13)||CHR(10),' ') REP_CMDT_NM
+                          FROM    MDM_REP_CMDT REP
+                          WHERE   REP.REP_CMDT_CD = BK.REP_CMDT_CD
+                         ),' ')||CHR(10)||
+        'REMARK:'||REPLACE(REPLACE(REPLACE(Translate(NVL(BK.XTER_RMK,' '),chr(13)||chr(10),' '),'$','S'),'#',' '),'*','-')||CHR(10)||
+        'AUS_QUAR:'||' '||CHR(10)||
+        'SRNBR:'||CHR(10)||
+        'BKGNBR:'||NVL(BK.BKG_NO,' ')||CHR(10)||
+        'RGN_BKGNBR:'||NVL(REF.CUST_REF_NO_CTNT,' ')||CHR(10)||
+        'PPDOFC:'||NVL(F.PPD_RCV_OFC_CD,' ')||CHR(10)||
+        'CCTOFC:'||NVL(F.CLT_OFC_CD,' ')||CHR(10)||
+        'THDOFC:'||CHR(10)||
+        'SCNO:'||NVL(BK.SC_NO,' ')||CHR(10)||
+        'RFANO:'||NVL(BK.RFA_NO,' ')||CHR(10)||
+        'WAYBILL_IND:'||CHR(10)||
+        'CUSTREF_NUM:'||(SELECT NVL(MAX('U'),'N')  CUSTREF_NUM
+                         FROM   BKG_NTC_HIS
+                         WHERE  BKG_NO      = BK.BKG_NO
+                         AND    NTC_VIA_CD  = 'E'
+                         AND    ( NTC_KND_CD  = 'IM' OR NTC_KND_CD  = 'DL' )
+                         AND    EDI_ID      = @[in_rcv_id]
+                         AND    ROWNUM      = 1
+                        )||CHR(10)|| 
+        'FINAL_ETA:'||CHR(10)||
+        'FUNC_CODE:'||CHR(10)||
+        'ONBOARD:'||CHR(10)||
+        'INV_NO:'||NVL((SELECT  IBD.IBD_TRSP_NO
+                        FROM    BKG_CSTMS_ADV_IBD IBD
+                        WHERE   IBD.CNT_CD = 'US'
+                        AND     IBD.BL_NO  = BK.BL_NO
+                        AND     IBD.IBD_TRSP_NO IS NOT NULL
+                       ),'')||CHR(10)||
+        'BLTS:'||CHR(10)||
+        'BLTP:'||CHR(10)||
+        'MSN:'||CHR(10)||
+        'MSNCFM:'||CHR(10)||
+        'CMDESC:'||CHR(10)||
+        'LOCAL_IPI:'||NVL( (
+                            /** pod location이 USA 지역인 경우 **/
+                            SELECT  CASE WHEN I.CSTMS_CLR_TP_CD = 'L' AND DECODE(BL.CSTMS_POD_CD,'USLAX','USLGB',BL.CSTMS_POD_CD) <> DECODE(BL.HUB_LOC_CD,'USLAX','USLGB',BL.HUB_LOC_CD) THEN 'Y'
+									ELSE I.CSTMS_CLR_TP_CD END
+									||
+                                    NVL(L.LOC_CD,'     ')||
+                                    DECODE(LENGTH(RTRIM(L.LOC_AMS_PORT_CD)),4,'D',5,'K','N')||
+                                    RPAD(RTRIM(L.LOC_AMS_PORT_CD),5)||
+                                    L.LOC_NM LOCAL_IPI
+                            FROM    BKG_CSTMS_ADV_IBD I,
+                                    MDM_LOCATION      L,
+                                    BKG_CSTMS_ADV_BL  BL
+                            WHERE   @[in_area_id]    = 'USA'      
+                            AND     I.CNT_CD       = 'US'
+                            AND     BL.CNT_CD      = 'US'
+                            AND     BK.BL_NO       = BL.BL_NO
+                            AND     BL.BL_NO       = I.BL_NO
+                            AND     BL.HUB_LOC_CD  = L.LOC_CD(+)
+                            UNION ALL
+                            /** pod location이 USA 지역이 아닌 경우 **/
+                            SELECT  DECODE(C2.SCC_CD, C4.SCC_CD,
+                                    DECODE(SUBSTR(BK.POD_CD,1,2), SUBSTR(BK.DEL_CD,1,2), 'L', 'I'), 'I')
+                                    ||(SELECT  L3.LOC_CD||L3.LOC_NM
+                                       FROM    MDM_LOCATION L3
+                                       WHERE   L3.LOC_CD = C4.SCC_CD
+                                      )  LOCAL_IPI
+                            FROM    DUAL
+                            WHERE   @[in_area_id]  <>  'USA'  
+                           ),' ')||CHR(10)|| 
+        'EQREL:'||BK.MTY_PKUP_YD_CD|| CHR(10)||
+        'EQPICKDT:'||TO_CHAR(BK.MTY_PKUP_DT,'RRRRMMDDHH24MI')|| CHR(10)||
+        'EQRTN:'||BK.FULL_RTN_YD_CD|| CHR(10)||
+        'TRANS_MODE:'||NVL((SELECT  'F' TRANS_MODE
+                            FROM    BKG_VVD
+                            WHERE   BKG_NO         = BK.BKG_NO
+                            AND     VSL_PRE_PST_CD = 'U'
+                            AND     POL_CD         = @[in_pod_cd]
+                            AND     ROWNUM         = 1
+                           ),' ')|| CHR(10)||
+        'UD_CD:'||NVL(BK.STWG_CD,' ')||CHR(10) ) CUST_INFO
+FROM   (SELECT  BKG_NO,
+                MIN(ORD)  ORD
+        FROM    BKG_CSTMS_TML_EDI_TMP_KEY
+        WHERE   ROWNUM >= 1
+        GROUP BY BKG_NO
+       )  X,
+        BKG_BOOKING   BK,
+        BKG_BL_DOC    DOC,
+        BKG_BL_ISS    BL,
+        BKG_RATE      F,
+        BKG_CUSTOMER  BCN,
+        BKG_CUSTOMER  BCA,
+        BKG_CUSTOMER  BCF,
+        BKG_CUSTOMER  BCE,
+        MDM_LOCATION  C1,
+        MDM_LOCATION  C2,
+        MDM_LOCATION  C3,
+        MDM_LOCATION  C4,
+        MDM_LOCATION  C5,
+        MDM_COMMODITY COM,
+        BKG_REFERENCE REF
+WHERE   X.BKG_NO                = BK.BKG_NO
+AND     BK.BKG_NO               = BL.BKG_NO (+)
+AND     BK.BKG_NO               = REF.BKG_NO (+)
+AND     REF.BKG_REF_TP_CD(+)    = 'PSAN'
+AND     BK.BKG_NO               = DOC.BKG_NO
+AND     BK.BKG_NO               = F.BKG_NO (+)
+AND     BK.POL_CD               = C1.LOC_CD(+)
+AND     BK.POD_CD               = C2.LOC_CD(+)
+AND     BK.POR_CD               = C3.LOC_CD(+)
+AND     BK.DEL_CD               = C4.LOC_CD(+)
+AND     DECODE(@[in_pol_cd],NULL,NVL(BK.PST_RLY_PORT_CD,' '),NVL(BK.PRE_RLY_PORT_CD,' ')) = C5.LOC_CD(+)
+AND     BK.CMDT_CD              = COM.CMDT_CD(+)
+AND     BK.BKG_NO               = BCN.BKG_NO (+)
+AND     BCN.BKG_CUST_TP_CD (+)  = 'N'
+AND     BK.BKG_NO               = BCA.BKG_NO (+)
+AND     BCA.BKG_CUST_TP_CD (+)  = 'A'
+AND     BK.BKG_NO               = BCF.BKG_NO (+)
+AND     BCF.BKG_CUST_TP_CD (+)  = 'F'
+AND     BK.BKG_NO               = BCE.BKG_NO (+)
+AND     BCE.BKG_CUST_TP_CD (+)  = 'E'
+UNION ALL
+SELECT  /*+ OPT_PARAM('_gby_hash_aggregation_enabled','false') ORDERED USE_NL(X A) */
+        X.ORD        ORD1,
+        DECODE(B.CPY_NO, 1, 3, 4)  ORD2,
+        1                          ORD3,
+        TO_CLOB( CASE WHEN B.CPY_NO = 1 THEN
+            MAX(
+            '{CHARGE'||CHR(10)||
+            'FCTYPE:'||NVL(A.CHG_CD, ' ')||CHR(10)||
+            'RATE:'||NVL(A.CHG_UT_AMT, 0)||CHR(10)||
+            'REVENUETON:'||NVL(A.RAT_AS_QTY,0)||CHR(10)||
+            DECODE(A.FRT_TERM_CD,'P','PPD:'||
+            NVL(A.CHG_AMT,0),'PPD:'||0.0)||CHR(10)||
+            DECODE(A.FRT_TERM_CD,'C','CCT:'||
+            NVL(A.CHG_AMT,0),'CCT:'||0.0)||CHR(10)||
+            'CURRENCYCODE:'||NVL(A.CURR_CD,' ')||CHR(10)||
+            'EXCHRATE:'||CHR(10)||
+            'TARIFF:'||NVL(A.TRF_ITM_NO,' ')||CHR(10)||
+            'PERTYPE:'||NVL(A.RAT_UT_CD,' ')||CHR(10)||
+            'RATEOFC:'||NVL(A.N3PTY_RCV_OFC_CD,' ')||CHR(10)||
+            '}CHARGE'||CHR(10)
+            )  
+        ELSE 
+            '{CHARGE_TTL'||CHR(10)||
+            'PPD_TOTAL:'||sum(DECODE(FRT_TERM_CD,'P',CHG_AMT,0))||CHR(10)||
+            'CCT_TOTAL:'||sum(DECODE(FRT_TERM_CD,'C',CHG_AMT,0))||CHR(10)||
+            'TOTAL_CUR:'||NVL(CURR_CD, ' ')||CHR(10)||
+            '}CHARGE_TTL'||CHR(10) 
+        END ) CHARGE_INFO
+FROM   (SELECT  BKG_NO,
+                MIN(ORD)  ORD
+        FROM    BKG_CSTMS_TML_EDI_TMP_KEY
+        WHERE   ROWNUM >= 1
+        GROUP BY BKG_NO
+       )  X,
+        BKG_CHG_RT   A,
+       (SELECT  LEVEL  CPY_NO
+        FROM    DUAL
+        CONNECT BY LEVEL <= 2
+       )  B  
+WHERE   X.BKG_NO = A.BKG_NO 
+AND     A.FRT_INCL_XCLD_DIV_CD = 'N'
+GROUP BY X.ORD, 
+         B.CPY_NO,
+         DECODE(B.CPY_NO, 1, A.BKG_NO), 
+         DECODE(B.CPY_NO, 1, A.RT_SEQ),
+         A.FRT_TERM_CD, NVL(A.CURR_CD,' ')
+UNION ALL
+SELECT  X.ORD        ORD1,
+        5            ORD2,
+        1            ORD3,
+        TO_CLOB( '{CUS_DESC' || CHR(10) || 'CUSTOMS_DESC:'|| replace(replace(replace(A.CSTMS_DESC,CHR(63),CHR(63)||CHR(63)), CHR(39),CHR(63)||CHR(39)), CHR(58),CHR(63)||CHR(58))|| CHR(10) || '}CUS_DESC'||chr(10)  ) BCD_DESC
+FROM   (SELECT  BKG_NO,
+                MIN(ORD)  ORD
+        FROM    BKG_CSTMS_TML_EDI_TMP_KEY
+        WHERE   ROWNUM >= 1
+        GROUP BY BKG_NO
+       )  X,
+        BKG_BL_DOC   A
+WHERE   X.BKG_NO = A.BKG_NO (+)
+AND     @[in_pod_cd] IN ('CNXMN', 'CNDLC', 'CNXGG', 'CNNBO')  
+UNION ALL
+SELECT  /*+ ORDERED USE_NL(C R A) */
+        X.ORD        ORD1,
+        7            ORD2,
+        1            ORD3,
+       TO_CLOB( '{CNTR_INFO'||CHR(10)||
+        'CNTRNBR:'||NVL(C.CNTR_NO,' ')||CHR(10)||
+		'CNTRNBR_OLD:'||(	SELECT 	ORD_CNTR
+							FROM	(
+										SELECT      CRNT_CTNT.BKG_NO,
+													CRNT_CTNT.CNTR_NO CRNT_CNTR,
+													PRE_CTNT.PRE_CTNT ORD_CNTR
+										FROM (      SELECT  ROW_NUMBER() OVER (PARTITION BY BKG_NO ORDER BY BKG_NO) RN,
+															BKG_NO,
+															PRE_CTNT
+													FROM    (
+																SELECT 	TMP_KEY.BKG_NO,
+																		SUBSTR(DTL.PRE_CTNT,1,11) PRE_CTNT
+																FROM    BKG_HIS_MST MST,
+																		BKG_HIS_DTL DTL,
+																		(SELECT DISTINCT BKG_NO FROM BKG_CSTMS_TML_EDI_TMP_KEY) TMP_KEY
+																WHERE 	MST.BKG_NO 		= DTL.BKG_NO
+																AND   	MST.HIS_SEQ 	= DTL.HIS_SEQ
+																AND   	MST.BKG_NO 		= TMP_KEY.BKG_NO
+																AND   	DTL.HIS_CATE_NM LIKE 'Container%'
+																AND   	MST.BKG_HIS_ISS_UI_ID NOT IN ('ESM_BKG_0079_07','SYSTEM')
+																AND   	DTL.PRE_CTNT IS NOT NULL
+																AND     (TMP_KEY.BKG_NO, SUBSTR(DTL.PRE_CTNT,1,11)) NOT IN  ( SELECT BKG_NO, CNTR_NO FROM BKG_CSTMS_TML_EDI_TMP_KEY)
+															)
+											 ) PRE_CTNT,
+											(	    SELECT 	ROW_NUMBER() OVER (PARTITION BY TMP_KEY.BKG_NO ORDER BY TMP_KEY.BKG_NO) RN, TMP_KEY.BKG_NO, TMP_KEY.CNTR_NO
+													FROM    BKG_CSTMS_TML_EDI_TMP_KEY TMP_KEY ) CRNT_CTNT
+											WHERE 	CRNT_CTNT.BKG_NO    = PRE_CTNT.BKG_NO(+)
+											AND     CRNT_CTNT.RN        = PRE_CTNT.RN(+))
+										WHERE 	BKG_NO      = X.BKG_NO
+										AND     CRNT_CNTR   = X.CNTR_NO
+										AND		ROWNUM  = 1)||CHR(10)||
+		'ALPS_EQID:'||(SELECT MAX(DOC_PROC_SEQ) 
+					 	FROM BKG_DOC_PROC_SKD
+						WHERE BKG_DOC_PROC_TP_CD = 'CNTATC'
+					 	 AND BKG_NO = X.BKG_NO
+					 	 AND DIFF_RMK = X.CNTR_NO )||CHR(10)||
+        'PUNIT:'||NVl(C.PCK_TP_CD,' ')||CHR(10)||
+        DECODE(@[in_yd_cd],'CNXMN','PUNIT_DESC:'||NVL(P.PCK_NM,' ')||CHR(10),'')||
+        'PKG:'||NVL(C.PCK_QTY,0)||CHR(10)||
+        'CNTRWGT:'||DECODE(NVL(C.WGT_UT_CD,' '),
+		'LBS',ROUND(NVL(DECODE(C.CNTR_WGT,0,  ROUND((round(nvl(D.ACT_WGT,0) * decode(substr(C.CNTR_TPSZ_CD,2,1),'2',1,2) / (SELECT SUM(DECODE(SUBSTR(CNTR_TPSZ_CD,2,1),'2',1,2)) FROM BKG_CONTAINER BC WHERE BC.BKG_NO = C.BKG_NO)) 
+        + (NVL(C.CNTR_VOL_QTY, 1)*DECODE(NVL(SPEC.TARE_WGT, 0), 0, DECODE(NVL(MDM.CNTR_TPSZ_TARE_WGT, 0), 0, DECODE(O.CNTR_TPSZ_CD, 'T2', 3600, 'T4', 5200, 0), MDM.CNTR_TPSZ_TARE_WGT), SPEC.TARE_WGT  )))), C.CNTR_WGT),0)*0.4536,2),
+        NVL(DECODE(C.CNTR_WGT,0,ROUND((round(nvl(D.ACT_WGT,0) * decode(substr(C.CNTR_TPSZ_CD,2,1),'2',1,2) / (SELECT SUM(DECODE(SUBSTR(CNTR_TPSZ_CD,2,1),'2',1,2)) FROM BKG_CONTAINER BC WHERE BC.BKG_NO = C.BKG_NO)) 
+        + (NVL(C.CNTR_VOL_QTY, 1)*DECODE(NVL(SPEC.TARE_WGT, 0), 0, DECODE(NVL(MDM.CNTR_TPSZ_TARE_WGT, 0), 0, DECODE(O.CNTR_TPSZ_CD, 'T2', 3600, 'T4', 5200, 0), MDM.CNTR_TPSZ_TARE_WGT), SPEC.TARE_WGT  )))), C.CNTR_WGT),0)
+        )||CHR(10)||
+        'CNTRGWGT:'||CHR(10)||
+        'CNTR_WGT_UNIT:'||'KGS'||CHR(10)||
+
+        'CNTR_TOTAL_WGT:'|| (
+							 SELECT
+							 SUM( DECODE( NVL(WGT_UT_CD, ' ') , 'LBS', ROUND(NVL(CNTR_WGT, 0)*0.4536, 0) , NVL(CNTR_WGT, 0) )  ) CNTR_TOTAL_WGT
+							 FROM BKG_CONTAINER BC , BKG_BOOKING BK
+							WHERE 1=1
+							 AND BC.CNTR_NO = C.CNTR_NO
+							 AND BC.BKG_NO= BK.BKG_NO
+							 AND B.VSL_CD = BK.VSL_CD
+							 AND B.SKD_VOY_NO= BK.SKD_VOY_NO
+							 AND B.SKD_DIR_CD = BK.SKD_DIR_CD
+							 AND BK.BKG_STS_CD NOT IN ('X','S')
+                            ) ||CHR(10)||
+        
+        
+        'CNTR_TOTAL_WGT_UNIT:'||'KGS'||CHR(10)||
+
+
+        'CNTRTRW:'||DECODE(NVL(SPEC.TARE_WGT, 0), 0
+        , DECODE(NVL(MDM.CNTR_TPSZ_TARE_WGT, 0), 0
+        , DECODE(O.CNTR_TPSZ_CD, 'T2', 3600, 'T4', 5200, 0), MDM.CNTR_TPSZ_TARE_WGT)
+        , SPEC.TARE_WGT  )||CHR(10)||
+        'CNTRTYPE:'||NVL(C.CNTR_TPSZ_CD,' ')||CHR(10)||
+		'VGM_WGTQTY:'||DECODE(NVL(C.VGM_WGT_UT_CD, 0), 'LBS', ROUND (NVL(C.VGM_WGT, 0)*0.4536, 3), NVL(C.VGM_WGT, 0))||CHR(10)||
+    	
+		'VGM_WGTCD:'||'KGS'||CHR(10)||
+    	'VGM_METHOD:'||NVL(C.VGM_MZD_TP_CD, '')||CHR(10)||
+    	'VGM_SIGNATURE:'||NVL(C.VGM_VRFY_SIG_CTNT, '')||CHR(10)||
+		'SEALNBR:'||NVL((SELECT CNTR_SEAL_NO
+		   FROM BKG_CNTR_SEAL_NO
+		   WHERE BKG_NO = C.BKG_NO
+		   AND CNTR_NO = C.CNTR_NO
+		   AND CNTR_SEAL_SEQ = 1),' ') ||CHR(10)||
+        'FM_IND:'||DECODE(B.BKG_CGO_TP_CD,'F','F','M')||CHR(10)||
+        'RF_IND:'||NVL(B.RC_FLG,' ')||CHR(10)||
+        'DG_IND:'||NVL(B.DCGO_FLG,' ')||CHR(10)||
+        'AK_IND:'||NVL(B.AWK_CGO_FLG,' ')||CHR(10)||
+        'BK_IND:'||NVL(B.BB_CGO_FLG,' ')||CHR(10)||
+        'TEMP:'||NVL(R.CDO_TEMP,0)||CHR(10)||
+        'TUNIT:C'||CHR(10)||
+		'VENT:' || CASE WHEN R.VENT_RTO = 0 THEN 'C'
+						WHEN R.VENT_RTO > 0 AND R.VENT_RTO < 35 THEN 'Q'
+						WHEN R.VENT_RTO >= 35 AND R.VENT_RTO < 65 THEN 'H'
+						WHEN R.VENT_RTO >= 65 AND R.VENT_RTO < 100 THEN 'T'
+						WHEN R.VENT_RTO = 100 THEN 'O' END		|| CHR(10)||
+		'VENT_NUM:' || DECODE(NVL(R.VENT_RTO, 0), 0, '', R.VENT_RTO) ||CHR(10)||
+		'VENT_CMH:' || DECODE(NVL(R.CBM_PER_HR_QTY, 0), 0, '', R.CBM_PER_HR_QTY) ||CHR(10)||
+		'HUMID:'    || NVL(R.HUMID_NO, 0) ||CHR(10)||
+        'MEASURE:'||NVL(C.MEAS_QTY,0)||CHR(10)||
+        'MEASURE_UNIT:'||NVL(C.MEAS_UT_CD,' ')||CHR(10)||
+        'RDTYPE:'||NVL(C.RCV_TERM_CD,' ')||NVL(C. DE_TERM_CD,' ')||CHR(10)||
+        'CMDT_DESC:'||(SELECT  TRANSLATE(NVL(COM.CMDT_NM,' '),CHR(13)||CHR(10),' ') CMDT_NM
+                       FROM    MDM_COMMODITY COM
+                       WHERE   COM.CMDT_CD = B.CMDT_CD
+                      )||CHR(10)||
+        'CMDTCD:'||NVL(B.CMDT_CD,' ')||CHR(10)||        
+        'RF_REMARK:'||replace(NVL(R.DIFF_RMK,' '),CHR(13)||CHR(10),' ')||CHR(10)||
+        'RFDRY_IND:'||DECODE(NVL(B.RD_CGO_FLG,' '),'N','0','Y','1',NVL(B.RD_CGO_FLG,' '))||CHR(10)||
+        'OVF:'||NVL(A.OVR_FWRD_LEN,0)||CHR(10)||
+        'OVR:'||NVL(A.OVR_BKWD_LEN,0)||CHR(10)||
+        'OVH:'||NVL(A.OVR_HGT,0)||CHR(10)||
+        'OVLW:'||NVL(A.OVR_LF_LEN,0)||CHR(10)||
+        'OVRW:'||NVL(A.OVR_RT_LEN,0)||CHR(10)||
+        'OVWGT:'||NVL(A.GRS_WGT,0)||CHR(10)||
+        'OVWGT_UNIT:'||NVL(A.WGT_UT_CD,' ')||CHR(10)||
+        'VOID_SLOT:'||NVL(A.OVR_VOID_SLT_QTY,0)||CHR(10)||
+        'STWG_REQ:'||CHR(10)||
+        'SOCIND:'||NVL(C.SOC_FLG,' ')||CHR(10)||
+        'HAULAGE:'||CHR(10)||
+        'BKWGT:'||CHR(10)||
+        'BKWGTU:'||CHR(10)||
+        'BKW:'||CHR(10)||
+        'BKH:'||CHR(10)||
+        'BKL:'||CHR(10)||
+        'CNTROWN:'||NVL(O.OWNR_CO_CD,' ')||CHR(10)||
+        'CNTRTRM:'||NVL(O.LSTM_CD,' ')||CHR(10) )	 CNTR_INFO
+FROM    
+        BKG_CSTMS_TML_EDI_TMP_KEY      X,
+        BKG_BOOKING      B,
+        BKG_CONTAINER    C,
+        MST_CONTAINER    O,
+        MDM_PCK_TP       P,
+        MST_CNTR_SPEC    SPEC,
+        MDM_CNTR_TP_SZ   MDM,
+        BKG_RF_CGO       R,
+        BKG_AWK_CGO      A,
+		BKG_BL_DOC		 D
+WHERE   X.BKG_NO           = B.BKG_NO
+AND     X.BKG_NO           = C.BKG_NO
+AND     X.CNTR_NO          = C.CNTR_NO
+AND     C.BKG_NO           = R.BKG_NO(+)
+AND     C.CNTR_NO          = R.CNTR_NO(+)
+AND     C.BKG_NO           = A.BKG_NO(+)
+AND     C.CNTR_NO          = A.CNTR_NO(+)
+AND     C.PCK_TP_CD        = P.PCK_CD(+)
+AND     O.CNTR_NO          = C.CNTR_NO
+AND     O.CNTR_SPEC_NO     = SPEC.CNTR_SPEC_NO(+)
+AND     O.CNTR_TPSZ_CD     = MDM.CNTR_TPSZ_CD
+AND     B.BKG_NO     	   = D.BKG_NO
+UNION ALL
+SELECT 
+        X.ORD        ORD1,
+        8            ORD2,
+        ROW_NUMBER() OVER (PARTITION BY X.ORD ORDER BY X.ORD, SEAL.CNTR_SEAL_SEQ)  ORD3,
+        TO_CLOB(
+            '{CNTR_SEAL_NO'||CHR(10)||
+            'SEAL_NO:'||NVL(SEAL.CNTR_SEAL_NO,' ')||CHR(10)||
+            '}CNTR_SEAL_NO'||CHR(10) 
+        )	CNTR_SEAL_INFO
+FROM    BKG_CSTMS_TML_EDI_TMP_KEY  X,
+        BKG_CNTR_SEAL_NO   SEAL
+WHERE   X.BKG_NO  = SEAL.BKG_NO
+AND     X.CNTR_NO = SEAL.CNTR_NO
+UNION ALL
+SELECT  /*+ USE_NL(X DG) */
+        X.ORD        ORD1,
+        9            ORD2,
+        1            ORD3,
+        TO_CLOB( '{CNTR_DANGER'||CHR(10)||
+        'UNNBR:'||NVL(DG.IMDG_UN_NO,' ')||CHR(10)||
+        'CLASS:'||NVL(DG.IMDG_CLSS_CD,' ')||CHR(10)||
+        'DG_DESC:'||NVL(DG.PRP_SHP_NM,' ')||CHR(10)||
+        'PHONE:'||NVL(DG.EMER_CNTC_PHN_NO_CTNT,' ')||CHR(10)||
+        'PAGE:'||CHR(10)||
+        'FLSH_TEMP:'||DG.FLSH_PNT_CDO_TEMP||CHR(10)||
+        'FLSH_UNIT:C'||CHR(10)||
+        'DG_REMARK:'||REPLACE(NVL(DG.DIFF_RMK,' '),CHR(13)||CHR(10),' ')||CHR(10)||
+        'EMSNO:'||NVL(DG.EMS_NO,' ')||CHR(10)||
+        'PSACLS:'||NVL(DG.PSA_NO,' ')||CHR(10)||
+        'PKGGRP:'||NVL(DG.IMDG_PCK_GRP_CD,' ')||CHR(10)||
+        'MFAG1:'||CHR(10)||
+        'MFAG2:'||CHR(10)||
+        'MAR_POLL:'||NVL(DG.MRN_POLUT_FLG,' ')||CHR(10)||
+        'LABEL_CD:'||NVL(DG.IMDG_SUBS_RSK_LBL_CD1,' ')||' '||NVL(DG.IMDG_SUBS_RSK_LBL_CD2,' ')||' '||NVL(DG.IMDG_SUBS_RSK_LBL_CD3,' ')||CHR(10)||
+        'LABEL_DESC:'||CHR(10)||
+        'D_PKG:'||NVL(DG.OUT_IMDG_PCK_QTY1,0)||CHR(10)||
+        'D_PKGUNIT:'||NVL(DG.OUT_IMDG_PCK_CD1,' ')||CHR(10)||
+        'NWGT:'||NVL(DG.NET_WGT,0)||CHR(10)||
+        'NWGT_UNIT:KGS'||CHR(10)||
+        'GWGT:'||NVL(DG.GRS_WGT,0)||CHR(10)||
+        'GWGT_UNIT:'||NVL(DG.WGT_UT_CD,' ')||CHR(10)||
+        'MEA:'||NVL(DG.MEAS_QTY,0)||CHR(10)||
+        'MEA_UNIT:'||NVL(DG.MEAS_UT_CD,' ')||CHR(10)||
+        'HAZ_CONT:'||NVL(DG.HZD_DESC,' ')||CHR(10)||
+        'STWG:'||NVL(DG.SPCL_STWG_RQST_DESC,' ')||CHR(10)||
+        'LABEL:'||NVL(DG.IMDG_SUBS_RSK_LBL_CD1,' ')||' '||NVL(DG.IMDG_SUBS_RSK_LBL_CD2,' ')||' '||NVL(DG.IMDG_SUBS_RSK_LBL_CD3,' ')||CHR(10)||
+        'DG_APPROVE_NO:'||NVL(NVL(DG.APLY_NO, 
+                                 (SELECT /*+ INDEX_DESC(A XPKSCG_AUTHORIZATION) */ A.APRO_REF_NO 
+                                    FROM SCG_AUTHORIZATION A
+                                   WHERE SPCL_CGO_CATE_CD = 'DG'
+                                     AND A.BKG_NO = X.BKG_NO
+                                     AND A.VSL_PRE_PST_CD||A.VSL_SEQ IN ( SELECT MIN(VSL_PRE_PST_CD||VSL_SEQ) FROM BKG_VVD WHERE BKG_NO = A.BKG_NO )
+                                     AND ROWNUM = 1)),' ')||CHR(10)||
+        '}CNTR_DANGER'||CHR(10) )	CNTR_DG_INFO
+FROM    BKG_CSTMS_TML_EDI_TMP_KEY  X,
+        BKG_DG_CGO   DG
+WHERE   X.BKG_NO  = DG.BKG_NO
+AND     X.CNTR_NO = DG.CNTR_NO
+UNION ALL
+SELECT  *
+FROM   (WITH  CNTR_DESC  AS
+               (SELECT  /*+ ORDERED USE_NL(X A B) INDEX(B XAK1BKG_CSTMS_ADV_CNTR_MF) */
+                        X.ORD        ORD1,
+                        10            ORD2,
+                        ROW_NUMBER() OVER (PARTITION BY X.ORD ORDER BY X.ORD, B.CMDT_GDS_SEQ)  ORD3,
+                        '{CNTR_DESC'||CHR(10)||
+                        'D_CMDT:'||CHR(10)||
+                        'D_PUNIT:'||NVL(AMS_PCK_TP_CD,' ')||CHR(10)||
+                        'D_PKG:'||NVL(B.PCK_QTY,0)||CHR(10)||
+                        'D_WGT:'||DECODE(NVL(B.WGT_UT_CD,' '),
+                        'LBS',ROUND(NVL(GRS_WGT,0)*0.4536,3),
+                        NVL(GRS_WGT,0)
+                        )||CHR(10)||
+                        'D_MEAS:'||CHR(10)||
+                        'D_HS_CD:'||CHR(10)||
+						'D_HTS_CD:'||CHR(10)||
+						'D_NCM_CD:'||CHR(10)||
+                        'D_DESC:'||CHR(10)||
+                        '}CNTR_DESC'||CHR(10) CNTR_DESC
+                FROM    BKG_CSTMS_TML_EDI_TMP_KEY            X,
+                        BKG_BOOKING            A,
+                        BKG_CSTMS_ADV_CNTR_MF  B,
+						BKG_CONTAINER C
+                WHERE   X.BKG_NO = A.BKG_NO
+                AND     A.BL_NO = B.BL_NO
+                AND     X.CNTR_NO = B.CNTR_NO
+				AND		B.CNT_CD = 'US'
+				AND A.BKG_NO = C.BKG_NO
+				AND B.CNTR_NO = C.CNTR_NO
+               )
+        SELECT  ORD1, ORD2, ORD3, TO_CLOB( CNTR_DESC )
+        FROM    CNTR_DESC
+        UNION ALL
+        SELECT  /*+ ORDERED USE_NL(A X B) */
+                X.ORD        ORD1,
+                11           ORD2,
+                1            ORD3,
+                TO_CLOB( '{CNTR_DESC'||CHR(10)||
+                'D_CMDT:'||NVL(BK.CMDT_CD,' ')||CHR(10)||
+                'D_PUNIT:'||NVL(PCK_TP_CD,' ')||CHR(10)||
+                'D_PKG:'||NVL(PCK_QTY,0)||CHR(10)||
+                'D_WGT:'||DECODE(NVL(WGT_UT_CD,' '),
+                'LBS',ROUND(NVL(CNTR_MF_WGT,0)*0.4536,3),
+                NVL(CNTR_MF_WGT,0)
+                )||CHR(10)||
+                'D_MEAS:'||DECODE(NVL(MEAS_UT_CD,' '),
+                'CBF',ROUND(NVL(MEAS_QTY,0)*0.0283,3),
+                NVL(MEAS_QTY,0)
+                )||CHR(10)||
+                'D_HS_CD:'||NVL(B.CMDT_HS_CD,' ')||CHR(10)||
+				'D_HTS_CD:'||NVL(B.HAMO_TRF_CD,' ')||CHR(10)||
+				'D_NCM_CD:'||NVL(B.NCM_NO,' ')||CHR(10)               )
+                
+                ||
+                TO_CLOB('D_DESC:'||Translate(NVL(CNTR_MF_GDS_DESC,' '),chr(13)||chr(10),' ')||chr(10)           )||
+                
+                TO_CLOB(
+                decode(CNTR_MF_MK_DESC, NULL,'',
+                '{CUS_MARK'||chr(10)||'D_MARK:' ||
+                CASE WHEN LENGTH(REPLACE(CNTR_MF_MK_DESC,CHR(13)||CHR(10),CHR(10)||'D_MARK:')) > 3800
+                       THEN
+                         --REPLACE(DBMS_LOB.SUBSTR(CNTR_MF_MK_DESC, 2000,1),CHR(13)||CHR(10),CHR(10)||'D_MARK:')
+						   DBMS_LOB.SUBSTR(REPLACE(CNTR_MF_MK_DESC,CHR(13)||CHR(10),CHR(10)||'D_MARK:'), 3800,1)
+                       ELSE
+                         REPLACE(CNTR_MF_MK_DESC,CHR(13)||CHR(10),CHR(10)||'D_MARK:')
+                     END
+                ||chr(10)||
+                '}CUS_MARK'||CHR(10)
+                )
+                
+                ||
+                '}CNTR_DESC'||chr(10) )
+                AS CNTR_DESC_END
+        FROM   (SELECT  ROWNUM
+                FROM    DUAL
+                WHERE   NOT EXISTS (SELECT  'X'
+                                    FROM    CNTR_DESC
+                                   )
+               ) A,
+                BKG_CSTMS_TML_EDI_TMP_KEY       X,
+                BKG_CNTR_MF_DESC  B,
+				BKG_BOOKING BK
+        WHERE   X.BKG_NO  = B.BKG_NO
+        AND     X.CNTR_NO = B.CNTR_NO
+		AND		X.BKG_NO = BK.BKG_NO
+        UNION ALL
+        SELECT  X.ORD          ORD1,
+                12             ORD2,
+                1              ORD3,
+                TO_CLOB( '}CNTR_INFO'||chr(10) )  STR
+        FROM    BKG_CSTMS_TML_EDI_TMP_KEY  X,
+				BKG_CONTAINER A
+		WHERE X.BKG_NO = A.BKG_NO
+		  AND X.CNTR_NO = A.CNTR_NO
+
+       )
+
+UNION ALL
+SELECT  X.ORD    ORD1,
+        13       ORD2,
+        1        ORD3,
+        TO_CLOB( '{QTY'||CHR(10)||
+        'HANTYPE:'||NVL(CNTR_TPSZ_CD,' ')||CHR(10)||
+        'COUNT:'||NVL(OP_CNTR_QTY,0)||CHR(10)||
+        '}QTY'||CHR(10) )	BKG_QTY_INFO
+FROM   (SELECT  BKG_NO,
+                MAX(ORD)  ORD
+        FROM    BKG_CSTMS_TML_EDI_TMP_KEY
+        WHERE   ROWNUM >= 1
+        GROUP BY BKG_NO
+       )  X,
+        BKG_QUANTITY   A
+WHERE   X.BKG_NO = A.BKG_NO
+UNION ALL
+SELECT  /*+ ORDERED USE_NL(X A D E F B C) INDEX(A XPKBKG_VVD) */
+        X.ORD    ORD1,
+        14       ORD2,
+        ROW_NUMBER() OVER (PARTITION BY X.ORD ORDER BY X.ORD, A.VSL_PRE_PST_CD, A.VSL_SEQ)  ORD3,
+        TO_CLOB( '{BKGVVD'||chr(10)||
+        'BVVD1:'||NVL(A.VSL_CD,' ')||NVL(A.SKD_VOY_NO,' ')||
+        NVL(A.SKD_DIR_CD,' ')||CHR(10)||
+        'BVVD_LANE:'||NVL(A.SLAN_CD,' ')||CHR(10)||
+        'VSL_CALLSIGN1:'||NVL(D.CALL_SGN_NO,' ')||CHR(10)||
+        'VSL_LLOYDCODE1:'||NVL(D.LLOYD_NO,' ')||CHR(10)||
+        'VSL_FULLNAME1:'||NVL(D.VSL_ENG_NM,' ')||CHR(10)||
+        'VVD_REF_NO1:'||NVL(decode(G.CVY_REF_NO, NULL, H.CVY_REF_NO, G.CVY_REF_NO),' ')||CHR(10)||
+        'BLPOL1:'||NVL(A.POL_CD,' ')||chr(10)||
+		'BLPOL_YDCD1:'||NVL(A.POL_YD_CD,' ')||CHR(10)||
+		'BLPOL_YDNM1:'||(SELECT YD_NM FROM MDM_YARD WHERE YD_CD = A.POL_YD_CD)||CHR(10)||
+        'POL_FULLNAME1:'||E.LOC_NM||chr(10)||
+        'BLPOD1:'||NVL(A.POD_CD,' ')||chr(10)||
+		'BLPOD_YDCD1:'||NVL(A.POD_YD_CD,' ')||CHR(10)||
+		'BLPOD_YDNM1:'||(SELECT YD_NM FROM MDM_YARD WHERE YD_CD = A.POD_YD_CD)||CHR(10)||
+        'POD_FULLNAME1:'||F.LOC_NM||chr(10)||
+        'POLETA1:'||NVL(TO_CHAR(b.VPS_ETA_DT,'YYYYMMDDHH24MI'),' ')||CHR(10)||
+        'POLETD1:'||NVL(TO_CHAR(b.VPS_ETD_DT,'YYYYMMDDHH24MI'),' ')||CHR(10)||
+        'PODETA1:'||NVL(TO_CHAR(c.VPS_ETA_DT,'YYYYMMDDHH24MI'),' ')||CHR(10)||
+        'PODETD1:'||NVL(TO_CHAR(c.VPS_ETD_DT,'YYYYMMDDHH24MI'),' ')||CHR(10)||
+        'OP_CODE:'||CHR(10)||
+        '}BKGVVD'||CHR(10) )	BKG_VVD_INFO
+FROM   (SELECT  BKG_NO,
+                MAX(ORD)  ORD
+        FROM    BKG_CSTMS_TML_EDI_TMP_KEY
+        WHERE   ROWNUM >= 1
+        GROUP BY BKG_NO
+       )  X,
+        BKG_VVD          A,
+        MDM_VSL_CNTR     D,
+        MDM_LOCATION     E,
+        MDM_LOCATION     F,
+        VSK_VSL_PORT_SKD B,
+        VSK_VSL_PORT_SKD C,
+        BKG_VSL_DCHG_YD  G,
+        BKG_VSL_DCHG_YD  H
+WHERE   X.BKG_NO          = A.BKG_NO
+AND     A.VSL_CD          = B.VSL_CD(+)
+AND     A.SKD_VOY_NO      = B.SKD_VOY_NO(+)
+AND     A.SKD_DIR_CD      = B.SKD_DIR_CD(+)
+AND     A.POL_CD          = B.VPS_PORT_CD(+)
+AND     NVL(A.POL_CLPT_IND_SEQ,'1') = B.CLPT_IND_SEQ(+)  -- AND     B.CLPT_IND_SEQ(+) = '1'
+AND     A.VSL_CD          = C.VSL_CD(+)
+AND     A.SKD_VOY_NO      = C.SKD_VOY_NO(+)
+AND     A.SKD_DIR_CD      = C.SKD_DIR_CD(+)
+AND     A.POD_CD          = C.VPS_PORT_CD(+)
+AND     NVL(A.POD_CLPT_IND_SEQ,'1') = C.CLPT_IND_SEQ(+)   -- AND     C.CLPT_IND_SEQ(+) = '1'
+AND     A.VSL_CD          = D.VSL_CD(+)
+AND     A.POL_CD          = E.LOC_CD(+)
+AND     A.POD_CD          = F.LOC_CD(+)
+AND     A.VSL_CD          = G.VSL_CD(+)
+AND     A.SKD_VOY_NO      = G.SKD_VOY_NO(+)
+AND     A.SKD_DIR_CD      = G.SKD_DIR_CD(+)
+AND     A.POL_CD          = G.PORT_CD(+)
+AND     NVL(A.POL_CLPT_IND_SEQ,'1') = G.CLPT_IND_SEQ(+)  -- AND     G.CLPT_IND_SEQ(+) = '1'
+AND     A.VSL_CD          = H.VSL_CD(+)
+AND     A.SKD_VOY_NO      = H.SKD_VOY_NO(+)
+AND     A.SKD_DIR_CD      = H.SKD_DIR_CD(+)
+AND     A.POD_CD          = H.PORT_CD(+)
+AND     NVL(A.POD_CLPT_IND_SEQ,'1') = H.CLPT_IND_SEQ(+)  -- AND     H.CLPT_IND_SEQ(+) = '1'
+UNION ALL
+SELECT  X.ORD          ORD1,
+        15             ORD2,
+        1              ORD3,
+        TO_CLOB( '}BL_INFO'||chr(10) )  STR
+FROM   (SELECT  BKG_NO,
+                MAX(ORD)  ORD
+        FROM    BKG_CSTMS_TML_EDI_TMP_KEY
+        GROUP BY BKG_NO
+       )  X			]]></sql>
+			<params>
+				<param name="in_edi_msg_func" type="12" value="" out="N"/>
+				<param name="in_pol_cd" type="12" value="" out="N"/>
+				<param name="in_pod_cd" type="12" value="" out="N"/>
+				<param name="in_vvd_cd" type="12" value="" out="N"/>
+				<param name="in_pod_split_no" type="12" value="" out="N"/>
+				<param name="in_pol_split_no" type="12" value="" out="N"/>
+				<param name="in_rcv_id" type="12" value="" out="N"/>
+				<param name="in_area_id" type="12" value="" out="N"/>
+				<param name="in_yd_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

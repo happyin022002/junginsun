@@ -1,0 +1,103 @@
+/*=========================================================
+*Copyright(c) 2017 CyberLogitec
+*@FileName : KorCustomsTransmissionDBDAOsearchMakeSubNoRSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2017.01.19
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2017.01.19 
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.bkg.customsdeclaration.customstransmission.korea.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class KorCustomsTransmissionDBDAOsearchMakeSubNoRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * Submit No 생성
+	  * </pre>
+	  */
+	public KorCustomsTransmissionDBDAOsearchMakeSubNoRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("vvd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("io_bnd_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("pol_loc",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("pod_loc",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.esm.bkg.customsdeclaration.customstransmission.korea.integration").append("\n"); 
+		query.append("FileName : KorCustomsTransmissionDBDAOsearchMakeSubNoRSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT KV.MRN_NO||KV.MRN_CHK_NO||'SMLM'||LTRIM(TO_CHAR(NVL(MAX(SUBSTR(KC.SMT_AMD_NO, 16, 4)), 0) + 1, '0000')) SUB_NO" ).append("\n"); 
+		query.append("  FROM BKG_CSTMS_KR_CORR KC, BKG_CSTMS_KR_VVD_SMRY KV" ).append("\n"); 
+		query.append(" WHERE KV.VSL_CD     = SUBSTR(@[vvd], 1, 4)" ).append("\n"); 
+		query.append("   AND KV.SKD_VOY_NO = SUBSTR(@[vvd], 5, 4)" ).append("\n"); 
+		query.append("   AND KV.SKD_DIR_CD = SUBSTR(@[vvd], 9, 1)" ).append("\n"); 
+		query.append("   AND KV.IO_BND_CD  = DECODE(@[io_bnd_cd], 'I', 'I', 'T', 'I', 'O')" ).append("\n"); 
+		query.append("   AND KV.PORT_CD    = DECODE(@[io_bnd_cd], 'I', @[pod_loc], 'T', @[pod_loc], @[pol_loc])" ).append("\n"); 
+		query.append("   AND KC.SMT_AMD_NO(+) LIKE KV.MRN_NO||KV.MRN_CHK_NO||'SMLM'||'%'" ).append("\n"); 
+		query.append("--   AND KC.AMDT_SND_DT(+) IS NOT NULL" ).append("\n"); 
+		query.append(" GROUP BY KV.MRN_NO,KV.MRN_CHK_NO" ).append("\n"); 
+
+	}
+}

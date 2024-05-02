@@ -1,0 +1,872 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SpacecontrolinquiryDBDAO21PfmcRatioRSQL">
+			<desc><![CDATA[Daily Forecast Status 화면 내 PFMC Ratio vs QTA & BSA 탭 조회
+QTA & BSA 대비 F'cast 와 BKG 실적 달성율
+2013.01.23 [CHM-201322502-01] SPC 프로젝트 - 성수기 선복운영 개선을 위한 T/F추진
+2013.02.22 김시몬[CHM-201323235-01]WAX 노선은 Dest. 를 AU 로 집계되도록 보완, WAXIA 의 경우 Direction 변경(E=> W, W=> E)
+2013.09.05 진마리아 [CHM-201326612] AAZ Direction Conversion
+2013.11.26 진마리아 [CHM-201326854] SAQ project로 인한 SPC 변경건_FNC 우선제거
+2013.12.05 김시몬 [CHM-201326854] SAQ project로 인한 SPC 변경건_테이블 변경
+2014.01.13 김시몬 [선처리] SELSC/TYOSC RHQ변경에 따른 SQM SPC_OFC_LVL추가
+2014.02.26 신자영 [CHM-201428699] Daily FCST status report _ TTL 값 산출 logic변경
+2014.03.25 김시몬 [선처리] SQM 분기구하는 로직 관련 보완
+2014.12.16 박은주 [CHM-201433153] Daily FCST status 리포트 보완 요청(겹선) 
+2015.03.03 CHM-201534458 SQM QTA주가 변경 관련 적용 요청
+2015.09.16 이혜민 선반영 SPC_CONTI_CONV_FNC 태울때 SLAN_CD를 인자로 가져가던것 RLANE_CD로 수정 (RLANE_CD로 가져가야 제대로 펑션을 탐)
+2015.11.23 이혜민 선반영 RUS 노선 Bound 변경 요청
+2015.12.03 이혜민 [CHM-201538975] VVOBA Office 관련 수정(Area를 SHARC 대신 E.RUSIA로 치환)
+2016.05.27 이혜민 SELSC, TYOSC RHQ 독립분리
+2017.1.23 SM상선 전환에 따른 소스변경]]></desc>
+			<sql><![CDATA[
+WITH MAS_MON_VVD_LV AS(
+    SELECT B.TRD_CD    ,
+           B.SUB_TRD_CD,
+           B.RLANE_CD  ,
+           B.DIR_CD    ,
+           B.IOC_CD    ,
+           B.COST_YR   ,
+           B.COST_MON  ,
+           B.NUM       ,
+           DENSE_RANK() OVER(PARTITION BY B.TRD_CD, B.RLANE_CD, B.DIR_CD, B.NUM ORDER BY B.DIR_CD, B.PORT_ETD) NUM_1,
+           B.COST_WK   ,
+           B.VSL_CD    ,
+           B.SKD_VOY_NO,
+           B.SKD_DIR_CD,
+           B.RHQ_CD    ,
+           B.AQ_CD     ,
+           B.RGN_OFC_CD,
+           (
+             SELECT DECODE(O.OFC_TP_CD, 'QT', O.PRNT_OFC_CD, DECODE(@[ofc_cd], 'ATLSA', 'NYCRA', 'SLSSC', 'NYCRA', 'PHXSA', 'NYCRA', O.OFC_CD))
+               FROM SPC_OFC_LVL O,
+                    COM_USER COM
+              WHERE COM.USR_ID = @[login_id]
+                AND B.COST_YR || B.COST_WK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+                AND O.OFC_CD = SPC_SCR_OFC_CONV_FNC(COM.OFC_CD, @[ui_name])		--Login Office가 ISTSC인 경우에는 Origin Office가 아닌 Login Office가 Loading Office와 일치할 경우 Alloc 이 조회될 수 있도록 수정 요청
+           ) AS OFC_CD,
+           B.POL_CD,
+           B.BSA   ,
+           B.PAST,
+		   B.BSE_QTR_CD,
+		   B.BSE_YR
+      FROM (
+              SELECT M.TRD_CD    ,
+                     M.SUB_TRD_CD,
+                     M.RLANE_CD  ,
+                     M.DIR_CD    ,
+                     M.IOC_CD    ,
+                     SUBSTR(M.SLS_YRMON, 1, 4) AS COST_YR ,
+                     SUBSTR(M.SLS_YRMON, 5)    AS COST_MON,
+                     P.RNUM NUM  ,
+                     M.COST_WK   ,
+                     M.VSL_CD    ,
+                     M.SKD_VOY_NO,
+                     M.DIR_CD               AS SKD_DIR_CD,
+                     C.RHQ_CD               AS RHQ_CD    ,
+                     @[area]                AS AQ_CD     ,
+                     @[sales_office]        AS RGN_OFC_CD,
+                     @[pol_cd]              AS POL_CD    ,
+                     NVL(B.CRR_BSA_CAPA, 0) AS BSA       ,
+                     DECODE(SIGN(SUBSTR(M.SLS_YRMON, 1, 4)||M.COST_WK - ( SELECT PRD.COST_YR||TO_CHAR(CEIL((TO_CHAR(SYSDATE, 'DDD') + 7 - TO_CHAR(TO_DATE(PRD.SLS_TO_DT, 'YYYYMMDD'), 'DDD')) / 7), 'FM00')
+                                                                            FROM MAS_WK_PRD PRD
+                                                                           WHERE PRD.COST_YR = TO_CHAR(SYSDATE, 'YYYY')
+                                                                             AND PRD.COST_WK = '01')), -1, 'Y', 'N') AS PAST
+                    ,TO_CHAR(M.LST_LODG_PORT_ETD_DT,'YYYYMMDD') AS PORT_ETD
+                    , CASE WHEN M.COST_YRMON >= '201501' 
+                          THEN CEIL(TO_NUMBER(SUBSTR(M.COST_YRMON, -2))/3)||'Q' 
+                          ELSE CEIL(TO_NUMBER(DECODE(M.COST_WK,'00','01','53','52',M.COST_WK))/13)||'Q'
+                      END BSE_QTR_CD --2015.03.04 CHM-201534435 SQM QTA주가 변경 관련 적용 요청
+                   , SUBSTR(M.COST_YRMON, 1,4) AS BSE_YR
+                FROM MAS_MON_VVD     M,
+                     BSA_VVD_OTR_CRR B,
+                     (
+                        SELECT /*+ INDEX (P, XPKMAS_WK_PRD) */
+                               P.COST_YR||P.COST_WK AS COST_YRWK,
+                               ROWNUM               AS RNUM
+                          FROM MAS_WK_PRD P
+                         WHERE P.COST_YR||P.COST_WK >= @[year]||@[week]
+                           AND ROWNUM               <= @[duration]
+                     ) P,
+                     (
+       				 SELECT DISTINCT
+            			    SUBSTR(AA,
+             					   INSTR(AA,',',1,LEVEL)+1,
+               					   INSTR(AA,',',1,LEVEL+1) - INSTR(AA,',',1,LEVEL)
+              					  -1
+              					  ) RHQ_CD
+         			   FROM (SELECT ','||@[rhq2]||',' AA FROM DUAL)
+          					  CONNECT BY LEVEL <= LENGTH(AA) - LENGTH(REPLACE(AA,','))-1
+                     ) C
+               WHERE SUBSTR(M.SLS_YRMON, 1, 4)||M.COST_WK = P.COST_YRWK
+                 AND (M.DELT_FLG IS NULL OR M.DELT_FLG = 'N')
+       
+#if (${trade} != '')
+                 AND M.TRD_CD = @[trade]
+#end
+
+#if (${subtrade1} != '')
+                 AND M.SUB_TRD_CD = @[subtrade1]
+#end
+#if (${bound} != '')
+                 AND M.DIR_CD = (CASE
+                                    WHEN M.RLANE_CD IN ('AUSIA', 'CKAIA', 'WAXIA', 'AAZIA', 'QISIA', 'RUSIA', 'FOXIA') THEN
+                                            DECODE(@[bound], 'E', 'W', 'W', 'E', @[bound])
+                                    ELSE
+                                        (CASE WHEN M.SLAN_CD = 'CAT' THEN DECODE(@[bound], 'W', 'E', 'E', 'W', @[bound]) ELSE @[bound] END)
+
+                                END)
+#end
+
+                 AND B.BSA_OP_JB_CD(+) = '007'
+                 AND B.CRR_CD      (+) = 'SML'
+                 AND M.TRD_CD          = B.TRD_CD    (+)
+                 AND M.RLANE_CD        = B.RLANE_CD  (+)
+                 AND M.VSL_CD          = B.VSL_CD    (+)
+                 AND M.SKD_VOY_NO      = B.SKD_VOY_NO(+)
+                 AND M.DIR_CD          = B.SKD_DIR_CD(+)
+       #if (${rlane1} != '')
+      			 AND M.RLANE_CD         IN ($rlane1)
+       #end
+           ) B
+  ORDER BY B.VSL_CD    ,
+           B.SKD_VOY_NO,
+           B.DIR_CD
+)
+, QTA_DATA AS (
+    SELECT 1 AS FLG    ,
+           R.TRD_CD    ,
+           R.DIR_CD    ,
+           R.SUB_TRD_CD,
+           R.RLANE_CD  ,
+           R.RHQ_CD    ,
+
+#if (${chkview} == 'P')
+           R.AREA      ,
+#end
+
+           NVL(( SELECT T2.CONV_RGN_OFC_CD
+                   FROM SPC_RGN_OFC_CONV T2
+                  WHERE T2.SLS_RGN_OFC_CD = R.OFC_CD), R.OFC_CD) AS OFC_CD,
+           R.WK ,
+           R.NUM,
+           R.NUM_1,
+           R.VVD,
+           R.BSA,
+           ROUND(SUM(R.QTA_QTY)) AS QTA_QTY ,
+           SUM(R.QTA_GREV)       AS QTA_GREV,
+           SUM(R.QTA_CM)         AS QTA_CM  ,
+           0 AS FCT_QTY ,
+           0 AS FCT_GREV,
+           0 AS FCT_CM  ,
+           0 AS ALC_QTY ,
+           0 AS ALC_GREV,
+           0 AS ALC_CM  ,
+           0 AS BKG_QTY ,
+           0 AS BKG_GREV,
+           0 AS BKG_CM
+      FROM (
+              SELECT MQ.TRD_CD     ,
+                     A.SUB_TRD_CD  ,
+                     MQ.RLANE_CD   ,
+                     MQ.DIR_CD     ,
+                     O.N2ND_PRNT_OFC_CD AS RHQ_CD     ,
+
+#if (${chkview} == 'P')
+                     '0' AS AREA,
+#end
+                     NVL(( SELECT O2.CONV_RGN_OFC_CD
+                                            FROM SPC_RGN_OFC_CONV O2
+                                           WHERE O2.SLS_RGN_OFC_CD = MQ.RGN_OFC_CD), MQ.RGN_OFC_CD) AS OFC_CD,
+                     --MQ.RGN_OFC_CD        AS OFC_CD,
+                     A.COST_YR||A.COST_WK AS WK    ,
+                     A.NUM,
+                     A.NUM_1,
+                     MQ.VSL_CD||MQ.SKD_VOY_NO||MQ.SKD_DIR_CD AS VVD,
+                     A.BSA,
+                     (MQ.LOD_QTY) AS QTA_QTY,
+                     0 AS QTA_GREV,
+                     0 AS QTA_CM
+                FROM MAS_MON_VVD_LV   A  ,
+                     SQM_CFM_QTA      MQ ,
+                     SQM_QTA_RLSE_VER MQR,
+                     SPC_OFC_LVL      O
+               WHERE 1=1
+               
+#if (${chkview} == 'P')
+                 --AND MQ.POL_CD <> '00000'
+#end
+
+#if (${rhq2} != '')
+                 AND A.RHQ_CD = O.N2ND_PRNT_OFC_CD
+#end
+
+#if (${area} != '')
+                 AND A.AQ_CD = MQ.AQ_CD
+#end
+
+#if (${sales_office} != '')
+                 AND A.RGN_OFC_CD = NVL(( SELECT O2.CONV_RGN_OFC_CD
+                                            FROM SPC_RGN_OFC_CONV O2
+                                           WHERE O2.SLS_RGN_OFC_CD = MQ.RGN_OFC_CD), MQ.RGN_OFC_CD)
+#end
+
+#if (${pol_cd} != '')
+                 AND A.POL_CD = '00000'
+#end
+
+                 AND MQR.BSE_YR          = A.BSE_YR
+                 --AND MQR.BSE_QTR_CD      = CEIL(TO_NUMBER(DECODE(A.COST_WK,'00','01','53','52',A.COST_WK))/13)||'Q' --CEIL(TO_NUMBER(A.COST_MON)/3)||'Q'
+				-- CHM-201534458 SQM QTA주가 변경 관련 적용 요청
+       			 AND MQR.BSE_QTR_CD      = A.BSE_QTR_CD
+                 AND MQR.SQM_VER_STS_CD  = 'R'
+                 AND MQR.BSE_TP_CD       = 'Q' -- 분기 20131205추가
+                 AND MQ.QTA_RLSE_VER_NO  = MQR.QTA_RLSE_VER_NO
+                 AND MQ.BSE_TP_CD        = MQR.BSE_TP_CD -- 분기 20131205추가 
+                 AND MQ.BSE_YR           = MQR.BSE_YR
+                 AND MQ.BSE_QTR_CD       = MQR.BSE_QTR_CD
+                 AND MQ.QTA_TGT_CD       = 'D'
+                 AND MQ.OFC_VW_CD        = 'L'  -- 20131205추가
+                 AND MQ.TRD_CD           = A.TRD_CD
+                 AND MQ.RLANE_CD         = A.RLANE_CD
+                 AND MQ.DIR_CD           = A.SKD_DIR_CD
+                 AND MQ.VSL_CD           = A.VSL_CD
+                 AND MQ.SKD_VOY_NO       = A.SKD_VOY_NO
+                 AND MQ.SKD_DIR_CD       = A.SKD_DIR_CD
+                 AND A.COST_YR || A.COST_WK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+                 --AND MQ.RGN_OFC_CD        = O.OFC_CD
+                 AND NVL((SELECT O2.CONV_RGN_OFC_CD
+                            FROM SPC_RGN_OFC_CONV O2
+                           WHERE O2.SLS_RGN_OFC_CD = MQ.RGN_OFC_CD), MQ.RGN_OFC_CD) = O.OFC_CD
+           ) R
+  GROUP BY R.TRD_CD    ,
+           R.DIR_CD    ,
+           R.SUB_TRD_CD,
+           R.RLANE_CD  ,
+           R.RHQ_CD    ,
+
+#if (${chkview} == 'P')
+           R.AREA      ,
+#end
+
+           R.OFC_CD    ,
+           R.WK        ,
+           R.NUM       ,
+           R.NUM_1,
+           R.VVD       ,
+           R.BSA
+    HAVING ROUND(SUM(R.QTA_QTY)) > 0
+)
+, FCT_DATA AS (
+    SELECT 2 AS FLG    ,
+           B.TRD_CD    ,
+           B.DIR_CD    ,
+           B.SUB_TRD_CD,
+           B.RLANE_CD  ,
+           B.SLS_RHQ_CD AS RHQ_CD,
+
+#if (${chkview} == 'P')
+           B.TRNK_POL_CD AS AREA,
+#end
+
+           B.SLS_RGN_OFC_CD     AS OFC_CD,
+           A.COST_YR||A.COST_WK AS WK    ,
+           A.NUM,
+           A.NUM_1,
+           B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD AS VVD,
+           A.BSA,
+           0 AS QTA_QTY ,
+           0 AS QTA_GREV,
+           0 AS QTA_CM  ,
+           SUM(NVL(B.CFM_TTL_QTY, 0) + NVL(B.CFM_40FT_HC_QTY, 0) * 2 + NVL(B.CFM_45FT_HC_QTY, 0) * 2 + NVL(B.CFM_53FT_QTY, 0) * 2) AS FCT_QTY,
+           0 AS FCT_GREV,
+           0 AS FCT_CM  ,
+           0 AS ALC_QTY ,
+           0 AS ALC_GREV,
+           0 AS ALC_CM  ,
+           0 AS BKG_QTY ,
+           0 AS BKG_GREV,
+           0 AS BKG_CM  ,
+           MAX(A.PAST) AS PAST
+      FROM MAS_MON_VVD_LV     A,
+           SPC_DLY_FCAST_CUST B
+     WHERE A.TRD_CD      = B.TRD_CD
+       AND A.RLANE_CD    = B.RLANE_CD
+       AND A.IOC_CD      = B.IOC_TS_CD
+       AND A.VSL_CD      = B.VSL_CD
+       AND A.SKD_VOY_NO  = B.SKD_VOY_NO
+       AND A.DIR_CD      = B.SKD_DIR_CD
+       AND A.DIR_CD      = B.DIR_CD
+
+#if (${rhq2} != '')
+       AND ((     A.RHQ_CD = 'SHARC'
+              AND EXISTS ( SELECT 1
+                             FROM MDM_LOCATION L
+                            WHERE SUBSTR(B.POL_YD_CD, 1, 5) = L.LOC_CD
+                              AND SPC_CONTI_CONV_FNC(L.CONTI_CD,A.RLANE_CD,A.DIR_CD) = 'A')
+                              AND A.RHQ_CD = B.SLS_RHQ_CD)  
+             OR A.RHQ_CD = B.SLS_RHQ_CD)
+#end
+
+#if (${area} != '')
+       AND B.SLS_RGN_OFC_CD IN ( SELECT O.OFC_CD
+                                   FROM SPC_OFC_LVL O
+                                  WHERE A.AQ_CD = O.N3RD_PRNT_OFC_CD
+                                    AND A.COST_YR || A.COST_WK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK )
+#end
+
+#if (${sales_office} != '')
+       AND A.RGN_OFC_CD = NVL(( SELECT T2.CONV_RGN_OFC_CD
+                                  FROM SPC_RGN_OFC_CONV T2
+                                 WHERE T2.SLS_RGN_OFC_CD = B.SLS_RGN_OFC_CD), B.SLS_RGN_OFC_CD )
+#end
+
+#if (${pol_cd} != '')
+       AND A.POL_CD = B.POL_YD_CD
+#end
+	
+  GROUP BY B.TRD_CD        ,
+           B.DIR_CD        ,
+           B.SUB_TRD_CD    ,
+           B.RLANE_CD      ,
+           B.SLS_RHQ_CD    ,
+
+#if (${chkview} == 'P')
+           B.TRNK_POL_CD   ,
+#end
+
+           B.SLS_RGN_OFC_CD,
+           A.COST_YR||A.COST_WK,
+           A.NUM,
+           A.NUM_1,
+           B.VSL_CD||B.SKD_VOY_NO||B.SKD_DIR_CD,
+           A.BSA
+    HAVING SUM(NVL(B.CFM_TTL_QTY, 0) + NVL(B.CFM_40FT_HC_QTY, 0) * 2 + NVL(B.CFM_45FT_HC_QTY, 0) * 2 + NVL(B.CFM_53FT_QTY, 0) * 2) > 0
+)
+, BKG_DATA AS (
+    SELECT 4 AS FLG    ,
+           A.TRD_CD    ,
+           A.DIR_CD    ,
+           A.SUB_TRD_CD,
+           A.RLANE_CD  ,
+           O.N2ND_PRNT_OFC_CD   AS RHQ_CD,
+
+#if (${chkview} == 'P')
+           NVL(B.PRE_RLY_PORT_CD, B.POL_CD) AS AREA,
+#end
+
+           O.N4TH_PRNT_OFC_CD   AS OFC_CD,
+           A.COST_YR||A.COST_WK AS WK    ,
+           A.NUM,
+           A.NUM_1,
+           A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD AS VVD,
+           A.BSA,
+           0 AS QTA_QTY ,
+           0 AS QTA_GREV,
+           0 AS QTA_CM  ,
+           0 AS FCT_QTY ,
+           0 AS FCT_GREV,
+           0 AS FCT_CM  ,
+           0 AS ALC_QTY ,
+           0 AS ALC_GREV,
+           0 AS ALC_CM  ,
+           SUM(( SELECT SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '2', 1, 2) * Q.OP_CNTR_QTY)
+                   FROM BKG_QUANTITY Q
+                  WHERE B.BKG_NO = Q.BKG_NO
+                 HAVING SUM(DECODE(SPC_GET_CNTR_SZ_FNC(Q.CNTR_TPSZ_CD), '2', 1, 2) * Q.OP_CNTR_QTY) > 0
+           )) AS BKG_QTY,
+           0 AS BKG_GREV,
+           0 AS BKG_CM  ,
+           MAX(A.PAST) AS PAST
+      FROM SPC_OFC_LVL        O  ,
+           BKG_BOOKING        B  ,
+           MDM_DTL_REV_LANE   DRL,
+           MDM_REV_LANE       RL ,
+           MAS_MON_VVD_LV     A
+     WHERE O.OFC_CD         = SPC_SCR_OFC_CONV_FNC(B.OB_SLS_OFC_CD)
+
+       AND B.BKG_STS_CD    IN('W','F')
+       AND B.BKG_CGO_TP_CD IN ('F', 'B', 'R')
+       AND A.VSL_CD         = B.VSL_CD
+       AND A.SKD_VOY_NO     = B.SKD_VOY_NO
+       AND A.SKD_DIR_CD     = B.SKD_DIR_CD
+
+#if (${rhq2} != '' || ${area} != '' || ${sales_office} != '')
+       AND (    (A.RHQ_CD = 'SHARC' AND A.AQ_CD IS NULL AND A.RGN_OFC_CD IS NULL) 
+             OR EXISTS ( SELECT O.OFC_CD
+                           FROM SPC_OFC_LVL O
+                          WHERE O.OFC_TP_CD IN ('BB', 'BA', 'BS')
+                            AND SPC_SCR_OFC_CONV_FNC(B.BKG_OFC_CD) = O.OFC_CD
+						    AND A.RHQ_CD = O.N2ND_PRNT_OFC_CD
+                            AND A.COST_YR || A.COST_WK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+                     CONNECT BY NOCYCLE O.PRNT_OFC_CD = PRIOR O.OFC_CD
+                             START WITH (A.RGN_OFC_CD IS NULL AND (O.PRNT_OFC_CD = A.AQ_CD OR O.PRNT_OFC_CD = A.RHQ_CD)) OR (O.OFC_CD = A.RGN_OFC_CD)))
+
+#end
+
+#if (${pol_cd} != '')
+       AND A.POL_CD = NVL(B.PRE_RLY_PORT_CD, B.POL_CD)
+#end
+
+       AND DRL.RLANE_CD        = A.RLANE_CD
+       AND DRL.VSL_SLAN_DIR_CD = A.DIR_CD
+       AND DRL.IOC_CD          = A.IOC_CD
+       AND DRL.SUB_TRD_CD      = A.SUB_TRD_CD
+       AND DRL.DELT_FLG        = 'N'
+       AND DRL.RLANE_CD        = RL.RLANE_CD
+       AND DRL.FM_CONTI_CD     =( SELECT SPC_CONTI_CONV_FNC(L.CONTI_CD, A.RLANE_CD, A.DIR_CD)
+                                    FROM MDM_LOCATION L
+                                   WHERE L.LOC_CD = NVL(B.PRE_RLY_PORT_CD, B.POL_CD) )
+       AND DRL.TO_CONTI_CD     =( SELECT SPC_CONTI_CONV_FNC(L.CONTI_CD, A.RLANE_CD, A.DIR_CD)
+                                    FROM MDM_LOCATION L
+                                   WHERE L.LOC_CD = NVL(B.PST_RLY_PORT_CD, B.POD_CD) )
+       AND (    ((A.RHQ_CD = 'SHARC' AND A.AQ_CD IS NULL AND A.RGN_OFC_CD IS NULL AND  A.RHQ_CD = O.N2ND_PRNT_OFC_CD) AND DRL.FM_CONTI_CD = 'A')
+             OR A.RHQ_CD <> 'SHARC'
+             OR A.AQ_CD      IS NOT NULL
+             OR A.RGN_OFC_CD IS NOT NULL )
+       AND RL.RLANE_CD    = A.RLANE_CD
+       AND RL.VSL_SLAN_CD = B.SLAN_CD
+       AND RL.VSL_TP_CD   = 'C'
+       AND RL.DELT_FLG    = 'N'
+       AND A.COST_YR || A.COST_WK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+  GROUP BY A.TRD_CD    ,
+           A.DIR_CD    ,
+           A.SUB_TRD_CD,
+           A.RLANE_CD  ,
+           O.N2ND_PRNT_OFC_CD,
+
+#if (${chkview} == 'P')
+           NVL(B.PRE_RLY_PORT_CD, B.POL_CD),
+#end
+
+           O.N4TH_PRNT_OFC_CD,
+           A.COST_YR||A.COST_WK,
+           A.NUM,
+           A.NUM_1,
+           A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD,
+           A.BSA
+    HAVING O.N4TH_PRNT_OFC_CD IS NOT NULL
+)
+, BASE_DATA AS(
+    SELECT TRD_CD
+          ,DIR_CD
+          ,SUB_TRD_CD
+          ,RLANE_CD
+		   -- 2014.02.11 KOREA/JAPAN AREA 분리 cateshin
+		  ,DECODE(Z1.OFC_CD, 'SELSC', 'KOREA' , 'TYOSC', 'JAPAN', 'VVOBA', 'E.RUSIA', Z1.RHQ_CD) AS RHQ_CD
+--		   Z1.RHQ_CD    ,
+#if (${chkview} == 'P')
+          ,Z1.AREA AS AQ_CD
+#else
+          ,DECODE(Z1.OFC_CD, 'SELSC', 'KOREA' , 'TYOSC', 'JAPAN', 'VVOBA', 'E.RUSIA', ( 
+             #if(${check_area4} =='Y')
+             SELECT SPC_RGN_OFC_CONV_FNC(NVL(O.N3RD_PRNT_OFC_CD, O.N2ND_PRNT_OFC_CD),Z1.OFC_CD)
+             #else
+             SELECT SPC_RGN_OFC_CONV_FNC2(NVL(O.N3RD_PRNT_OFC_CD, O.N2ND_PRNT_OFC_CD), Z1.OFC_CD)             
+             #end
+               FROM SPC_OFC_LVL O
+              WHERE O.OFC_CD = Z1.OFC_CD
+                AND Z1.WK BETWEEN O.OFC_APLY_FM_YRWK AND O.OFC_APLY_TO_YRWK
+           )) AS AQ_CD
+#end          
+          ,OFC_CD
+          ,WK
+          ,NUM
+#if(${checkVvd4} == 'Y')
+          ,DENSE_RANK() OVER(PARTITION BY TRD_CD, RLANE_CD, DIR_CD, NUM ORDER BY NUM_1) NUM_1 -- 누락되는 vvd 들이 존재해서 순번을 다시 만듬
+#else
+          ,'' NUM_1
+#end
+          ,VVD
+          ,BSA
+          ,QTA_QTY
+          ,QTA_GREV
+          ,QTA_CM
+          ,FCT_QTY
+          ,FCT_GREV
+          ,FCT_CM
+          ,BKG_QTY
+          ,BKG_GREV
+          ,BKG_CM
+      FROM (
+            SELECT TRD_CD    ,
+                   DIR_CD    ,
+                   SUB_TRD_CD,
+                   RLANE_CD  ,
+                   RHQ_CD    ,
+                   OFC_CD    ,
+                   WK        ,
+                   NUM       ,
+                   NUM_1,
+                   VVD       ,
+#if (${chkview} == 'P')
+           AREA      ,
+#end
+                   BSA       ,
+                   SUM(QTA_QTY)  AS QTA_QTY ,
+                   SUM(QTA_GREV) AS QTA_GREV,
+                   SUM(QTA_CM)   AS QTA_CM  ,
+                   SUM(FCT_QTY)  AS FCT_QTY ,
+                   SUM(FCT_GREV) AS FCT_GREV,
+                   SUM(FCT_CM)   AS FCT_CM  ,
+                   SUM(BKG_QTY)  AS BKG_QTY ,
+                   SUM(BKG_GREV) AS BKG_GREV,
+                   SUM(BKG_CM)   AS BKG_CM
+              FROM (
+                      SELECT TRD_CD    ,
+                             DIR_CD    ,
+                             SUB_TRD_CD,
+                             RLANE_CD  ,
+                             RHQ_CD    ,
+                             OFC_CD    ,
+                             WK        ,
+                             NUM       ,
+                             NUM_1,
+                             VVD       ,
+#if (${chkview} == 'P')
+                             AREA      ,
+#end
+                             BSA       ,
+                             QTA_QTY   ,
+                             QTA_GREV  ,
+                             QTA_CM    ,
+                             FCT_QTY   ,
+                             FCT_GREV  ,
+                             FCT_CM    ,
+                             ALC_QTY   ,
+                             ALC_GREV  ,
+                             ALC_CM    ,
+                             BKG_QTY   ,
+                             BKG_GREV  ,
+                             BKG_CM
+                        FROM QTA_DATA
+                      UNION ALL
+                      SELECT TRD_CD    ,
+                             DIR_CD    ,
+                             SUB_TRD_CD,
+                             RLANE_CD  ,
+                             RHQ_CD    ,
+                             OFC_CD    ,
+                             WK        ,
+                             NUM       ,
+                             NUM_1,
+                             VVD       ,
+#if (${chkview} == 'P')
+                             AREA      ,
+#end
+                             BSA       ,
+                             QTA_QTY   ,
+                             QTA_GREV  ,
+                             QTA_CM    ,
+                             FCT_QTY  AS FCT_QTY ,
+                             FCT_GREV AS FCT_GREV,
+                             FCT_CM   AS FCT_CM  ,
+                             ALC_QTY ,
+                             ALC_GREV,
+                             ALC_CM  ,
+                             BKG_QTY ,
+                             BKG_GREV,
+                             BKG_CM
+                        FROM FCT_DATA
+                      UNION ALL
+                      SELECT TRD_CD    ,
+                             DIR_CD    ,
+                             SUB_TRD_CD,
+                             RLANE_CD  ,
+                             RHQ_CD    ,
+                             OFC_CD    ,
+                             WK        ,
+                             NUM       ,
+                             NUM_1,
+                             VVD       ,
+#if (${chkview} == 'P')
+                             AREA      ,
+#end
+                             BSA       ,
+                             QTA_QTY   ,
+                             QTA_GREV  ,
+                             QTA_CM    ,
+                             0 AS FCT_QTY ,
+                             0 AS FCT_GREV,
+                             0 AS FCT_CM  ,
+                             ALC_QTY ,
+                             ALC_GREV,
+                             ALC_CM  ,
+                             BKG_QTY ,
+                             BKG_GREV,
+                             BKG_CM
+                        FROM BKG_DATA
+                   )
+          GROUP BY TRD_CD    ,
+                   DIR_CD    ,
+                   SUB_TRD_CD,
+                   RLANE_CD  ,
+                   RHQ_CD    ,
+                   OFC_CD    ,
+                   WK        ,
+                   NUM       ,
+                   NUM_1,
+                   VVD       ,
+                   BSA
+#if (${chkview} == 'P')
+                 , AREA
+#end
+           ) Z1
+)
+, BASE_DATA1 AS (
+#if(${is_sha} == 'Y' || ${is_sel} == 'Y' || ${is_tyo} == 'Y')
+
+    SELECT 1 AS BSA_AVG ,
+           Z1.TRD_CD    ,
+           Z1.SUB_TRD_CD,
+#if(${trade} == 'IAS')
+           NVL(SPC_GET_DEST_FNC(Z1.TRD_CD, Z1.SUB_TRD_CD, Z1.RLANE_CD), '-') AS DEST,
+#else
+           SPC_GET_DEST_FNC(Z1.TRD_CD, Z1.SUB_TRD_CD, Z1.RLANE_CD) AS DEST,
+#end
+           Z1.RLANE_CD  ,
+           Z1.DIR_CD    ,
+           Z1.RHQ_CD    ,
+           Z1.AQ_CD     ,
+           --DECODE(Z1.OFC_CD, 'SELSC', 'SELSC', 'TYOSC', 'TYOSC', Z1.AQ_CD) AQ_CD      ,
+           Z1.OFC_CD    ,
+           Z1.NUM_1     ,
+#set($primate = 'new_dur')
+#if(${duration} == '1')
+	#set($new_dur = ['1'])
+#elseif(${duration} == '2')
+	#set($new_dur = ['1','2'])
+#elseif(${duration} == '3')
+	#set($new_dur = ['1','2','3'])
+#elseif(${duration} == '4')
+	#set($new_dur = ['1','2','3','4'])
+#elseif(${duration} == '5')
+	#set($new_dur = ['1','2','3','4','5'])
+#elseif(${duration} == '6')
+	#set($new_dur = ['1','2','3','4','5','6'])
+#end
+#foreach( $key in $new_dur )
+           SUM(DECODE(Z1.NUM, ${key}, NVL(Z1.BSA, 0), 0)) AS BSA${key} ,
+#if(${checkVvd4} == 'Y')
+            MAX(DECODE(Z1.NUM, ${key}, Z1.VVD))            AS VVD${key}1,
+#else
+            MIN(DECODE(Z1.NUM, ${key}, Z1.VVD))            AS VVD${key}1,
+#end
+           MAX(DECODE(Z1.NUM, ${key}, Z1.VVD))            AS VVD${key}2,
+           SUM(DECODE(Z1.NUM, ${key}, Z1.QTA_QTY, 0))     AS QTA${key}1,
+           SUM(DECODE(Z1.NUM, ${key}, Z1.FCT_QTY, 0))     AS FCT${key}1,
+           SUM(DECODE(Z1.NUM, ${key}, Z1.BKG_QTY, 0))     AS BKG${key}1,
+#end
+           ''
+      FROM BASE_DATA Z1
+      WHERE 1=1
+#if(${area} != '' && ${area} != 'null')
+	  AND Z1.AQ_CD = @[area]
+#end
+#if(${is_sha} == 'Y')
+#if(${is_sel} == 'Y' && ${is_tyo} == 'N')
+      AND Z1.OFC_CD <> 'TYOSC'
+#elseif(${is_sel} == 'N' && ${is_tyo} == 'Y')
+      AND Z1.OFC_CD <> 'SELSC'
+#elseif(${is_sel} == 'N' && ${is_tyo} == 'N')
+      AND Z1.OFC_CD <> 'SELSC' AND Z1.OFC_CD <> 'TYOSC'
+#end	
+
+#elseif(${is_sha} == 'N')
+#if(${is_sel} == 'Y' && ${is_tyo} == 'N')
+      AND Z1.OFC_CD = 'SELSC'
+#elseif(${is_sel} == 'N' && ${is_tyo} == 'Y')
+      AND Z1.OFC_CD = 'TYOSC'
+#elseif(${is_sel} == 'Y' && ${is_tyo} == 'Y')
+      AND Z1.OFC_CD = 'SELSC' OR Z1.OFC_CD = 'TYOSC'
+#end
+#end
+  GROUP BY Z1.TRD_CD    ,
+           Z1.SUB_TRD_CD,
+           SPC_GET_DEST_FNC(Z1.TRD_CD, Z1.SUB_TRD_CD, Z1.RLANE_CD),
+           Z1.RLANE_CD  ,
+           Z1.DIR_CD    ,
+           Z1.RHQ_CD    ,
+           Z1.AQ_CD     ,
+           Z1.OFC_CD    ,
+           Z1.NUM_1
+#end
+#if(( ${is_sha} == 'N' && ${is_sel} == 'Y' ) || ( ${is_sha} == 'N' && ${is_tyo} == 'Y' ))
+ UNION ALL
+#end
+#if(${is_sha} == 'N')
+    SELECT 1 AS BSA_AVG ,
+           Z1.TRD_CD    ,
+           Z1.SUB_TRD_CD,
+#if(${trade} == 'IAS')
+           NVL(SPC_GET_DEST_FNC(Z1.TRD_CD, Z1.SUB_TRD_CD, Z1.RLANE_CD), '-') AS DEST,
+#else
+           SPC_GET_DEST_FNC(Z1.TRD_CD, Z1.SUB_TRD_CD, Z1.RLANE_CD) AS DEST,
+#end
+           Z1.RLANE_CD  ,
+           Z1.DIR_CD    ,
+           Z1.RHQ_CD    ,
+           Z1.AQ_CD,
+           Z1.OFC_CD    ,
+           Z1.NUM_1     ,
+#set($primate = 'new_dur')
+#if(${duration} == '1')
+	#set($new_dur = ['1'])
+#elseif(${duration} == '2')
+	#set($new_dur = ['1','2'])
+#elseif(${duration} == '3')
+	#set($new_dur = ['1','2','3'])
+#elseif(${duration} == '4')
+	#set($new_dur = ['1','2','3','4'])
+#elseif(${duration} == '5')
+	#set($new_dur = ['1','2','3','4','5'])
+#elseif(${duration} == '6')
+	#set($new_dur = ['1','2','3','4','5','6'])
+#end
+#foreach( $key in $new_dur )
+           SUM(DECODE(Z1.NUM, ${key}, NVL(Z1.BSA, 0), 0)) AS BSA${key} ,
+#if(${checkVvd4} == 'Y')
+            MAX(DECODE(Z1.NUM, ${key}, Z1.VVD))            AS VVD${key}1,
+#else
+            MIN(DECODE(Z1.NUM, ${key}, Z1.VVD))            AS VVD${key}1,
+#end
+           MAX(DECODE(Z1.NUM, ${key}, Z1.VVD))            AS VVD${key}2,
+           SUM(DECODE(Z1.NUM, ${key}, Z1.QTA_QTY, 0))     AS QTA${key}1,
+           SUM(DECODE(Z1.NUM, ${key}, Z1.FCT_QTY, 0))     AS FCT${key}1,
+           SUM(DECODE(Z1.NUM, ${key}, Z1.BKG_QTY, 0))     AS BKG${key}1,
+#end
+           ''
+      FROM BASE_DATA Z1
+      WHERE 1=1
+      AND Z1.RHQ_CD <> 'SHARC' 
+      AND Z1.RHQ_CD <> 'KOREA' 
+      AND Z1.RHQ_CD <> 'JAPAN'
+#if(${area} != '' && ${area} != 'null')
+	  AND Z1.AQ_CD = @[area]
+#end
+  GROUP BY Z1.TRD_CD    ,
+           Z1.SUB_TRD_CD,
+           SPC_GET_DEST_FNC(Z1.TRD_CD, Z1.SUB_TRD_CD, Z1.RLANE_CD),
+           Z1.RLANE_CD  ,
+           Z1.DIR_CD    ,
+           Z1.RHQ_CD    ,
+           Z1.AQ_CD,
+           Z1.OFC_CD    ,
+           Z1.NUM_1
+#end
+
+)
+  SELECT /* + USE_MERGE(Z4 Z3) */
+         Z3.TRD_CD    ,
+         Z3.SUB_TRD_CD,
+         Z3.RLANE_CD  ,
+         Z3.DIR_CD    ,
+         Z3.RHQ_CD    ,
+         Z3.AQ_CD     ,
+         Z3.OFC_CD    ,
+         SPC_GET_PORT_ROTATION(Z3.RLANE_CD) AS PORT1,
+         CNT          ,
+#foreach( $key in $new_dur )
+         MAX(Z3.VVD${key} ) OVER (PARTITION BY Z3.TRD_CD, Z3.SUB_TRD_CD, Z3.RLANE_CD, Z3.DIR_CD, Z3.NUM_1) AS VVD${key},
+         Z3.BSA${key},
+         Z3.QTA${key}1,
+         Z3.FCT${key}1,
+         Z3.BKG${key}1,         
+         ROUND(DECODE(Z3.QTA${key}1, 0, 0, Z3.FCT${key}1 * 100 / Z3.QTA${key}1), 0)||'%' AS FQTA${key}1,
+         ROUND(DECODE(Z3.BSA$key, 0, 0, Z3.FCT${key}1 * 100 / Z3.BSA$key), 0)||'%' AS FBSA${key}1,
+         ROUND(DECODE(Z3.QTA${key}1, 0, 0, Z3.BKG${key}1 * 100 / Z3.QTA${key}1), 0)||'%' AS BQTA${key}1,
+         ROUND(DECODE(Z3.BSA$key, 0, 0, Z3.BKG${key}1 * 100 / Z3.BSA$key), 0)||'%' AS BBSA${key}1,
+#end
+         '' AS T
+    FROM (
+            SELECT NVL(( SELECT SUM(BSA) / COUNT(1) AS BSA
+                           FROM MAS_MON_VVD_LV L
+                          WHERE L.SUB_TRD_CD = Z2.SUB_TRD_CD
+                            AND L.RLANE_CD   = Z2.RLANE_CD
+                      ), 0) AS BSA_AVG,
+                   NVL(Z2.TRD_CD    , 'TOTAL') AS TRD_CD    ,
+                   NVL(Z2.SUB_TRD_CD, 'TOTAL') AS SUB_TRD_CD,
+                   NVL(Z2.RLANE_CD  , 'TOTAL') AS RLANE_CD  ,
+                   NVL(Z2.DIR_CD    , 'TOTAL') AS DIR_CD    ,
+                   NVL(Z2.RHQ_CD     , '+')    AS RHQ_CD    ,
+                   NVL(Z2.AQ_CD     , '+')     AS AQ_CD     ,
+                   NVL(Z2.OFC_CD    , '+')     AS OFC_CD    ,
+#if(${checkVvd4} == 'Y')
+                   Z2.NUM_1,
+#else
+                   '' NUM_1,
+#end
+#foreach( $key in $new_dur )
+                   MAX(Z2.BSA${key}) AS BSA${key},
+                   MAX(DECODE((NVL(Z2.VVD${key}1, ' ')), (NVL(Z2.VVD${key}2, ' ')), Z2.VVD${key}1, Z2.VVD${key}2||'/'||Z2.VVD${key}1)) AS VVD${key},
+                   SUM(Z2.QTA${key}1) AS QTA${key}1,
+                   SUM(Z2.FCT${key}1) AS FCT${key}1,
+                   SUM(Z2.BKG${key}1) AS BKG${key}1,
+#end
+                   CASE
+                        WHEN (Z2.RHQ_CD IS NULL AND Z2.AQ_CD IS NULL) OR (Z2.DIR_CD IS NOT NULL AND Z2.OFC_CD IS NOT NULL) THEN COUNT(1) * CASE
+                                                                                                                        WHEN Z2.OFC_CD IS NOT NULL THEN -1
+                                                                                                                        WHEN Z2.RHQ_CD IS NULL AND Z2.AQ_CD IS NULL AND Z2.DIR_CD IS NOT NULL AND Z2.RLANE_CD IS NULL THEN 0
+                                                                                                                        ELSE 1
+                                                                                                                    END
+                        WHEN Z2.RHQ_CD IS NOT NULL AND Z2.AQ_CD IS NOT NULL AND Z2.DIR_CD IS NULL AND Z2.RLANE_CD IS NULL AND Z2.OFC_CD IS NOT NULL THEN COUNT(1) * -1     
+                        ELSE 0
+                    END AS CNT
+              FROM BASE_DATA1 Z2
+          GROUP BY
+#if (${subtrade1} == '')
+                    Z2.TRD_CD,
+                    CUBE(Z2.SUB_TRD_CD, Z2.RLANE_CD, Z2.DIR_CD, Z2.RHQ_CD, Z2.AQ_CD, Z2.OFC_CD #if(${checkVvd4} == 'Y') ,Z2.NUM_1 #end)
+#else
+                    Z2.TRD_CD,
+                    Z2.SUB_TRD_CD,
+                    CUBE(Z2.RLANE_CD, Z2.DIR_CD, Z2.RHQ_CD, Z2.AQ_CD, Z2.OFC_CD #if(${checkVvd4} == 'Y') ,Z2.NUM_1 #end)
+#end
+	
+            HAVING     (NOT (RHQ_CD IS NULL AND AQ_CD IS NOT NULL))
+                   AND (NOT (AQ_CD IS NULL AND OFC_CD IS NOT NULL))
+                   AND (NOT (RLANE_CD IS NOT NULL AND DIR_CD IS NULL))
+                   AND (NOT (RLANE_CD IS NULL AND DIR_CD IS NOT NULL AND RHQ_CD IS NOT NULL))
+                   AND (NOT (SUB_TRD_CD IS NOT NULL AND RLANE_CD IS NULL AND DIR_CD IS NOT NULL AND AQ_CD IS NOT NULL))
+                   AND (NOT (SUB_TRD_CD IS NULL AND RLANE_CD IS NOT NULL))
+                   AND (NOT (SUB_TRD_CD IS NULL AND RLANE_CD IS NULL AND DIR_CD IS NOT NULL AND AQ_CD IS NOT NULL))
+#if(${checkVvd4} == 'Y')
+                    AND (NOT (TRD_CD IS NOT NULL AND SUB_TRD_CD IS NOT NULL AND RLANE_CD IS NOT NULL AND DIR_CD IS NOT NULL AND NUM_1 IS     NULL))
+                    AND (NOT (TRD_CD IS NOT NULL AND SUB_TRD_CD IS NOT NULL AND RLANE_CD IS     NULL AND DIR_CD IS NOT NULL AND NUM_1 IS NOT NULL))
+                    AND (NOT (TRD_CD IS NOT NULL AND SUB_TRD_CD IS NOT NULL AND RLANE_CD IS     NULL AND DIR_CD IS     NULL AND NUM_1 IS NOT NULL))
+                    AND (NOT (TRD_CD IS NOT NULL AND SUB_TRD_CD IS     NULL AND RLANE_CD IS     NULL AND DIR_CD IS NOT NULL AND NUM_1 IS NOT NULL))
+                    AND (NOT (TRD_CD IS NOT NULL AND SUB_TRD_CD IS     NULL AND RLANE_CD IS     NULL AND DIR_CD IS     NULL AND NUM_1 IS NOT NULL))
+#end
+         ) Z3
+ORDER BY DECODE(Z3.SUB_TRD_CD, 'TOTAL', '00', Z3.SUB_TRD_CD) DESC,
+         Z3.BSA_AVG DESC,
+         DECODE(Z3.RLANE_CD, 'TOTAL', 'ZZZZZ', Z3.RLANE_CD),
+         DECODE(Z3.DIR_CD  , 'TOTAL', DECODE(Z3.RHQ_CD, '+', 'Z', '1'), Z3.DIR_CD),
+         Z3.NUM_1,
+         DECODE(Z3.RHQ_CD  , 'TOTAL', 'Z', '+', 'Y', 'KOREA', '1', 'JAPAN', '2', Z3.RHQ_CD),
+         DECODE(Z3.AQ_CD   , 'TOTAL', DECODE(Z3.RLANE_CD, 'TOTAL', 'ZZZZZ', 'ZZZZ'),
+#if (${chkview} == 'P')
+                                                                                      Z3.AQ_CD),
+#else
+         DECODE(Z3.AQ_CD, NULL, 'Z', '+', 'Y', 'SHADNC', '1', 'SZPDC', '2', 'SHARC','3','KOREA', '4', 'JAPAN', '5', 'TAIWAN', '6','SHADKJ', '7', 'SINDSA', '8', 'SINDPI', '9', 'E.RUSIA', '10', Z3.AQ_CD)),
+#end
+
+         DECODE(Z3.OFC_CD, 'TOTAL', 'ZZZZZ', '+', 'ZZZZ', Z3.OFC_CD)			]]></sql>
+			<params>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="login_id" type="12" value="" out="N"/>
+				<param name="ui_name" type="12" value="" out="N"/>
+				<param name="area" type="12" value="" out="N"/>
+				<param name="sales_office" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="year" type="12" value="" out="N"/>
+				<param name="week" type="12" value="" out="N"/>
+				<param name="duration" type="12" value="" out="N"/>
+				<param name="rhq2" type="12" value="" out="N"/>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="subtrade1" type="12" value="" out="N"/>
+				<param name="bound" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

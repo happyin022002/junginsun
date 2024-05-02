@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PlanningDBDAOSearchQtaSetupForIsaSecByHoSummaryRSQL">
+			<desc><![CDATA[QTA Set Up for IAS Sector by Head Office_Summary를 조회한다.
+
+* 2015.06.15 김용습 [CHM-201536164] 주간 MAS Open에 따른 타모듈 프로그램 적용 요청
+* 2016.02.25 최성민 [CHM-201640194] QTA Set up by Head Office for IAS Sector_Summary VVD 중복 계산 관련 로직 수정]]></desc>
+			<sql><![CDATA[
+SELECT 
+       C1.BSE_TP_CD
+      ,C1.BSE_YR
+      ,C1.BSE_QTR_CD
+      ,(SELECT INTG_CD_VAL_DP_DESC AS NAME
+        FROM COM_INTG_CD_DTL
+        WHERE INTG_CD_ID  = 'CD00940'
+        AND INTG_CD_VAL_CTNT = C1.OFC_VW_CD) OFC_VW_CD
+      ,C1.RLANE_CD
+      ,C1.DIR_CD
+      ,C4.BSE_MON
+      ,C4.VVD_CNT
+      ,C4.TOT_BSA_CAPA
+      ,(SELECT INTG_CD_VAL_DP_DESC
+		FROM COM_INTG_CD_DTL
+		WHERE INTG_CD_ID = 'CD03218'
+		AND INTG_CD_VAL_CTNT = C5.IAS_RGN_CD) IAS_RGN_CD
+      ,C1.RGN_OFC_CD
+      ,DECODE(C5.HUL_BND_CD, 'HH', 'H/H', 'BH', 'B/H') HUL_BND_CD
+      ,C1.TRD_CD
+      ,C1.SUB_TRD_CD
+      ,C1.RHQ_CD
+    --  ,SUM(C2.LOD_QTY) AS LOD_QTY
+      ,DECODE(SUM(C2.LOD_QTY),0,0, SUM(C2.LOD_QTY) * C4.VVD_CNT) AS LOD_QTY
+      ,DECODE(SUM(C2.LOD_QTY),0,0, SUM(C2.LOD_QTY * C2.GRS_RPB_REV) /SUM(C2.LOD_QTY)) AS REV_RPB
+      ,SUM(C2.LOD_QTY * C2.GRS_RPB_REV) * C4.VVD_CNT AS GRS_REV
+  FROM SQM_SCTR_LANE_OFC  C1
+      ,SQM_SCTR_LOD_REV   C2
+      ,SQM_SCTR_PAIR_COST C3
+      ,(
+        SELECT
+               B1.BSE_TP_CD
+              ,B1.BSE_YR
+              ,B1.BSE_QTR_CD
+              ,B1.TRD_CD
+              ,B1.RLANE_CD
+              ,B1.DIR_CD
+              ,B1.VVD_CNT
+              ,B1.TOT_BSA_CAPA
+              ,B1.BSE_MON
+              ,B1.SUB_TRD_CD
+              ,B1.FNL_BSA_CAPA
+              ,MAX(B2.RANGE_BSA)+9 AS BSA_CAPA --차이가 0~9 사이일 경우 큰 BSA를 대표로 그룹핑한다.
+          FROM (
+                SELECT A1.BSE_TP_CD
+                      ,A1.BSE_YR
+                      ,A1.BSE_QTR_CD
+                      ,A1.TRD_CD
+                      ,A1.RLANE_CD
+                      ,A1.DIR_CD
+                      ,COUNT(A1.BSE_MON) OVER(PARTITION BY A1.RLANE_CD,A1.DIR_CD,A1.BSE_MON) AS VVD_CNT
+                      ,SUM(A1.FNL_BSA_CAPA) OVER(PARTITION BY A1.RLANE_CD,A1.DIR_CD,A1.BSE_MON) AS TOT_BSA_CAPA
+                      ,A1.BSE_MON
+                      ,A1.SUB_TRD_CD
+                      ,A1.FNL_BSA_CAPA
+                  FROM SQM_QTA_TGT_VVD A1
+                      ,SQM_SCTR_PF_GRP A2
+                 WHERE A1.BSE_TP_CD    = @[f_bse_tp_cd]
+                   AND A1.BSE_YR       = @[f_bse_yr]
+                   AND A1.BSE_QTR_CD   = DECODE(@[f_bse_tp_cd], 'Y', '00', @[f_bse_qtr_cd])
+                   AND A1.TRD_CD       = 'IAS'
+                   AND A1.DELT_FLG     = 'N'
+#if (${f_rlane_cd} != '' && ${f_rlane_cd} != 'All')
+                   AND A1.RLANE_CD     IN (${f_rlane_cd})
+#end
+#if (${f_trd_dir} != 'on' && ${f_dir_cd} != '' && ${f_dir_cd} != 'All')
+                   AND A1.DIR_CD       = @[f_dir_cd]
+#end
+#if (${f_sub_trd_cd} != '' && ${f_sub_trd_cd} != 'All')
+                   AND A1.SUB_TRD_CD   = @[f_sub_trd_cd]
+#end
+                   AND A1.BSE_TP_CD    = A2.BSE_TP_CD
+                   AND A1.BSE_YR       = A2.BSE_YR
+                   AND A1.BSE_QTR_CD   = A2.BSE_QTR_CD
+                   AND A1.RLANE_CD     = A2.RLANE_CD
+                   AND A1.PF_SVC_TP_CD = A2.PF_SVC_TP_CD
+                   AND A1.FNL_BSA_CAPA <> 0
+                 ORDER BY A1.DIR_CD, A1.RLANE_CD, A1.BSE_MON
+               ) B1
+              ,(
+                SELECT DISTINCT RLANE_CD, DIR_CD, FNL_BSA_CAPA, FNL_BSA_CAPA - 9 AS RANGE_BSA
+                  FROM SQM_QTA_TGT_VVD
+                 WHERE BSE_TP_CD  = @[f_bse_tp_cd]
+                   AND BSE_YR     = @[f_bse_yr]
+                   AND BSE_QTR_CD = DECODE(@[f_bse_tp_cd], 'Y', '00', @[f_bse_qtr_cd])
+                   AND TRD_CD     = 'IAS'
+                   AND DELT_FLG   = 'N'
+                   AND FNL_BSA_CAPA <> 0
+                 ORDER BY DIR_CD, RLANE_CD, FNL_BSA_CAPA DESC
+               ) B2
+         WHERE 1=1
+           AND B1.DIR_CD        = B2.DIR_CD
+           AND B1.RLANE_CD      = B2.RLANE_CD
+           AND B1.FNL_BSA_CAPA >= B2.RANGE_BSA
+         GROUP BY B1.BSE_TP_CD
+                 ,B1.BSE_YR
+                 ,B1.BSE_QTR_CD
+                 ,B1.TRD_CD
+                 ,B1.RLANE_CD
+                 ,B1.DIR_CD
+                 ,B1.VVD_CNT
+                 ,B1.TOT_BSA_CAPA
+                 ,B1.BSE_MON
+                 ,B1.SUB_TRD_CD
+                 ,B1.FNL_BSA_CAPA
+         ORDER BY B1.DIR_CD, B1.RLANE_CD,B1.FNL_BSA_CAPA DESC, B1.BSE_MON       
+       )    C4
+     ,MAS_LANE_RGST C5
+ WHERE 1=1
+   AND C1.BSE_TP_CD   = @[f_bse_tp_cd]
+   AND C1.BSE_YR      = @[f_bse_yr]
+   AND C1.BSE_QTR_CD  = DECODE(@[f_bse_tp_cd], 'Y', '00', @[f_bse_qtr_cd]) 
+   AND C1.SQM_ACT_FLG = 'Y'
+   AND C1.OFC_VW_CD   = @[f_ofc_vw_cd]
+#if (${f_rhq_cd} != '' && ${f_rhq_cd} != 'All')
+   AND C1.RHQ_CD      = @[f_rhq_cd]
+#end
+#if (${f_rgn_ofc_cd} != '' && ${f_rgn_ofc_cd} != 'All')
+   AND C1.RGN_OFC_CD  = @[f_rgn_ofc_cd]
+#end
+#if (${f_rlane_cd} != '' && ${f_rlane_cd} != 'All')
+   AND C1.RLANE_CD    IN (${f_rlane_cd})
+#end
+#if (${f_trd_dir} != 'on' && ${f_dir_cd} != '' && ${f_dir_cd} != 'All')
+   AND C1.DIR_CD      = @[f_dir_cd]
+#end
+#if (${f_sub_trd_cd} != '' && ${f_sub_trd_cd} != 'All')
+   AND C1.SUB_TRD_CD  = @[f_sub_trd_cd]
+#end
+#if (${f_ias_rgn_cd} != '' && ${f_ias_rgn_cd} != 'All')
+   AND C5.IAS_RGN_CD  = @[f_ias_rgn_cd]
+#end
+#if (${f_trd_dir} == 'on' && ${f_hul_bnd_cd} != '' && ${f_hul_bnd_cd} != 'All')
+   AND C5.HUL_BND_CD  = @[f_hul_bnd_cd]
+#end
+   AND C1.BSE_TP_CD   = C2.BSE_TP_CD
+   AND C1.BSE_YR      = C2.BSE_YR
+   AND C1.BSE_QTR_CD  = C2.BSE_QTR_CD
+   AND C1.OFC_VW_CD   = C2.OFC_VW_CD
+   AND C1.RLANE_CD    = C2.RLANE_CD
+   AND C1.DIR_CD      = C2.DIR_CD
+   AND C1.PF_GRP_CD   = C2.PF_GRP_CD
+   AND C1.RGN_OFC_CD  = C2.RGN_OFC_CD
+   AND C1.POL_CD      = C2.POL_CD
+   AND C1.POD_CD      = C2.POD_CD
+
+   AND C1.BSE_TP_CD   = C3.BSE_TP_CD
+   AND C1.BSE_YR      = C3.BSE_YR
+   AND C1.BSE_QTR_CD  = C3.BSE_QTR_CD
+   AND C1.RLANE_CD    = C3.RLANE_CD
+   AND C1.DIR_CD      = C3.DIR_CD
+   AND C1.POL_CD      = C3.POL_CD
+   AND C1.POD_CD      = C3.POD_CD
+
+   AND C2.BSE_TP_CD    = C4.BSE_TP_CD
+   AND C2.BSE_YR       = C4.BSE_YR
+   AND C2.BSE_QTR_CD   = C4.BSE_QTR_CD
+   AND C2.TRD_CD       = C4.TRD_CD
+   AND C2.RLANE_CD     = C4.RLANE_CD
+   AND C2.DIR_CD       = C4.DIR_CD
+   AND C2.FNL_BSA_CAPA = C4.BSA_CAPA
+   AND C4.BSA_CAPA    <> 0
+
+   AND C1.TRD_CD       = C5.TRD_CD
+   AND C1.SUB_TRD_CD   = C5.SUB_TRD_CD
+   AND C1.RLANE_CD     = C5.RLANE_CD
+   AND C1.DIR_CD       = C5.DIR_CD  
+   AND C5.DELT_FLG     = 'N'
+GROUP BY C1.BSE_TP_CD
+      ,C1.BSE_YR
+      ,C1.BSE_QTR_CD
+      ,C1.OFC_VW_CD
+      ,C1.RLANE_CD
+      ,C1.DIR_CD
+      ,C4.BSE_MON
+      ,C4.VVD_CNT
+      ,C4.TOT_BSA_CAPA
+      ,C5.IAS_RGN_CD
+      ,C1.RGN_OFC_CD
+      ,C5.HUL_BND_CD
+      ,C1.TRD_CD
+      ,C1.SUB_TRD_CD
+      ,C1.RHQ_CD
+ORDER BY RLANE_CD,DIR_CD,BSE_MON,RHQ_CD,RGN_OFC_CD,HUL_BND_CD			]]></sql>
+			<params>
+				<param name="f_bse_tp_cd" type="12" value="" out="N"/>
+				<param name="f_bse_yr" type="12" value="" out="N"/>
+				<param name="f_bse_qtr_cd" type="12" value="" out="N"/>
+				<param name="f_dir_cd" type="12" value="" out="N"/>
+				<param name="f_sub_trd_cd" type="12" value="" out="N"/>
+				<param name="f_ofc_vw_cd" type="12" value="" out="N"/>
+				<param name="f_rhq_cd" type="12" value="" out="N"/>
+				<param name="f_rgn_ofc_cd" type="12" value="" out="N"/>
+				<param name="f_ias_rgn_cd" type="12" value="" out="N"/>
+				<param name="f_hul_bnd_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

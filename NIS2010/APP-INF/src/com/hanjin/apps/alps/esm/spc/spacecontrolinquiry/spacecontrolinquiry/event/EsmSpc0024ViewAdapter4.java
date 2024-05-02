@@ -1,0 +1,154 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : EsmSpc0024ViewAdapter4.java
+*@FileTitle : spacecontrolinquiry
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.08.20
+*@LastModifier : 한상훈
+*@LastVersion : 1.0
+* 2009.08.20 한상훈
+* 1.0 Creation
+* 2009.11.24 CHOI.Y.S
+* - GS 분리
+* 2011.06.27 Kim jong jun : 소스 품질검토 결과 적용
+=========================================================*/
+package com.hanjin.apps.alps.esm.spc.spacecontrolinquiry.spacecontrolinquiry.event;
+
+import java.util.List;
+
+import com.hanjin.apps.alps.esm.spc.common.SPCUtil;
+import com.hanjin.apps.alps.esm.spc.spacecontrolinquiry.spacecontrolinquiry.vo.ComplexMainVO;
+import com.hanjin.framework.component.common.AbstractValueObject;
+import com.hanjin.framework.component.rowset.DBRowSet;
+import com.hanjin.framework.core.controller.ViewAdapter;
+
+/**
+ * 기본 IBSheet XML 생성<br>
+ * - IBSheet로 반환할 서버처리결과를 XML로 변환하는 클래스이다.<br>
+ * 
+ * @author 한상훈
+ * @see ViewAdapter 참조
+ * @since J2EE 1.5
+ */
+public class EsmSpc0024ViewAdapter4 extends ViewAdapter{
+	
+	/**
+	 * VO List를 Parsing하여 <Data>태그 부분의 XML문자열을 반환한다.<br>
+	 * 
+	 * @param vos List<AbstractValueObject> List 객체
+	 * @param colOrder String[] Column명 문자열 
+	 * @param prefix String IBSheet savename's prefix
+	 * @return String <Data>태그 부분의 XML문자열
+	 * @exception 
+	 */	
+	protected String makeDataTag(List<AbstractValueObject> vos, String prefix) 
+	{
+		StringBuilder sbufXML = new StringBuilder();
+				
+		ComplexMainVO comMain = (ComplexMainVO)vos.get(0);
+		boolean searchOffice  = !comMain.getCondition().getOffice().equals("");
+		boolean searchVVD     = !comMain.getCondition().getVvd().equals("");
+		boolean searchWeek    = !comMain.getCondition().getWeek().equals("");
+		boolean searchLane    = !comMain.getCondition().getLane().equals("");
+		
+		DBRowSet rowSets = new DBRowSet();
+		rowSets = comMain.getRs();
+		
+		int rowCount = 0;
+		
+		try{				
+			rowCount = rowSets.getRowCount();
+		}catch(Exception e){
+			log.debug("DBRowSet err");
+			log.error(e.getMessage());
+		}
+		
+		sbufXML.append("<DATA TOTAL='"+rowCount+"'>\n");
+	
+		String[] color = SPCUtil.getColors(5);
+		color[3] = "";
+		color[4] = "255,255,255";
+		
+		if (rowSets != null && rowSets.getRowCount()>0) {//3.1
+			int lvl       = 0;			
+			String lane   = null;
+			String week   = null;
+			String area   = null;
+			String office = null;
+			
+			try{
+				while(rowSets.next()){
+					lvl    = rowSets.getInt("lvl");
+					lane   = rowSets.getString("rlane_cd");
+					week   = rowSets.getString("cost_wk");
+					area   = rowSets.getString("aq_cd");
+					office = rowSets.getString("ofc_cd");
+					
+					if(lane.equals("")){
+						lane = "-";
+					} else if(week.equals("")) {
+						week = "-";
+					} else if(area.equals("")) {
+						area = "+";
+					} else if(office.equals("")) {
+						office = "+";
+					}
+					
+					if((!searchOffice || (lvl != 3 && lvl != 4)) && (!searchVVD || (lvl >= 3)) && (!searchWeek || lvl != 2) && (!searchLane || lvl != 1)){
+						sbufXML.append("<tr BGCOLOR=\"" + color[lvl-1] + "\" LEVEL=\"" + lvl + "\" EXPAND=\"").append(lvl<3?"TRUE":"FALSE").append("\">\n");
+						sbufXML.append("<td BGCOLOR=\"" + color[4] + "\">" + rowSets.getString("trd_cd") + "</td>\n");
+						sbufXML.append("<td BGCOLOR=\"" + color[4] + "\">" + rowSets.getString("sub_trd_cd") + "</td>\n");
+						sbufXML.append("<td BGCOLOR=\"").append(lvl>1?color[4]:color[lvl-1]).append("\">" + lane + "</td>\n");
+						sbufXML.append("<td BGCOLOR=\"").append(lvl>2?color[4]:color[lvl-1]).append("\">" + week + "</td>\n");
+						sbufXML.append("<td BGCOLOR=\"").append(lvl>2?color[4]:color[lvl-1]).append("\">" + rowSets.getString("vvd") + "</td>\n");
+						sbufXML.append("<td BGCOLOR=\"").append(lvl>2?color[4]:color[lvl-1]).append("\">" + rowSets.getString("dir_cd") + "</td>\n");
+						sbufXML.append("<td>" + area   + "</td>\n");
+						sbufXML.append("<td>" + office + "</td>\n");
+						sbufXML.append("<td INDENT=\"1\">" + rowSets.getString("fcast_lod_qty") + "</td>\n");
+						sbufXML.append("<td INDENT=\"2\">" + rowSets.getString("bkg_lod_qty")   + "</td>\n");
+						sbufXML.append("<td INDENT=\"1\">" + rowSets.getString("aloc_lod_qty")  + "</td>\n");
+						sbufXML.append("<td INDENT=\"2\">" + rowSets.getString("shortfall")     + "</td>\n");
+						sbufXML.append("<td INDENT=\"3\">" + rowSets.getString("ratio")         + "%</td>\n");
+						sbufXML.append("<td>" + lvl + "</td>\n");
+						sbufXML.append("</tr>\n");
+					}
+				}
+			}catch(Exception e){
+				log.error(e.getMessage(), e);
+			}
+		}
+		
+		sbufXML.append("</DATA>\n");
+		
+		return sbufXML.toString();
+	}
+
+	/**
+	 * DBRowSet를 Parsing하여 <DATA>태그를 생성한다.<br>
+	 * IBSheet의 prefix값이 있는 경우 COLORDER에 prefix를 붙인 column명으로 표시해 준다.<br>
+	 * 
+	 * @param rs DBRowSet 		VO객체
+	 * @param prefix String 		IBSheet savename's prefix string
+	 * @return String IBSheet 		<DATA>태그
+	 * @exception 
+	 */
+	protected String makeDataTag(DBRowSet rs,String prefix) {
+		StringBuilder sb = new StringBuilder();
+		
+		return sb.toString();
+	} 
+	
+	/**
+	 * Pivot Table용 Data tag를 생성한다.<br>
+	 * 
+	 * @param rs			DBRowSet 		VO객체
+	 * @return String 	IBSheet 			<DATA>태그
+	 * @exception 
+	 */
+	protected String makePivotDataTag(DBRowSet rs) {
+		StringBuilder sb = new StringBuilder();
+
+		return sb.toString();
+	}
+}

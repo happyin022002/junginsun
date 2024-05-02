@@ -1,0 +1,96 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : CostStructureDBDAOUpdateMasActGrpCostMapgCSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.10.22
+*@LastModifier : 김기식
+*@LastVersion : 1.0
+* 2009.10.22 김기식
+* 1.0 Creation
+=========================================================*/
+package com.hanjin.apps.alps.esm.mas.stdunitcost.coststructure.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.hanjin.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author Kim Ki-Sik
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class CostStructureDBDAOUpdateMasActGrpCostMapgCSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * MAS_ACT_GRP_COST_MAPG 테이블 싱크
+	  * </pre>
+	  */
+	public CostStructureDBDAOUpdateMasActGrpCostMapgCSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("user_id",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.hanjin.apps.alps.esm.mas.stdunitcost.coststructure.integration").append("\n"); 
+		query.append("FileName : CostStructureDBDAOUpdateMasActGrpCostMapgCSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("MERGE INTO MAS_ACT_GRP_COST_MAPG A" ).append("\n"); 
+		query.append("USING (SELECT M.COST_ACT_GRP_CD" ).append("\n"); 
+		query.append(",N.MAS_COST_SRC_CD" ).append("\n"); 
+		query.append(",@[user_id] CRE_USR_ID" ).append("\n"); 
+		query.append(",SYSDATE CRE_DT" ).append("\n"); 
+		query.append("FROM PRD_COST_ACT_GRP M" ).append("\n"); 
+		query.append(",MAS_COST_SRC_ACCT N" ).append("\n"); 
+		query.append("WHERE M.COST_ACT_GRP_CD IS NOT NULL" ).append("\n"); 
+		query.append("AND N.MAS_COST_SRC_CD IS NOT NULL) B" ).append("\n"); 
+		query.append("ON (A.COST_ACT_GRP_CD = B.COST_ACT_GRP_CD" ).append("\n"); 
+		query.append("AND A.MAS_COST_SRC_CD = B.MAS_COST_SRC_CD)" ).append("\n"); 
+		query.append("WHEN NOT MATCHED THEN" ).append("\n"); 
+		query.append("INSERT(COST_ACT_GRP_CD" ).append("\n"); 
+		query.append(", MAS_COST_SRC_CD" ).append("\n"); 
+		query.append(", CRE_DT" ).append("\n"); 
+		query.append(", CRE_USR_ID" ).append("\n"); 
+		query.append(", UPD_DT" ).append("\n"); 
+		query.append(", UPD_USR_ID)" ).append("\n"); 
+		query.append("VALUES(B.COST_ACT_GRP_CD" ).append("\n"); 
+		query.append(", B.MAS_COST_SRC_CD" ).append("\n"); 
+		query.append(", B.CRE_DT" ).append("\n"); 
+		query.append(", B.CRE_USR_ID" ).append("\n"); 
+		query.append(", B.CRE_DT" ).append("\n"); 
+		query.append(", B.CRE_USR_ID)" ).append("\n"); 
+
+	}
+}

@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="MnrAdvanceAuditDBDAOsearchCleaningContainerInquiryListRSQL">
+			<desc><![CDATA[ESD_EAS_0366
+Cleaning Container Inquiry
+특정기간 동안 Cleaning한 Container 조회 목록]]></desc>
+			<sql><![CDATA[
+WITH ROW_DATA AS (
+    SELECT   EQ_NO
+           , EQ_TPSZ_CD
+           , LSTM_CD
+           , OWNR_CO_CD
+           , CURR_CD
+           , ONH_DT
+           , USING_DAYS
+           , LOC_CD
+           , YD_CD
+           , VNDR_SEQ
+           , VNDR_NM
+           , VNDR_CNT
+           , LOC_CNT
+           , MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC( MNR_INP_DT, CURR_CD, 'USD', COST_AMT ) AS CHG_COST_AMT
+           , MNR_COMMON_PKG.MNR_CAL_DV_FNC( 'U', EQ_NO, P_ONH_DT ) AS DV_VALUE
+    FROM     (
+               SELECT   /*+ USE_NL(B A D E) */
+                        B.EQ_NO 
+                      , MAX(B.EQ_TPSZ_CD) EQ_TPSZ_CD
+                      , MAX(D.LSTM_CD) LSTM_CD
+                      , (
+                          SELECT   DECODE(INTG_CD_VAL_CTNT,'H','SM Line',INTG_CD_VAL_DP_DESC)
+                          FROM     COM_INTG_CD_DTL CD
+                          WHERE    1 = 1
+                          AND      INTG_CD_ID ='CD01047'
+                          AND      CD.INTG_CD_VAL_CTNT = D.OWNR_CO_CD
+                        ) AS OWNR_CO_CD
+                      , MAX(A.CURR_CD) AS CURR_CD
+                      , TO_CHAR(MAX(A.MNR_INP_DT), 'YYYYMM') AS MNR_INP_DT
+                      , SUM(B.COST_AMT) AS COST_AMT
+                      , TO_CHAR(MAX(D.ONH_DT), 'YYYY-MM-DD') AS ONH_DT
+                      , CASE WHEN MAX(E.CNTR_STS_CD) IN ('LSO', 'SBO', 'DIO', 'MUO', 'LST', 'SRO', 'SLD', 'SCR', 'DON', 'TLL') THEN TRUNC(MAX(E.CNTR_STS_EVNT_DT)) - TRUNC(MAX(D.ONH_DT))
+                             ELSE TRUNC(SYSDATE) - TRUNC(MAX(D.ONH_DT)) + 1
+                        END AS USING_DAYS
+                      , TO_CHAR(MAX(D.ONH_DT), 'YYYYMMDD') AS P_ONH_DT
+                      , C.LOC_CD
+                      , B.YD_CD
+                      , A.VNDR_SEQ
+                      , (SELECT VNDR_LGL_ENG_NM FROM MDM_VENDOR V WHERE V.VNDR_SEQ = A.VNDR_SEQ) AS VNDR_NM
+                      , COUNT(1) OVER(PARTITION BY B.EQ_NO, C.LOC_CD, B.YD_CD, A.VNDR_SEQ) AS VNDR_CNT
+                      , COUNT(1) OVER(PARTITION BY B.EQ_NO, C.LOC_CD) AS LOC_CNT
+               FROM     MNR_ORD_DTL B
+                      , MNR_ORD_HDR A
+                      , MST_CONTAINER D
+                      , MST_CNTR_STS_HIS E
+                      , MDM_YARD C
+               WHERE    1 = 1
+               AND      A.MNR_ORD_OFC_CTY_CD = B.MNR_ORD_OFC_CTY_CD
+               AND      A.MNR_ORD_SEQ = B.MNR_ORD_SEQ 
+               AND      B.YD_CD = C.YD_CD
+               AND      B.EQ_NO = D.CNTR_NO
+               AND      D.CNTR_NO = E.CNTR_NO
+               AND      D.LST_STS_SEQ = E.CNTR_STS_SEQ
+               AND      A.MNR_GRP_TP_CD = 'RPR'
+               AND      A.EQ_KND_CD = 'U'
+               AND      B.EQ_NO IS NOT NULL
+               AND      A.MNR_WO_TP_CD IN ('EST', 'SPL')
+               AND      A.MNR_INP_DT BETWEEN TO_DATE(@[s_start_dt] || '000000', 'YYYY-MM-DDHH24MISS') AND TO_DATE(@[s_end_dt] || '235959', 'YYYY-MM-DDHH24MISS')
+               AND      B.COST_CD = 'MRDRCL'
+#if(${s_vndr_seq} != '')
+               AND      A.VNDR_SEQ = @[s_vndr_seq]
+#end
+#if(${s_cnt_cd} != '')
+               AND      C.LOC_CD LIKE @[s_cnt_cd] || '%'
+#end
+#if(${s_loc_cd} != '')
+               AND      C.LOC_CD = @[s_loc_cd]
+#end
+#if(${s_yard_cd} != '')
+               AND      C.YD_CD = @[s_loc_cd] || @[s_yd_cd]
+#end
+#if(${s_eq_tpsz_cd} != '')
+               AND      B.EQ_TPSZ_CD IN
+                        (
+    #foreach ($tpszCd IN ${eqTpSzCds})
+        #if($velocityCount < $eqTpSzCds.size())
+                          '$tpszCd',
+        #else
+                          '$tpszCd'
+        #end
+    #end              
+                        )
+#end
+#if(${s_cost_dtl_cd} != '')
+               AND      B.COST_DTL_CD IN
+                        (
+    #foreach ($costDtlCd IN ${costDtlCds})
+        #if($velocityCount < $costDtlCds.size())
+                           '$costDtlCd',
+        #else
+                           '$costDtlCd'
+        #end
+    #end              
+                        )
+#end
+#if(${s_rpr_amt} != '')
+               AND      MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC(TO_CHAR(A.MNR_INP_DT, 'YYYYMM'), A.CURR_CD, 'USD', B.COST_AMT) > TO_NUMBER(@[s_rpr_amt])
+#end
+               GROUP BY B.EQ_NO
+                      , C.LOC_CD
+                      , B.YD_CD
+                      , A.VNDR_SEQ
+                      , D.OWNR_CO_CD
+             )
+)
+SELECT   DENSE_RANK() OVER(ORDER BY EQ_NO) AS SEQ
+       , EQ_NO
+       , EQ_TPSZ_CD
+       , LSTM_CD
+       , OWNR_CO_CD
+       , CURR_CD
+       , ONH_DT
+       , USING_DAYS
+       , DV_VALUE
+       , LOC_CNT AS TTL_NO_OF_CASES
+       , LOC_CD
+       , SUM(CHG_COST_AMT) OVER(PARTITION BY EQ_NO) AS TTL_COST_AMT
+       , YD_CD
+       , VNDR_SEQ
+       , VNDR_NM
+       , VNDR_CNT AS NO_OF_CASES
+       , CHG_COST_AMT AS COST_AMT
+FROM     ROW_DATA
+WHERE    1 = 1
+AND      LOC_CNT > NVL(TO_NUMBER(@[s_rpr_cnt]), 2)
+ORDER BY EQ_NO
+       , YD_CD
+       , VNDR_SEQ			]]></sql>
+			<params>
+				<param name="s_start_dt" type="12" value="" out="N"/>
+				<param name="s_end_dt" type="12" value="" out="N"/>
+				<param name="s_vndr_seq" type="12" value="" out="N"/>
+				<param name="s_cnt_cd" type="12" value="" out="N"/>
+				<param name="s_loc_cd" type="12" value="" out="N"/>
+				<param name="s_yd_cd" type="12" value="" out="N"/>
+				<param name="s_rpr_amt" type="12" value="" out="N"/>
+				<param name="s_rpr_cnt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

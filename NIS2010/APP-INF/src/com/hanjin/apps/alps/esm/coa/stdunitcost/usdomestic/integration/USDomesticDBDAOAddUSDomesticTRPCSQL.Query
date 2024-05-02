@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="USDomesticDBDAOAddUSDomesticTRPCSQL">
+			<desc><![CDATA[3.1 Domestic TRP 데이터 생성
+2015.08.31 손진환 [CHM-201536992] Split14-[그룹사 표준 코드 시행] HJS 프로그램 대응 및 데이타 마이그레이션 작업 요청]]></desc>
+			<sql><![CDATA[
+MERGE INTO COA_USA_DMST_UT_COST A1 USING
+(
+ SELECT A.COST_YRMON
+      , A.EQ_TPSZ_CD AS CNTR_TPSZ_CD
+      , A.ECC_CD
+      , A.LOC_CD                	AS ORG_RAIL_LOC_CD
+      , 'C'                   		AS COST_LOC_GRP_CD
+      , A.QTY                   	AS TRP_QTY
+      , A.INV_TOT_AMT_USD       	AS TRP_AMT
+      , A.INV_TOT_AMT_USD / A.QTY	AS TRP_UC_AMT
+   FROM (
+
+        SELECT COST_YRMON
+             , EQ_TPSZ_CD
+             , ECC_CD
+             , LOC_CD
+             , COUNT(EQ_NO) QTY
+             , SUM(INV_TOT_AMT_USD) INV_TOT_AMT_USD
+          FROM (
+                 SELECT REPLACE(@[f_cost_yrmon], '-', '' ) AS COST_YRMON
+                      , DECODE(SO.EQ_TPSZ_CD, 'D2', 'D2', 'D4', 'D4', 'D5', 'D5', 'D7', 'D7', 'OT') EQ_TPSZ_CD
+                      , COA_LOC_FNC(SO.FM_NOD_CD, 'ECC') ECC_CD
+                      , SUBSTR(SO.FM_NOD_CD, 1, 5) LOC_CD
+                      , SO.EQ_NO
+                      , ROUND ((NVL (SO.INV_BZC_AMT, 0) + NVL (SO.INV_ETC_ADD_AMT, 0)) / CASE WHEN SO.INV_CURR_CD = 'USD' THEN 1 WHEN SO.CURR_CD = 'USD' THEN 1 ELSE
+                                (
+                                 SELECT USD_LOCL_XCH_RT
+                                   FROM GL_MON_XCH_RT XCH
+                                  WHERE XCH.ACCT_XCH_RT_LVL = 1 
+                                    AND XCH.CURR_CD = NVL(SO.INV_CURR_CD, SO.CURR_CD) 
+                                    AND XCH.ACCT_XCH_RT_YRMON = NVL(TO_CHAR(WRK.LOCL_CRE_DT, 'YYYYMM'), TO_CHAR(WO.LOCL_CRE_DT, 'YYYYMM'))
+                                ) END, 2) INV_TOT_AMT_USD
+                   FROM TRS_TRSP_SVC_ORD SO
+                      , TRS_TRSP_WRK_ORD WO
+                      , TRS_TRSP_INV_WRK WRK
+                      , TRS_TRSP_HJL_SVC_ORD HSO
+                  WHERE SO.TRSP_WO_OFC_CTY_CD = WO.TRSP_WO_OFC_CTY_CD(+)
+                    AND SO.TRSP_WO_SEQ        = WO.TRSP_WO_SEQ(+)
+                    AND SO.INV_NO             = WRK.INV_NO(+)
+                    AND SO.INV_VNDR_SEQ       = WRK.INV_VNDR_SEQ(+)
+                    AND SO.TRSP_SO_OFC_CTY_CD = HSO.TRSP_SO_OFC_CTY_CD(+)
+                    AND SO.TRSP_SO_SEQ        = HSO.TRSP_SO_SEQ(+)
+                    AND SO.LOCL_CRE_DT BETWEEN TO_DATE (REPLACE(@[f_cre_start_dt], '-', '' )||'01', 'rrrrmmdd') AND LAST_DAY(TO_DATE(REPLACE(@[f_cre_end_dt], '-', ''), 'YYYYMM')) + 0.99999
+                    AND SO.CRE_OFC_CD IN
+                        (
+                                 SELECT OFC_CD
+                                   FROM MDM_ORGANIZATION
+                                  WHERE DELT_FLG                = 'N'
+                                CONNECT BY NOCYCLE PRIOR OFC_CD = PRNT_OFC_CD
+                                  START WITH OFC_CD             = 'NYCRA'
+                        )
+                    AND SO.DELT_FLG             = 'N'
+                    AND WO.WO_ISS_STS_CD       IN ( 'I', 'R', 'C')
+                    AND SO.TRSP_COST_DTL_MOD_CD = 'ER'
+                    AND SO.TRSP_CRR_MOD_CD      = 'RD'
+                    AND SO.TRSP_SO_TP_CD        = 'O'
+                )
+          WHERE INV_TOT_AMT_USD > 100
+-- TRS에서 TRP 처리된 invoice 금액이 100불미만인 container들에 대해서는 제외
+       GROUP BY EQ_TPSZ_CD
+              , ECC_CD
+              , LOC_CD 
+        ) A
+      , (
+          SELECT DISTINCT ECC_CD
+                FROM COA_LOCATION_V
+                WHERE RCC_CD = 'USNYC'
+                AND LCC_CD IN ('USSFO', 'USPDX', 'USNYC', 'USSEA', 'CAVAN'
+                              ,'USHOU', 'CATOR', 'USLGB', 'USATL', 'USCHI')
+      ) E
+  WHERE A.ECC_CD = E.ECC_CD
+) B1 
+ON ( A1.COST_YRMON = B1.COST_YRMON AND A1.ORG_RAIL_LOC_CD = B1.ORG_RAIL_LOC_CD AND A1.CNTR_TPSZ_CD = B1.CNTR_TPSZ_CD AND A1.COST_LOC_GRP_CD = B1.COST_LOC_GRP_CD )
+WHEN MATCHED THEN
+         UPDATE
+            SET A1.TRP_QTY    = B1.TRP_QTY
+              , A1.TRP_AMT    = B1.TRP_AMT
+              , A1.TRP_UC_AMT = B1.TRP_UC_AMT
+              , A1.UPD_USR_ID = @[upd_usr_id]
+              , A1.UPD_DT     = SYSDATE
+
+WHEN NOT MATCHED THEN
+    INSERT (
+          A1.COST_YRMON
+        , A1.ORG_RAIL_LOC_CD
+        , A1.COST_LOC_GRP_CD
+        , A1.CNTR_TPSZ_CD
+        , A1.TRP_QTY
+        , A1.TRP_AMT
+        , A1.TRP_UC_AMT
+        , A1.CRE_USR_ID
+        , A1.CRE_DT
+        , A1.UPD_USR_ID
+        , A1.UPD_DT
+    )
+    VALUES (
+          B1.COST_YRMON
+        , B1.ORG_RAIL_LOC_CD
+        , B1.COST_LOC_GRP_CD
+        , B1.CNTR_TPSZ_CD
+        , B1.TRP_QTY
+        , B1.TRP_AMT
+        , B1.TRP_UC_AMT
+        , @[cre_usr_id]
+        , SYSDATE
+        , @[upd_usr_id]
+        , SYSDATE
+    )			]]></sql>
+			<params>
+				<param name="f_cost_yrmon" type="12" value="" out="N"/>
+				<param name="f_cre_start_dt" type="12" value="" out="N"/>
+				<param name="f_cre_end_dt" type="12" value="" out="N"/>
+				<param name="upd_usr_id" type="12" value="" out="N"/>
+				<param name="cre_usr_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

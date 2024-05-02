@@ -1,0 +1,525 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PerformanceReportDBDAOPortCLSReportVORSQL">
+			<desc><![CDATA[PCT (Port Closing Time)내 Rating 현황 Report 산출 메뉴]]></desc>
+			<sql><![CDATA[
+#if (${report_type} != 'VO')
+WITH TEMP_T AS ( 
+  
+SELECT ROWNUM  AS RNUM
+   
+,       BK.BKG_NO              							    BKG_NO              --예약 번호
+,       BK.BL_NO                         							 BL_NO               --B/L 번호
+,       BK.SHPR_CD                                                   --Shipper
+,       BK.SHPR_NM                                           SHPR_NM             --Shipper
+,       BK.POR_CD
+,       BK.POL_CD                                                    POL_CD              --Port of Loading (선적항)
+,       BK.POD_CD
+,       BK.DEL_CD
+,       BK.BRH_CFM_IND  							                 BRH_CFM_IND     --Rating STS
+,		CASE WHEN BK.BRH_CFM_IND = 'F' THEN 'Charged' ELSE 'Non-Charged' END BRH_CFM_IND_NM
+,       TO_CHAR(BK.PORT_CLZ_DT,'YYYY-MM-DD')                        PCT                 --Port Closing Time
+,       TO_CHAR(BK.ACT_DEP_DT,'YYYY-MM-DD')                         ATD                 --출항일 (Actual Departure Date)
+,       TO_CHAR(BK.VPS_ETD_DT,'YYYY-MM-DD')                         ETD                 --출항예정일 (Estimated Departure date)
+,       TO_CHAR(BK.VPS_ETB_DT,'YYYY-MM-DD')                         ETB                 --선박이 Port에 접안할 예상 날짜( ESTIMATED BERTHING DATE )
+,       TO_CHAR(BK.BKG_CRE_DT,'YYYY-MM-DD')                         BKG_DATE
+,       VVD_CD              --Vessel / Voyage / Direction
+,		BK.VPS_SLAN_CD												 BKG_LANE
+,		BK.REV_STATUS												LANE_IND
+,       BK.BKG_STS_CD                                                BKG_STS_CD          --예약 현황
+,       BK.SI_FLG                             						 SI_FLG              --S/R 접수 여부
+,		BK.OB_SLS_OFC_CD											 OB_SLS_OFC_CD
+,       BK.OB_SREP_CD                                                OB_SREP_CD          --Sales Rep Code 
+,		BK.CTRT_OFC_CD												 CTRT_OFC_CD
+,		BK.CTRT_SREP_CD												 CTRT_SREP_CD
+,		DECODE(BK.INDIV_PSON_FLG,'Y',NVL(BK.CNEE_CD,'Individual'),BK.CNEE_CD) CNEE_CD
+,       DECODE(BK.INDIV_PSON_FLG,'Y',NVL(BK.CNEE_NM,BK.INDIV_CUST_NM),BK.CNEE_NM)  CNEE_NM
+,       BK.BKG_OFC_CD                                                BKG_OFC_CD          --예약 점소
+,		BK.GSO                                                      GSO
+,       BK.DOC_USR_ID                                                BKG_STF             --예약 담당자 (아이디)
+,       BK.CTRT_NO
+
+/* 2015.06.01  [CHM-201536166]downexcel에 Contract party code & name 추가 */
+, BK.CTRT_CUST_CNT_CD
+, BK.CTRT_CUST_SEQ  
+
+,       CASE WHEN INSTR(BK.CTRT_NO,'DUM') > 0 THEN 'Y' ELSE 'N' END DUMMY_FLAG
+,       BKG_DOC_PROC_TP_CD AS CNTR_CFM_FLG
+
+,       BK.SC_NO
+,       BK.RFA_NO
+,		BK.TAA_NO
+,		BK.CMDT_CD
+,		BK.CMDT_NM
+,		BK.RATE_CHECK
+,	    '' RHQ_CD
+,		'' ROWS_PER_PAGE
+,		'' CURR_PAGE
+,       NON_RT_STS_CD 
+,       NON_RT_STS_CD  AS NO_RT_STS     
+,       BK.RTRO_KND_CD /* 2015.01.20 추가  CHM-201433206 Retroactive OFT 적용 및 변경시 모니터링 시스템 개발 */
+
+/* 2015.03.30 Port Closing Status Report에 Rates by ID, Cntr confirm by ID 추가 */
+,       ( SELECT UPD_USR_ID 
+			FROM BKG_CHG_RT BCR
+		   WHERE BKG_NO = BK.BKG_NO
+			 AND AUTO_RAT_CD <> 'I'
+			 AND RT_SEQ = ( SELECT MAX(RT_SEQ) FROM BKG_CHG_RT BCR_T WHERE BCR_T.BKG_NO = BCR.BKG_NO AND BCR_T.AUTO_RAT_CD <> 'I')
+		 ) AS RT_BY_ID
+
+,       ( SELECT EVNT_USR_ID 
+			FROM BKG_DOC_PROC_SKD TT1
+		   WHERE BKG_NO = BK.BKG_NO
+		     AND BKG_DOC_PROC_TP_CD = 'CNTCFM'
+			 AND DOC_PERF_DELT_FLG = 'N'  
+             AND ROWNUM =1 /* 최근 것이 아니면 모두 N 이나 에러 방지를 위해서 체크 함 */
+		) AS CNTR_CFM_BY_ID
+FROM   (
+        SELECT  
+               #if (${dt_type} == 'ETD') 
+					/*+ LEADING(VPS VVD BK LVL) */  /* TG TUNING 1 2015.11.10 */
+				#end
+                BK.*
+        ,VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD VVD_CD
+        ,      (SELECT ACT_DEP_DT FROM VSK_ACT_PORT_SKD VAP
+					WHERE 1=1
+					AND VPS.VSL_CD = VAP.VSL_CD
+					AND VPS.SKD_VOY_NO = VAP.SKD_VOY_NO
+					AND VPS.SKD_DIR_CD = VAP.SKD_DIR_CD
+					AND VPS.VPS_PORT_CD = VAP.VPS_PORT_CD
+					AND VPS.CLPT_IND_SEQ = VAP.CLPT_IND_SEQ
+					AND ROWNUM = 1
+				) ACT_DEP_DT
+        ,       VPS.VPS_ETD_DT
+        ,       VPS.VPS_ETB_DT
+        ,       VPS.SLAN_CD AS  VPS_SLAN_CD
+        ,       BKG_RATE_RESULT_FNC(BK.BKG_NO)  							 BRH_CFM_IND
+        ,       CASE WHEN BK.SC_NO IS NULL AND BK.RFA_NO IS NULL  THEN BK.TAA_NO
+                WHEN BK.SC_NO IS NULL THEN BK.RFA_NO
+                ELSE BK.SC_NO
+                END CTRT_NO
+                ,		NVL((SELECT DECODE(K.BKG_DOC_PROC_TP_CD,'CNTCFM','Y','N')
+                FROM BKG_DOC_PROC_SKD K
+                WHERE 1=1
+                AND   K.DOC_PERF_DELT_FLG ='N'
+                AND   K.BKG_DOC_PROC_TP_CD IN ('CNTCFM','CNTRLS')
+                and   k.bkg_no = bk.bkg_no
+                AND     K.DOC_PROC_SEQ = (SELECT MAX(DOC_PROC_SEQ)
+                FROM BKG_DOC_PROC_SKD Y
+                WHERE K.BKG_NO = Y.BKG_NO
+                AND Y.BKG_DOC_PROC_TP_CD IN ('CNTCFM','CNTRLS')
+                AND Y.DOC_PERF_DELT_FLG ='N'
+                )
+                ),'N') BKG_DOC_PROC_TP_CD
+        
+        ,       TRIM(SC.CUST_CNT_CD)||TRIM(TO_CHAR(SC.CUST_SEQ, '000000'))   SHPR_CD             --Shipper
+        ,       SC.CUST_LGL_ENG_NM                                           SHPR_NM             --Shipper
+        
+        ,       ( SELECT TRIM(MC.CUST_CNT_CD)||TRIM(TO_CHAR(MC.CUST_SEQ, '000000'))
+                    FROM MDM_CUSTOMER MC
+                   WHERE 1=1
+                     AND DECODE(BK.CUST_TO_ORD_FLG,'Y',N.CUST_CNT_CD,C.CUST_CNT_CD) =   MC.CUST_CNT_CD
+                     AND DECODE(BK.CUST_TO_ORD_FLG,'Y',N.CUST_SEQ,C.CUST_SEQ) =   MC.CUST_SEQ 
+                 ) CNEE_CD
+        ,       ( SELECT MC.CUST_LGL_ENG_NM
+                    FROM MDM_CUSTOMER MC
+                   WHERE 1=1
+                     AND DECODE(BK.CUST_TO_ORD_FLG,'Y',N.CUST_CNT_CD,C.CUST_CNT_CD) =   MC.CUST_CNT_CD
+                     AND DECODE(BK.CUST_TO_ORD_FLG,'Y',N.CUST_SEQ,C.CUST_SEQ) =   MC.CUST_SEQ 
+                 ) CNEE_NM
+        ,       C.CUST_NM INDIV_CUST_NM
+        ,       NVL(( SELECT 'Y'
+                FROM MDM_DTL_REV_LANE
+                WHERE DELT_FLG = 'N'
+                AND BK.SLAN_CD = SUBSTR(RLANE_CD, 1, 3)
+                AND ROWNUM = 1 ),'N') REV_STATUS
+        ,       LVL.GSO
+        ,       M.CMDT_NM
+        ,       CASE WHEN BK.CRE_DT >= TO_DATE('20141125','YYYYMMDD') THEN BR.OFT_MSS_FLG 
+                     WHEN SUBSTR(BK.SC_NO,1,3) = 'DUM' OR SUBSTR(BK.RFA_NO,1,3) = 'DUM' OR SUBSTR(BK.TAA_NO,1,3) = 'DUM' THEN 'Y'
+                     WHEN BR.OFT_MSS_FLG = 'N' THEN 'N'
+					 WHEN BR.OFT_MSS_FLG = 'Y' THEN NVL((SELECT 'N' 
+														 FROM BKG_CHG_RT RT 
+														 WHERE RT.BKG_NO = BK.BKG_NO 
+														 AND ROWNUM = 1), 'Y') 
+                END AS RATE_CHECK
+ 
+        FROM    BKG_BOOKING BK
+        ,       BKG_VVD         VVD
+        ,       VSK_VSL_PORT_SKD VPS
+        ,       BKG_CUSTOMER    S
+        ,       BKG_RATE        BR
+        ,       MDM_CUSTOMER    SC
+        ,       BKG_CUSTOMER    C
+        ,       BKG_CUSTOMER    N
+        ,       MDM_LOCATION    L
+        ,       MDM_COMMODITY   M
+        ,       ( SELECT  /*+ NO_MERGE */ LVL.* /* TG TUNING 2 2015.11.10 */
+					FROM BKG_OFC_LVL_V  LVL 
+				   WHERE 1=1
+#if (${rhq_cd} != '')  
+					 AND LVL.REGION = @[rhq_cd]
+#end
+#if (${gso} != '')  
+ 					 AND LVL.GSO      =   @[gso]
+#end
+				)    LVL
+        WHERE   1=1
+ 
+#if (${bkg_ofc_cd} != '')  
+ 		AND    BK.BKG_OFC_CD      =   @[bkg_ofc_cd]
+#end
+
+#if (${ob_sls_ofc_cd} != '')  
+		 /* ob_ofc_cd, l_ofc_cd_sub */
+			#if(${l_ofc_cd_sub} != '')
+				 AND	BK.OB_SLS_OFC_CD   IN ( SELECT OFC_N8TH_LVL_CD
+															 FROM   DMT_OFC_LVL_V /* BKG BST(0103)REPORT와 체크 조건을 동일하게 하기 위해 DMT 뷰를 사용함.*/
+															 WHERE @[ob_sls_ofc_cd] IN (OFC_N1ST_LVL_CD, OFC_N2ND_LVL_CD, OFC_N3RD_LVL_CD, OFC_N4TH_LVL_CD,
+																						OFC_N5TH_LVL_CD, OFC_N6TH_LVL_CD, OFC_N7TH_LVL_CD, OFC_N8TH_LVL_CD)
+														 )
+			#else
+		 		AND    BK.OB_SLS_OFC_CD  =   @[ob_sls_ofc_cd]  
+			#end
+
+#end
+ 
+#if (${ob_srep_cd} != '')  
+ 		AND    BK.OB_SREP_CD      =   @[ob_srep_cd]  
+#end
+
+#if (${ctrt_ofc_cd} != '')  
+
+		 /* ctrt_ofc_cd, c_ofc_cd_sub */
+			#if(${c_ofc_cd_sub} != '')
+				 AND	BK.CTRT_OFC_CD   IN ( SELECT OFC_N8TH_LVL_CD
+															 FROM   DMT_OFC_LVL_V /* BKG BST(0103)REPORT와 체크 조건을 동일하게 하기 위해 DMT 뷰를 사용함.*/
+															 WHERE @[ctrt_ofc_cd] IN (OFC_N1ST_LVL_CD, OFC_N2ND_LVL_CD, OFC_N3RD_LVL_CD, OFC_N4TH_LVL_CD,
+																													OFC_N5TH_LVL_CD, OFC_N6TH_LVL_CD, OFC_N7TH_LVL_CD, OFC_N8TH_LVL_CD)
+														 )
+			#else
+		 		AND    BK.CTRT_OFC_CD      =   @[ctrt_ofc_cd]  
+			#end
+
+
+#end
+
+#if (${ctrt_srep_cd} != '')  
+ 		AND    BK.CTRT_SREP_CD      =   @[ctrt_srep_cd]  
+#end
+  
+#if (${dt_type} == 'ETD') 
+	#if (${atd} != '')     
+	     AND    VPS.VPS_ETD_DT      >=  TO_DATE(@[atd],'yyyy-mm-dd')
+	#end
+	#if (${etd} != '') 
+	     AND    VPS.VPS_ETD_DT      <=  TO_DATE(@[etd],'yyyy-mm-dd') + 0.99999
+	#end   
+#else 
+	#if (${atd} != '')     
+	     AND    BK.PORT_CLZ_DT      >=  TO_DATE(@[atd],'yyyy-mm-dd')
+	#end
+	#if (${etd} != '') 
+	     AND    BK.PORT_CLZ_DT      <=  TO_DATE(@[etd],'yyyy-mm-dd') + 0.99999
+	#end   
+#end	    
+
+#if (${vvd_cd} != '') 
+	     AND	VVD.VSL_CD          =   SUBSTR(@[vvd_cd],1,4)
+	     AND    VVD.SKD_VOY_NO      =   SUBSTR(@[vvd_cd],5,4)
+   	     AND    VVD.SKD_DIR_CD      =   SUBSTR(@[vvd_cd],9,1)
+#end
+
+#if (${bkg_stf} != '') 
+ 		AND    UPPER(BK.DOC_USR_ID)       =   UPPER(@[bkg_stf])
+#end       
+
+#if (${cnee_cd} != '') 
+ 	AND   ( SELECT TRIM(MC.CUST_CNT_CD)||TRIM(TO_CHAR(MC.CUST_SEQ, '000000'))
+                    FROM MDM_CUSTOMER MC
+                   WHERE 1=1
+                     AND DECODE(BK.CUST_TO_ORD_FLG,'Y',N.CUST_CNT_CD,C.CUST_CNT_CD) =   MC.CUST_CNT_CD
+                     AND DECODE(BK.CUST_TO_ORD_FLG,'Y',N.CUST_SEQ,C.CUST_SEQ) =   MC.CUST_SEQ 
+                 ) LIKE   @[cnee_cd] || '%' 
+#end
+
+#if (${bkg_sts_cd} != '') 
+ AND     BK.BKG_STS_CD       =  @[bkg_sts_cd]
+#end
+
+#if (${pol_cd} != '') 
+ AND	VVD.POL_CD         =   @[pol_cd]
+ AND    VPS.VPS_PORT_CD     =  @[pol_cd]
+ AND    BK.POL_CD		   =   @[pol_cd]
+#else
+ AND     BK.POL_CD		        =  VVD.POL_CD
+#end
+
+
+#if (${no_rt_sts} == 'R') 
+ AND BK.NON_RT_STS_CD = 'R'
+#elseif (${no_rt_sts} == 'F') 
+ AND BK.NON_RT_STS_CD = 'F'
+#elseif (${no_rt_sts} == 'P') 
+ AND BK.NON_RT_STS_CD IS NULL
+#end
+
+#if (${spot_gid_rfa_cd} == 'Y') 
+ AND SUBSTR(RFA_NO,6,1) = 'G' 
+#end
+
+/* 2015.01.20 추가  CHM-201433206 Retroactive OFT 적용 및 변경시 모니터링 시스템 개발 */
+#if (${rtro_knd_cd} != '') 
+ AND BK.RTRO_KND_CD IN (${rtro_knd_cd})
+#end
+
+#if (${del_conti} != '')
+ AND L.CONTI_CD = @[del_conti]
+#end
+
+#if (${aloc_sts_cd} != '')
+  AND BK.ALOC_STS_CD = @[aloc_sts_cd]
+#end
+
+
+        AND BK.DEL_CD = L.LOC_CD(+)
+        AND BK.CMDT_CD = M.CMDT_CD(+)
+        AND     BK.BKG_NO           =   VVD.BKG_NO
+        AND     VPS.VSL_CD          =   VVD.VSL_CD
+        AND     VPS.SKD_VOY_NO      =   VVD.SKD_VOY_NO
+        AND     VPS.SKD_DIR_CD      =   VVD.SKD_DIR_CD
+        AND     VPS.CLPT_IND_SEQ    =    VVD.POL_CLPT_IND_SEQ
+        AND	    VPS.VPS_PORT_CD     =   VVD.POL_CD
+        
+        AND     BK.BKG_CGO_TP_CD <> 'P'
+        AND     BK.BKG_STS_CD      <>  'X'
+     
+        AND     BK.BKG_NO           =   S.BKG_NO
+        AND     S.BKG_CUST_TP_CD    =   'S'
+        AND     S.CUST_CNT_CD          =   SC.CUST_CNT_CD(+)
+        AND     S.CUST_SEQ             =   SC.CUST_SEQ(+)
+        AND     BK.BKG_NO              =   C.BKG_NO
+        AND     C.BKG_CUST_TP_CD   =   'C'
+        AND     BK.BKG_NO           =   N.BKG_NO
+        AND     N.BKG_CUST_TP_CD    =   'N'
+
+		/* 2015.05.13 ofc_tp_cd 추가  */
+		#if(${ofc_tp_cd} == 'B')
+			AND     BK.BKG_OFC_CD = LVL.OFC_CD
+		#else
+			AND     BK.CTRT_OFC_CD = LVL.OFC_CD
+		#end
+
+		
+		AND     BK.BKG_NO = BR.BKG_NO
+
+    /* TG TUNING 2 2015.11.10 */
+	#if (${rate_check} != '')
+        AND  CASE WHEN BK.CRE_DT >= TO_DATE('20141125','YYYYMMDD') THEN BR.OFT_MSS_FLG 
+                  WHEN SUBSTR(BK.SC_NO,1,3) = 'DUM' OR SUBSTR(BK.RFA_NO,1,3) = 'DUM' OR SUBSTR(BK.TAA_NO,1,3) = 'DUM' THEN 'Y'
+                  WHEN BR.OFT_MSS_FLG = 'N' THEN 'N'
+				  WHEN BR.OFT_MSS_FLG = 'Y' THEN NVL( ( SELECT 'N' 
+														FROM  BKG_CHG_RT  RT 
+														WHERE RT.BKG_NO  = BK.BKG_NO 
+														AND ROWNUM = 1), 'Y')  end = @[rate_check]
+	#end
+
+		AND		ROWNUM < 70000
+        ORDER BY BK.BKG_NO
+
+) BK      
+
+WHERE 1=1
+#if (${brh_cfm_ind} != '' && ${brh_cfm_ind} == 'F')
+ AND   BK.BRH_CFM_IND =  @[brh_cfm_ind]
+#elseif(${brh_cfm_ind} != '' && ${brh_cfm_ind} == 'N') 
+  AND  BK.BRH_CFM_IND =  @[brh_cfm_ind]	
+#end 
+
+#if (${ctrt_no} != '') 
+ AND	BK.CTRT_NO LIKE @[ctrt_no] || '%'
+#end
+
+#if (${cntr_cfm_flg} != '') 
+ AND	BK.BKG_DOC_PROC_TP_CD = @[cntr_cfm_flg]
+#end
+
+#if (${slan_cd} != 'All')
+AND	BK.VPS_SLAN_CD = @[slan_cd]
+#end
+
+
+) 
+
+#if (${report_type} == '') 
+	
+SELECT T.*,
+      /* 2015.06.01  Contract party code & name 추가*/
+       NVL(T.CTRT_CUST_CNT_CD,'00')||TRIM(TO_CHAR(T.CTRT_CUST_SEQ,'000000')) CTRT_CUST_CD
+      , ( SELECT CTRT.CUST_LGL_ENG_NM
+            FROM MDM_CUSTOMER CTRT
+           WHERE CTRT.CUST_CNT_CD = T.CTRT_CUST_CNT_CD
+             AND CTRT.CUST_SEQ    = T.CTRT_CUST_SEQ 
+         ) AS CTRT_CUST_NM 
+FROM TEMP_T T 
+WHERE RNUM BETWEEN NVL(@[rows_per_page],50) * (NVL(@[curr_page],1) - 1) + 1
+           AND     NVL(@[rows_per_page],50) *  NVL(@[curr_page],1)
+
+#elseif (${report_type} == 'SUM') 
+
+SELECT 
+   TRIM(TO_CHAR(T2.TOTAL_CNT, '999,999,999')) AS NO_RT_TOT_CNT
+,  TRIM(TO_CHAR(T2.TOTAL_CNT-T2.NO_RT_CNT, '999,999,999'))  AS NO_RT_FRM_CNT
+,  TRIM(TO_CHAR(T2.NO_RT_CNT, '999,999,999'))  AS NO_RT_CNT
+,  DECODE(T2.TOTAL_CNT,0,'0',TRIM(TO_CHAR(NVL(T2.NO_RT_CNT / T2.TOTAL_CNT * 100,0),'99990.99'))) || '%'  AS NO_RT_PERCENT
+,  T2.*
+FROM (
+
+	SELECT 
+	  1 AS  RNUM	
+,	  nvl(COUNT(BKG_NO),0) AS TOTAL_CNT
+,     TRIM(TO_CHAR(nvl(COUNT(BKG_NO),0), '999,999,999')) AS BK_TOT_CNT
+,     TRIM(TO_CHAR(nvl(COUNT(BKG_NO),0), '999,999,999')) AS RT_TOT_CNT
+,     TRIM(TO_CHAR(nvl(COUNT(BKG_NO),0), '999,999,999')) AS CNTR_TOT_CNT
+,     TRIM(TO_CHAR(nvl(COUNT(BKG_NO),0), '999,999,999')) AS CN_TOT_CNT
+,     TRIM(TO_CHAR(nvl(COUNT(BKG_NO),0), '999,999,999')) AS CONT_TOT_CNT
+
+
+,     TRIM(TO_CHAR(nvl(SUM(DECODE(BKG_STS_CD,'W',0,1)),0), '999,999,999')) AS BK_CHARGE_CNT
+,     TRIM(TO_CHAR(nvl(SUM(DECODE(BRH_CFM_IND,'F',1,0)),0), '999,999,999'))  AS RT_FIRM_CNT
+,     TRIM(TO_CHAR(nvl(SUM(DECODE(CNTR_CFM_FLG,'Y',1,0)),0), '999,999,999'))  AS CNTR_FIRM_CNT
+
+,     TRIM(TO_CHAR(nvl(SUM(DECODE(NVL(CNEE_CD,' '),' ',0,1)),0), '999,999,999'))  AS CN_CODE_CNT
+,     TRIM(TO_CHAR(nvl(SUM(CASE WHEN NVL(CTRT_NO,' ') <> ' ' AND DUMMY_FLAG != 'Y' THEN 1 ELSE 0 END),0), '999,999,999'))  AS CONT_ACT_CNT
+,     TRIM(TO_CHAR(nvl(SUM(CASE WHEN DUMMY_FLAG = 'Y' THEN 1 ELSE 0 END),0), '999,999,999'))  AS CONT_DUMMY_CNT
+
+,     NVL(SUM(CASE WHEN NVL(NON_RT_STS_CD,'F' ) = 'R' THEN 1 ELSE 0 END),0)  AS NO_RT_CNT
+
+/*cntr_tot_cnt - cntr_firm_cnt;*/
+,     TRIM(TO_CHAR(nvl(COUNT(BKG_NO) - SUM(DECODE(CNTR_CFM_FLG,'Y',1,0)),0), '999,999,999')) AS CNTR_BALANCE_CNT
+/*cn_tot_cnt - cn_code_cnt;*/
+,     TRIM(TO_CHAR(nvl(COUNT(BKG_NO) - SUM(DECODE(NVL(CNEE_CD,' '),' ',0,1)),0), '999,999,999')) AS  CN_BALANCE_CNT
+/*cont_tot_cnt - cont_act_cnt - cont_dummy_cnt;*/
+,     TRIM(TO_CHAR(nvl(COUNT(BKG_NO) - SUM(CASE WHEN NVL(CTRT_NO,' ') <> ' ' AND DUMMY_FLAG != 'Y' THEN 1 ELSE 0 END) - SUM(CASE WHEN DUMMY_FLAG = 'Y' THEN 1 ELSE 0 END),0), '999,999,999')) AS  CONT_BALANCE_CNT
+
+/*bk_tot_cnt -bk_charge_cnt*/
+,     TRIM(TO_CHAR(nvl(COUNT(BKG_NO) - SUM(DECODE(BKG_STS_CD,'W',0,1)),0), '999,999,999')) AS BK_NON_CHARGE_CNT
+/*rt_tot_cnt -rt_charge_cnt*/
+,     TRIM(TO_CHAR(nvl(COUNT(BKG_NO) - SUM(DECODE(BRH_CFM_IND,'F',1,0)),0), '999,999,999')) AS RT_NON_CHARGE_CNT
+/*ComRound(bk_non_charge_cnt/bk_tot_cnt*100)+'%';*/
+,     TRIM(TO_CHAR(nvl((COUNT(BKG_NO) - SUM(DECODE(BKG_STS_CD,'W',0,1))) / COUNT(BKG_NO) * 100,0),'99990.99')) || '%' AS  BK_PERCENT
+/*ComRound(rt_non_charge_cnt/rt_tot_cnt*100)+'%';*/
+,     TRIM(TO_CHAR(nvl((COUNT(BKG_NO) - SUM(DECODE(BRH_CFM_IND,'F',1,0))) / COUNT(BKG_NO) * 100,0),'99990.99')) || '%'  AS  RT_PERCENT
+/*ComRound(cntr_balance_cnt/cntr_tot_cnt*100)+'%';*/
+,     TRIM(TO_CHAR(nvl((COUNT(BKG_NO) - SUM(DECODE(CNTR_CFM_FLG,'Y',1,0))) / COUNT(BKG_NO) * 100,0),'99990.99')) || '%' AS CNTR_PERCENT
+/*ComRound(cn_balance_cnt/cn_tot_cnt*100)+'%';	*/
+,     TRIM(TO_CHAR(nvl((COUNT(BKG_NO) - SUM(DECODE(NVL(CNEE_CD,' '),' ',0,1))) / COUNT(BKG_NO) * 100,0),'99990.99')) || '%'  AS CN_PERCENT
+/*ComRound(cont_balance_cnt/cont_tot_cnt*100)+'%';*/
+,     TRIM(TO_CHAR(nvl((COUNT(BKG_NO) -  SUM(CASE WHEN NVL(CTRT_NO,' ') <> ' ' AND DUMMY_FLAG != 'Y' THEN 1 ELSE 0 END)
+		- SUM(CASE WHEN DUMMY_FLAG = 'Y' THEN 1 ELSE 0 END)) / COUNT(BKG_NO) * 100,0),'99990.99')) || '%'  AS CONT_PERCENT
+FROM TEMP_T T 
+
+/* 2014.10.28 No Rate 추가*/
+) T2
+#end
+
+
+
+
+-----------------------------------------------------------------------------------
+#elseif (${report_type} == 'VO') 
+
+SELECT 	' ' RNUM
+,	' ' BKG_NO
+,	' ' BL_NO
+,	' ' SHPR_CD
+,	' ' SHPR_NM
+,	' ' POL_CD
+,	' ' BRH_CFM_IND
+,	' ' BRH_CFM_IND_NM
+,	' ' PCT
+,	' ' ATD
+,	' ' ETD
+,	' ' BKG_DATE
+,	' ' VVD_CD
+,	' ' BKG_LANE
+,	' ' LANE_IND
+,	' ' BKG_STS_CD
+,	' ' SI_FLG
+,	' ' CNEE_CD
+,	' ' CNEE_NM
+,	' ' BKG_OFC_CD
+,   ' ' MDM_OFC_CD
+,	' ' BKG_STF
+,	' ' CTRT_NO
+,	' ' DUMMY_FLAG
+,	' ' CNTR_CFM_FLG
+,	' ' SC_NO
+,	' ' RFA_NO
+,	' ' TAA_NO
+,	' ' RHQ_CD
+,	' ' ROWS_PER_PAGE
+,	' ' CURR_PAGE
+,	' ' TOTAL_CNT
+,	' ' TOT_CNT 
+,	' ' TOTAL_CNT
+,   ' ' BK_TOT_CNT   
+,   ' ' RT_TOT_CNT  
+,   ' ' CNTR_TOT_CNT   
+,   ' ' CN_TOT_CNT 
+,   ' ' CONT_TOT_CNT 
+ 
+,	' ' BK_CHARGE_CNT
+,	' ' RT_FIRM_CNT
+,	' ' CNTR_FIRM_CNT
+,	' ' CN_CODE_CNT
+,	' ' CONT_ACT_CNT
+,	' ' CONT_DUMMY_CNT
+,	' ' CNTR_BALANCE_CNT
+,	' ' CN_BALANCE_CNT
+,	' ' CONT_BALANCE_CNT
+,	' ' BK_NON_CHARGE_CNT
+,	' ' RT_NON_CHARGE_CNT
+,	' ' BK_PERCENT
+,	' ' RT_PERCENT 
+,	' ' CNTR_PERCENT
+,	' ' CN_PERCENT
+,	' ' CONT_PERCENT
+,	' ' REPORT_TYPE
+,	' ' DT_TYPE
+
+,  ' '  AS NO_RT_TOT_CNT
+,  ' '  AS NO_RT_FRM_CNT
+,  ' '  AS NO_RT_CNT
+,  ' ' AS NO_RT_PERCENT
+FROM 	DUAL
+#end			]]></sql>
+			<params>
+				<param name="rhq_cd" type="12" value="" out="N"/>
+				<param name="gso" type="12" value="" out="N"/>
+				<param name="bkg_ofc_cd" type="12" value="" out="N"/>
+				<param name="ob_sls_ofc_cd" type="12" value="" out="N"/>
+				<param name="ob_srep_cd" type="12" value="" out="N"/>
+				<param name="ctrt_ofc_cd" type="12" value="" out="N"/>
+				<param name="ctrt_srep_cd" type="12" value="" out="N"/>
+				<param name="atd" type="12" value="" out="N"/>
+				<param name="etd" type="12" value="" out="N"/>
+				<param name="vvd_cd" type="12" value="" out="N"/>
+				<param name="bkg_stf" type="12" value="" out="N"/>
+				<param name="cnee_cd" type="12" value="" out="N"/>
+				<param name="bkg_sts_cd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="del_conti" type="12" value="" out="N"/>
+				<param name="aloc_sts_cd" type="12" value="" out="N"/>
+				<param name="rate_check" type="12" value="" out="N"/>
+				<param name="brh_cfm_ind" type="12" value="" out="N"/>
+				<param name="ctrt_no" type="12" value="" out="N"/>
+				<param name="cntr_cfm_flg" type="12" value="" out="N"/>
+				<param name="slan_cd" type="12" value="" out="N"/>
+				<param name="rows_per_page" type="12" value="" out="N"/>
+				<param name="curr_page" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>
