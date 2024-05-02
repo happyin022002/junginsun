@@ -1,0 +1,73 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : SpecialManifestDBDAOSpecialListVORSQL.java
+*@FileTitle :
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.08.03
+*@LastModifier :
+*@LastVersion : 1.0
+* 2009.08.03
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.bkg.terminaldocumentation.specialmanifest.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class SpecialManifestDBDAOSpecialListVORSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+
+	Logger log =Logger.getLogger(this.getClass());
+
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+
+	/**
+	  * <pre>
+	  * SpecialListVO 생성을 위해 사용
+	  * </pre>
+	  */
+	public SpecialManifestDBDAOSpecialListVORSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		query.append("/*").append("\n");
+		query.append("Path : com.clt.apps.opus.esm.bkg.terminaldocumentation.specialmanifest.integration").append("\n");
+		query.append("FileName : SpecialManifestDBDAOSpecialListVORSQL").append("\n");
+		query.append("*/").append("\n");
+	}
+
+	public String getSQL(){
+		return query.toString();
+	}
+
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT" ).append("\n");
+		query.append("''CRE_DT" ).append("\n");
+		query.append(",	''UPD_USR_ID" ).append("\n");
+		query.append(",	''UPD_DT" ).append("\n");
+		query.append(",	''IMDG_UN_NO" ).append("\n");
+		query.append(",	''OLD_IMDG_UN_NO" ).append("\n");
+		query.append(",	''ANR_SPCL_TP_ID" ).append("\n");
+		query.append(",	''SPCL_ID_DESC" ).append("\n");
+		query.append(",	''CRE_USR_ID" ).append("\n");
+		query.append("FROM DUAL" ).append("\n");
+
+	}
+}

@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="RevenueDebitNoteDBDAOBkgRevDrNotesStatusRSQL">
+			<desc><![CDATA[RDN STATUS LIST]]></desc>
+			<sql><![CDATA[
+SELECT  A2.ISS_OFC_CD
+,       A2.RCT_RHQ_CD
+,       A2.RCT_OFC_CD
+,       A2.RESPB_RHQ_CD
+,       A2.RESPB_OFC_CD
+,       A2.BKG_NO
+,       A2.BL_NO
+,       A2.SC_RFA_NO
+,       DECODE(A2.CTRT_TP_CD,'R','RFA','S','S/C','TAA') CTRT_TP_CD
+,       A2.RDN_NO
+,       A2.RVIS_SEQ
+,       A2.RDN_STS_CD
+,       A2.RDN_STS_NM
+,       A2.UMCH_TP_CD
+,       A2.UMCH_SUB_TP_CD
+,       A2.RDN_ISS_RSN_CD
+,       A2.USD_AMT
+,       A2.UMCH_RMK
+,       A2.BKG_CORR_NO
+,       P1.RDN_RMK  OFFICE_RDN_RMK
+,       P2.RDN_RMK  RECEIVER_RDN_RMK
+,       A2.REV_AUD_TOOL_CD
+,       A2.REV_AUD_TOOL_NM
+,       TO_CHAR(A2.RDN_ISS_DT, 'YYYY-MM-DD')  RDN_ISS_DT
+,       ( SELECT TO_CHAR(MAX(A.CRE_DT),'YYYY-MM-DD') FROM BKG_REV_DR_NOTE_PROG A WHERE A.RDN_NO = A2.RDN_NO AND A.RVIS_SEQ = A2.RVIS_SEQ )  UPD_DT
+,       A2.CRE_USR_ID ISS_USR_ID
+,       CASE
+        WHEN  P1.RDN_STS_CD IN ( 'ST', 'CL' ) THEN P1.CRE_USR_ID
+        ELSE  NULL
+        END STL_USR_ID
+,       P2.CRE_USR_ID AS RECEIVER_USR_ID                                     --RDN_ISS_DT가 AC,RR,CR 인 경우의 유저 아이디
+,       ''  RDN_ISS_DT_FROM
+,       ''  RDN_ISS_DT_TO
+
+FROM    (
+        SELECT  DN.ISS_OFC_CD                                                         --이슈오피스 코드
+        ,       DN.RCT_RHQ_CD                                                         --오피스 대분류
+        ,       DN.RCT_OFC_CD                                                         --오피스 소분류
+        ,       DN.BKG_NO
+        ,       BK.BL_NO                                                              --BL NO
+        ,       DECODE(BR.BKG_CTRT_TP_CD, 'S', BK.SC_NO, 'R', BK.RFA_NO, 'T', BK.TAA_NO)  SC_RFA_NO
+        ,       BR.BKG_CTRT_TP_CD CTRT_TP_CD                                          -- 계약 TYPE
+        ,       DN.RDN_NO
+        ,       DN.RVIS_SEQ
+        ,       DN.RDN_STS_CD                                                         --상태코드
+        ,       ( SELECT INTG_CD_VAL_DESC FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD01568' AND INTG_CD_VAL_CTNT = DN.RDN_STS_CD )            RDN_STS_NM
+        ,       ( SELECT UMCH_TP_DESC FROM BKG_REV_UMCH_TP WHERE UMCH_TP_CD = DN.UMCH_TP_CD )                                                 UMCH_TP_CD
+        ,       ( SELECT UMCH_SUB_TP_DESC FROM BKG_REV_UMCH_SUB_TP WHERE UMCH_TP_CD = DN.UMCH_TP_CD AND UMCH_SUB_TP_CD = DN.UMCH_SUB_TP_CD )  UMCH_SUB_TP_CD
+        ,       ( SELECT INTG_CD_VAL_DESC FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD01567' AND INTG_CD_VAL_CTNT = DN.RDN_ISS_RSN_CD )        RDN_ISS_RSN_CD
+        ,       DN.UMCH_RMK                                                           --Details
+        ,       DN.BKG_CORR_NO                                                        --CA NO
+        ,       DN.RDN_ISS_DT                                                         --ISSUE DATE
+        ,       DN.RESPB_RHQ_CD
+        ,       DN.RESPB_OFC_CD
+        ,       DN.REV_AUD_TOOL_CD
+        ,       DN.CRE_USR_ID                                                         --처음 생성한 유저 아이디
+        ,       ( SELECT INTG_CD_VAL_DESC FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD02371' AND INTG_CD_VAL_CTNT = DN.REV_AUD_TOOL_CD )       REV_AUD_TOOL_NM
+        ,       (
+                SELECT  SUM(ROUND(DA.DR_AMT / XR.USD_LOCL_XCH_RT, 2))
+                FROM    BKG_REV_DR_AMT  DA  ,
+                        GL_MON_XCH_RT   XR
+                WHERE   XR.ACCT_XCH_RT_YRMON  = TO_CHAR(DN.RDN_ISS_DT, 'YYYYMM')
+                AND     XR.ACCT_XCH_RT_LVL    = '1'
+                AND     XR.CURR_CD            = DA.CURR_CD
+                AND     DA.RDN_NO             = DN.RDN_NO
+                AND     DA.RVIS_SEQ           = DN.RVIS_SEQ
+                )   USD_AMT
+
+        FROM    BKG_REV_DR_NOTE DN  ,
+                BKG_BOOKING     BK  ,
+                BKG_RATE        BR
+        WHERE   BK.BKG_NO = DN.BKG_NO
+        AND     BR.BKG_NO = BK.BKG_NO
+        AND     ( DN.RDN_NO, DN.RVIS_SEQ )  IN  (
+                                                SELECT  RDN_NO        ,
+                                                        MAX(RVIS_SEQ)
+                                                FROM    BKG_REV_DR_NOTE
+                                                GROUP BY
+                                                        RDN_NO
+                                                )
+
+        #if (${rct_rhq_cd} != '')
+        AND     DN.RCT_RHQ_CD   = @[rct_rhq_cd]
+        #end
+        #if (${rct_ofc_cd} != '')
+        AND     DN.RCT_OFC_CD   = @[rct_ofc_cd]
+        #end
+        #if (${respb_rhq_cd} != '')
+        AND     DN.RESPB_RHQ_CD = @[respb_rhq_cd]
+        #end
+        #if (${respb_ofc_cd} != '')
+        AND     DN.RESPB_OFC_CD = @[respb_ofc_cd]
+        #end
+       
+ 		#if ('All'!=${umch_tp_cd} && ''!=${umch_tp_cd})
+           AND DN.UMCH_TP_CD IN (${umch_tp_cd})
+		#end
+        
+        #if (${rdn_iss_dt_from} != '')
+        AND     DN.RDN_ISS_DT   >= TO_DATE(@[rdn_iss_dt_from], 'YYYY/MM/DD')
+        #end
+        #if (${rdn_iss_dt_to} != '')
+        AND     DN.RDN_ISS_DT   <= TO_DATE(@[rdn_iss_dt_to], 'YYYY/MM/DD') + 0.99999
+        #end
+
+        #if (${rdn_no} != '')
+        AND   DN.RDN_NO         LIKE @[rdn_no] || '%'
+        #end
+        #if (${bl_no} != '')
+        AND   BK.BL_NO          LIKE @[bl_no] || '%'
+        #end
+
+        #if (${bkg_ctrt_tp_cd} != '')
+        AND   BR.BKG_CTRT_TP_CD     = @[bkg_ctrt_tp_cd]
+        #end
+
+        #if (${rev_aud_tool_cd} != '')
+        AND   DN.REV_AUD_TOOL_CD  = @[rev_aud_tool_cd]
+        #end
+
+        #if (${rdn_sts_cd} != '')
+        AND   DN.RDN_STS_CD     IN ( ${rdn_sts_cd} )
+        #end
+        ) A2  ,
+        (
+        SELECT  DP.RDN_NO
+        ,       DP.RVIS_SEQ
+        ,       DP.PROG_SEQ
+        ,       DP.RDN_STS_CD
+        ,       DP.RDN_RMK
+        ,       DP.CRE_USR_ID
+        ,       ROW_NUMBER() OVER ( PARTITION BY DP.RDN_NO ORDER BY DP.RVIS_SEQ DESC, DP.PROG_SEQ DESC )  ROW_NUMBER
+        FROM    BKG_REV_DR_NOTE_PROG  DP
+        WHERE     DP.RDN_STS_CD IN ( 'IS', 'RV', 'ST', 'CL' )
+        ) P1  ,
+        (
+        SELECT  DP.RDN_NO
+        ,       DP.RVIS_SEQ
+        ,       DP.PROG_SEQ
+        ,       DP.RDN_STS_CD
+        ,       DP.RDN_RMK
+        ,       DP.CRE_USR_ID
+        ,       ROW_NUMBER() OVER ( PARTITION BY DP.RDN_NO ORDER BY DP.RVIS_SEQ DESC, DP.PROG_SEQ DESC )  ROW_NUMBER
+        FROM    BKG_REV_DR_NOTE_PROG  DP
+        WHERE     DP.RDN_STS_CD IN ( 'AC', 'RR', 'CR' )
+        ) P2
+
+WHERE   P1.RDN_NO(+)      = A2.RDN_NO
+AND     P1.ROW_NUMBER(+)  = 1
+AND     P2.RDN_NO(+)      = A2.RDN_NO
+AND     P2.ROW_NUMBER(+)  = 1
+--AND     A2.USD_AMT IS NOT NULL
+
+ORDER BY
+        A2.RDN_NO   DESC			]]></sql>
+			<params>
+				<param name="rct_rhq_cd" type="12" value="" out="N"/>
+				<param name="rct_ofc_cd" type="12" value="" out="N"/>
+				<param name="respb_rhq_cd" type="12" value="" out="N"/>
+				<param name="respb_ofc_cd" type="12" value="" out="N"/>
+				<param name="rdn_iss_dt_from" type="12" value="" out="N"/>
+				<param name="rdn_iss_dt_to" type="12" value="" out="N"/>
+				<param name="rdn_no" type="12" value="" out="N"/>
+				<param name="bl_no" type="12" value="" out="N"/>
+				<param name="bkg_ctrt_tp_cd" type="12" value="" out="N"/>
+				<param name="rev_aud_tool_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

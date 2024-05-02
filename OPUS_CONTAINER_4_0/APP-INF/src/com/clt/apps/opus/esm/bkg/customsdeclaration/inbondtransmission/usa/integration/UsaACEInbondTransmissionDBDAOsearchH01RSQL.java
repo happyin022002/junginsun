@@ -1,0 +1,107 @@
+/*=========================================================
+*Copyright(c) 2014 CyberLogitec
+*@FileName : UsaACEInbondTransmissionDBDAOsearchH01RSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2014.09.01
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2014.09.01 
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.bkg.customsdeclaration.inbondtransmission.usa.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class UsaACEInbondTransmissionDBDAOsearchH01RSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * UsaACEInbondTransmissionDBDAOsearchH01RSQL
+	  * </pre>
+	  */
+	public UsaACEInbondTransmissionDBDAOsearchH01RSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("arr_time",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("loc_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("arr_dt",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("bl_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("flag1",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.clt.apps.opus.esm.bkg.customsdeclaration.inbondtransmission.usa.integration").append("\n"); 
+		query.append("FileName : UsaACEInbondTransmissionDBDAOsearchH01RSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT" ).append("\n"); 
+		query.append("	RPAD('H01'||@[flag1]||" ).append("\n"); 
+		query.append("	RPAD(@[bl_no],14,' ')||RPAD(to_char(to_date(replace(replace(@[arr_dt],'-',''),'/',''),'yyyymmdd'),'rrmmdd'),6,' ')||" ).append("\n"); 
+		query.append("	RPAD(LOC_AMS_PORT_CD,4,' ')||" ).append("\n"); 
+		query.append("	COM_ConstantMgr_PKG.COM_getScacCode_FNC()||DECODE(NVL(replace(@[arr_time],':',''),'0001'),'0000','0001',replace(@[arr_time],':','')),80,' ')||CHR(10)" ).append("\n"); 
+		query.append("FROM MDM_LOCATION" ).append("\n"); 
+		query.append("WHERE LOC_CD = @[loc_cd]" ).append("\n"); 
+
+	}
+}

@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="VesselScheduleMgtDBDAOSearchCargoVolByBayPlanRSQL">
+			<desc><![CDATA[DESC Enter..]]></desc>
+			<sql><![CDATA[
+SELECT	TP_20_QTY, TP_40_QTY
+FROM	(
+		SELECT	/* GROUP START */
+				ROW_NUMBER() OVER (ORDER BY DECODE(PLAN_TYPE, 'F', 0, 1)) AS PLAN_TYPE_SEQ
+				, SUM(DECODE(SUBSTR(SZTP, 2, 1), 2, 1, 0)) AS TP_20_QTY
+				, SUM(DECODE(SUBSTR(SZTP, 2, 1), 2, 0, 1)) AS TP_40_QTY
+		FROM	BAY_PLAN
+		WHERE	1	= 1
+		AND		POD	= @[vps_port_cd]
+		AND		(VSL_CD, VOY_NO, DIR_CD, PORT_CD, CALL_IND, POL) IN 
+				(	/* IN STRART */
+					SELECT	/* T50 START */
+							VSL_CD, SKD_VOY_NO,SKD_DIR_CD, VPS_PORT_CD, CLPT_IND_SEQ, VPS_PORT_CD
+					FROM	(
+							SELECT	/* T40 START */
+									NO, VSL_CD, SKD_VOY_NO,SKD_DIR_CD, VPS_PORT_CD, CLPT_IND_SEQ
+									, MAX(NO) OVER () AS LAST_PAY
+							FROM	(
+									SELECT	/* T30 START */
+											NO, VSL_CD, SKD_VOY_NO,SKD_DIR_CD, VPS_PORT_CD, CLPT_IND_SEQ,
+											NVL((	SELECT	1
+													FROM	BAY_PLAN S
+													WHERE	T30.VSL_CD		= S.VSL_CD
+													AND		T30.SKD_VOY_NO	= S.VOY_NO
+													AND		T30.SKD_DIR_CD	= S.DIR_CD
+													AND		T30.VPS_PORT_CD	= S.PORT_CD
+													AND		T30.CLPT_IND_SEQ= S.CALL_IND
+													AND		ROWNUM			= 1
+												), 0) AS CHK_PAY
+									FROM	(
+											SELECT	/* T20 START */
+													--SKIP 전 PORT와 CONTI CODE가 동일한 것과 최초 CONTI CODE가 바뀌는 PORT까지를 조회한다.
+													T20.*
+													, FIRST_VALUE(NO) OVER (ORDER BY CHK ASC, NO DESC ROWS UNBOUNDED PRECEDING) AS STR_ROW
+													, LAST_VALUE(NO) OVER (ORDER BY ROWNUM ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS END_ROW
+											FROM	(
+													SELECT	/* T10 START */
+															--TARGET DATA 조회 : SKIP PORT VVD 포함, SKIP VVD와 연결된 바로 전 TURNING VVD와 연결된 VIRTUAL VVD를 조회한다.
+															ROW_NUMBER() OVER (ORDER BY CLPT_SEQ) AS NO
+															, VSL_CD,SKD_VOY_NO,SKD_DIR_CD,VPS_PORT_CD, CLPT_IND_SEQ
+															, CONTI_CD				
+															, DECODE(CONTI_CD, LAST_VALUE(CONTI_CD) OVER (ORDER BY ROWNUM ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), 1, 0) AS CHK
+													FROM	(
+																SELECT	VSL_CD, SKD_VOY_NO, SKD_DIR_CD, VPS_PORT_CD, CLPT_IND_SEQ, CONTI_CD, CLPT_SEQ
+																FROM	VSK_VSL_PORT_SKD T1, MDM_LOCATION T2
+																WHERE	T1.VPS_PORT_CD	= T2.LOC_CD
+																AND		VSL_CD      	= @[vsl_cd]
+																AND		SKD_VOY_NO  	= ( SELECT  TURN_SKD_VOY_NO 
+                                                                                            FROM    VSK_VSL_PORT_SKD
+                                                                                            WHERE   VSL_CD = T1.VSL_CD
+                                                                                            AND     SKD_VOY_NO = @[skd_voy_no]
+																                            AND     SKD_DIR_CD = @[skd_dir_cd]
+																                            AND     TURN_PORT_FLG = 'Y'
+																                            AND     ROWNUM = 1
+																                          )
+																AND		SKD_DIR_CD  	= ( SELECT  TURN_SKD_DIR_CD
+                                                                                            FROM    VSK_VSL_PORT_SKD
+                                                                                            WHERE   VSL_CD = T1.VSL_CD
+                                                                                            AND     SKD_VOY_NO = @[skd_voy_no]
+																                            AND     SKD_DIR_CD = @[skd_dir_cd]
+																                            AND     TURN_PORT_FLG = 'Y'
+																                            AND     ROWNUM = 1
+																                          )
+																AND		VPS_PORT_CD	NOT IN ('EGSCA', 'PAPCA')
+																AND		TURN_PORT_IND_CD NOT IN ('D', 'V', 'F')
+																AND		'S'			!= NVL(SKD_CNG_STS_CD, ' ')
+																UNION ALL
+																SELECT	VSL_CD,SKD_VOY_NO,SKD_DIR_CD,VPS_PORT_CD,CLPT_IND_SEQ, CONTI_CD, CLPT_SEQ + 100 AS CLPT_SEQ
+																FROM	VSK_VSL_PORT_SKD T1, MDM_LOCATION T2
+																WHERE	T1.VPS_PORT_CD	= T2.LOC_CD
+																AND		VSL_CD      = @[vsl_cd]
+																AND		SKD_VOY_NO  = @[skd_voy_no]
+																AND		SKD_DIR_CD  = @[skd_dir_cd]
+																AND		VPS_PORT_CD	NOT IN ('EGSCA', 'PAPCA')
+																AND		'S'			!= NVL(SKD_CNG_STS_CD, ' ')
+																AND		CLPT_SEQ	<
+																(
+																	SELECT	CLPT_SEQ
+																	FROM	VSK_VSL_PORT_SKD S
+																	WHERE	T1.VSL_CD		= S.VSL_CD
+																	AND		T1.SKD_VOY_NO	= S.SKD_VOY_NO
+																	AND		T1.SKD_DIR_CD	= S.SKD_DIR_CD
+																	AND		S.VPS_PORT_CD	= @[vps_port_cd]
+																	AND		S.CLPT_IND_SEQ	= @[clpt_ind_seq]
+																)
+															) T10 /* T10 END */
+													) T20	/* T20 END */
+											) T30
+									WHERE	NO BETWEEN STR_ROW AND END_ROW  /* T30 END */
+									) T40
+							WHERE	CHK_PAY	= 1 /* T40 END */
+							) T50
+					WHERE	LAST_PAY	= NO	/* T50 END */
+				)  /* IN END */
+		GROUP BY PLAN_TYPE /* GROUP END */
+		)
+WHERE	PLAN_TYPE_SEQ = 1			]]></sql>
+			<params>
+				<param name="vps_port_cd" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="clpt_ind_seq" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

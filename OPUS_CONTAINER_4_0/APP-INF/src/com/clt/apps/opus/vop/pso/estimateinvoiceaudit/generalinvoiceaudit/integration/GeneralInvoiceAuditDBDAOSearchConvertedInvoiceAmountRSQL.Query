@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="GeneralInvoiceAuditDBDAOSearchConvertedInvoiceAmountRSQL">
+			<desc><![CDATA[Invoice , Tariff Currency Local to Local 추가]]></desc>
+			<sql><![CDATA[
+WITH V_FR_MON_XCH_RT AS (
+        SELECT A.*
+          FROM (
+                SELECT 1 AS GUBUN
+                     , FR.*
+                  FROM (
+                        SELECT A.ACCT_XCH_RT_YRMON
+                             , A.ACCT_XCH_RT_LVL
+                             , A.CURR_CD
+                             , A.USD_LOCL_XCH_RT
+                             , ROW_NUMBER() OVER(PARTITION BY A.CURR_CD ORDER BY A.ACCT_XCH_RT_YRMON DESC) XCH_RANK
+                          FROM GL_MON_XCH_RT A
+                         WHERE 1=1
+                           AND A.ACCT_XCH_RT_YRMON = SUBSTR(REPLACE(@[dt],'-'), 1, 6)
+                           AND A.ACCT_XCH_RT_LVL = 1  
+                           AND A.CURR_CD = @[fr_curr_cd]
+                        ) FR
+                 WHERE FR.XCH_RANK = 1 /*CURR_CD의 Last YRMON*/
+                 UNION ALL
+                SELECT 2 AS GUBUN
+                     , FR.*
+                  FROM (
+                        SELECT A.ACCT_XCH_RT_YRMON
+                             , A.ACCT_XCH_RT_LVL
+                             , A.CURR_CD
+                             , A.USD_LOCL_XCH_RT
+                             , ROW_NUMBER() OVER(PARTITION BY A.CURR_CD ORDER BY A.ACCT_XCH_RT_YRMON DESC) XCH_RANK
+                          FROM GL_MON_XCH_RT A
+                         WHERE 1=1
+                           AND A.ACCT_XCH_RT_LVL = 1  
+                           AND A.CURR_CD = @[fr_curr_cd]
+                        ) FR
+                 WHERE FR.XCH_RANK = 1 /*CURR_CD의 Last YRMON*/
+               ) A
+         WHERE ROWNUM = 1
+    )
+--SELECT * FROM V_FR_MON_XCH_RT;    
+    , V_TO_MON_XCH_RT AS (
+        SELECT A.*
+          FROM (
+                SELECT 1 AS GUBUN
+                     , A.*
+                  FROM (
+                        SELECT A.ACCT_XCH_RT_YRMON
+                             , A.ACCT_XCH_RT_LVL
+                             , A.CURR_CD
+                             , A.USD_LOCL_XCH_RT
+                             , ROW_NUMBER() OVER(PARTITION BY A.CURR_CD ORDER BY A.ACCT_XCH_RT_YRMON DESC) XCH_RANK
+                          FROM GL_MON_XCH_RT A
+                         WHERE 1=1
+                           AND A.ACCT_XCH_RT_YRMON = SUBSTR(REPLACE(@[dt],'-'), 1, 6)
+                           AND A.ACCT_XCH_RT_LVL = 1  
+                           AND A.CURR_CD = NVL(@[to_curr_cd],@[fr_curr_cd])
+                        ) A
+                 WHERE A.XCH_RANK = 1 /*CURR_CD의 Last YRMON*/
+                 UNION ALL
+                SELECT 2 AS GUBUN
+                     , A.*
+                  FROM (
+                        SELECT A.ACCT_XCH_RT_YRMON
+                             , A.ACCT_XCH_RT_LVL
+                             , A.CURR_CD
+                             , A.USD_LOCL_XCH_RT
+                             , ROW_NUMBER() OVER(PARTITION BY A.CURR_CD ORDER BY A.ACCT_XCH_RT_YRMON DESC) XCH_RANK
+                          FROM GL_MON_XCH_RT A
+                         WHERE 1=1
+                           AND A.ACCT_XCH_RT_LVL = 1  
+                           AND A.CURR_CD = NVL(@[to_curr_cd],@[fr_curr_cd])
+                        ) A
+                 WHERE A.XCH_RANK = 1 /*CURR_CD의 Last YRMON*/
+               ) A
+         WHERE ROWNUM = 1
+    ) 
+--SELECT * FROM V_TO_MON_XCH_RT;        
+    , V_MDM_CURRENCY AS (
+       SELECT MAX(DECODE(B.CURR_CD, 'USD', 'USD'))             CURR_USD           
+              ,MAX(DECODE(B.CURR_CD, 'USD', B.DP_PRCS_KNT))     DP_USD
+              ,MAX(DECODE(B.CURR_CD, @[fr_curr_cd], @[fr_curr_cd]))             FR_CURR_LOCAL
+              ,MAX(DECODE(B.CURR_CD, @[fr_curr_cd], B.DP_PRCS_KNT))     FR_DP_LOCAL 
+              ,MAX(DECODE(B.CURR_CD, NVL(@[to_curr_cd],@[fr_curr_cd]), NVL(@[to_curr_cd],@[fr_curr_cd])))             TO_CURR_LOCAL
+              ,MAX(DECODE(B.CURR_CD, NVL(@[to_curr_cd],@[fr_curr_cd]), B.DP_PRCS_KNT))     TO_DP_LOCAL 
+        FROM   MDM_CURRENCY  B
+        WHERE  1=1
+        AND    B.CURR_CD IN (@[fr_curr_cd], 'USD', NVL(@[to_curr_cd],@[fr_curr_cd])) 
+       )
+--SELECT * FROM V_MDM_CURRENCY;        
+
+SELECT CASE WHEN 'Local2USD' = @[div] THEN ROUND(@[amt] / FR.USD_LOCL_XCH_RT, MC.DP_USD)
+            WHEN 'USD2Local' = @[div] THEN ROUND(@[amt] * FR.USD_LOCL_XCH_RT, MC.FR_DP_LOCAL)
+            WHEN 'Local2Local' = @[div] THEN  ROUND( ROUND(@[amt] / FR.USD_LOCL_XCH_RT, MC.DP_USD) * TR.USD_LOCL_XCH_RT, MC.TO_DP_LOCAL)
+            ELSE 0
+       END AS AMT
+     , CASE WHEN 'Local2USD' = @[div] OR 'USD2Local' = @[div] THEN '1 USD = ' || FR.USD_LOCL_XCH_RT ||' '|| MC.FR_CURR_LOCAL
+            WHEN 'Local2Local' = @[div] THEN  FR.USD_LOCL_XCH_RT ||' '|| MC.FR_CURR_LOCAL || ' = 1 USD = ' || TR.USD_LOCL_XCH_RT ||' '|| MC.TO_CURR_LOCAL
+            ELSE ''
+       END AS XCH
+  FROM V_MDM_CURRENCY MC
+     , V_FR_MON_XCH_RT FR
+     , V_TO_MON_XCH_RT TR
+ WHERE 1=1			]]></sql>
+			<params>
+				<param name="dt" type="12" value="20160805" out="N"/>
+				<param name="fr_curr_cd" type="12" value="PHP" out="N"/>
+				<param name="to_curr_cd" type="12" value="SGD" out="N"/>
+				<param name="div" type="12" value="Local2Local" out="N"/>
+				<param name="amt" type="12" value="2136.07" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

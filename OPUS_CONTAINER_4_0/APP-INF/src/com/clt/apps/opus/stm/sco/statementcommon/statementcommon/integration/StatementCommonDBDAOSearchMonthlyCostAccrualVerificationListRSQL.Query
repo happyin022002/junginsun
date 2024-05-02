@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="StatementCommonDBDAOSearchMonthlyCostAccrualVerificationListRSQL">
+			<desc><![CDATA[Cost Monthly Accrual Verification]]></desc>
+			<sql><![CDATA[
+SELECT A.EXE_YRMON
+     , A.PFITCTR_CD
+     , A.GL_ACCT_NO
+     , A.ACT_YRMON
+     , A.LOCL_CURR_CD
+     , SUM(A.ACCL_DOC_AMT) AS ACCL_DOC_AMT
+     , SUM(A.ACCL_LOCL_AMT) AS ACCL_LOCL_AMT
+     , SUM(A.OPR_DOC_AMT) AS OPR_DOC_AMT
+     , SUM(A.OPR_LOCL_AMT) AS OPR_LOCL_AMT
+   FROM (
+        SELECT A.EXE_YRMON
+             , A.PFITCTR_CD
+             , A.GL_ACCT_NO
+             , A.ACT_YRMON
+             , A.LOCL_CURR_CD
+             , SUM(A.DOC_AMT) AS ACCL_DOC_AMT
+             , SUM(A.LOCL_AMT) AS ACCL_LOCL_AMT
+             , 0 AS OPR_DOC_AMT
+             , 0 AS OPR_LOCL_AMT
+         FROM (
+                SELECT A.EXE_YRMON
+                     , CASE WHEN A.TRD_CD IS NOT NULL THEN 
+                                 NVL(A.TMP_TRD_MODI_COST_CTR_CD, NVL(A.TMP_SVC_MODI_COST_CTR_CD, NVL(DECODE(A.TMP_TGT_CD, 'ZH', A.TMP_ORG_MODI_COST_CTR_CD, A.TMP_TGT_CD), 'A106') ))
+                            ELSE NVL(A.TMP_SVC_MODI_COST_CTR_CD, NVL(DECODE(A.TMP_TGT_CD, 'ZH', A.TMP_ORG_MODI_COST_CTR_CD, A.TMP_TGT_CD), 'A106'))
+                       END AS PFITCTR_CD
+                     , A.GL_ACCT_NO
+                     , A.ACT_YRMON
+                     , A.LOCL_CURR_CD
+                     , A.DOC_AMT
+                     , A.LOCL_AMT
+                  FROM (
+                        SELECT INFO.EXE_YRMON
+                             , INFO.TRD_CD
+                             , MA.MODI_ACCT_CD AS GL_ACCT_NO
+                             , SUBSTR(INFO.ACT_DT, 1, 6) AS ACT_YRMON
+                             , INFO.LOCL_CURR_CD AS LOCL_CURR_CD
+                             , NVL(INFO.ACCL_AMT,0) AS DOC_AMT
+                             , DECODE(INFO.LOCL_CURR_CD, 'JPY', NVL(INFO.ACCL_AMT,0), ROUND(NVL(INFO.ACCL_AMT,0) * SAC_GET_GL_XCH_RT_FNC('1', INFO.ACT_DT, INFO.LOCL_CURR_CD, 'JPY'), 0)) AS LOCL_AMT
+                             , ACCLADM.SAC_BRG_IF_PKG.GET_STMT_CD_CONV('GL ACCT OF PROFIT CENTER', MA.MODI_ACCT_CD) AS TMP_TGT_CD
+                             , (SELECT DECODE(VS.VSL_SLAN_CD, 'COM', NULL, 'CNT',NULL, VS.MODI_COST_CTR_CD) 
+                                  FROM MDM_VSL_SVC_LANE VS 
+                                 WHERE VS.VSL_SLAN_CD = INFO.SLAN_CD) AS TMP_SVC_MODI_COST_CTR_CD
+                             , (SELECT ORG.MODI_COST_CTR_CD 
+                                  FROM MDM_ORGANIZATION ORG 
+                                 WHERE ORG.OFC_CD = NVL(INFO.CTRL_OFC_CD, INFO.ACT_PLC_CD)) AS TMP_ORG_MODI_COST_CTR_CD
+                             , (SELECT MT.MODI_COST_CTR_CD 
+                                  FROM MDM_TRADE MT 
+                                 WHERE MT.TRD_CD = INFO.TRD_CD AND ROWNUM = 1 ) AS TMP_TRD_MODI_COST_CTR_CD
+                          FROM SAC_COST_ACCL_INFO INFO
+                             , MDM_ACCOUNT MA
+                         WHERE INFO.ACCT_CD             = MA.ACCT_CD(+)
+                           AND INFO.EXE_YRMON           = REPLACE(@[accl_yrmon],'-','')      --Cond accrual month
+                           AND INFO.ACT_DT              <= TO_CHAR(LAST_DAY(TO_DATE(REPLACE(@[accl_yrmon],'-',''),'YYYYMM')),'YYYYMMDD') --Cond accrual month last day
+                           AND NVL(INFO.ACCL_AMT, 0)    <> 0
+                           AND NVL(INFO.ACCL_FLG, 'Y')  = 'Y' 
+                           #if( ${gl_acct_no} !='')
+                           AND MA.MODI_ACCT_CD          = @[gl_acct_no] --Cond Sakura Account
+                           #end
+                       ) A
+               ) A
+          WHERE 1=1
+            #if( ${pfitctr_cd} !='')
+            AND A.PFITCTR_CD  LIKE '%'||@[pfitctr_cd]||'%' --Cond profit center
+            #end
+          GROUP BY A.EXE_YRMON
+             , A.PFITCTR_CD
+             , A.GL_ACCT_NO
+             , A.ACT_YRMON
+             , A.LOCL_CURR_CD
+     UNION ALL
+        SELECT SUBSTR(ACCL.PST_DT, 1, 6) AS EXE_YRMON
+             , ACCL.PFITCTR_CD
+             , ACCL.GL_ACCT_NO
+             , SUBSTR(ACCL.ACT_DT, 1, 6) AS ACT_YRMON
+             , ACCL.CURR_CD AS LOCL_CURR_CD
+             , 0 AS ACCL_DOC_AMT
+             , 0 AS ACCL_LOCL_AMT
+             , SUM(DECODE(ACCL.PST_KEY_CD, '40', ACCL.DOC_AMT, ACCL.DOC_AMT * (-1))) AS OPR_DOC_AMT
+             , SUM(DECODE(ACCL.PST_KEY_CD, '40', NVL(ACCL.LOCL_AMT, ACCL.DOC_AMT), NVL(ACCL.LOCL_AMT, ACCL.DOC_AMT) * (-1))) AS OPR_LOCL_AMT
+          FROM SAC_COST_ACCL_IF ACCL
+         WHERE 1=1
+           AND ACCL.PST_DT      = TO_CHAR(LAST_DAY(TO_DATE(REPLACE(@[accl_yrmon],'-',''),'YYYYMM')),'YYYYMMDD') --Cond accrual month last day
+           AND ACCL.PST_KEY_CD  IN ('40', '50')     
+           #if( ${pfitctr_cd} !='')
+           AND ACCL.PFITCTR_CD  LIKE '%'||@[pfitctr_cd]||'%' --Cond profit center
+           #end
+           #if( ${gl_acct_no} !='')
+           AND ACCL.GL_ACCT_NO  = @[gl_acct_no] --Cond Sakura Account
+           #end
+         GROUP BY SUBSTR(ACCL.PST_DT, 1, 6)
+             , ACCL.PFITCTR_CD
+             , ACCL.GL_ACCT_NO
+             , SUBSTR(ACCL.ACT_DT, 1, 6)
+             , ACCL.CURR_CD   
+       ) A
+ GROUP BY A.EXE_YRMON
+     , A.PFITCTR_CD
+     , A.GL_ACCT_NO
+     , A.ACT_YRMON
+     , A.LOCL_CURR_CD
+ ORDER BY A.EXE_YRMON
+     , A.PFITCTR_CD
+     , A.GL_ACCT_NO
+     , A.ACT_YRMON
+     , A.LOCL_CURR_CD 			]]></sql>
+			<params>
+				<param name="accl_yrmon" type="12" value="" out="N"/>
+				<param name="gl_acct_no" type="12" value="" out="N"/>
+				<param name="pfitctr_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

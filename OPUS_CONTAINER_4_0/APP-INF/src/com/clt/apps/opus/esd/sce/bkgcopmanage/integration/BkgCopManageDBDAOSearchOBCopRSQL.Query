@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="BkgCopManageDBDAOSearchOBCopRSQL">
+			<desc><![CDATA[구주 지역은 BKG_EURO_TRO_DTL, 그 이외 지역은 BKG_TRO_DTL 을 참조하여 OUTBOUND 의 TRO 가 MAPPING 될 COP 정보를 조회한다.]]></desc>
+			<sql><![CDATA[
+SELECT COP_NO, BKG_NO,
+  ACT_STS_CD,
+  AFT_PLN_DT PLAN_DT,
+  A.VSL_CD VSL_CD,
+  A.SKD_VOY_NO SKD_VOY_NO,
+  A.SKD_DIR_CD SKD_DIR_CD,
+  CLPT_IND_SEQ,
+  MTY_PKUP_YD_CD,
+  POR_NOD_CD,
+  FULL_RTN_YD_CD,
+  CNTR_NO,
+  MST_COP_NO,
+  MST_FLG,
+  MST_COP_ORD,
+  (SELECT BKG_NO FROM SCE_COP_HDR WHERE COP_NO = A.MST_COP_NO AND COP_STS_CD != 'X' AND ROWNUM = 1) AS MST_BKG_NO,
+  CNTR_ORD
+FROM (
+    SELECT D.COP_NO COP_NO, H.BKG_NO AS BKG_NO, H.MST_COP_NO,
+	  DECODE(H.MST_COP_NO, H.COP_NO, 'Y', 'N') AS MST_FLG,
+	  DECODE(H.MST_COP_NO, H.COP_NO, 0, 1) AS MST_COP_ORD,
+	  DECODE(H.CNTR_NO, 'COMU0000000', 1, 0) AS CNTR_ORD,
+      D.ACT_STS_CD ACT_STS_CD ,
+	  P.MTY_PKUP_YD_CD,
+	  P.POR_NOD_CD,
+	  P.FULL_RTN_YD_CD,
+      LEAD(D.PLN_DT, 1) OVER (PARTITION BY D.COP_NO ORDER BY D.COP_NO, D.COP_DTL_SEQ) AFT_PLN_DT ,
+      LEAD(D.VSL_CD, 1) OVER (PARTITION BY D.COP_NO ORDER BY D.COP_NO, D.COP_DTL_SEQ) VSL_CD ,
+      LEAD(D.SKD_VOY_NO, 1) OVER (PARTITION BY D.COP_NO ORDER BY D.COP_NO, D.COP_DTL_SEQ) SKD_VOY_NO ,
+      LEAD(D.SKD_DIR_CD, 1) OVER (PARTITION BY D.COP_NO ORDER BY D.COP_NO, D.COP_DTL_SEQ) SKD_DIR_CD ,
+      D.ACT_CD ,
+      LEAD(D.CLPT_IND_SEQ, 1) OVER (PARTITION BY D.COP_NO  ORDER BY D.COP_NO, D.COP_DTL_SEQ) CLPT_IND_SEQ,
+	  H.CNTR_NO
+    FROM SCE_COP_HDR H,
+      SCE_COP_DTL D,
+	  PRD_PROD_CTL_MST P,
+	  BKG_BOOKING B, 	
+#if (${area_conti_cd} == 'E') 
+	  BKG_EUR_TRO TRO_HDR,  -- 구주
+#end
+
+#if (${area_conti_cd} == 'X')
+		BKG_TRO_DTL TRO_DTL -- 구주가 아닐경우
+#elseif (${area_conti_cd} == 'E') 
+		BKG_EUR_TRO_DTL TRO_DTL  -- 구주
+#end
+    WHERE H.BKG_NO = @[bkg_no]
+      AND H.BKG_NO = TRO_DTL.BKG_NO
+	  AND H.BKG_NO = B.BKG_NO
+	  AND H.PCTL_NO = P.PCTL_NO
+
+#if (${area_conti_cd} == 'E') 
+	  AND TRO_HDR.BKG_NO = TRO_DTL.BKG_NO
+	  AND TRO_HDR.IO_BND_CD = TRO_DTL.IO_BND_CD
+	  AND TRO_HDR.TRO_SEQ = TRO_DTL.TRO_SEQ
+	  AND TRO_HDR.CNTR_TPSZ_CD = H.CNTR_TPSZ_CD
+#end
+      AND TRO_DTL.IO_BND_CD = @[io_bnd_cd]
+      AND TRO_DTL.TRO_SEQ = @[tro_seq]
+      AND TRO_DTL.TRO_SUB_SEQ = @[tro_sub_seq]
+#if (${area_conti_cd} == 'X')
+      --AND TRO_DTL.CNTR_TPSZ_CD = H.CNTR_TPSZ_CD
+      AND (CASE WHEN NVL(B.FLEX_HGT_FLG, 'N') = 'Y' AND H.CNTR_TPSZ_CD IN (
+																			  SELECT CNTR_TPSZ_CD
+																				FROM SCE_COP_CNTR_REPO_RULE
+																			   WHERE (CNTR_TPSZ_CD = TRO_DTL.CNTR_TPSZ_CD OR PROV_CNTR_TPSZ_CD = TRO_DTL.CNTR_TPSZ_CD)
+																				 AND NVL(ACT_FLG, 'N') = 'Y'
+																			  UNION ALL
+																			  SELECT TRO_DTL.CNTR_TPSZ_CD
+																				FROM DUAL
+																		  ) THEN  'TRUE'
+                WHEN NVL(B.FLEX_HGT_FLG, 'N') = 'N' AND TRO_DTL.CNTR_TPSZ_CD = H.CNTR_TPSZ_CD THEN 'TRUE'
+                ELSE 'FALSE'
+         END) = 'TRUE'
+	  AND NVL(TRO_DTL.RTN_TRO_FLG, 'N') = 'N' -- 'Y' 인건은 S/O 가 발생하지 않으며 한국지역에서만 생김
+#end
+      AND H.COP_NO = D.COP_NO
+	  AND NVL(H.OB_TRO_FLG, 'N') = 'N'
+      AND H.COP_STS_CD IN ('C', 'T', 'F')
+      AND D.ACT_CD IN ('FLWMLO','FLVMLO','FLWMDO','FLVMDO') 
+      ) A
+WHERE A.ACT_CD IN ('FLWMLO','FLVMLO')
+ORDER BY MST_COP_ORD, CNTR_ORD			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="io_bnd_cd" type="12" value="" out="N"/>
+				<param name="tro_seq" type="12" value="" out="N"/>
+				<param name="tro_sub_seq" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

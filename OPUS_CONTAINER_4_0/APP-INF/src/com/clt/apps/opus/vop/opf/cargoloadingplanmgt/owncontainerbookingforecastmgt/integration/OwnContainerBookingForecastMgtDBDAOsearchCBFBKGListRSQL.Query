@@ -1,0 +1,496 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="OwnContainerBookingForecastMgtDBDAOsearchCBFBKGListRSQL">
+			<desc><![CDATA[searchCBFBKGList 조회]]></desc>
+			<sql><![CDATA[
+WITH WGT_GRP AS ( 
+     SELECT SLAN_CD,
+            SKD_DIR_CD,
+            POL_CD,
+            CNTR_SZ_CD,
+            FULL_MTY_CD,
+            CNTR_WGT_GRP_CD,
+            FM_LMT_WGT FROM_LMT_WGT,
+            TO_LMT_WGT TO_LMT_WGT
+       FROM OPF_CGO_BKG_FCAST_WGT_GRP 
+)
+, COPY_T AS ( 
+      --2016-08-02 Improvement--
+--   SELECT ROWNUM NO
+--   FROM BKG_BOOKING
+--   WHERE ROWNUM<=1000 
+     SELECT LEVEL NO
+       FROM DUAL
+      CONNECT BY LEVEL <= 1000
+)
+, VVD_BKG AS (
+    SELECT VVD.BKG_NO,
+           VVD.POD_CD,
+           VVD.POD_CLPT_IND_SEQ,
+           VVD.POL_YD_CD,
+           VVD.POL_CLPT_IND_SEQ,
+           BKG.BLCK_STWG_CD,
+           BKG.BKG_CGO_TP_CD,
+           BKG.SPLIT_FLG,
+           VVD.SLAN_CD,
+           VVD.SKD_DIR_CD,
+           VVD.POL_CD,
+           BKG.PRCT_FLG,
+           BKG.BKG_STS_CD,
+           BKG.BKG_CRE_TP_CD,
+           BKG.FM_BKG_NO
+    FROM BKG_VVD VVD, BKG_BOOKING BKG
+    WHERE  1=1
+           AND VVD.VSL_CD = @[vsl_cd]
+           AND VVD.SKD_VOY_NO = @[skd_voy_no]
+           AND VVD.SKD_DIR_CD = @[skd_dir_cd]
+           AND VVD.POL_YD_CD || VVD.POL_CLPT_IND_SEQ = @[yd_cd]
+           AND VVD.POL_CD = SUBSTR(@[yd_cd], 1, 5)
+           AND VVD.POL_CLPT_IND_SEQ = SUBSTR(@[yd_cd], 8)								
+           AND BKG.BKG_STS_CD  <> 'X'
+           AND VVD.BKG_NO = BKG.BKG_NO
+)
+, QTY_CNTR_TMP AS (
+    SELECT
+    QTY.BKG_NO,
+    QTY.CNTR_TPSZ_CD,
+    QTY.OP_CNTR_QTY,
+    (SELECT COUNT(*)
+      FROM BKG_CONTAINER C
+     WHERE C.BKG_NO       = QTY.BKG_NO
+       AND C.CNTR_TPSZ_CD = QTY.CNTR_TPSZ_CD
+    ) AS AC_CNTR_QTY,
+    CNTR.CNTR_NO,
+    CNTR.DCGO_FLG,
+    CNTR.RC_FLG,
+    CNTR.AWK_CGO_FLG,
+    CNTR.BB_CGO_FLG,
+    CNTR.CNTR_WGT,
+    CNTR.WGT_UT_CD,
+	CNTR.CNTR_PRT_FLG
+    FROM BKG_QUANTITY  QTY, BKG_CONTAINER CNTR, VVD_BKG BKG
+    WHERE QTY.BKG_NO = BKG.BKG_NO
+    AND QTY.CNTR_TPSZ_CD NOT LIKE 'Q%'
+    AND QTY.BKG_NO       = CNTR.BKG_NO(+)
+    AND QTY.CNTR_TPSZ_CD = CNTR.CNTR_TPSZ_CD(+)
+
+    UNION ALL
+
+    SELECT
+    CNTR.BKG_NO,
+    CNTR.CNTR_TPSZ_CD,
+    0 AS OP_CNTR_QTY,
+    COUNT(CNTR_NO) OVER (PARTITION BY CNTR.BKG_NO, CNTR.CNTR_TPSZ_CD) AS AC_CNTR_QTY,
+    CNTR.CNTR_NO,
+    CNTR.DCGO_FLG,
+    CNTR.RC_FLG,
+    CNTR.AWK_CGO_FLG,
+    CNTR.BB_CGO_FLG,
+    CNTR.CNTR_WGT,
+    CNTR.WGT_UT_CD,
+	CNTR.CNTR_PRT_FLG
+    FROM BKG_CONTAINER CNTR, VVD_BKG BKG
+    WHERE CNTR.BKG_NO = BKG.BKG_NO
+    AND CNTR_TPSZ_CD NOT IN (SELECT CNTR_TPSZ_CD FROM BKG_QUANTITY WHERE BKG_NO = CNTR.BKG_NO)
+)
+, QTY_CNTR AS (
+    SELECT
+        BKG_NO,
+        CNTR_TPSZ_CD,
+        CASE WHEN NON_OP_CNTR_QTY > 0 AND OP_CNTR_QTY != AC_CNTR_QTY AND OP_CNTR_QTY != 0
+                THEN OP_CNTR_QTY - (NON_OP_CNTR_QTY / ONLY_OP_CNTR_TP_CNT)
+             WHEN OP_CNTR_QTY = 0
+                THEN AC_CNTR_QTY
+             ELSE OP_CNTR_QTY
+        END AS OP_CNTR_QTY,
+        AC_CNTR_QTY,
+        CNTR_NO,
+        DCGO_FLG,
+        RC_FLG,
+        AWK_CGO_FLG,
+        BB_CGO_FLG,
+        CNTR_WGT,
+        WGT_UT_CD,
+		CNTR_PRT_FLG
+    FROM (
+        SELECT
+            T1.BKG_NO,
+            T1.CNTR_TPSZ_CD,
+            T1.OP_CNTR_QTY,
+            T1.AC_CNTR_QTY,
+            T2.ONLY_OP_CNTR_QTY,
+            T3.NON_OP_CNTR_QTY,
+            T4.ONLY_OP_CNTR_TP_CNT,
+            T1.CNTR_NO,
+            T1.DCGO_FLG,
+            T1.RC_FLG,
+            T1.AWK_CGO_FLG,
+            T1.BB_CGO_FLG,
+            T1.CNTR_WGT,
+            T1.WGT_UT_CD,
+			T1.CNTR_PRT_FLG
+        FROM QTY_CNTR_TMP T1,
+            (
+                SELECT BKG_NO, (SUM(OP_CNTR_QTY) - SUM(AC_CNTR_QTY)) AS ONLY_OP_CNTR_QTY
+                FROM QTY_CNTR_TMP
+                GROUP BY BKG_NO
+            ) T2,
+            (
+                SELECT BKG_NO, SUM(AC_CNTR_QTY) AS NON_OP_CNTR_QTY
+                FROM QTY_CNTR_TMP
+                WHERE OP_CNTR_QTY = 0
+                GROUP BY BKG_NO
+            ) T3,
+            (
+                SELECT BKG_NO, COUNT(CNTR_TPSZ_CD) AS ONLY_OP_CNTR_TP_CNT
+                FROM QTY_CNTR_TMP
+                WHERE OP_CNTR_QTY = 0
+                GROUP BY BKG_NO
+            ) T4
+        WHERE T1.BKG_NO = T2.BKG_NO
+        AND T1.BKG_NO = T3.BKG_NO(+)
+        AND T1.BKG_NO = T4.BKG_NO(+)
+    )
+)
+
+SELECT --DISTINCT --QT.BKG_NO,
+	   QT.BKG_NO||DECODE(QT.C_BKG_NO, NULL, '', '/')||QT.C_BKG_NO AS BKG_REF_NO_CTNT,
+       QT.BKG_NO,
+       QT.CNTR_NO,
+       QT.POD POD_CD,
+       QT.POD_CLPT_IND_SEQ,
+       QT.MLB MLB_CD,
+       COM_ConstantMgr_PKG.COM_getCompanyCode_FNC() CRR_CD,
+       QT.TP CNTR_TPSZ_CD,
+       WP.CNTR_WGT_GRP_CD CNTR_WGT_GRP_CD,
+       QT.FM FULL_MTY_CD,
+       QT.DG DCGO_FLG,
+       QT.RF RC_FLG,
+       QT.AK AWK_CGO_FLG,
+       QT.BB BB_CGO_FLG,
+       QT.STWG_CD,
+       QT.STWG_CGO_FLG,
+       QT.PRCT_FLG,
+       ROUND(CNTR_GRS_WGT,3) CNTR_GRS_WGT,
+       QT.STS BKG_STS_CD,
+       @[vsl_cd] VSL_CD,
+       @[skd_voy_no] SKD_VOY_NO,
+       @[skd_dir_cd] SKD_DIR_CD,
+       QT.POL_YD_CD  YD_CD,
+       QT.POL_CLPT_IND_SEQ,
+       'D' RD_ST,
+       'Y' BKG_SHPR_OWNR_FLG,
+       (SELECT VSL_SLAN_CD 
+          FROM VSK_VSL_SKD
+         WHERE VSL_CD     = @[vsl_cd]
+           AND SKD_VOY_NO = @[skd_voy_no]
+           AND SKD_DIR_CD = @[skd_dir_cd]) SLAN_CD,
+       'V' CBF_DP_CD
+  FROM ( 
+        SELECT QT.BKG_NO,
+			   QT.C_BKG_NO,
+               QT.CNTR_NO,
+               QT.POD,
+               QT.POD_CLPT_IND_SEQ,
+               QT.POL_YD_CD,
+               QT.POL_CLPT_IND_SEQ,
+               QT.MLB,
+               QT.TP,
+               QT.FM,
+               QT.DG,
+               QT.RF,
+               QT.AK,
+               QT.BB,
+               -- Modify weight calculation!
+               (
+                    CASE
+                        WHEN CNTR_NO IS NOT NULL AND CNTR_WGT > 0 AND CNTR_PRT_FLG = 'Y'
+                            THEN (
+                                SELECT   (SELECT SUM(BCC.CNTR_WGT)     ---- Container total cargo weight ----
+                                          FROM   BKG_BOOKING       BKK
+                                               , BKG_CONTAINER     BCC 
+                                          WHERE  1 = 1
+                                          AND    BKK.BKG_NO        = BCC.BKG_NO
+                                          AND    BKK.VSL_CD        = BK.VSL_CD        ---- Same Trunk VVD ----
+                                          AND    BKK.SKD_VOY_NO    = BK.SKD_VOY_NO    ---- Same Trunk VVD ----
+                                          AND    BKK.SKD_DIR_CD    = BK.SKD_DIR_CD    ---- Same Trunk VVD ----
+                                          AND    BKK.POL_CD        = BK.POL_CD        ---- Same POL of BKG ----
+                                          AND    BKK.POD_CD        = BK.POD_CD        ---- Same POL of BKG ----
+                                          AND    BCC.CNTR_NO       = BC.CNTR_NO       ---- Same Container# ----
+                                          ) as wgt
+                                FROM     BKG_BOOKING               BK
+                                       , BKG_CONTAINER             BC
+                                       , SCE_COP_HDR               HD
+                                WHERE    1 = 1
+                                AND      BK.BKG_NO                 = BC.BKG_NO
+                                AND      BC.BKG_NO                 = HD.BKG_NO
+                                AND      BC.CNTR_NO                = HD.CNTR_NO
+                                AND      HD.MST_COP_NO             = HD.COP_NO      ---- Partial Container중 Master 추출조건 ----
+                                AND      BC.CNTR_PRT_FLG           = 'Y'            ---- Partial Container Indicator ------------
+                                AND      BK.BKG_NO                 = QT.BKG_NO
+                            )
+                        WHEN CNTR_NO IS NOT NULL AND CNTR_WGT > 0 AND CNTR_PRT_FLG <> 'Y'
+                            THEN CNTR_WGT
+                        WHEN (COUNT(CNTR_WGT) OVER (PARTITION BY BKG_NO) - AC_CNTR_QTY) > 0
+                            THEN (ACT_WGT - CNTR_WGT_SUM) / (COUNT(CNTR_WGT) OVER (PARTITION BY BKG_NO) - AC_CNTR_QTY)
+                        ELSE ACT_WGT / (COUNT(CNTR_WGT) OVER (PARTITION BY BKG_NO))
+                    END
+               ) + DECODE(NVL(TP.CNTR_TPSZ_TARE_WGT,0), 0, DECODE(SUBSTR(QT.TP,2,1),2,2500,4000), NVL(TP.CNTR_TPSZ_TARE_WGT,0)) CNTR_GRS_WGT,
+               QT.SLAN_CD,
+               QT.SKD_DIR_CD,
+               QT.POL_CD,
+               QT.PRCT_FLG,
+               QT.STWG_CD,
+               QT.STWG_CGO_FLG,
+               QT.STS
+          FROM ( 
+                SELECT /*+ ORDERED */ 
+                       BKG_NO,
+					   C_BKG_NO,
+                       CASE WHEN RN=1 AND NO>1 THEN NULL ELSE CNTR_NO END CNTR_NO,
+                       POD,
+                       POD_CLPT_IND_SEQ,
+                       POL_YD_CD,
+                       POL_CLPT_IND_SEQ,
+                       MLB,
+                       TP,
+                       FM,
+                       NVL(CASE WHEN RN=1 AND NO>1 THEN NULL ELSE CDG END,DG) DG,
+                       NVL(CASE WHEN RN=1 AND NO>1 THEN NULL ELSE CRF END,RF) RF ,
+                       NVL(CASE WHEN RN=1 AND NO>1 THEN NULL ELSE CAK END,AK) AK ,
+                       NVL(CASE WHEN RN=1 AND NO>1 THEN NULL ELSE CBB END,BB) BB,
+                       -- Delete because wrong calculation!
+--                       (CASE WHEN RN=1 AND NO=1 AND  CNTR_NO IS NULL     THEN ((TRS_COMMON_PKG.GET_CONV_WGT_TO_KG_FNC('KGS', ACT_WGT) - TRS_COMMON_PKG.GET_CONV_WGT_TO_KG_FNC('KGS', CNTR_WGT_SUM))
+--                                                                                /(COUNT(CNTR_WGT) OVER (PARTITION BY BKG_NO) - AC_CNTR_QTY) )
+--                             WHEN RN=1 AND NO=1 AND  CNTR_NO IS NOT NULL THEN (TRS_COMMON_PKG.GET_CONV_WGT_TO_KG_FNC('KGS', CNTR_WGT) )       
+--                             WHEN RN=1 AND NO>1                          THEN ((TRS_COMMON_PKG.GET_CONV_WGT_TO_KG_FNC('KGS', ACT_WGT) - TRS_COMMON_PKG.GET_CONV_WGT_TO_KG_FNC('KGS', CNTR_WGT_SUM))
+--                                                                                /(COUNT(CNTR_WGT) OVER (PARTITION BY BKG_NO) - AC_CNTR_QTY) )
+--                             ELSE TRS_COMMON_PKG.GET_CONV_WGT_TO_KG_FNC('KGS', CNTR_WGT)
+--                       END) AS CNTR_GRS_WGT,
+                       -- Add columns
+                       ACT_WGT,
+                       CNTR_WGT_SUM,
+                       CNTR_WGT,
+                       AC_CNTR_QTY,
+                       SLAN_CD ,
+                       SKD_DIR_CD ,
+                       POL_CD,
+                       PRCT_FLG,
+                       STWG_CD,
+                       STWG_CGO_FLG,
+                       STS,
+					   CNTR_PRT_FLG
+                  FROM ( 
+                        SELECT BKG_NO,
+							   C_BKG_NO,
+                               POD,
+                               POD_CLPT_IND_SEQ,
+                               POL_YD_CD,
+                               POL_CLPT_IND_SEQ,
+                               MLB,
+                               TP,
+                               FM,
+                               DG,
+                               RF,
+                               AK,
+                               BB,
+                               --DECODE(ac_cntr_flg,'C',AC_CNTR_QTY,OP_CNTR_QTY) CNTR_QTY,
+                               OP_CNTR_QTY AS CNTR_QTY,
+                               SLAN_CD,
+                               SKD_DIR_CD,
+                               POL_CD,
+                               PRCT_FLG,
+                               STWG_CD,
+                               STWG_CGO_FLG,
+                               CNTR_NO,
+                               CDG,
+                               CRF,
+                               CAK,
+                               CBB,
+                               STS,
+                               ROW_NUMBER() OVER (PARTITION BY BKG_NO, TP ORDER BY CNTR_NO) RN,
+                               COUNT(CNTR_NO) OVER (PARTITION BY BKG_NO, TP ) CNT,
+                               -- Weight value convert to KGS!
+                               --NVL(CNTR_WGT,0) CNTR_WGT,
+                               --NVL(CNTR_WGT_SUM,0) CNTR_WGT_SUM,
+                               NVL2(CNTR_WGT, DECODE(CNTR_WGT_UT_CD, 'LBS', VSK_COMMON_PKG.GET_CONV_WGT_FNC('L', 'K', CNTR_WGT), CNTR_WGT), 0) AS CNTR_WGT,
+                               NVL2(CNTR_WGT_SUM, DECODE(CNTR_WGT_UT_CD, 'LBS', VSK_COMMON_PKG.GET_CONV_WGT_FNC('L', 'K', CNTR_WGT_SUM), CNTR_WGT_SUM), 0) AS CNTR_WGT_SUM,
+                               -- Delete because not used!
+--                               TP_OP_QTY,
+--                               TOT_TP_OP_QTY,
+                               -- Weight value convert to KGS!
+                               --ACT_WGT,
+                               DECODE(DOC_WGT_UT_CD, 'LBS', VSK_COMMON_PKG.GET_CONV_WGT_FNC('L', 'K', ACT_WGT), ACT_WGT) AS ACT_WGT,
+                               AC_CNTR_QTY,
+                               OP_CNTR_QTY,
+							   CNTR_PRT_FLG
+                          FROM ( 
+                                SELECT /*+ ORDERED */
+                                       VVD_BKG.BKG_NO       BKG_NO,
+                                       VVD_BKG.POD_CD       POD,
+                                       VVD_BKG.POD_CLPT_IND_SEQ,
+                                       VVD_BKG.POL_YD_CD,
+                                       VVD_BKG.POL_CLPT_IND_SEQ,
+                                       VVD_BKG.BLCK_STWG_CD MLB,
+                                       QTY.CNTR_TPSZ_CD TP,
+                                       DECODE(NVL(VVD_BKG.BKG_CGO_TP_CD,' '),'F','F','E') FM,
+                                       DTL.DCGO_FLG     DG,
+                                       DTL.RC_FLG       RF,
+                                       DTL.AWK_CGO_FLG  AK,
+                                       DTL.BB_CGO_FLG   BB,
+                                       -- If split booking exist, add split booking weight!
+                                       --DOC.ACT_WGT,
+                                       CASE WHEN VVD_BKG.SPLIT_FLG = 'Y'
+                                            THEN (
+                                                SELECT SUM(ACT_WGT) 
+                                                FROM BKG_BL_DOC 
+                                                WHERE BKG_NO IN (
+                                                    SELECT BKG_NO 
+                                                    FROM BKG_BOOKING FM_BKG 
+                                                    WHERE VVD_BKG.BKG_NO = FM_BKG.FM_BKG_NO 
+                                                    AND FM_BKG.BKG_CRE_TP_CD ='S' -- Split code
+                                                    AND FM_BKG.BKG_STS_CD <> 'X'
+                                                )
+                                            ) + DOC.ACT_WGT
+                                       ELSE DOC.ACT_WGT
+                                       END AS ACT_WGT,
+                                       DOC.WGT_UT_CD    DOC_WGT_UT_CD,
+                                       -- Delete because not used!
+--                                       (SELECT SUM(BQ.OP_CNTR_QTY*DECODE(SUBSTR(BQ.CNTR_TPSZ_CD,2,1),2,1,2))  
+--                                          FROM BKG_QUANTITY BQ
+--                                         WHERE BQ.BKG_NO = BKG.BKG_NO 
+--                                           AND BQ.CNTR_TPSZ_CD NOT LIKE 'Q%'
+--                                       ) AS TOT_TP_OP_QTY,                                           
+--                                       (SELECT SUM(BQ.OP_CNTR_QTY*DECODE(SUBSTR(BQ.CNTR_TPSZ_CD,2,1),2,1,2))
+--                                          FROM BKG_QUANTITY BQ
+--                                         WHERE BQ.BKG_NO       = BKG.BKG_NO
+--                                           AND BQ.CNTR_TPSZ_CD = QTY.CNTR_TPSZ_CD
+--                                           AND BQ.CNTR_TPSZ_CD NOT LIKE 'Q%'
+--                                       ) AS TP_OP_QTY,                                           
+--                                       SUM(DISTINCT(DECODE(SUBSTR(QTY.CNTR_TPSZ_CD,2,1),2,QTY.ACT_CNTR_QTY,QTY.ACT_CNTR_QTY*2))) OVER (PARTITION BY BKG.BKG_NO, QTY.CNTR_TPSZ_CD) AS TP_AC_QTY, 
+--                                       SUM(DECODE(SUBSTR(QTY.CNTR_TPSZ_CD,2,1),2,1,2)) OVER (PARTITION BY QTY.BKG_NO) AS TOT_TP_AC_QTY,
+--                                       SUM(DECODE(SUBSTR(QTY.CNTR_TPSZ_CD,2,1),2,1,2)) OVER (PARTITION BY QTY.BKG_NO, QTY.CNTR_TPSZ_CD) AS TP_CNR_QTY,
+                                       (SELECT COUNT(*)
+                                          FROM BKG_CONTAINER C
+                                         WHERE C.BKG_NO       = QTY.BKG_NO
+                                           AND C.CNTR_TPSZ_CD = QTY.CNTR_TPSZ_CD
+                                           AND C.CNTR_WGT != 0
+                                       ) AS AC_CNTR_QTY, 
+                                       QTY.OP_CNTR_QTY AS OP_CNTR_QTY, 
+                                       VVD_BKG.SLAN_CD      SLAN_CD,
+                                       VVD_BKG.SKD_DIR_CD   SKD_DIR_CD,
+                                       VVD_BKG.POL_CD       POL_CD,
+                                       VVD_BKG.PRCT_FLG     PRCT_FLG,
+                                       STWG.STWG_CD     STWG_CD,
+                                       DECODE(STWG.STWG_CD,'','N','Y') STWG_CGO_FLG,
+                                       QTY.CNTR_NO     CNTR_NO,
+                                       QTY.DCGO_FLG    CDG,
+                                       QTY.RC_FLG      CRF,
+                                       QTY.AWK_CGO_FLG CAK,
+                                       QTY.BB_CGO_FLG  CBB,
+                                       QTY.CNTR_WGT    CNTR_WGT,
+                                       SUM(CNTR_WGT) OVER (PARTITION BY QTY.BKG_NO) AS CNTR_WGT_SUM,
+                                       QTY.WGT_UT_CD   CNTR_WGT_UT_CD,
+                                       VVD_BKG.BKG_STS_CD   STS,
+									   --2016-08-02 Improvement--
+
+									   --PBKG.C_BKG_NO,
+									   --DECODE(QTY.BKG_NO, DELG.BKG_NO, 'Y', 'N') DEL_BKG
+                                        (
+                                        SELECT 
+                                            LISTAGG(SUBSTR(FM_BKG.BKG_NO,-2), '/') WITHIN GROUP( ORDER BY FM_BKG.BKG_NO) AS C_BKG_NO
+                                         FROM BKG_BOOKING FM_BKG
+                                        WHERE 1=1
+                                        AND VVD_BKG.BKG_NO = FM_BKG.FM_BKG_NO
+                                        AND FM_BKG.BKG_CRE_TP_CD ='S' -- Split code
+                                        AND FM_BKG.BKG_STS_CD <> 'X'
+--                                        AND EXISTS
+--                                           (SELECT 'X' FROM BKG_CONTAINER FM_CNTR WHERE FM_CNTR.BKG_NO = FM_BKG.BKG_NO)
+                                        ) AS C_BKG_NO,
+--									   DECODE(QTY.BKG_NO, DELG.BKG_NO, 'Y', 'N') DEL_BKG
+                                       CASE WHEN VVD_BKG.FM_BKG_NO IS NOT NULL AND VVD_BKG.BKG_CRE_TP_CD ='S' -- Split code
+                                            THEN 'Y' ELSE 'N' END AS DEL_BKG,
+									   --2016-08-02 Improvement--
+										QTY.CNTR_PRT_FLG
+                                  FROM VVD_BKG       VVD_BKG, 
+                                       BKG_STWG_CGO  STWG, 
+                                       BKG_BL_DOC    DOC, 
+                                       BKG_QTY_DTL   DTL,
+                                       QTY_CNTR      QTY
+--                                     --2016-07-29 Improvement--
+--                                     (  SELECT P_BKG_NO
+--                                             , LISTAGG(SUBSTR(BKG_NO,-2), '/') WITHIN GROUP( ORDER BY BKG_NO) AS C_BKG_NO
+--                                          FROM (SELECT /*+USE_HASH(B, A)*/DISTINCT SUBSTR(TRIM(A.CRNT_CTNT), -12) P_BKG_NO
+--                                                     , A.BKG_NO
+--                                                  FROM BKG_HIS_DTL A
+--                                                     , BKG_CONTAINER B
+--                                                 WHERE 1 = 1
+--                                                   AND A.BKG_NO = B.BKG_NO
+--                                                   AND A.HIS_CATE_NM = 'SPLIT'
+--                                                   AND A.CRNT_CTNT LIKE 'Split from BKG No%'
+--                                               )
+--                                       GROUP BY P_BKG_NO
+--                                      ) PBKG,
+--                                     (
+--                                     
+--                                        SELECT /*+USE_HASH(A, B)*/DISTINCT A.BKG_NO
+--                                                  FROM BKG_HIS_DTL A
+--                                                     , BKG_CONTAINER B
+--                                                 WHERE 1 = 1
+--                                                   AND A.BKG_NO = B.BKG_NO
+--                                                   AND A.HIS_CATE_NM = 'SPLIT'
+--                                                   AND A.CRNT_CTNT LIKE 'Split from BKG No%'
+--                                      ) DELG
+--                                      --2016-07-29 Improvement--
+                                 WHERE 1=1
+                                   #if(${bk_st} == 'F')
+                                   AND VVD_BKG.BKG_STS_CD  LIKE 'F'||'%'            --:BKG_STS(CONFIRM : 'F', ALL : '')
+                                   #end
+                                   AND VVD_BKG.BKG_NO       = DOC.BKG_NO
+                                   AND VVD_BKG.BKG_NO       = QTY.BKG_NO
+                                   AND VVD_BKG.BKG_NO       = STWG.BKG_NO(+)
+                                   AND QTY.BKG_NO       = DTL.BKG_NO(+)
+                                   AND QTY.CNTR_TPSZ_CD = DTL.CNTR_TPSZ_CD(+)
+                               ) 
+						 WHERE DEL_BKG = 'N'
+                       )      QTY, 
+                       COPY_T C
+                 WHERE 1=1
+                   AND CNTR_QTY > 0
+                   AND DECODE(QTY.RN,1,CNTR_QTY - DECODE(QTY.CNT,0,0,QTY.CNT-1)) >= C.NO(+) 
+               )              QT, 
+               MDM_CNTR_TP_SZ TP
+         WHERE QT.TP = TP.CNTR_TPSZ_CD(+) 
+       )       QT, 
+       WGT_GRP WP
+ WHERE QT.SLAN_CD         = WP.SLAN_CD(+)
+   AND QT.SKD_DIR_CD      = WP.SKD_DIR_CD(+)
+   AND QT.POL_CD          = WP.POL_CD(+)
+   AND DECODE(SUBSTR(QT.TP,2,1),'2','2','4') = WP.CNTR_SZ_CD(+)
+   AND QT.FM              = WP.FULL_MTY_CD(+)
+   AND QT.CNTR_GRS_WGT/1000 > WP.FROM_LMT_WGT(+) 
+   AND QT.CNTR_GRS_WGT/1000 <= NVL(WP.TO_LMT_WGT(+),9999999999)
+#if(${ac_cntr_flg} == 'C')
+   AND LENGTH(CNTR_NO) > 1
+#end
+ ORDER BY  
+       POD_CD, 
+       POD_CLPT_IND_SEQ,
+       MLB_CD, 
+       BKG_NO, 
+       CNTR_NO,
+       CNTR_TPSZ_CD, 
+       CNTR_WGT_GRP_CD,
+       FULL_MTY_CD, 
+       DECODE(DCGO_FLG,'Y','1',RC_FLG,'Y','2',AWK_CGO_FLG,'Y','3',BB_CGO_FLG,'Y','4')
+ 			]]></sql>
+			<params>
+				<param name="vsl_cd" type="12" value="HNBR" out="N"/>
+				<param name="skd_voy_no" type="12" value="0032" out="N"/>
+				<param name="skd_dir_cd" type="12" value="E" out="N"/>
+				<param name="yd_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

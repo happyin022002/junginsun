@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TerminalDepartureReportDBDAOMissingTDRVORSQL">
+			<desc><![CDATA[2010.11.26 박희동 최초작성
+Missing TDR Inquiry 화면 조회 Query   ]]></desc>
+			<sql><![CDATA[
+SELECT XX.RHQ_OFC_CD, XX.CRR_CD, XX.PORT_CD, XX.YD_CD, XX.YD_NM, XX.SLAN_CD, XX.SVC_TP_CD, XX.VVD, XX.AR_DT, XX.DP_DT, XX.MV_CNT, XX.BAY_PLN_FLG, XX.TDR_FLG
+FROM   (
+       SELECT ----CASE WHEN NVL(ML.DELT_FLG,'N') <> 'N' OR ML.CALL_PORT_FLG <> 'Y' THEN
+              ----         ''
+              ----     ELSE
+              ----         ML.VSKD_PORT_RHQ_CD
+              ----END AS RHQ_OFC_CD,
+
+			  --(SELECT	CASE 	WHEN 	DECODE(CONTI_CD, 'F', 'E', CONTI_CD) = 'E' AND NVL(DELT_FLG, 'N') = 'N' AND CALL_PORT_FLG = 'Y'
+              --    						THEN (SELECT OFC_CD FROM TABLE(COM_OfficeCodeMgr_PKG.COM_getOfficeCodeList_FNC('000001', 'VSK'))) -- EUROPE REGIONAL HEADQUARTERS
+              --					WHEN 	CONTI_CD  = 'M' AND NVL(DELT_FLG, 'N') = 'N' AND CALL_PORT_FLG = 'Y'
+              --    						THEN (SELECT OFC_CD FROM TABLE(COM_OfficeCodeMgr_PKG.COM_getOfficeCodeList_FNC('000002', 'VSK'))) -- AMERICA REGIONAL HEADQUARTERS
+              --					WHEN 	CONTI_CD  = 'A' AND NVL(DELT_FLG, 'N') = 'N' AND CALL_PORT_FLG = 'Y' --AND SCONTI_CD = 'AF'
+              --    						THEN (SELECT OFC_CD FROM TABLE(COM_OfficeCodeMgr_PKG.COM_getOfficeCodeList_FNC('000003', 'VSK'))) -- ASIA REGIONAL HEADQUARTERS
+        	  --			END	
+			  --	FROM	MDM_LOCATION	ML
+			  --	WHERE	ML.LOC_CD		= PS.VPS_PORT_CD
+			  --)	AS		RHQ_OFC_CD,
+
+			(	SELECT		MAX(DECODE(MO.OFC_TP_CD, 'HQ', MO.OFC_CD))	AS NAME    
+				FROM		MDM_ORGANIZATION MO
+				CONNECT BY 	NOCYCLE PRIOR MO.PRNT_OFC_CD	= MO.OFC_CD
+				START WITH 	MO.OFC_CD 						= (SELECT ML.SLS_OFC_CD FROM MDM_LOCATION ML WHERE ML.LOC_CD = PS.VPS_PORT_CD)
+			)	AS RHQ_OFC_CD,
+
+              VS.ACT_CRR_CD AS CRR_CD,
+              PS.VPS_PORT_CD AS PORT_CD,
+              PS.YD_CD,
+              MY.YD_NM,
+              PS.SLAN_CD,
+              SL.VSL_SVC_TP_CD AS SVC_TP_CD,
+              PS.VSL_CD||PS.SKD_VOY_NO||PS.SKD_DIR_CD AS VVD,
+              TO_CHAR(AA.ACT_ARR_DT,'YYYYMMDDHH24MI') AS AR_DT,
+              TO_CHAR(AA.ACT_DEP_DT,'YYYYMMDDHH24MI') AS DP_DT,
+              NVL(TH.MVS,0) AS MV_CNT,
+              DECODE(NVL((
+                SELECT 1
+                FROM   BAY_PLAN BP
+                WHERE  BP.VSL_CD    = PS.VSL_CD
+                AND    BP.VOY_NO    = PS.SKD_VOY_NO
+                AND    BP.DIR_CD    = PS.SKD_DIR_CD
+                AND    BP.PORT_CD   = PS.VPS_PORT_CD
+                AND    BP.CALL_IND  = PS.CLPT_IND_SEQ
+                AND    BP.PLAN_TYPE = 'F'
+                AND    ROWNUM       = 1
+                ),0),0,'N','Y')  AS BAY_PLN_FLG,
+              NVL2(TH.VSL_CD, 'Y', 'N') AS TDR_FLG
+       FROM   TDR_HEADER       TH,
+              VSK_VSL_PORT_SKD PS,
+              VSK_VSL_SKD      VS,
+              VSK_ACT_PORT_SKD AA,
+              MDM_LOCATION     ML,
+              MDM_YARD         MY,
+              MDM_VSL_SVC_LANE SL
+       WHERE  PS.VSL_CD       = TH.VSL_CD   (+)
+       AND    PS.SKD_VOY_NO   = TH.VOY_NO   (+)
+       AND    PS.SKD_DIR_CD   = TH.DIR_CD   (+)
+       AND    PS.VPS_PORT_CD  = TH.PORT_CD  (+)
+       AND    PS.CLPT_IND_SEQ = TH.CALL_IND (+)
+       
+       AND    PS.VSL_CD       = VS.VSL_CD
+       AND    PS.SKD_VOY_NO   = VS.SKD_VOY_NO
+       AND    PS.SKD_DIR_CD   = VS.SKD_DIR_CD
+       
+       AND    PS.VSL_CD       = AA.VSL_CD
+       AND    PS.SKD_VOY_NO   = AA.SKD_VOY_NO
+       AND    PS.SKD_DIR_CD   = AA.SKD_DIR_CD
+       AND    PS.VPS_PORT_CD  = AA.VPS_PORT_CD
+       AND    PS.CLPT_IND_SEQ = AA.CLPT_IND_SEQ
+       
+       AND    PS.VPS_PORT_CD  = ML.LOC_CD
+       
+       AND    PS.YD_CD        = MY.YD_CD
+       
+       AND    PS.SLAN_CD      = SL.VSL_SLAN_CD
+       AND    PS.VPS_PORT_CD  NOT IN ('EGSCA','PAPCA')
+       AND    PS.TURN_PORT_IND_CD IN ('Y','N')
+#if (${ex_tpr_flg} == 'Y')
+       AND    EXISTS (
+                SELECT 1
+                  FROM OPF_TML_DEP_RPT_DTL X
+                 WHERE X.VSL_CD       = PS.VSL_CD
+                   AND X.SKD_VOY_NO   = PS.SKD_VOY_NO
+                   AND X.SKD_DIR_CD   = PS.SKD_DIR_CD
+                   AND X.CLPT_CD      = PS.VPS_PORT_CD
+                   AND X.CLPT_IND_SEQ = PS.CLPT_IND_SEQ
+              )
+#end           
+       /* cf. TURN_PORT_FLG
+       - D : Direction Change
+       - F : Final Port
+       - N : First Call/Normal Port
+       - V : Voyage Change
+       - Y : Turning Port
+       */                                         
+       AND    NVL(PS.SKD_CNG_STS_CD,'N') <> 'S' -- S:Skip,I:Phase-In,O:Phase-Out,A:Adding
+
+#if (${vsl_cd} != '')
+       AND    AA.VSL_CD       = @[vsl_cd]
+       #if (${skd_voy_no} != '')
+       AND    AA.SKD_VOY_NO   = @[skd_voy_no]
+       #end
+       #if (${skd_dir_cd} != '')
+       AND    AA.SKD_DIR_CD   = @[skd_dir_cd]
+       #end 
+#else
+       AND    AA.ACT_DEP_DT  BETWEEN TO_DATE(REPLACE(@[fr_dt],'-','')||'000000','YYYYMMDDHH24MISS') 
+                             AND     TO_DATE(REPLACE(@[to_dt],'-','')||'235959','YYYYMMDDHH24MISS')
+#end
+
+#if (${loc_cd} != '')
+       AND    PS.VPS_PORT_CD = @[loc_cd]
+#end
+#if (${slan_cd} != '')
+       AND    PS.SLAN_CD = @[slan_cd]
+#end
+#if (${crr_cd} != '')
+
+AND    VS.ACT_CRR_CD IN  ( CASE WHEN @[crr_cd] = COM_ConstantMgr_PKG.COM_getCompanyCode_FNC() THEN
+                                 COM_ConstantMgr_PKG.COM_getCompanyCode_FNC()
+                            ELSE
+                                 (
+                                 SELECT VS.ACT_CRR_CD
+                                 FROM   VSK_VSL_SKD S
+                                 WHERE  VS.VSL_CD       = S.VSL_CD
+                                 AND    VS.SKD_VOY_NO   = S.SKD_VOY_NO
+                                 AND    VS.SKD_DIR_CD   = S.SKD_DIR_CD
+                                 AND    VS.ACT_CRR_CD   != COM_ConstantMgr_PKG.COM_getCompanyCode_FNC()
+                                 )
+                          END
+                         )
+
+#end
+#if (${svc_tp_cd} != 'All' && ${svc_tp_cd} != '')
+#if (${svc_tp_cd} == 'TRK')
+       AND    SL.VSL_SVC_TP_CD IN ('I', 'J', 'S') --TRUNK
+#else
+       AND    NVL(SL.VSL_SVC_TP_CD,'*') NOT IN ('I', 'J', 'S')  -- FEEDER
+#end
+#end
+       ) XX
+WHERE  1 = 1
+
+#if (${tdr_flg} == 'MSS')
+AND     (1 = 1
+		 ----AND	XX.CRR_CD  = COM_ConstantMgr_PKG.COM_getCompanyCode_FNC()                  
+		 ----AND    XX.SVC_TP_CD IN ('I', 'J', 'S')      
+		 AND    XX.MV_CNT  = 0                       
+		 AND    ((XX.BAY_PLN_FLG = 'Y' AND XX.TDR_FLG = 'N') OR XX.BAY_PLN_FLG = 'N')
+		)
+#elseif(${tdr_flg} == 'EXT')
+AND NOT (1 = 1
+		 ----AND	XX.CRR_CD  = COM_ConstantMgr_PKG.COM_getCompanyCode_FNC()                  
+		 ----AND    XX.SVC_TP_CD IN ('I', 'J', 'S')      
+		 AND    XX.MV_CNT  = 0                       
+		 AND    ((XX.BAY_PLN_FLG = 'Y' AND XX.TDR_FLG = 'N') OR XX.BAY_PLN_FLG = 'N')
+		) 
+#end
+
+#if (${rhq_ofc_cd} != '')
+AND		XX.RHQ_OFC_CD	= @[rhq_ofc_cd]
+#end
+
+
+ORDER  BY 1,2,3,4,6,7,8,9			]]></sql>
+			<params>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="fr_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="slan_cd" type="12" value="" out="N"/>
+				<param name="crr_cd" type="12" value="" out="N"/>
+				<param name="rhq_ofc_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

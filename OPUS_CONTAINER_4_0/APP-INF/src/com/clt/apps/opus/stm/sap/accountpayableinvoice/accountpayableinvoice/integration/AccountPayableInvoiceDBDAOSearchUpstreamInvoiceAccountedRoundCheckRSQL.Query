@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AccountPayableInvoiceDBDAOSearchUpstreamInvoiceAccountedRoundCheckRSQL">
+			<desc><![CDATA[Upstream module interfaced standard slip에 대한 Partially apply시 Accounted 금액에 대한 Round 금액 발생 여부 파악]]></desc>
+			<sql><![CDATA[
+SELECT  CASE WHEN ((SELECT COUNT(SID2.INV_DTRB_SEQ) FROM SAP_INV_DTL SID2 WHERE SID2.INV_SEQ = SIH.INV_SEQ AND SID2.LINE_TP_LU_CD = 'PREPAY'
+                   AND    NVL(SID2.RVS_FLG, 'N') = 'N') > 0) 
+                  AND (SELECT COUNT(DISTINCT LINE_RATE) FROM (SELECT NVL(SID1.DTRB_XCH_RT,1) AS LINE_RATE FROM SAP_INV_DTL SID1, SAP_INV_HDR SIH1 WHERE SIH1.INV_SEQ = SID1.INV_SEQ
+                                                              AND    SIH1.INV_NO = @[csr_no] AND SID1.LINE_TP_LU_CD <> 'PREPAY' AND NVL(SID1.RVS_FLG, 'N') = 'N' 
+                                                              AND    TO_NUMBER(NVL(SID1.GLO_ATTR_CTNT1, 0)) <> 0
+                                                              UNION ALL
+                                                              SELECT NVL(SIH1.INV_XCH_RT, 1) AS LINE_RATE FROM SAP_INV_DTL SID2, SAP_INV_HDR SIH1, SAP_INV_HDR SIH2 
+                                                              WHERE  SID2.INV_SEQ = SIH2.INV_SEQ AND SID2.LINE_TP_LU_CD = 'PREPAY' AND NVL(SID2.RVS_FLG, 'N') = 'N' 
+                                                              AND    SID2.PPAY_INV_SEQ = SIH1.INV_SEQ
+                                                              AND    SIH2.INV_NO = @[csr_no]
+                                                              AND    (SELECT  COUNT(SID3.INV_DTRB_SEQ) FROM SAP_INV_DTL SID3 
+                                                                      WHERE   SID2.PPAY_INV_SEQ = SID3.PPAY_INV_SEQ AND SID2.PPAY_LINE_NO = SID3.PPAY_LINE_NO AND SID2.INV_DTRB_SEQ > SID3.INV_DTRB_SEQ) = 0  
+                                                              UNION ALL
+                                                              SELECT NVL(SIH1.INV_XCH_RT, 1) AS LINE_RATE FROM SAP_INV_DTL SID2, SAP_INV_HDR SIH1, SAP_INV_HDR SIH2, SAP_INV_DTL SID5
+                                                              WHERE  SID2.INV_SEQ = SIH2.INV_SEQ AND SID2.LINE_TP_LU_CD = 'PREPAY' AND NVL(SID2.RVS_FLG, 'N') = 'N' 
+                                                              AND    SID5.INV_SEQ = SIH1.INV_SEQ
+                                                              AND    SIH2.INV_NO = @[csr_no]
+                                                              AND    (SELECT  COUNT(SID3.INV_DTRB_SEQ) FROM SAP_INV_DTL SID3 
+                                                                      WHERE   SID2.PPAY_INV_SEQ = SID3.PPAY_INV_SEQ AND SID2.PPAY_LINE_NO = SID3.PPAY_LINE_NO AND SID2.INV_DTRB_SEQ > SID3.INV_DTRB_SEQ) > 0
+                                                              AND    SID5.INV_DTRB_SEQ = (SELECT  MAX(SID4.INV_DTRB_SEQ) FROM SAP_INV_DTL SID4 WHERE SID2.PPAY_INV_SEQ = SID4.PPAY_INV_SEQ
+                                                                                          AND     SID2.PPAY_LINE_NO = SID4.PPAY_LINE_NO AND SID4.INV_DTRB_SEQ < SID2.INV_DTRB_SEQ) ) ) = 1 THEN 
+                  (SELECT  SUM(NVL(ROUND(NVL(SID.GLO_ATTR_CTNT1, 0) * NVL(SID.DTRB_XCH_RT, SIH.INV_XCH_RT), 
+                                  (SELECT  DP_PRCS_KNT FROM MDM_CURRENCY MC WHERE MC.CURR_CD = 'JPY' AND DELT_FLG = 'N' AND ROWNUM=1)), NVL(SID.GLO_ATTR_CTNT1, 0))) FROM SAP_INV_DTL SID 
+                   WHERE   SID.INV_SEQ = SIH.INV_SEQ AND SID.LINE_TP_LU_CD <> 'PREPAY' AND NVL(SID.RVS_FLG, 'N') = 'N' AND TO_NUMBER(NVL(SID.GLO_ATTR_CTNT1, 0)) <> 0) + 
+                  (SELECT  SUM(ROUND((((SELECT  SID2.DTRB_AMT FROM SAP_INV_DTL SID2
+                                        WHERE   SID.PPAY_INV_SEQ = SID2.INV_SEQ AND SID.PPAY_LINE_NO = SID2.DTRB_LINE_NO AND ROWNUM = 1) -
+                                   NVL((SELECT  ABS(SUM(SID2.DTRB_AMT)) FROM SAP_INV_DTL SID2
+                                        WHERE   SID.PPAY_INV_SEQ = SID2.PPAY_INV_SEQ AND SID.PPAY_LINE_NO = SID2.PPAY_LINE_NO AND SID.INV_DTRB_SEQ >= SID2.INV_DTRB_SEQ), 0)) +
+                                     (((SELECT  SID2.DTRB_AMT FROM SAP_INV_DTL SID2
+                                        WHERE   SID.PPAY_INV_SEQ = SID2.INV_SEQ AND SID.PPAY_LINE_NO = SID2.DTRB_LINE_NO AND ROWNUM = 1) -
+                                   NVL((SELECT  ABS(SUM(SID2.DTRB_AMT)) FROM SAP_INV_DTL SID2
+                                        WHERE   SID.PPAY_INV_SEQ = SID2.PPAY_INV_SEQ AND SID.PPAY_LINE_NO = SID2.PPAY_LINE_NO AND SID.INV_DTRB_SEQ > SID2.INV_DTRB_SEQ), 0)) -
+                                      ((SELECT  SID2.DTRB_AMT FROM SAP_INV_DTL SID2
+                                        WHERE   SID.PPAY_INV_SEQ = SID2.INV_SEQ AND SID.PPAY_LINE_NO = SID2.DTRB_LINE_NO AND ROWNUM = 1) -
+                                   NVL((SELECT  ABS(SUM(SID2.DTRB_AMT)) FROM SAP_INV_DTL SID2
+                                        WHERE   SID.PPAY_INV_SEQ = SID2.PPAY_INV_SEQ AND SID.PPAY_LINE_NO = SID2.PPAY_LINE_NO AND SID.INV_DTRB_SEQ >= SID2.INV_DTRB_SEQ), 0)))
+                                                - ABS(SID.DTRB_AMT)) 
+                                   * SIH.INV_XCH_RT, (SELECT  DP_PRCS_KNT FROM MDM_CURRENCY MC 
+                                                      WHERE   MC.CURR_CD = (SELECT  SLD.lU_CD FROM SCO_LU_HDR SLH, SCO_LU_DTL SLD
+                                                                            WHERE   SLH.LU_TP_CD = SLD.LU_TP_CD AND SLH.LU_TP_CD = 'FUNCTIONAL CURRENCY'
+                                                                            AND     SLH.LU_APPL_CD = 'SCO' AND NVL(SLD.ENBL_FLG, 'Y') = 'Y' AND NVL(SLD.LU_ST_DT, SYSDATE) >= SYSDATE 
+                                                                            AND     ROWNUM = 1) AND DELT_FLG = 'N' AND ROWNUM=1))) 
+                   FROM    SAP_INV_DTL SID WHERE SID.INV_SEQ = SIH.INV_SEQ AND SID.LINE_TP_LU_CD = 'PREPAY' AND NVL(SID.RVS_FLG, 'N') = 'N') -
+                  (SELECT  SUM(ROUND(((SELECT  SID2.DTRB_AMT FROM SAP_INV_DTL SID2
+                                       WHERE   SID.PPAY_INV_SEQ = SID2.INV_SEQ AND SID.PPAY_LINE_NO = SID2.DTRB_LINE_NO AND ROWNUM = 1) -
+                                  NVL((SELECT  ABS(SUM(SID2.DTRB_AMT)) FROM SAP_INV_DTL SID2
+                                       WHERE   SID.PPAY_INV_SEQ = SID2.PPAY_INV_SEQ AND SID.PPAY_LINE_NO = SID2.PPAY_LINE_NO AND SID.INV_DTRB_SEQ > SID2.INV_DTRB_SEQ), 0))
+                                    * (DECODE(NVL((SELECT  ABS(SUM(SID2.DTRB_AMT)) FROM SAP_INV_DTL SID2
+                                                   WHERE   SID.PPAY_INV_SEQ = SID2.PPAY_INV_SEQ AND SID.PPAY_LINE_NO = SID2.PPAY_LINE_NO AND SID.INV_DTRB_SEQ > SID2.INV_DTRB_SEQ), 0), 0,
+                                                  (SELECT NVL(SIH2.INV_XCH_RT,1) FROM SAP_INV_HDR SIH2 WHERE SIH2.INV_SEQ = SID.PPAY_INV_SEQ AND ROWNUM = 1),
+                                                  (SELECT  NVL(SIH2.INV_XCH_RT, 1) FROM SAP_INV_HDR SIH2, SAP_INV_DTL SID2 WHERE SIH2.INV_SEQ = SID2.INV_SEQ 
+                                                   AND     SID2.INV_DTRB_SEQ = (SELECT  MAX(SID3.INV_DTRB_SEQ) FROM SAP_INV_DTL SID3 WHERE SID.PPAY_INV_SEQ = SID3.PPAY_INV_SEQ
+                                                   AND     SID.PPAY_LINE_NO = SID3.PPAY_LINE_NO AND SID.INV_DTRB_SEQ > SID3.INV_DTRB_SEQ)))), 
+                                      (SELECT  DP_PRCS_KNT FROM MDM_CURRENCY MC 
+                                       WHERE   MC.CURR_CD = (SELECT  SLD.lU_CD FROM SCO_LU_HDR SLH, SCO_LU_DTL SLD
+                                                             WHERE   SLH.LU_TP_CD = SLD.LU_TP_CD AND SLH.LU_TP_CD = 'FUNCTIONAL CURRENCY'
+                                                             AND     SLH.LU_APPL_CD = 'SCO' AND NVL(SLD.ENBL_FLG, 'Y') = 'Y' AND NVL(SLD.LU_ST_DT, SYSDATE) >= SYSDATE 
+                                                             AND     ROWNUM = 1) AND DELT_FLG = 'N' AND ROWNUM=1)))
+                   FROM    SAP_INV_DTL SID WHERE SID.INV_SEQ = SIH.INV_SEQ AND SID.LINE_TP_LU_CD = 'PREPAY' AND NVL(SID.RVS_FLG, 'N') = 'N') ELSE 0 END PREPAY_ROUND_AMT
+FROM    SAP_INV_HDR SIH
+      , MDM_ORGANIZATION MO
+WHERE   SIH.OFC_CD = MO.OFC_CD
+AND     SIH.INV_NO = @[csr_no]			]]></sql>
+			<params>
+				<param name="csr_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

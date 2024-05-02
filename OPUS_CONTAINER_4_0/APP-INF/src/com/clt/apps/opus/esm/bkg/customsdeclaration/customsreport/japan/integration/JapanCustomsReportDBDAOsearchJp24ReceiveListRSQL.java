@@ -1,0 +1,178 @@
+/*=========================================================
+*Copyright(c) 2014 CyberLogitec
+*@FileName : JapanCustomsReportDBDAOsearchJp24ReceiveListRSQL.java
+*@FileTitle :
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2014.04.15
+*@LastModifier : 김상수
+*@LastVersion : 1.0
+* 2014.04.15 김상수
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.bkg.customsdeclaration.customsreport.japan.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author Sang-Soo KIM
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class JapanCustomsReportDBDAOsearchJp24ReceiveListRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+
+	Logger log =Logger.getLogger(this.getClass());
+
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+
+	/**
+	  * <pre>
+	  * searchJpcusReceiveList
+	  * </pre>
+	  */
+	public JapanCustomsReportDBDAOsearchJp24ReceiveListRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("in_pod_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("start_rcv_dt",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("jp_msg_tp_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("usr_id",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("in_vvd_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("startno",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("endno",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("end_rcv_dt",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n");
+		query.append("Path : com.clt.apps.opus.esm.bkg.customsdeclaration.customsreport.japan.integration").append("\n");
+		query.append("FileName : JapanCustomsReportDBDAOsearchJp24ReceiveListRSQL").append("\n");
+		query.append("*/").append("\n");
+	}
+
+	public String getSQL(){
+		return query.toString();
+	}
+
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT JP_MSG_TP_CD," ).append("\n");
+		query.append("       RCV_DT," ).append("\n");
+		query.append("       RCV_DT2," ).append("\n");
+		query.append("       --JP_SVC_CD," ).append("\n");
+		query.append("       RCV_KEY_DAT_CTNT," ).append("\n");
+		query.append("       SAS112," ).append("\n");
+		query.append("       BKG_NO," ).append("\n");
+		query.append("       UPD_USR_ID," ).append("\n");
+		query.append("       VSL_CD," ).append("\n");
+		query.append("       SKD_VOY_NO," ).append("\n");
+		query.append("       SKD_DIR_CD," ).append("\n");
+		query.append("       POD_CD," ).append("\n");
+		query.append("       POL_CD," ).append("\n");
+		query.append("       RN," ).append("\n");
+		query.append("       TOTAL" ).append("\n");
+		query.append("" ).append("\n");
+		query.append("  FROM" ).append("\n");
+		query.append("       (SELECT JP_MSG_TP_ID AS JP_MSG_TP_CD," ).append("\n");
+		query.append("               TO_CHAR(RCV_DT, 'YYYY-MM-DD') AS RCV_DT," ).append("\n");
+		query.append("               TO_CHAR(RCV_DT, 'HH24:MI:SS') AS RCV_DT2," ).append("\n");
+		query.append("               --NVL(JP_SVC_ID, ' ') AS JP_SVC_CD," ).append("\n");
+		query.append("               NVL(RCV_KEY_DAT_CTNT, ' ') AS RCV_KEY_DAT_CTNT," ).append("\n");
+		query.append("               DECODE(JP_BAT_NO, 1, 'Y', ' ') AS SAS112," ).append("\n");
+		query.append("               NVL(BKG_NO, ' ') AS BKG_NO," ).append("\n");
+		query.append("               NVL(UPD_USR_ID, ' ') AS UPD_USR_ID," ).append("\n");
+		query.append("               NVL(VSL_CD, ' ') AS VSL_CD," ).append("\n");
+		query.append("               NVL(SKD_VOY_NO, ' ') AS SKD_VOY_NO," ).append("\n");
+		query.append("               NVL(SKD_DIR_CD, ' ') AS SKD_DIR_CD," ).append("\n");
+		query.append("               NVL(POL_CD, ' ') AS POL_CD," ).append("\n");
+		query.append("               NVL(POD_CD, ' ') AS POD_CD," ).append("\n");
+		query.append("               ROWNUM AS RN," ).append("\n");
+		query.append("               COUNT(*) OVER() AS TOTAL" ).append("\n");
+		query.append("" ).append("\n");
+		query.append("          FROM BKG_CSTMS_ADV_JP_RCV_LOG" ).append("\n");
+		query.append("" ).append("\n");
+		query.append("         WHERE 1 = 1" ).append("\n");
+		query.append("#if (${jp_msg_tp_cd} == '')" ).append("\n");
+		query.append("           AND JP_MSG_TP_ID IN ('SAS111', 'SAS108', 'SAMR', 'SCMR', 'SATD')" ).append("\n");
+		query.append("#else" ).append("\n");
+		query.append("           AND JP_MSG_TP_ID = @[jp_msg_tp_cd]" ).append("\n");
+		query.append("#end" ).append("\n");
+		query.append("#if (${date_check} != '')" ).append("\n");
+		query.append("           AND RCV_DT BETWEEN TO_DATE(@[start_rcv_dt], 'YYYY-MM-DD HH24:MI')" ).append("\n");
+		query.append("                          AND TO_DATE(@[end_rcv_dt], 'YYYY-MM-DD HH24:MI')" ).append("\n");
+		query.append("#end" ).append("\n");
+		query.append("           AND NVL(VSL_CD, '%') LIKE NVL(SUBSTR(@[in_vvd_cd], 1, 4), '%')" ).append("\n");
+		query.append("           AND NVL(SKD_VOY_NO, '%') LIKE NVL(SUBSTR(@[in_vvd_cd], 5, 4), '%')" ).append("\n");
+		query.append("           AND NVL(SKD_DIR_CD, '%') LIKE NVL(SUBSTR(@[in_vvd_cd], 9, 1), '%')" ).append("\n");
+		query.append("           AND NVL(POL_CD, '%') LIKE NVL(@[in_pod_cd], '%')" ).append("\n");
+		query.append("           AND NVL(UPD_USR_ID, '%') LIKE NVL(@[usr_id], '%')" ).append("\n");
+		query.append("" ).append("\n");
+		query.append("         ORDER BY JP_MSG_TP_CD," ).append("\n");
+		query.append("                  RCV_DT," ).append("\n");
+		query.append("                  RCV_DT2" ).append("\n");
+		query.append("       )" ).append("\n");
+		query.append("" ).append("\n");
+		query.append(" WHERE RN BETWEEN @[startno] AND @[endno]" ).append("\n");
+
+	}
+}

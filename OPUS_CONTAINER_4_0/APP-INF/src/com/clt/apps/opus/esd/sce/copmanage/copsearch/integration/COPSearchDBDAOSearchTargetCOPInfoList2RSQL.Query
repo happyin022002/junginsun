@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="COPSearchDBDAOSearchTargetCOPInfoList2RSQL">
+			<desc><![CDATA[searchTargetCOPInfoList2]]></desc>
+			<sql><![CDATA[
+SELECT /*+ ORDERED USE_NL(MAIN MST DTL) */ main.pctl_no, main.ROUT_PLN_CD , REPLACE(main.org_nod_cd_val,'->','/') org_nod_cd_val
+     --, sce_cop_dlv_dt_cost_fnc('','',SUM(ttl_tztm_hrs),'TIME') est_dlv_tm
+     --, sce_cop_dlv_dt_cost_fnc('','',SUM(coa.estm_uc_amt),'COST') est_tot_cost
+     ,(SELECT TO_CHAR(MAX(estm_dt),'yyyy-MM-dd hh24:mi') est_dlv_tm
+         FROM (
+                SELECT LAG(estm_dt, 2) OVER (PARTITION BY a.cop_no ORDER BY a.cop_no,a.cop_dtl_seq) estm_dt
+                  FROM sce_cop_dtl A
+                 WHERE A.cop_no = @[cop_no]
+      ) ) EST_DLV_TM
+     , 0 est_tot_cost
+   	 , LENGTH(REPLACE(main.org_nod_cd_val,'->','/'))-LENGTH(REPLACE(REPLACE(main.org_nod_cd_val,'->',''),'/',''))+1 item_cnt
+	 , MAX(LENGTH(REPLACE(main.org_nod_cd_val,'->','/'))-LENGTH(REPLACE(REPLACE(main.org_nod_cd_val,'->',''),'/',''))) OVER ()+1  item_max_cnt
+	 , @[io_bnd_cd] AS io_bnd_cd
+	 , max(dtl.inlnd_rout_cmb_flg) inlnd_rout_cmb_flg
+	 , NVL(( select INLND_ROUT_TMP_FLG
+	       from prd_inlnd_rout_mst inmst
+	      where inmst.ROUT_ORG_NOD_CD  = dtl.ROUT_ORG_NOD_CD
+            and inmst.ROUT_DEST_NOD_CD = dtl.ROUT_DEST_NOD_CD
+            and inmst.ROUT_SEQ         = dtl.ROUT_SEQ
+            AND inmst.PCTL_IO_BND_CD   = dtl.pctl_io_bnd_cd ),'N') INLND_ROUT_TMP_FLG
+ FROM (																			
+       SELECT  pctl_no, ROUT_PLN_CD , SUBSTR(MAX(SYS_CONNECT_BY_PATH(ORG_NOD_CD_VAL,'/')),2) org_nod_cd_val
+         FROM (
+		        SELECT pctl_no
+                     , ROUT_PLN_CD
+                     , org_nod_cd || DECODE(nod_lnk_div_cd, 'L', '->' || intg_cd_val_dp_desc ||'->' || VNDR_LGL_ENG_NM ) || '->' || NVL(AGMT_REF_NO, '-') org_nod_cd_val
+			         , ROW_NUMBER() OVER(PARTITION BY pctl_no ORDER BY pctl_seq) grp_seq
+			         , COUNT(pctl_no) OVER(PARTITION BY pctl_no) grp_cnt 
+			         , '' cost_act_grp_seq
+     			FROM (
+                       SELECT /*+ USE_NL(A B C) */ 
+							  a.pctl_no
+                            , b.pctl_seq 
+                            , b.org_nod_cd 
+                            , b.dest_nod_cd 
+                            , b.nod_lnk_div_cd 
+                            , b.trsp_mod_cd
+                            , intg_cd_val_dp_desc 
+                            , REPLACE(VNDR_LGL_ENG_NM , '/', ' ') AS VNDR_LGL_ENG_NM
+                            , ROW_NUMBER() OVER(PARTITION BY a.pctl_no ORDER BY pctl_seq) grp_seq
+                            , COUNT(a.pctl_no) OVER(PARTITION BY a.pctl_no) grp_cnt
+							, ROUT_PLN_CD --0903 add
+                            , h.AGMT_REF_NO --0903 add
+                         FROM prd_prod_ctl_mst a 
+                            , prd_prod_ctl_rout_dtl b
+                            , TRS_AGMT_HDR h
+                         	,(
+                         	   SELECT intg_cd_val_ctnt, intg_cd_val_dp_desc
+                         	     FROM com_intg_cd_dtl
+                         	    WHERE intg_cd_id = 'CD00277'
+                         	  ) C
+                            , MDM_VENDOR  M
+                            , PRD_INLND_ROUT_MST C --0903 add
+                        WHERE a.pctl_no = b.pctl_no
+                          and b.trsp_mod_cd = c.intg_cd_val_ctnt(+)
+                          AND a.pctl_no LIKE  SUBSTR(@[pctl_no],1,16) ||'%'
+                          AND b.pctl_io_bnd_cd = @[io_bnd_cd] 
+                          AND b.N1ST_VNDR_SEQ = M.VNDR_SEQ(+)
+                          AND b.ROUT_ORG_NOD_CD = c.ROUT_ORG_NOD_CD --0903 add
+                          AND b.ROUT_DEST_NOD_CD = c.ROUT_DEST_NOD_CD --0903 add
+                          AND b.ROUT_SEQ = c.ROUT_SEQ --0903 add
+                          AND b.TRSP_AGMT_OFC_CTY_CD = h.TRSP_AGMT_OFC_CTY_CD(+)
+                          AND b.TRSP_AGMT_SEQ = h.TRSP_AGMT_SEQ(+)
+                       )
+     			WHERE  nod_lnk_div_cd = DECODE(grp_seq,grp_cnt, 'N','L')
+     		  )
+      	WHERE grp_seq = grp_cnt 
+      	      START WITH GRP_SEQ = 1    CONNECT BY PRIOR grp_seq = grp_seq - 1 AND prior pctl_no = pctl_no
+        GROUP BY pctl_no ,ROUT_PLN_CD 
+      ) main
+      , prd_prod_ctl_mst mst
+      --, coa_com_cost_para coa 
+      , prd_prod_ctl_rout_dtl dtl
+ WHERE main.pctl_no = mst.pctl_no
+   --AND dtl.pctl_no = coa.pctl_no(+)
+   AND main.pctl_no = dtl.pctl_no
+   AND DTL.pctl_io_bnd_cd = @[io_bnd_cd]
+  -- AND coa.cost_act_grp_seq(+) = dtl.cost_act_grp_seq
+ GROUP BY main.pctl_no
+     , main.ROUT_PLN_CD
+     , main.org_nod_cd_val
+	 , dtl.ROUT_ORG_NOD_CD
+   	 , dtl.ROUT_DEST_NOD_CD
+     , dtl.ROUT_SEQ
+     , DTL.pctl_io_bnd_cd			]]></sql>
+			<params>
+				<param name="cop_no" type="12" value="" out="N"/>
+				<param name="io_bnd_cd" type="12" value="" out="N"/>
+				<param name="pctl_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

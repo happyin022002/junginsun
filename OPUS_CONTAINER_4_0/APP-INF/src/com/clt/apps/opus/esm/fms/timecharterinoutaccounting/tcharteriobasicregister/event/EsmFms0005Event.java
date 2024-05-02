@@ -1,0 +1,66 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : EsmFms0005Event.java
+*@FileTitle : Customer Code Entry
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.04.16
+*@LastModifier : 윤세영
+*@LastVersion : 1.0
+* 2009.04.16 윤세영
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.fms.timecharterinoutaccounting.tcharteriobasicregister.event;
+
+import com.clt.apps.opus.esm.fms.timecharterinoutaccounting.tcharteriobasicregister.vo.SearchVendorCustomerVO;
+import com.clt.framework.support.layer.event.EventSupport;
+
+
+/**
+ * ESM_FMS_0005 에 대한 PDTO(Data Transfer Object including Parameters)<br>
+ * -  ESM_FMS_0005HTMLAction에서 작성<br>
+ * - ServiceCommand Layer로 전달하는 PDTO로 사용<br>
+ *
+ * @author Yoon Seyeong
+ * @see ESM_FMS_0005HTMLAction 참조
+ * @since J2EE 1.4
+ */
+
+public class EsmFms0005Event extends EventSupport {
+
+	private static final long serialVersionUID = 1L;
+	
+	/** Table Value Object 조회 조건 및 단건 처리  */
+	private SearchVendorCustomerVO searchvendorcustomervo = null;
+	
+	/** Table Value Object Multi Data 처리 */
+	private SearchVendorCustomerVO[] searchvendorcustomervos = null;
+
+	public EsmFms0005Event(){}
+	
+	public void setSearchVendorCustomerVO(SearchVendorCustomerVO searchvendorcustomervo){
+		this. searchvendorcustomervo = searchvendorcustomervo;
+	}
+
+	public void setSearchVendorCustomerVOS(SearchVendorCustomerVO[] searchvendorcustomervos){
+		if (searchvendorcustomervos != null) {
+			SearchVendorCustomerVO[] tmpVOs = new SearchVendorCustomerVO[searchvendorcustomervos.length];
+			System.arraycopy(searchvendorcustomervos, 0, tmpVOs, 0, tmpVOs.length);
+			this.searchvendorcustomervos = tmpVOs;
+		}
+	}
+
+	public SearchVendorCustomerVO getSearchVendorCustomerVO(){
+		return searchvendorcustomervo;
+	}
+
+	public SearchVendorCustomerVO[] getSearchVendorCustomerVOS(){
+		SearchVendorCustomerVO[] tmpVOs = null;
+		if (this.searchvendorcustomervos != null) {
+			tmpVOs = new SearchVendorCustomerVO[searchvendorcustomervos.length];
+			System.arraycopy(searchvendorcustomervos, 0, tmpVOs, 0, tmpVOs.length);
+		}
+		return tmpVOs;
+	}
+
+}

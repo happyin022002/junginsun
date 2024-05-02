@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ACMReportDBDAOSearchCSRInquiryListRSQL">
+			<desc><![CDATA[CSR Inquiry 목록을 조회한다.]]></desc>
+			<sql><![CDATA[
+SELECT AGN.AGN_CD,
+       AGN.CSR_NO,
+       AGN.AUD_NO,
+       MAX (INH.INV_DESC) AS INV_DESC,
+       AGN.COMM_STND_COST_CD,
+       SUM (AGN.IF_AMT) AS IF_AMT,
+       SUM (AGN.PAY_IF_AMT) AS PAY_IF_AMT,
+       INF.REV_VVD_CD,
+       CASE AGN.XCH_RT_APLY_LVL
+         WHEN '4' THEN (SELECT ORG.FX_CURR_RT
+                          FROM MDM_ORGANIZATION ORG
+                         WHERE ORG.OFC_CD = AGN.AGN_CD )
+                  ELSE AGN.PAY_XCH_RT
+       END AS XCH_RT,
+       AGN.CURR_CD,
+       CASE
+         WHEN MAX (IF_ERR_RSN) IS NOT NULL THEN MAX (IF_ERR_RSN)
+         WHEN MAX (RCV_ERR_RSN) IS NOT NULL THEN MAX (RCV_ERR_RSN)
+         WHEN MAX (AGN.AC_PROC_DESC) = 'Interface OK!' THEN 'Success'
+         ELSE MAX (AGN.AC_PROC_DESC)
+       END AS STATUS,
+       TO_CHAR(MAX (INH.CRE_DT), 'YYYYMMDD')  AS CRE_DT,
+       TO_CHAR(MAX (INH.IF_DT), 'YYYYMMDD')   AS IF_DT,
+       TO_CHAR(MAX (AGN.APRO_DT), 'YYYYMMDD') AS APRO_DT,
+       MAX (INH.GL_DT)       AS GL_DT,
+       MAX (INH.PAY_DT)      AS PAY_DT,
+       MAX (CSR.RQST_USR_ID)   AS CRE_USR_ID,
+       MAX (CSR.RQST_USR_NM)   AS CRE_USR_NM,
+       MAX (CSR.APRO_USR_ID)   AS APRO_USR_ID,
+       MAX (CSR.APRO_USR_NM)   AS APRO_USR_NM
+  FROM ACM_AGN_COMM AGN,
+       AP_INV_HDR INH,
+       ACM_AGN_BKG_INFO INF,
+       (SELECT H.RQST_USR_ID AS RQST_USR_ID
+             , H.RQST_USR_NM AS RQST_USR_NM
+             , R.APRO_USR_ID AS APRO_USR_ID
+             , R.APRO_USR_NM AS APRO_USR_NM
+             , D.CSR_NO      AS CSR_NO
+          FROM COM_APRO_RQST_HDR H
+             , COM_APRO_RQST_ROUT R
+             , COM_APRO_CSR_DTL D
+         WHERE 1=1
+           AND H.APRO_RQST_NO = R.APRO_RQST_NO
+           AND H.CRNT_APRO_SEQ = R.APRO_RQST_SEQ
+           AND R.APRO_RQST_NO = D.APRO_RQST_NO) CSR  
+ WHERE AGN.CSR_NO = INH.CSR_NO
+   AND INH.CSR_NO = CSR.CSR_NO
+   AND AGN.CSR_NO IS NOT NULL
+   AND AGN.BKG_NO = INF.BKG_NO
+   AND AGN.AGN_CD = @[agn_cd]
+   AND INH.SRC_CTNT = 'COMMISSION' 
+ #if (${csr_no} != '')
+   AND AGN.CSR_NO IN (${csr_no}) 
+ #end
+ #if (${rev_vvd_cd} != '')
+   AND INF.REV_VVD_CD LIKE @[rev_vvd_cd]||'%'
+ #end
+ #if (${date_div} == 'C')
+   AND INH.CRE_DT BETWEEN TO_DATE(@[date_fm], 'YYYY-MM-DD') AND TO_DATE(@[date_to], 'YYYY-MM-DD') + 0.99999
+ #elseif (${date_div} == 'A')
+   AND INH.IF_DT BETWEEN TO_DATE(@[date_fm], 'YYYY-MM-DD') AND TO_DATE(@[date_to], 'YYYY-MM-DD') + 0.99999
+ #elseif (${date_div} == 'G')
+   AND INH.GL_DT BETWEEN replace(@[date_fm],'-','') AND replace(@[date_to],'-','')
+ #end
+ #if (${sts_cd} == '1')
+   AND INH.IF_DT IS NULL
+   AND NVL (INH.IF_FLG, 'Y') <> 'E'
+ #elseif (${sts_cd} == '2')
+   AND INH.IF_DT IS NOT NULL
+   AND NVL (INH.IF_FLG, 'Y') <> 'E'
+   AND NVL (INH.RCV_ERR_FLG, 'Y') <> 'E'
+ #elseif (${sts_cd} == '3')
+   AND INH.IF_DT IS NOT NULL
+   AND NVL (INH.IF_FLG, 'Y') <> 'E'
+   AND NVL (INH.RCV_ERR_FLG, 'Y') <> 'E'
+   AND INH.PAY_DT IS NOT NULL
+ #elseif (${sts_cd} == '4') 
+   AND (NVL (INH.IF_FLG, 'Y') = 'E'
+    OR NVL (INH.RCV_ERR_FLG, 'Y') = 'E')
+ #end
+ GROUP BY AGN.AGN_CD,
+       AGN.CSR_NO,
+       AGN.AUD_NO,
+       AGN.COMM_STND_COST_CD,
+       INF.REV_VVD_CD,
+       AGN.XCH_RT_APLY_LVL,
+       AGN.PAY_XCH_RT,
+       AGN.CURR_CD
+
+UNION ALL
+-- OTHER COMMISSION --
+SELECT AGN.AGN_CD,
+       AGN.CSR_NO,
+       AGN.AUD_NO,
+       MAX (INH.INV_DESC) AS INV_DESC,
+       AGN.COMM_STND_COST_CD,
+       SUM (AGN.IF_AMT) AS IF_AMT,
+       SUM (AGN.PAY_IF_AMT) AS PAY_IF_AMT,
+       AGN.AC_VSL_CD||AGN.AC_SKD_VOY_NO||AGN.AC_SKD_DIR_CD AS REV_VVD_CD,
+       CASE AGN.XCH_RT_APLY_LVL
+         WHEN '4' THEN (SELECT ORG.FX_CURR_RT
+                          FROM MDM_ORGANIZATION ORG
+                         WHERE ORG.OFC_CD = AGN.AGN_CD )
+                  ELSE AGN.PAY_XCH_RT
+       END AS XCH_RT,
+       AGN.CURR_CD,
+       CASE
+         WHEN MAX (IF_ERR_RSN) IS NOT NULL THEN MAX (IF_ERR_RSN)
+         WHEN MAX (RCV_ERR_RSN) IS NOT NULL THEN MAX (RCV_ERR_RSN)
+         WHEN MAX (AGN.AC_PROC_DESC) = 'Interface OK!' THEN 'Success'
+         ELSE MAX (AGN.AC_PROC_DESC)
+       END AS STATUS,
+       TO_CHAR(MAX (INH.CRE_DT), 'YYYYMMDD')  AS CRE_DT,
+       TO_CHAR(MAX (INH.IF_DT), 'YYYYMMDD')   AS IF_DT,
+       TO_CHAR(MAX (AGN.APRO_DT), 'YYYYMMDD') AS APRO_DT,
+       MAX (INH.GL_DT)       AS GL_DT,
+       MAX (INH.PAY_DT)      AS PAY_DT,
+       MAX (CSR.RQST_USR_ID)   AS CRE_USR_ID,
+       MAX (CSR.RQST_USR_NM)   AS CRE_USR_NM,
+       MAX (CSR.APRO_USR_ID)   AS APRO_USR_ID,
+       MAX (CSR.APRO_USR_NM)   AS APRO_USR_NM
+  FROM ACM_AGN_OTR_COMM AGN,
+       AP_INV_HDR INH,
+       (SELECT H.RQST_USR_ID AS RQST_USR_ID
+             , H.RQST_USR_NM AS RQST_USR_NM
+             , R.APRO_USR_ID AS APRO_USR_ID
+             , R.APRO_USR_NM AS APRO_USR_NM
+             , D.CSR_NO      AS CSR_NO
+          FROM COM_APRO_RQST_HDR H
+             , COM_APRO_RQST_ROUT R
+             , COM_APRO_CSR_DTL D
+         WHERE 1=1
+           AND H.APRO_RQST_NO = R.APRO_RQST_NO
+           AND H.CRNT_APRO_SEQ = R.APRO_RQST_SEQ
+           AND R.APRO_RQST_NO = D.APRO_RQST_NO) CSR  
+ WHERE AGN.CSR_NO = INH.CSR_NO
+   AND INH.CSR_NO = CSR.CSR_NO
+   AND AGN.CSR_NO IS NOT NULL
+   AND AGN.AGN_CD = @[agn_cd]
+   AND INH.SRC_CTNT = 'COMMISSION' 
+ #if (${csr_no} != '')
+   AND AGN.CSR_NO IN (${csr_no}) 
+ #end
+ #if (${rev_vvd_cd} != '')
+   AND AGN.AC_VSL_CD||AGN.AC_SKD_VOY_NO||AGN.AC_SKD_DIR_CD LIKE @[rev_vvd_cd]||'%'
+ #end
+ #if (${date_div} == 'C')
+   AND INH.CRE_DT BETWEEN TO_DATE(@[date_fm], 'YYYY-MM-DD') AND TO_DATE(@[date_to], 'YYYY-MM-DD') + 0.99999
+ #elseif (${date_div} == 'A')
+   AND INH.IF_DT BETWEEN TO_DATE(@[date_fm], 'YYYY-MM-DD') AND TO_DATE(@[date_to], 'YYYY-MM-DD') + 0.99999
+ #elseif (${date_div} == 'G')
+   AND INH.GL_DT BETWEEN replace(@[date_fm],'-','') AND replace(@[date_to],'-','')
+ #end
+ #if (${sts_cd} == '1')
+   AND INH.IF_DT IS NULL
+   AND NVL (INH.IF_FLG, 'Y') <> 'E'
+ #elseif (${sts_cd} == '2')
+   AND INH.IF_DT IS NOT NULL
+   AND NVL (INH.IF_FLG, 'Y') <> 'E'
+   AND NVL (INH.RCV_ERR_FLG, 'Y') <> 'E'
+ #elseif (${sts_cd} == '3')
+   AND INH.IF_DT IS NOT NULL
+   AND NVL (INH.IF_FLG, 'Y') <> 'E'
+   AND NVL (INH.RCV_ERR_FLG, 'Y') <> 'E'
+   AND INH.PAY_DT IS NOT NULL
+ #elseif (${sts_cd} == '4') 
+   AND (NVL (INH.IF_FLG, 'Y') = 'E'
+    OR NVL (INH.RCV_ERR_FLG, 'Y') = 'E')
+ #end
+ GROUP BY AGN.AGN_CD,
+       AGN.CSR_NO,
+       AGN.AUD_NO,
+       AGN.COMM_STND_COST_CD,
+       AGN.AC_VSL_CD||AGN.AC_SKD_VOY_NO||AGN.AC_SKD_DIR_CD,
+       AGN.XCH_RT_APLY_LVL,
+       AGN.PAY_XCH_RT,
+       AGN.CURR_CD
+ ORDER BY AGN_CD,
+       CSR_NO,
+       AUD_NO,
+       COMM_STND_COST_CD,
+       REV_VVD_CD			]]></sql>
+			<params>
+				<param name="agn_cd" type="12" value="" out="N"/>
+				<param name="rev_vvd_cd" type="12" value="" out="N"/>
+				<param name="date_fm" type="12" value="" out="N"/>
+				<param name="date_to" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

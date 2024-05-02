@@ -1,0 +1,76 @@
+/*=========================================================
+*Copyright(c) 2010 CyberLogitec
+*@FileName : FnsJoo0079Event.java
+*@FileTitle : Authority Office Creation
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2010.01.15
+*@LastModifier : 장강철
+*@LastVersion : 1.0
+* 2010.01.15 장강철
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.fns.joo.jointoperationagreementsettlement.renewalconsultation.event;
+
+import com.clt.apps.opus.fns.joo.jointoperationagreementsettlement.renewalconsultation.vo.ConsultationConditionVO;
+import com.clt.apps.opus.fns.joo.jointoperationagreementsettlement.renewalconsultation.vo.InvoiceVO;
+import com.clt.framework.support.layer.event.EventSupport;
+
+
+/**
+ * FNS_JOO_0106 에 대한 PDTO(Data Transfer Object including Parameters)<br>
+ * -  FNS_JOO_0106HTMLAction에서 작성<br>
+ * - ServiceCommand Layer로 전달하는 PDTO로 사용<br>
+ *
+ * @author jang kang cheol
+ * @see FNS_JOO_0106HTMLAction 참조
+ * @since J2EE 1.6
+ */
+
+public class FnsJoo0106Event extends EventSupport {
+
+	private static final long serialVersionUID = 1L;
+	
+	/** Table Value Object 조회 조건 및 단건 처리  */
+	private ConsultationConditionVO consultationConditionVO = null;
+	
+	private InvoiceVO invoiceVO = null;
+	
+	/** Table Value Object Multi Data 처리 */
+	private InvoiceVO[] invoiceVOs = null;	
+
+	public FnsJoo0106Event(){}
+	
+	public void setConsultationConditionVO(ConsultationConditionVO consultationConditionVO){
+		this.consultationConditionVO = consultationConditionVO;
+	}
+	
+	public void setInvoiceVO(InvoiceVO invoiceVO){
+		this.invoiceVO = invoiceVO;
+	}
+
+	public void setInvoiceVOS(InvoiceVO[] invoiceVOs){
+		if (invoiceVOs != null) {
+			InvoiceVO[] tmpVOs = new InvoiceVO[invoiceVOs.length];
+			System.arraycopy(invoiceVOs, 0, tmpVOs, 0, tmpVOs.length);
+			this.invoiceVOs = tmpVOs;
+		}
+	}
+
+	public ConsultationConditionVO getConsultationConditionVO(){
+		return consultationConditionVO;
+	}
+
+	public InvoiceVO getInvoiceVO(){
+		return invoiceVO;
+	}
+	
+	public InvoiceVO[] getInvoiceVOS(){
+		InvoiceVO[] tmpVOs = null;
+		if (this.invoiceVOs != null) {
+			tmpVOs = new InvoiceVO[invoiceVOs.length];
+			System.arraycopy(invoiceVOs, 0, tmpVOs, 0, tmpVOs.length);
+		}
+		return tmpVOs;
+	}
+}

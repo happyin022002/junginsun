@@ -1,0 +1,120 @@
+/*=========================================================
+*Copyright(c) 2015 CyberLogitec
+*@FileName : CommonDBDAOSearchBkgSokeupStatusRSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2015.11.10
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2015.11.10 
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.coa.common.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class CommonDBDAOSearchBkgSokeupStatusRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * SearchBkgSokeupStatus
+	  * [SJH.20140818]
+	  * </pre>
+	  */
+	public CommonDBDAOSearchBkgSokeupStatusRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("f_to_date",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("f_fm_date",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.clt.apps.opus.esm.coa.common.integration").append("\n"); 
+		query.append("FileName : CommonDBDAOSearchBkgSokeupStatusRSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT DISTINCT A.BKG_NO, A.COA_BAT_RMK, A.CRE_USR_ID , TO_CHAR(B.COST_BAT_DT, 'YYYY/MM/DD HH24:MI:SS') FINISH_TIME, '' COA_BAT_CD, '' COA_BAT_SEQ, 'S' STATUS" ).append("\n"); 
+		query.append("FROM COA_BKG_RTRO_HIS A, COA_BKG_COST_CALC_HIS B" ).append("\n"); 
+		query.append("WHERE 1=1" ).append("\n"); 
+		query.append("#if (${f_status} != '' && ${f_status} != 'S') " ).append("\n"); 
+		query.append("AND 1=0" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("#if (${f_fm_date} != '' && ${f_to_date} != '') " ).append("\n"); 
+		query.append("AND TO_CHAR(A.CRE_DT, 'YYYY-MM-DD') BETWEEN @[f_fm_date] AND @[f_to_date]" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("AND A.BKG_NO = B.BKG_NO(+)" ).append("\n"); 
+		query.append("AND TO_CHAR(A.CRE_DT,'YYYYMMDD') = TO_CHAR(B.COST_BAT_DT,'YYYYMMDD')" ).append("\n"); 
+		query.append("AND A.COA_BAT_RMK = B.COST_BAT_RMK" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("UNION ALL" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("SELECT DISTINCT A.BKG_NO, A.COA_BAT_RMK, A.CRE_USR_ID, '' FINISH_TIME, C.COA_BAT_CD , TO_CHAR(C.COA_BAT_SEQ) COA_BAT_SEQ," ).append("\n"); 
+		query.append("       CASE WHEN C.COA_BAT_CD ='P' THEN 'P'" ).append("\n"); 
+		query.append("            WHEN C.COA_BAT_CD = 'E' AND C.COA_BAT_SEQ = '2' THEN 'I'" ).append("\n"); 
+		query.append("            WHEN C.COA_BAT_CD = 'E' AND C.COA_BAT_SEQ >= '3' THEN 'F'" ).append("\n"); 
+		query.append("       END STATUS" ).append("\n"); 
+		query.append("FROM COA_BKG_RTRO_HIS A, COA_BKG_COST_CALC C " ).append("\n"); 
+		query.append("WHERE 1=1" ).append("\n"); 
+		query.append("#if (${f_status} == 'S') " ).append("\n"); 
+		query.append("AND 1=0" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("#if (${f_fm_date} != '' && ${f_to_date} != '') " ).append("\n"); 
+		query.append("AND TO_CHAR(A.CRE_DT, 'YYYY-MM-DD') BETWEEN @[f_fm_date] AND @[f_to_date]" ).append("\n"); 
+		query.append("AND A.COA_BAT_RMK = C.COA_BAT_RMK" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("AND A.BKG_NO = C.BKG_NO(+)" ).append("\n"); 
+		query.append("AND TO_CHAR(A.CRE_DT,'YYYYMMDD') = TO_CHAR(C.COA_BAT_DT,'YYYYMMDD')" ).append("\n"); 
+		query.append("#if (${f_status} == 'I')" ).append("\n"); 
+		query.append("AND C.COA_BAT_CD = 'E'" ).append("\n"); 
+		query.append("AND C.COA_BAT_SEQ = '2'" ).append("\n"); 
+		query.append("#elseif (${f_status} == 'P')" ).append("\n"); 
+		query.append("AND C.COA_BAT_CD ='P'" ).append("\n"); 
+		query.append("#elseif (${f_status} == 'F')" ).append("\n"); 
+		query.append("AND C.COA_BAT_CD = 'E'" ).append("\n"); 
+		query.append("AND C.COA_BAT_SEQ >= '3'" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+
+	}
+}

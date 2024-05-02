@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="Eur24ManifestDownloadDBDAOSearchEU24ENSPOFEbyVVDRSQL">
+			<desc><![CDATA[Eur24ManifestDownloadDBDAOSearchEU24ENSPOFEbyVVDRSQL]]></desc>
+			<sql><![CDATA[
+SELECT 
+  SKD.EU_1ST_PORT_YD_CD AS SEARCH_EU_1ST_PORT_YD_CD
+, DECODE(SKD.VSL_CD, NULL, NULL, NVL( ENS.CSTMS_YD_CD,SKD.EU_1ST_PORT_YD_CD))   AS EU_1ST_PORT_YD_CD
+, DECODE(SKD.VSL_CD, NULL, NULL, NVL( ENS.CLPT_IND_SEQ,SKD.CLPT_IND_SEQ))       AS EU_1ST_PORT_CLPT_SEQ
+, DECODE(ENS.CSTMS_YD_CD, SKD.EU_1ST_PORT_YD_CD, SKD.EU_1ST_PORT_YD_CD
+                        , NULL, SKD.EU_1ST_PORT_YD_CD                      
+                        , ENS.CSTMS_YD_CD ||'('|| SKD.EU_1ST_PORT_YD_CD ||')')  AS EU_1ST_PORT_NAME
+, SKD.RN
+, ENS.RN
+
+#if(${p_bl_no} != '')
+,( SELECT MVMT_REF_NO FROM BKG_CSTMS_EUR_BL WHERE VSL_CD = ENS.VSL_CD AND  SKD_VOY_NO = ENS.SKD_VOY_NO AND SKD_DIR_CD = ENS.SKD_DIR_CD AND CSTMS_YD_CD = ENS.CSTMS_YD_CD AND BL_NO = @[p_bl_no]) AS EDI_MRN
+#end
+
+FROM (
+SELECT SKD.* 
+     , ROW_NUMBER () OVER ( ORDER BY CLPT_SEQ) RN
+  FROM (SELECT A.VSL_CD
+             , A.SKD_VOY_NO
+             , A.SKD_DIR_CD
+             , SLAN_CD
+             , A.VPS_PORT_CD AS EU_1ST_PORT
+             , A.VPS_PORT_CD
+             , A.EU_1ST_PORT_YD_CD
+             , A.CLPT_SEQ
+             , A.CLPT_IND_SEQ
+             , CASE WHEN LAG( EU ) OVER (PARTITION BY A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD
+                                         ORDER BY A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.CLPT_SEQ ) IS NULL
+                     AND EU IS NOT NULL
+                     AND CLPT_SEQ >1 
+                    THEN 'EU1ST'
+                END EU_FLAG
+          FROM (SELECT A.VSL_CD 
+                     , A.SKD_VOY_NO
+                     , A.SKD_DIR_CD
+                     , SLAN_CD 
+                     , A.VPS_PORT_CD 
+                     , A.YD_CD          AS EU_1ST_PORT_YD_CD 
+                     , ROW_NUMBER() OVER (PARTITION BY A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD
+                                          ORDER BY A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.CLPT_SEQ ) AS CLPT_SEQ
+                     , A.CLPT_IND_SEQ
+                     , B.ATTR_CTNT1 EU
+                 FROM VSK_VSL_PORT_SKD A
+                    , BKG_CSTMS_CD_CONV_CTNT B
+                WHERE 1=1
+                  AND A.VSL_CD = SUBSTR(@[p_vvd_cd], 1, 4)
+                  AND A.SKD_VOY_NO = SUBSTR(@[p_vvd_cd], 5, 4)
+                  AND A.SKD_DIR_CD = SUBSTR(@[p_vvd_cd], 9, 1)
+                  AND NVL(SKD_CNG_STS_CD, 'X') <> 'S'
+                  AND B.CSTMS_DIV_ID(+)='EU_MEMBER_CNT'
+                  AND B.CNT_CD(+) = 'EU'
+                  AND SUBSTR(A.VPS_PORT_CD, 1, 2) = B.ATTR_CTNT1(+) ) A ) SKD
+         WHERE SKD.EU_FLAG IS NOT NULL
+) SKD
+FULL OUTER JOIN 
+(
+SELECT A.*
+     , ROW_NUMBER() OVER ( ORDER BY A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.CLPT_SEQ ) RN
+ FROM (SELECT DISTINCT A.VSL_CD
+            , A.SKD_VOY_NO
+            , A.SKD_DIR_CD
+            , A.CSTMS_PORT_CD 
+            , A.CSTMS_YD_CD 
+            , B.CLPT_SEQ
+            , A.CSTMS_CLPT_IND_SEQ AS CLPT_IND_SEQ
+         FROM BKG_CSTMS_EUR_BL A 
+            , VSK_VSL_PORT_SKD B
+        WHERE 1=1
+          AND A.VSL_CD= B.VSL_CD(+) 
+          AND A.SKD_VOY_NO = B.SKD_VOY_NO(+)
+          AND A.SKD_DIR_CD = B.SKD_DIR_CD(+)
+          AND A.CSTMS_PORT_CD = B.VPS_PORT_CD(+) 
+          AND A.CSTMS_YD_CD = B.YD_CD(+)
+          AND A.CSTMS_CLPT_IND_SEQ = B.CLPT_IND_SEQ(+)
+          AND B.CLPT_IND_SEQ(+) = 1
+          AND A.VSL_CD = SUBSTR(@[p_vvd_cd], 1, 4)
+          AND A.SKD_VOY_NO = SUBSTR(@[p_vvd_cd], 5, 4)
+          AND A.SKD_DIR_CD = SUBSTR(@[p_vvd_cd], 9, 1) 
+      ) A
+WHERE 1=1
+      AND CLPT_IND_SEQ IS NOT NULL -- 현재 Double Pofe를 방지하기 위해서 임시로 들어간 로직 후에 삭제 예정
+) ENS  -- ENS 내역
+      
+ON (SKD.VSL_CD = ENS.VSL_CD
+    AND SKD.SKD_VOY_NO = ENS.SKD_VOY_NO
+    AND SKD.SKD_DIR_CD = ENS.SKD_DIR_CD
+    AND SKD.RN = ENS.RN
+   )			]]></sql>
+			<params>
+				<param name="p_bl_no" type="12" value=" " out="N"/>
+				<param name="p_vvd_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

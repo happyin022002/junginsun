@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ProductCatalogCreateDBDAOCheckQtyReplanRSQL">
+			<desc><![CDATA[CheckQtyReplan]]></desc>
+			<sql><![CDATA[
+SELECT 'REJECT' RESULT
+FROM (
+    SELECT NVL(@[flex_hgt_flg], BKGM.FLEX_HGT_FLG) FLEX_HGT_FLG
+         , DECODE(NVL(@[flex_hgt_flg], BKGM.FLEX_HGT_FLG), 'Y', GREATEST(TQTY.CNTR_TPSZ_CD, NVL(CMAP.PROV_CNTR_TPSZ_CD, ' ')), TQTY.CNTR_TPSZ_CD) GRP_CNTR_TPSZ_CD
+         , TQTY.CNTR_TPSZ_CD
+         , CMAP.PROV_CNTR_TPSZ_CD
+         , TQTY.CNTR_ALL_FLG 
+         , TQTY.CNTR_VOL_QTY
+         , TQTY.OP_CNTR_QTY
+         , CEIL(TQTY.OP_CNTR_QTY) CEIL_OP_CNTR_QTY
+    FROM BKG_BOOKING BKGM
+       , (
+            SELECT @[bkg_no] BKG_NO
+                 , NVL(SQTY.CNTR_TPSZ_CD, BQTY.CNTR_TPSZ_CD) CNTR_TPSZ_CD
+                 , SQTY.CNTR_VOL_QTY
+                 , SQTY.CNTR_ALL_FLG
+                 , BQTY.OP_CNTR_QTY
+            FROM (
+            SELECT SHDR.CNTR_TPSZ_CD
+                 , SUM(DECODE(BCNT.CNTR_NO, NULL, 1, BCNT.CNTR_VOL_QTY)) AS CNTR_VOL_QTY
+                 , MIN(DECODE(BCNT.CNTR_NO, NULL, 0, 1)) AS CNTR_ALL_FLG
+            FROM SCE_COP_HDR SHDR
+               , BKG_CONTAINER BCNT
+               , (SELECT count(1) CNTR_CNFM FROM BKG_DOC_PROC_SKD
+                     WHERE BKG_NO = @[bkg_no]
+                       AND BKG_DOC_PROC_TP_CD = 'CNTCFM'
+                       AND DOC_PERF_DELT_FLG = 'N'
+                       AND ROWNUM = 1) CNFM
+            WHERE SHDR.BKG_NO = @[bkg_no]
+            AND SHDR.COP_STS_CD <> 'X'
+            AND BCNT.BKG_NO(+) = SHDR.BKG_NO
+            AND BCNT.CNTR_NO(+) = SHDR.CNTR_NO
+--            AND EXISTS (SELECT 1
+--                         FROM SCE_PLN_SO_LIST
+--                        WHERE COP_NO = SHDR.COP_NO
+--                         AND TRSP_SO_STS_CD IN ('C','R','I','E','X', DECODE(BCNT.CNTR_NO, NULL, 'NOT MATCH', 'P'))
+--                         AND ROWNUM = 1 )
+            AND (( CNFM.CNTR_CNFM = 0
+                  AND EXISTS (SELECT 1
+                         FROM SCE_PLN_SO_LIST
+                        WHERE COP_NO = SHDR.COP_NO
+                         AND TRSP_SO_STS_CD IN ('C','R','I','E','X', DECODE(BCNT.CNTR_NO, NULL, 'NOT MATCH', 'P'))
+                         AND ROWNUM = 1 )
+                 )
+                 OR
+                 ( CNFM.CNTR_CNFM = 1
+                  AND (BCNT.CNTR_NO <> 'COMU0000000'
+                      OR EXISTS (SELECT 1
+                                   FROM SCE_PLN_SO_LIST
+                                  WHERE COP_NO = SHDR.COP_NO
+                                    AND TRSP_SO_STS_CD IN ('C','R','I','E','X', DECODE(BCNT.CNTR_NO, NULL, 'NOT MATCH', 'P'))
+                                    AND ROWNUM = 1 )
+                      )
+                ))
+            GROUP BY SHDR.BKG_NO
+                   , SHDR.CNTR_TPSZ_CD
+            ) SQTY
+            FULL OUTER JOIN (
+            SELECT BKG_GET_TOKEN_FNC(COLUMN_VALUE, 1, '@') CNTR_TPSZ_CD 
+              , TO_NUMBER(BKG_GET_TOKEN_FNC(COLUMN_VALUE, 2, '@')) OP_CNTR_QTY
+            FROM TABLE(SELECT BKG_SPLIT_FNC(@[cntr_tpsz_qty], ',') CNTR_TPSZ_QTY_TBL_STR FROM DUAL )
+            WHERE TO_NUMBER(BKG_GET_TOKEN_FNC(COLUMN_VALUE, 2, '@')) > 0
+            ) BQTY
+            ON (  SQTY.CNTR_TPSZ_CD = BQTY.CNTR_TPSZ_CD )
+         ) TQTY
+       , SCE_COP_CNTR_REPO_RULE CMAP
+    WHERE BKGM.BKG_NO = @[bkg_no]
+      AND TQTY.BKG_NO = BKGM.BKG_NO
+      AND CMAP.CNTR_TPSZ_CD(+) = TQTY.CNTR_TPSZ_CD
+-- Parameter의 Bkg Qty가 변경되지 않았으면 Validation 하지 않는다 (김인수 수석, 전성진 수석 요청에 의해 처리) 20101207
+      AND 1 = NVL((SELECT DISTINCT(1)
+                     FROM (
+                           SELECT CNTR_TPSZ_CD, OP_CNTR_QTY, 0 PARAM_CNTR_QTY
+                             FROM BKG_QUANTITY
+                            WHERE BKG_NO = @[bkg_no]
+                           UNION ALL
+                           SELECT BKG_GET_TOKEN_FNC(COLUMN_VALUE, 1, '@') CNTR_TPSZ_CD
+                                , 0 AS OP_CNTR_QTY
+                                , TO_NUMBER(BKG_GET_TOKEN_FNC(COLUMN_VALUE, 2, '@')) PARAM_CNTR_QTY
+                             FROM TABLE(SELECT BKG_SPLIT_FNC(@[cntr_tpsz_qty], ',') CNTR_TPSZ_QTY_TBL_STR FROM DUAL )
+                          )
+                   GROUP BY CNTR_TPSZ_CD
+                   HAVING SUM(OP_CNTR_QTY) <> SUM(PARAM_CNTR_QTY)
+                   ) 
+                 ,0)
+-- Parameter의 Bkg Qty가 변경되지 않았으면 Validation 하지 않는다 - 끝
+-- TRO 및 SO가 하나도 없을 경우에는 검사하지 않고, CONTAINER Confirm이 있을 경우에는 TRO가 없더라도 검사한다.
+      AND 1 = CASE
+              WHEN (SELECT count(1) FROM BKG_DOC_PROC_SKD
+                     WHERE BKG_NO = @[bkg_no]
+                       AND BKG_DOC_PROC_TP_CD = 'CNTCFM'
+                       AND DOC_PERF_DELT_FLG = 'N'
+                       AND ROWNUM = 1 ) = 1 THEN 1-- CONTAINER CONFIRM 상태이면 검사
+              WHEN (SELECT COUNT(1) FROM SCE_COP_HDR
+                     WHERE BKG_NO = @[bkg_no]
+                       AND COP_STS_CD <> 'X'
+                       AND (IB_TRO_FLG = 'Y' OR OB_TRO_FLG = 'Y')
+                       AND ROWNUM = 1 ) = 1 THEN 1-- TRO가 존재하면 검사 (TRO가 존재할 시 QTY에 대한 규모는 상위 FULL OUTER JOIN에 사용되는 쿼리에서 검증)
+              WHEN (SELECT COUNT(1)
+                     FROM TRS_TRSP_SVC_ORD
+                    WHERE BKG_NO = @[bkg_no]
+                      AND TRSP_SO_TP_CD <> 'S'
+                      AND NVL(RPLN_UMCH_FLG,'N') <> 'Y'
+                      AND NVL(TRSP_FRST_FLG,'N') <> 'Y'
+                      AND NVL(DELT_FLG,'N') <> 'Y'
+                      --BKG에서 REPLAN시 UNMATCH 건은 제외하고 생성하게 처리 20100409
+            	      AND NVL(RPLN_UMCH_FLG,'N') <> 'Y'
+                      AND ROWNUM = 1 ) = 1 THEN 1 -- SO가 존재하면 검사 (get replan pattern의 so_knt와 동일)
+              WHEN (SELECT COUNT(1)
+                      FROM TRS_TRSP_RAIL_BIL_ORD A
+                     WHERE A.BKG_NO = @[bkg_no]
+            	       AND NVL(A.TRSP_FRST_FLG,'N') <> 'Y'
+                       AND NVL(A.DELT_FLG,'N') <> 'Y'
+                       AND ROWNUM = 1 ) = 1 THEN 1 -- SO가 존재하면 검사 (get replan pattern의 so_knt와 동일)
+              ELSE 0 END
+     ) SUBQ
+GROUP BY GRP_CNTR_TPSZ_CD
+HAVING NVL(SUM(CNTR_VOL_QTY), 0) > NVL(SUM(CEIL_OP_CNTR_QTY),0)			]]></sql>
+			<params>
+				<param name="flex_hgt_flg" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="cntr_tpsz_qty" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

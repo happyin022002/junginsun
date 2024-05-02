@@ -1,0 +1,330 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="Edi315SendDBDAOSearchTransInfoRSQL">
+			<desc><![CDATA[edi 315 trans info]]></desc>
+			<sql><![CDATA[
+#if (${trans_tp_cd} == 'TRNKPC' || ${trans_tp_cd} == 'TRNKMC' || ${trans_tp_cd} == 'TRNKOC')
+/*TRNKPC, TRNKMC, TRNKOC*/
+SELECT @[trans_tp_cd]
+     , MAX(ACTIVITY_IND)  AS ACTIVITY_IND
+     , MAX(TRANS_MODE) AS TRANS_MODE
+     , MAX(DECODE(VSL_CD,'','',VSL_TP)) AS VSL_TP
+     , MIN(OB_CSSM_VOY_NO) AS OB_CSSM_VOY_NO
+     , MAX(VSL_CD) AS VSL_CD
+     , MAX(VSL_VOY_NO) AS VSL_VOY_NO
+     , MAX(VSL_DIR_CD) AS VSL_DIR_CD
+     , MAX(VSL_LLOYD_CD) AS VSL_LLOYD_CD
+     , MAX(VSL_NM) AS VSL_NM
+     , MAX(VSL_CNT_CD) AS VSL_CNT_CD
+     , MAX(VSL_SEQ) AS VSL_SEQ
+     , MAX(POL_YD_CD) AS POL_YD_CD
+     , MAX(POD_YD_CD) AS POD_YD_CD
+  FROM(SELECT @[trans_tp_cd]
+             ,SCD.COP_DTL_SEQ SEQ
+             , CASE WHEN (
+                    SELECT 'Y'
+                      FROM SCE_COP_DTL A
+                         , SCE_COP_HDR B
+                         , BKG_VVD BV
+                     WHERE A.COP_NO =  @[cop_no]
+                       AND A.COP_NO = B.COP_NO
+                       AND B.BKG_NO = BV.BKG_NO
+                       AND DECODE(@[edi_sts_cd], 'VE',SUBSTR(A.STND_EDI_STS_CD, 1, 1), A.STND_EDI_STS_CD)  
+                         = DECODE(@[edi_sts_cd], 'VE',SUBSTR(@[edi_sts_cd],1,1), @[edi_sts_cd])  -- 'VE' EVENT 처리
+                       AND SUBSTR(A.NOD_CD, 1, 5) LIKE SUBSTR(@[event_yard_cd], 1, 5) /*PARAMETER    eventYard(Edi315SendVO)*/
+                    #if (${trans_tp_cd} == 'TRNKPC')
+               			AND BV.VSL_PRE_PST_CD = 'S'/*TRNKPC 'S' TRNKMC 'T' TRNKPC 'U' 가변 조건*/
+	           		#elseif(${trans_tp_cd} == 'TRNKMC')
+               			AND BV.VSL_PRE_PST_CD = 'T'/*TRNKPC 'S' TRNKMC 'T' TRNKPC 'U' 가변 조건*/
+           			#elseif(${trans_tp_cd} == 'TRNKOC')
+               			AND BV.VSL_PRE_PST_CD = 'U'/*TRNKPC 'S' TRNKMC 'T' TRNKPC 'U' 가변 조건*/
+           			#end
+                       AND A.VSL_CD = BV.VSL_CD
+                       AND A.SKD_VOY_NO = BV.SKD_VOY_NO
+                       AND A.SKD_DIR_CD = BV.SKD_DIR_CD
+                       AND A.COP_DTL_SEQ = SCD.COP_DTL_SEQ) IS NULL THEN 'N' ELSE 'Y' END ACTIVITY_IND -- 0715 로직 변경
+             , DECODE(SUBSTR(SCD.ACT_CD, 3,1),'W','F',SUBSTR(SCD.ACT_CD, 3,1)) AS TRANS_MODE
+             , DECODE(VSL_SVC_TP_CD, NULL, 'F', 'O', 'F', 'M') AS VSL_TP
+             , NVL(OB_CSSM_VOY_NO, IB_CSSM_VOY_NO) AS OB_CSSM_VOY_NO
+             , BV.VSL_CD AS VSL_CD
+             , BV.SKD_VOY_NO AS VSL_VOY_NO
+             , BV.SKD_DIR_CD AS VSL_DIR_CD
+             , MVC.LLOYD_NO AS VSL_LLOYD_CD
+             , MVC.VSL_ENG_NM AS VSL_NM
+             , MVC.VSL_RGST_CNT_CD AS VSL_CNT_CD
+             , VSL_SEQ
+             , BV.POL_YD_CD
+             , BV.POD_YD_CD
+          FROM SCE_COP_HDR SCH
+             , SCE_COP_DTL SCD
+             , MDM_VSL_CNTR MVC
+             , BKG_VVD BV
+             , VSK_VSL_PORT_SKD SKD
+             , MDM_VSL_SVC_LANE MV
+         WHERE SCH.BKG_NO = @[bkg_no]
+           AND SCH.COP_STS_CD IN ('C', 'T', 'F')
+           AND SCH.COP_NO = SCD.COP_NO
+           AND SCD.COP_NO = @[cop_no]
+           AND SCD.VSL_CD = MVC.VSL_CD(+)
+           AND SCH.BKG_NO = BV.BKG_NO
+           AND SCD.VSL_CD IS NOT NULL
+           AND SKD.VSL_CD = BV.VSL_CD
+           AND SKD.SKD_VOY_NO = BV.SKD_VOY_NO
+           AND SKD.SKD_DIR_CD = BV.SKD_DIR_CD
+           AND SKD.VPS_PORT_CD = SCD.VPS_PORT_CD
+           --AND OB_CSSM_VOY_NO IS NOT NULL
+           AND SKD.CLPT_IND_SEQ = SCD.CLPT_IND_SEQ
+           AND SCH.BKG_NO = BV.BKG_NO
+           AND BV.SLAN_CD = MV.VSL_SLAN_CD(+)
+		#if (${trans_tp_cd} == 'TRNKPC')
+           AND SCD.VSL_CD(+) = BV.VSL_CD
+           AND SCD.SKD_VOY_NO(+) = BV.SKD_VOY_NO
+           AND SCD.SKD_DIR_CD(+) = BV.SKD_DIR_CD
+           AND BV.VSL_PRE_PST_CD = 'S'
+           AND SCD.VSL_CD || SCD.SKD_VOY_NO || SCD.SKD_DIR_CD = @[vvd]    /*Edi315SendDBDAOSearchDynamicTransInfoRSQL 에서 VVD*/
+           AND SCD.VPS_PORT_CD = SKD.VPS_PORT_CD
+        #elseif(${trans_tp_cd} == 'TRNKMC')
+           AND SCD.VSL_CD(+) = BV.VSL_CD
+           AND SCD.SKD_VOY_NO(+) = BV.SKD_VOY_NO
+           AND SCD.SKD_DIR_CD(+) = BV.SKD_DIR_CD
+           AND BV.VSL_PRE_PST_CD = 'T'
+        #elseif(${trans_tp_cd} == 'TRNKOC')
+           AND SCD.VSL_CD(+) = BV.VSL_CD
+           AND SCD.SKD_VOY_NO(+) = BV.SKD_VOY_NO
+           AND SCD.SKD_DIR_CD(+) = BV.SKD_DIR_CD
+           AND BV.VSL_PRE_PST_CD = 'U'
+           AND SCD.VSL_CD || SCD.SKD_VOY_NO || SCD.SKD_DIR_CD = @[vvd]    /*Edi315SendDBDAOSearchDynamicTransInfoRSQL 에서 VVD*/
+           AND SCD.VPS_PORT_CD = SKD.VPS_PORT_CD
+        #end
+           AND (SUBSTR(SCD.NOD_CD, 1,5 ) = SUBSTR( BV.POL_YD_CD ,1, 5) OR SUBSTR(SCD.NOD_CD, 1,5 ) = SUBSTR( BV.POD_YD_CD ,1, 5) ) 
+           --AND SUBSTR(SCD.NOD_CD, 1,5 ) = SUBSTR( [nod_cd] ,1, 5)   /* Edi315SendDBDAOSearchDynamicTransInfoRSQL 에서 NOD_CD */
+        )
+ GROUP BY VSL_SEQ          -- 추가          
+ ORDER BY VSL_SEQ 
+#elseif(${trans_tp_cd} == 'TRNKTT')
+/*TRNKTT*/
+SELECT DISTINCT @[trans_tp_cd]
+     , CASE WHEN ACTIVITY_IND1 = 'Y' THEN 'Y'
+            WHEN ACTIVITY_IND1 = 'N' AND ACTIVITY_IND2 = 'Y' THEN 'Y' ELSE 'N' END AS ACTIVITY_IND
+     , TRANS_MODE AS TRANS_MODE
+     , DECODE(VSL_CD,'','',VSL_TP) AS VSL_TP
+     , OB_CSSM_VOY_NO AS OB_CSSM_VOY_NO
+     , VSL_CD AS VSL_CD
+     , VSL_VOY_NO AS VSL_VOY_NO
+     , VSL_DIR_CD AS VSL_DIR_CD
+     , VSL_LLOYD_CD AS VSL_LLOYD_CD
+     , VSL_NM AS VSL_NM
+     , VSL_CNT_CD AS VSL_CNT_CD
+     , '' AS VSL_SEQ
+     , '' AS POL_YD_CD
+     , '' AS POD_YD_CD
+  FROM (SELECT @[trans_tp_cd]
+             , SCD.COP_DTL_SEQ SEQ
+             , CASE WHEN (
+                    SELECT 'Y'
+                      FROM SCE_COP_DTL A
+                     WHERE A.COP_NO = @[cop_no]
+                       AND A.STND_EDI_STS_CD = @[edi_sts_cd]  /*PARAMEMTER MSGID ediStatus(Edi315SendVO)*/
+                       AND SUBSTR(A.NOD_CD, 1, 5) LIKE SUBSTR(@[event_yard_cd], 1, 5) /*PARAMETER    eventYard(Edi315SendVO)*/
+                       AND A.COP_DTL_SEQ = SCD.COP_DTL_SEQ) IS NULL THEN 'N' ELSE 'Y' END ACTIVITY_IND1-- 0715 로직 변경-- 0715 로직 변경
+             , CASE WHEN (
+                        SELECT DECODE(ACT_STS_CD,'F','Y','N')
+                          FROM SCE_COP_DTL
+                         WHERE COP_NO = @[cop_no]
+                           AND COP_DTL_SEQ = (  SELECT COP_DTL_SEQ
+                                                  FROM(SELECT ROW_NUMBER() OVER(PARTITION BY B.CNTR_NO ORDER BY C.COP_DTL_SEQ DESC) RN
+                                                            , COP_DTL_SEQ
+                                                         FROM SCE_COP_HDR B
+                                                            , SCE_COP_DTL C
+                                                        WHERE B.COP_NO = @[cop_no]
+                                                          AND B.COP_STS_CD IN ('C','T','F')
+                                                          AND B.COP_NO = C.COP_NO
+                                                          AND C.ACT_STS_CD = 'F' 
+                                                       )
+                                                 WHERE RN = 1
+                                             )
+                           AND COP_DTL_SEQ = SCD.COP_DTL_SEQ ) IS NULL THEN 'N' ELSE 'Y' END ACTIVITY_IND2
+             , DECODE(SUBSTR(SCD.ACT_CD, 3, 1), 'W', 'F', SUBSTR(SCD.ACT_CD, 3, 1)) AS TRANS_MODE
+             , (SELECT DECODE(L.VSL_SVC_TP_CD, NULL, 'F', 'O', 'F', 'M')
+                  FROM BKG_BOOKING B
+                     , MDM_VSL_SVC_LANE L
+                 WHERE B.BKG_NO = @[bkg_no]
+                   AND B.SLAN_CD = L.VSL_SLAN_CD(+)) AS VSL_TP
+             , (SELECT NVL(OB_CSSM_VOY_NO, IB_CSSM_VOY_NO)
+                  FROM VSK_VSL_PORT_SKD
+                 WHERE VSL_CD = SCD.VSL_CD
+                   AND SKD_VOY_NO = SCD.SKD_VOY_NO
+                   AND SKD_DIR_CD = SCD.SKD_DIR_CD
+                   AND VPS_PORT_CD = SCD.VPS_PORT_CD
+                   AND CLPT_IND_SEQ = SCD.CLPT_IND_SEQ) AS OB_CSSM_VOY_NO
+             , SCD.VSL_CD AS VSL_CD
+             , SCD.SKD_VOY_NO AS VSL_VOY_NO
+             , SCD.SKD_DIR_CD AS VSL_DIR_CD
+             , MVC.LLOYD_NO AS VSL_LLOYD_CD
+             , MVC.VSL_ENG_NM AS VSL_NM
+             , MVC.VSL_RGST_CNT_CD AS VSL_CNT_CD
+          FROM SCE_COP_HDR SCH
+             , SCE_COP_DTL SCD
+             , MDM_VSL_CNTR MVC
+         WHERE SCH.BKG_NO = @[bkg_no]
+           AND SCH.COP_STS_CD IN ('C', 'T', 'F')
+           AND SCH.COP_NO = SCD.COP_NO
+           AND SCD.COP_NO = @[cop_no]
+           AND SCD.VSL_CD = MVC.VSL_CD(+)
+           AND SCD.ACT_CD IN ('FTTMDO', 'FTTMAD') 
+     )
+ ORDER BY ACTIVITY_IND DESC
+#else
+/*OBSTRT, OBIMD, IBIMD, IBEND*/
+SELECT @[trans_tp_cd]
+       ,MAX(CASE WHEN ACTIVITY_IND1 = 'Y' THEN 'Y'
+             WHEN ACTIVITY_IND1 = 'N' AND ACTIVITY_IND2 = 'Y' THEN 'Y' 
+             WHEN ACTIVITY_IND1 = 'N' AND ACTIVITY_IND2 = 'N' AND ACTIVITY_IND3 = 'Y' THEN 'Y' 
+             ELSE 'N' END) ACTIVITY_IND
+     , MAX(TRANS_MODE) AS TRANS_MODE
+     , MAX(DECODE(VSL_CD,'','',VSL_TP)) AS VSL_TP
+     , MIN(OB_CSSM_VOY_NO) AS OB_CSSM_VOY_NO
+     , MAX(VSL_CD) AS VSL_CD
+     , MAX(VSL_VOY_NO) AS VSL_VOY_NO
+     , MAX(VSL_DIR_CD) AS VSL_DIR_CD
+     , MAX(VSL_LLOYD_CD) AS VSL_LLOYD_CD
+     , MAX(VSL_NM) AS VSL_NM
+     , MAX(VSL_CNT_CD) AS VSL_CNT_CD
+     , '' AS VSL_SEQ
+     , '' AS POL_YD_CD
+     , '' AS POD_YD_CD
+  FROM(SELECT @[trans_tp_cd]
+            , SCD.COP_DTL_SEQ SEQ
+            , CASE WHEN @[edi_sts_cd] = 'D' OR @[edi_sts_cd] = 'AG'   -- COP에 없는 I/B Delivery Case 처리
+                   THEN 
+                   NVL((SELECT 'Y'
+                      FROM SCE_COP_DTL A
+                     WHERE A.COP_NO = @[cop_no]
+                       AND A.ACT_CD = 'FITZAD'  -- 상수
+                       AND SUBSTR(A.NOD_CD, 1, 5) LIKE SUBSTR(@[event_yard_cd], 1, 5) /*PARAMETER    eventYard(Edi315SendVO)*/
+                       AND A.COP_DTL_SEQ = SCD.COP_DTL_SEQ), 'N')  ELSE 'N' END ACTIVITY_IND1-- 0715 로직 변경-- 0715 로직 변경
+             , CASE WHEN (
+                    SELECT 'Y'
+                      FROM SCE_COP_DTL A
+                     WHERE A.COP_NO = @[cop_no]
+                       AND A.STND_EDI_STS_CD = @[edi_sts_cd]  /*PARAMEMTER MSGID ediStatus(Edi315SendVO)*/
+                       AND SUBSTR(A.NOD_CD, 1, 5) LIKE SUBSTR(@[event_yard_cd], 1, 5) /*PARAMETER    eventYard(Edi315SendVO)*/
+                       AND A.COP_DTL_SEQ = SCD.COP_DTL_SEQ) IS NULL THEN 'N' ELSE 'Y' END ACTIVITY_IND2-- 0715 로직 변경-- 0715 로직 변경
+             , CASE WHEN (
+                    SELECT 'Y'
+                      FROM SCE_COP_DTL A
+                     WHERE A.COP_NO = @[cop_no]
+                       AND A.ACT_CD = @[edi_sts_cd]  /*PARAMEMTER MSGID ediStatus(Edi315SendVO)*/
+                       AND SUBSTR(A.NOD_CD, 1, 5) LIKE SUBSTR(@[event_yard_cd], 1, 5) /*PARAMETER    eventYard(Edi315SendVO)*/
+                       AND A.COP_DTL_SEQ = SCD.COP_DTL_SEQ) IS NULL THEN 'N' ELSE 'Y' END ACTIVITY_IND3-- 0715 로직 변경
+             , DECODE(SUBSTR(SCD.ACT_CD, 3,1),'W','F',SUBSTR(SCD.ACT_CD, 3,1)) AS TRANS_MODE
+             , (SELECT DECODE(L.VSL_SVC_TP_CD, NULL, 'F', 'O', 'F', 'M')
+                  FROM BKG_BOOKING B
+                     , MDM_VSL_SVC_LANE L
+                 WHERE B.BKG_NO = @[bkg_no]
+                   AND B.SLAN_CD = L.VSL_SLAN_CD(+)) AS VSL_TP
+             , (SELECT OB_CSSM_VOY_NO
+                  FROM VSK_VSL_PORT_SKD
+                 WHERE VSL_CD = SCD.VSL_CD
+                   AND SKD_VOY_NO = SCD.SKD_VOY_NO
+                   AND SKD_DIR_CD = SCD.SKD_DIR_CD
+                   AND VPS_PORT_CD = SCD.VPS_PORT_CD
+                   AND CLPT_IND_SEQ = SCD.CLPT_IND_SEQ) AS OB_CSSM_VOY_NO
+             , SCD.VSL_CD AS VSL_CD
+             , SCD.SKD_VOY_NO AS VSL_VOY_NO
+             , SCD.SKD_DIR_CD AS VSL_DIR_CD
+             , MVC.LLOYD_NO AS VSL_LLOYD_CD
+             , MVC.VSL_ENG_NM AS VSL_NM
+             , MVC.VSL_RGST_CNT_CD AS VSL_CNT_CD
+          FROM SCE_COP_HDR SCH
+             , SCE_COP_DTL SCD
+             , MDM_VSL_CNTR MVC
+         WHERE SCH.BKG_NO = @[bkg_no]
+           AND SCH.COP_STS_CD IN ('C', 'T', 'F')
+           AND SCH.COP_NO = SCD.COP_NO
+           AND SCD.COP_NO = @[cop_no]
+           AND SCD.VSL_CD = MVC.VSL_CD(+)
+		   #if (${trans_tp_cd} == 'OBSTRT')
+               AND SUBSTR(SCD.ACT_CD,2,1) = 'O'
+               AND SUBSTR(SCD.ACT_CD,3,1) NOT IN ('R','W')
+               AND SCD.COP_DTL_SEQ <= (SELECT MIN(COP_DTL_SEQ) FROM SCE_COP_DTL WHERE COP_NO = @[cop_no] AND SUBSTR(ACT_CD, 5, 2)  = 'AD' AND SUBSTR(ACT_CD, 1, 1)  =  'F')
+           #elseif (${trans_tp_cd} == 'OBIMD')
+               AND (SCD.COP_DTL_SEQ = @[cop_dtl_seq]  -- 출발지   위에서 조회한 SEQ
+                 OR SCD.COP_DTL_SEQ = (SELECT MIN(B.COP_DTL_SEQ) 
+                                         FROM SCE_COP_DTL A, SCE_COP_DTL B
+                                        WHERE A.COP_NO = @[cop_no] 
+                                          AND A.COP_NO = B.COP_NO
+                                          AND A.COP_DTL_SEQ = @[cop_dtl_seq]
+                                          AND SUBSTR(B.ACT_CD, 5,2) = 'AD'  -- 직후 도착지 FM - TO 를 다 가져오기 위해
+                                          AND SUBSTR(B.ACT_CD, 2,1) = 'O'
+                                          AND SUBSTR(A.ACT_CD, 1,3) = SUBSTR(B.ACT_CD, 1,3)
+                                          AND B.COP_DTL_SEQ >  @[cop_dtl_seq]) 
+                 OR SCD.COP_DTL_SEQ = (SELECT MAX(B.COP_DTL_SEQ) 
+                                         FROM SCE_COP_DTL A, SCE_COP_DTL B
+                                        WHERE A.COP_NO = @[cop_no] 
+                                          AND A.COP_NO = B.COP_NO
+                                          AND A.COP_DTL_SEQ = @[cop_dtl_seq]
+                                          AND SUBSTR(B.ACT_CD, 5,2) = 'LO'  -- 직전 Loading FM - TO 를 다 가져오기 위해
+                                          AND SUBSTR(B.ACT_CD, 2,1) = 'O'
+                                          AND SUBSTR(A.ACT_CD, 1,3) = SUBSTR(B.ACT_CD, 1,3)
+                                          AND B.COP_DTL_SEQ < @[cop_dtl_seq]) 
+                 OR SCD.COP_DTL_SEQ = (SELECT MIN(B.COP_DTL_SEQ) 
+                                         FROM SCE_COP_DTL A, SCE_COP_DTL B
+                                        WHERE A.COP_NO = @[cop_no] 
+                                          AND A.COP_NO = B.COP_NO
+                                          AND A.COP_DTL_SEQ = @[cop_dtl_seq]
+                                          AND SUBSTR(B.ACT_CD, 4,3) = 'RUD'  -- 직전 Loading FM - TO 를 다 가져오기 위해
+                                          AND SUBSTR(B.ACT_CD, 2,1) = 'O'
+                                          AND SUBSTR(A.ACT_CD, 1,3) = SUBSTR(B.ACT_CD, 1,3)
+                                          AND B.COP_DTL_SEQ > @[cop_dtl_seq])
+					 )
+           #elseif (${trans_tp_cd} == 'IBIMD')
+           	   AND (SCD.COP_DTL_SEQ = @[cop_dtl_seq]  -- 도착지   위에서 조회한 SEQ 
+                 OR SCD.COP_DTL_SEQ = (SELECT MAX(B.COP_DTL_SEQ) 
+                                         FROM SCE_COP_DTL A, SCE_COP_DTL B
+                                        WHERE A.COP_NO = @[cop_no]
+                                          AND A.COP_NO = B.COP_NO
+                                          AND A.COP_DTL_SEQ = @[cop_dtl_seq]
+                                          AND SUBSTR(B.ACT_CD, 5,2) = 'DO'  -- 직전 출발지 FM - TO 를 다 가져오기 위해
+                                          AND SUBSTR(B.ACT_CD, 2,1) = 'I'
+                                          AND SUBSTR(A.ACT_CD, 1,3) = SUBSTR(B.ACT_CD, 1,3)
+                                          AND B.COP_DTL_SEQ < @[cop_dtl_seq])
+                 OR SCD.COP_DTL_SEQ = (SELECT MAX(B.COP_DTL_SEQ) 
+                                         FROM SCE_COP_DTL  A, SCE_COP_DTL B
+                                        WHERE A.COP_NO = @[cop_no]
+                                          AND A.COP_NO = B.COP_NO
+                                          AND A.COP_DTL_SEQ = @[cop_dtl_seq]
+                                          AND SUBSTR(B.ACT_CD, 5,2) = 'LO'  -- 직전 Loading FM - TO 를 다 가져오기 위해
+                                          AND SUBSTR(B.ACT_CD, 2,1) = 'I'
+                                          AND SUBSTR(A.ACT_CD, 1,3) = SUBSTR(B.ACT_CD, 1,3)
+                                          AND B.COP_DTL_SEQ < @[cop_dtl_seq] )
+                 OR SCD.COP_DTL_SEQ = (SELECT MIN(B.COP_DTL_SEQ) 
+                                         FROM SCE_COP_DTL A, SCE_COP_DTL B
+                                        WHERE A.COP_NO = @[cop_no]
+                                          AND A.COP_NO = B.COP_NO
+                                          AND A.COP_DTL_SEQ = @[cop_dtl_seq]
+                                          AND SUBSTR(B.ACT_CD, 4,3) = 'RUD'  -- 직전 Loading FM - TO 를 다 가져오기 위해
+                                          AND SUBSTR(B.ACT_CD, 2,1) = 'I'
+                                          AND SUBSTR(A.ACT_CD, 1,3) = SUBSTR(B.ACT_CD, 1,3)
+                                          AND B.COP_DTL_SEQ > @[cop_dtl_seq] )
+					 )
+           #elseif (${trans_tp_cd} == 'IBEND')
+	           AND SUBSTR(SCD.ACT_CD,2,1) = 'I'
+               AND SUBSTR(SCD.ACT_CD,3,1) NOT IN ('R','W')
+               AND SCD.COP_DTL_SEQ >= (SELECT MAX(COP_DTL_SEQ) FROM SCE_COP_DTL WHERE COP_NO = @[cop_no] AND SUBSTR(ACT_CD, 5, 2)  = 'DO' )
+           #end
+    )
+#end			]]></sql>
+			<params>
+				<param name="trans_tp_cd" type="12" value="OBSTRT" out="N"/>
+				<param name="cop_no" type="12" value="CSHA5424474826" out="N"/>
+				<param name="edi_sts_cd" type="12" value="VE" out="N"/>
+				<param name="event_yard_cd" type="12" value="MXZLO" out="N"/>
+				<param name="bkg_no" type="12" value="SHA500182400" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="cop_dtl_seq" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

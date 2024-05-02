@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="MonthlyQuotaCfmAdjustmentDBDAOSearchMonthlyTargetVVDMappingOrg0164ListRSQL">
+			<desc><![CDATA[MonthlyTargetVVD의 데이타 모델에 해당되는 값을 불러온다.]]></desc>
+			<sql><![CDATA[
+WITH GRP_MAX AS (
+             SELECT V.RLANE_CD, MAX(V.BSA_GRP_CD) AS GRP_CD
+               FROM SAQ_MON_TGT_BSA_GRP V
+              WHERE V.BSE_YR = @[year]
+                AND V.TRD_CD = @[trade]
+                AND V.DIR_CD = @[bound]
+           GROUP BY V.RLANE_CD  ),
+      GRP_CAPA AS (
+              SELECT V.RLANE_CD, V.FNL_BSA_CAPA, MIN(V.BSA_GRP_CD) AS GRP_CD
+                FROM SAQ_MON_TGT_BSA_GRP V
+               WHERE V.BSE_YR = @[year]
+                 AND V.TRD_CD = @[trade]
+                 AND V.DIR_CD = @[bound]
+
+#if (${lane} != '') 
+                AND V.RLANE_CD =  @[lane]   
+#end
+            GROUP BY V.RLANE_CD, V.FNL_BSA_CAPA  ),
+      COA_MON_VVD_V AS (
+              SELECT V.TRD_CD    , V.RLANE_CD            , V.VSL_CD   ,
+                     V.SKD_VOY_NO, V.DIR_CD              , V.SLS_YRMON,
+                     V.COST_WK   , V.SUB_TRD_CD          , V.IOC_CD   ,
+                     V.VVD_SEQ   , V.LST_LODG_PORT_ETD_DT
+                FROM COA_MON_VVD V
+               WHERE V.SLS_YRMON BETWEEN @[year]||@[month1] AND @[year]||@[month2]
+                 AND V.TRD_CD = @[trade]
+                 AND V.DIR_CD = @[bound]
+                 AND V.COST_WK BETWEEN NVL(@[fmBseWk], '01') AND NVL(@[toBseWk], '54')
+                 AND V.RLANE_CD <> 'RBCCO'
+                 AND V.SUB_TRD_CD <> 'IP'
+
+#if (${lane} != '')
+                 AND V.RLANE_CD =  @[lane]    
+#end
+
+                 AND (V.DELT_FLG IS NULL OR V.DELT_FLG = 'N')    ),
+      EXCEPT_VVD AS (
+              SELECT CHKQTR_VVD.TRD_CD, CHKQTR_VVD.DIR_CD, CHKQTR_VVD.VSL_CD, CHKQTR_VVD.SKD_VOY_NO, CHKQTR_VVD.SKD_DIR_CD
+                FROM (                    -- 현분기에 없는 VVD
+                       SELECT TRD_CD, DIR_CD, VSL_CD, SKD_VOY_NO, DIR_CD AS SKD_DIR_CD
+                         FROM COA_MON_VVD_V
+                        MINUS
+                       SELECT TRD_CD, DIR_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD
+                         FROM SAQ_MON_CFM_TGT_VVD
+                        WHERE 1=1
+                          AND MQTA_RLSE_VER_NO = @[mqtaRlseVerNo]
+                          AND TRD_CD           = @[trade]
+                          AND DIR_CD           = @[bound]
+
+#if (${lane} != '')
+                          AND RLANE_CD         = @[lane]   
+#end
+
+                     ) CHKQTR_VVD,
+                     (                    -- 이전 분기 VVD
+                       SELECT TRD_CD, DIR_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD
+                         FROM SAQ_MON_CFM_TGT_VVD
+                        WHERE 1=1
+                          AND MQTA_RLSE_VER_NO = ( SELECT MQTA_RLSE_VER_NO
+                                                     FROM SAQ_MON_QTA_RLSE
+                                                    WHERE 1=1
+                                                      AND BSE_YR     = DECODE(@[quarter], '4Q', @[year] -1, @[year])
+                                                      AND BSE_QTR_CD = DECODE(@[quarter], '1Q', '4Q',
+                                                                                 '2Q', '1Q',
+                                                                                 '3Q', '2Q',
+                                                                                 '4Q', '3Q' )
+                                                      AND QTA_RLSE_STS_CD    = 'R'                )
+                          AND TRD_CD           = @[trade]
+                          AND DIR_CD           = @[bound]
+
+#if (${lane} != '')
+                          AND RLANE_CD         = @[lane]                
+#end
+
+                     ) PREQTR_VVD
+               WHERE 1=1
+               AND   CHKQTR_VVD.TRD_CD     = PREQTR_VVD.TRD_CD
+               AND   CHKQTR_VVD.DIR_CD     = PREQTR_VVD.DIR_CD
+               AND   CHKQTR_VVD.VSL_CD     = PREQTR_VVD.VSL_CD
+               AND   CHKQTR_VVD.SKD_VOY_NO = PREQTR_VVD.SKD_VOY_NO
+               AND   CHKQTR_VVD.SKD_DIR_CD = PREQTR_VVD.SKD_DIR_CD  )
+    SELECT A.TRD_CD      , A.RLANE_CD   , A.DIR_CD    ,
+           A.VSL_CD      , A.SKD_VOY_NO , A.SKD_DIR_CD,
+           A.SPRT_GRP_CD , NVL(GC.GRP_CD, '00') AS BSA_GRP_CD,
+           A.GRP_MAX     , A.BSE_MON    , A.BSE_WK    ,
+           A.SUB_TRD_CD  , A.IOC_CD     , A.VVD_SEQ   ,
+           A.FNL_BSA_CAPA,
+           TO_CHAR(A.FNL_BSA_CAPA, 'FM099999999990') AS STR_FNL_BSA_CAPA,
+           A.ETD_DT
+     FROM (
+             SELECT V.TRD_CD     ,
+                    V.RLANE_CD   ,
+                    V.DIR_CD     ,
+                    V.VSL_CD     ,
+                    V.SKD_VOY_NO ,
+                    V.DIR_CD  AS SKD_DIR_CD ,
+                    'A'       AS SPRT_GRP_CD,
+                    NVL(GC.GRP_CD, '00')                  AS BSA_GRP_CD,
+                    NVL(TO_CHAR(GM.GRP_CD, 'FM00'), '00') AS GRP_MAX   ,
+                    SUBSTR(V.SLS_YRMON, 5)                AS BSE_MON   ,
+                    V.COST_WK AS BSE_WK,
+                    V.SUB_TRD_CD ,
+                    V.IOC_CD     ,
+                    V.VVD_SEQ    ,
+                    ROUND(NVL(M.FNL_CO_BSA_CAPA, 0)) AS FNL_BSA_CAPA,
+                    TO_CHAR(V.LST_LODG_PORT_ETD_DT, 'YYYY/MM/DD HH24:MI:SS') AS ETD_DT,
+                    V.LST_LODG_PORT_ETD_DT,
+                    V.SLS_YRMON           ,
+                    V.COST_WK
+               FROM COA_MON_VVD_V   V ,
+                    BSA_VVD_MST M ,
+                    GRP_CAPA        GC,
+                    GRP_MAX         GM
+              WHERE V.TRD_CD     = M.TRD_CD(+)
+                AND V.RLANE_CD   = M.RLANE_CD(+)
+                AND V.VSL_CD     = M.VSL_CD(+)
+                AND V.SKD_VOY_NO = M.SKD_VOY_NO(+)
+                AND V.DIR_CD     = M.SKD_DIR_CD(+)
+                AND M.RLANE_CD   = GC.RLANE_CD(+)
+                AND ROUND(NVL(M.FNL_CO_BSA_CAPA, 0)) = GC.FNL_BSA_CAPA(+)
+                AND V.RLANE_CD   = GM.RLANE_CD(+)
+                AND NOT EXISTS ( SELECT VSL_CD, SKD_VOY_NO, DIR_CD
+                                   FROM EXCEPT_VVD
+                                  WHERE 1=1
+                                  AND   TRD_CD     = V.TRD_CD
+                                  AND   DIR_CD     = V.DIR_CD
+                                  AND   VSL_CD     = V.VSL_CD
+                                  AND   SKD_VOY_NO = V.SKD_VOY_NO
+                                  AND   SKD_DIR_CD = V.DIR_CD
+                                 UNION
+                                 SELECT VSL_CD, SKD_VOY_NO, DIR_CD
+                                   FROM SAQ_MON_TGT_VVD
+                                  WHERE 1=1
+                                  AND   BSE_YR     = @[year]
+                                  AND   BSE_QTR_CD = @[quarter]
+                                  AND   TRD_CD     = v.trd_cd
+                                  AND   DIR_CD     = v.dir_cd
+                                  AND   VSL_CD     = v.vsl_cd
+                                  AND   SKD_VOY_NO = v.skd_voy_no
+                                  AND   SKD_DIR_CD = v.dir_cd
+                                  AND   DELT_FLG   = 'Y'             )            ) A,
+          GRP_CAPA GC
+    WHERE A.RLANE_CD     = GC.RLANE_CD(+)
+      AND A.FNL_BSA_CAPA = GC.FNL_BSA_CAPA(+)
+ ORDER BY A.SUB_TRD_CD, A.RLANE_CD,A.SLS_YRMON,A.COST_WK, A.LST_LODG_PORT_ETD_DT			]]></sql>
+			<params>
+				<param name="year" type="12" value="" out="N"/>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="bound" type="12" value="" out="N"/>
+				<param name="lane" type="12" value="" out="N"/>
+				<param name="month1" type="12" value="" out="N"/>
+				<param name="month2" type="12" value="" out="N"/>
+				<param name="fmBseWk" type="12" value="" out="N"/>
+				<param name="toBseWk" type="12" value="" out="N"/>
+				<param name="mqtaRlseVerNo" type="12" value="" out="N"/>
+				<param name="quarter" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

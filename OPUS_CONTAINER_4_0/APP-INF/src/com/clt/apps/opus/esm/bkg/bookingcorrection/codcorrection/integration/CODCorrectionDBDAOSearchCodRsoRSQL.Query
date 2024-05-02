@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CODCorrectionDBDAOSearchCodRsoRSQL">
+			<desc><![CDATA[route 변경건에 대한 RSO와 OPF 요청 대상인지 조회한다.]]></desc>
+			<sql><![CDATA[
+--현재 운송 중인 VVD가 의 discharging port가 바뀌는 요청인지 확인
+--조회가 되면 opf 승인 요청 대상임
+with cod as 
+(select new_route.vsl_cd            new_vsl_cd
+         , new_route.skd_voy_no     new_skd_voy_no
+         , new_route.skd_dir_cd     new_skd_dir_cd
+         , new_route.org_nod_cd     new_pol_yd_cd
+         , new_route.dest_nod_cd    new_pod_yd_cd
+         , old_route.vsl_cd         old_vsl_cd
+         , old_route.skd_voy_no     old_skd_voy_no
+         , old_route.skd_dir_cd     old_skd_dir_cd
+         , old_route.pol_yd_cd      old_pol_yd_cd
+         , old_route.pod_yd_cd      old_pod_yd_cd
+         , svc_tp.VSL_SVC_TP_CD     vsl_svc_tp_cd
+         , (select to_char(max(pol_act_skd.ACT_DEP_DT), 'yyyymmdd') 
+              from VSK_ACT_PORT_SKD pol_act_skd
+             where new_route.vsl_cd     = pol_act_skd.vsl_cd
+               and new_route.skd_voy_no = pol_act_skd.skd_voy_no 
+               and new_route.skd_dir_cd = pol_act_skd.skd_dir_cd
+               and new_route.org_nod_cd like pol_act_skd.VPS_PORT_CD||'%') pol_act_dep_dt
+         , (select to_char(min(rhnd_port_act_skd.ACT_ARR_DT), 'yyyymmdd') 
+              from VSK_ACT_PORT_SKD rhnd_port_act_skd, vsk_vsl_port_skd est_skd
+             where est_skd.vsl_cd      = new_route.vsl_cd
+               and est_skd.skd_voy_no  = new_route.skd_voy_no 
+               and est_skd.skd_dir_cd  = new_route.skd_dir_cd
+			   and est_skd.yd_cd 	   = @[cod_rhnd_port_cd]
+               and est_skd.vsl_cd	   = rhnd_port_act_skd.vsl_cd      (+)
+               and est_skd.skd_voy_no  = rhnd_port_act_skd.skd_voy_no  (+) 
+               and est_skd.skd_dir_cd  = rhnd_port_act_skd.skd_dir_cd  (+)
+			   and est_skd.vps_port_cd = rhnd_port_act_skd.vps_port_cd (+)
+			   and est_skd.clpt_ind_seq= rhnd_port_act_skd.clpt_ind_seq(+)) rhnd_port_act_arr_dt
+         , (select to_char(min(rhnd_port_act_skd.ACT_DEP_DT), 'yyyymmdd') 
+              from VSK_ACT_PORT_SKD rhnd_port_act_skd, vsk_vsl_port_skd est_skd
+             where est_skd.vsl_cd      = new_route.vsl_cd
+               and est_skd.skd_voy_no  = new_route.skd_voy_no 
+               and est_skd.skd_dir_cd  = new_route.skd_dir_cd
+			   and est_skd.yd_cd 	   = @[cod_rhnd_port_cd]
+               and est_skd.vsl_cd	   = rhnd_port_act_skd.vsl_cd      (+)
+               and est_skd.skd_voy_no  = rhnd_port_act_skd.skd_voy_no  (+) 
+               and est_skd.skd_dir_cd  = rhnd_port_act_skd.skd_dir_cd  (+)
+			   and est_skd.vps_port_cd = rhnd_port_act_skd.vps_port_cd (+)
+			   and est_skd.clpt_ind_seq= rhnd_port_act_skd.clpt_ind_seq(+)) rhnd_port_act_dep_dt
+      from  (select PCTL_SEQ,ORG_NOD_CD,DEST_NOD_CD,TRSP_MOD_CD,VSL_SLAN_CD,CRR_CD,VSL_CD,SKD_VOY_NO,SKD_DIR_CD
+               from prd_prod_ctl_rout_dtl 
+              where pctl_no = @[pctl_no]
+                and TRSP_MOD_CD in ('VD', 'WD')
+                and PCTL_IO_BND_CD ='T') new_route
+            , (select bkg_no, VSL_CD,SKD_VOY_NO,SKD_DIR_CD, pol_cd, pol_yd_cd, pod_cd, pod_yd_cd
+                 from bkg_vvd 
+                where bkg_no = @[bkg_no]) old_route
+            , MDM_VSL_SVC_LANE svc_tp, PRD_PROD_CTL_MST PRD, BKG_BOOKING BK
+     where BK.BKG_NO            = @[bkg_no]
+	   AND PRD.PCTL_NO          = @[pctl_no]
+       and old_route.vsl_cd     = new_route.vsl_cd
+       and old_route.skd_voy_no = new_route.skd_voy_no 
+       and old_route.skd_dir_cd = new_route.skd_dir_cd
+       and old_route.pol_cd     = substr(new_route.org_nod_cd,  1, 5) --출발지가 같을 것
+       AND SUBSTR(@[cod_rhnd_port_cd], 1, 5) IN (old_route.pod_cd, substr(new_route.dest_nod_cd, 1, 5)) --REHANDLING PORT에 가는 VVD
+	   and (
+		     (old_route.pod_cd <> substr(new_route.dest_nod_cd, 1, 5) AND OLD_ROUTE.POD_CD <> BK.POD_CD)--t/S PORT 변경
+    	    OR
+	    	 (BK.POD_CD <> PRD.POD_CD)-- AND OLD_ROUTE.POD_CD = BK.POD_CD)--최종 POD 변경
+		    )
+       and new_route.VSL_SLAN_CD= svc_tp.VSL_SLAN_CD
+    )       
+select new_vsl_cd
+         , new_skd_voy_no
+         , new_skd_dir_cd
+         , new_pol_yd_cd
+         , new_pod_yd_cd
+         , old_vsl_cd
+         , old_skd_voy_no
+         , old_skd_dir_cd
+         , old_pol_yd_cd
+         , old_pod_yd_cd
+         , pol_act_dep_dt
+         , rhnd_port_act_arr_dt
+		 , rhnd_port_act_dep_dt
+         , vsl_svc_tp_cd
+         --OPF에서 제공받은 SQL
+         , (SELECT DECODE(M.CONTI_CD,'F','EUR','E','EUR','A','ASR','M','AMR') RSO
+              FROM VSK_VSL_PORT_SKD V, MDM_LOCATION M, cod
+             WHERE V.VSL_CD     = cod.old_vsl_cd
+               AND V.SKD_VOY_NO = cod.old_skd_voy_no
+               AND V.SKD_DIR_CD = cod.old_skd_dir_cd
+               AND V.CLPT_SEQ   = 
+                    ( SELECT NVL(B.CLPT_SEQ,A.CLPT_SEQ)
+                        FROM   ( SELECT MAX(V.CLPT_SEQ) CLPT_SEQ
+                                 FROM   BAY_PLAN B, VSK_VSL_PORT_SKD V, cod
+                                 WHERE  B.VSL_CD    = cod.old_vsl_cd
+                                 AND    B.VOY_NO    = cod.old_skd_voy_no
+                                 AND    B.DIR_CD    = cod.old_skd_dir_cd
+                                 AND    B.VSL_CD    = V.VSL_CD
+                                 AND    B.VOY_NO    = V.SKD_VOY_NO
+                                 AND    B.DIR_CD    = V.SKD_DIR_CD
+                                 AND    B.PORT_CD   = V.VPS_PORT_CD
+                                 AND    B.PLAN_TYPE = 'F'
+                                 AND    V.CLPT_SEQ  < ( SELECT CASE WHEN MIN(O.CLPT_SEQ) > MIN(N.CLPT_SEQ) THEN MIN(N.CLPT_SEQ)
+                                                                    WHEN MIN(O.CLPT_SEQ) < MIN(N.CLPT_SEQ) THEN MIN(O.CLPT_SEQ)
+                                                                    ELSE MIN(O.CLPT_SEQ)
+                                                               END  CLPT_SEQ
+                                                        FROM   VSK_VSL_PORT_SKD O, VSK_VSL_PORT_SKD N, cod
+                                                        WHERE  O.VSL_CD     = cod.old_vsl_cd
+                                                        AND    O.SKD_VOY_NO = cod.old_skd_voy_no
+                                                        AND    O.SKD_DIR_CD = cod.old_skd_dir_cd
+                                                        AND    O.YD_CD      = cod.old_pod_yd_cd
+                                                        AND    N.VSL_CD     = cod.new_vsl_cd
+                                                        AND    N.SKD_VOY_NO = cod.new_skd_voy_no
+                                                        AND    N.SKD_DIR_CD = cod.new_skd_dir_cd
+                                                        AND    N.YD_CD      = cod.new_pod_yd_cd ) ) B,
+                               ( SELECT MAX(V.CLPT_SEQ) CLPT_SEQ
+                                 FROM   VSK_ACT_PORT_SKD A, VSK_VSL_PORT_SKD V, cod
+                                 WHERE  A.VSL_CD      = cod.old_vsl_cd
+                                 AND    A.SKD_VOY_NO  = cod.old_skd_voy_no
+                                 AND    A.SKD_DIR_CD  = cod.old_skd_dir_cd
+                                 AND    A.VSL_CD      = V.VSL_CD
+                                 AND    A.SKD_VOY_NO  = V.SKD_VOY_NO
+                                 AND    A.SKD_DIR_CD  = V.SKD_DIR_CD
+                                 AND    A.VPS_PORT_CD = V.VPS_PORT_CD
+                                 AND    V.CLPT_SEQ    < ( SELECT CASE WHEN MIN(O.CLPT_SEQ) > MIN(N.CLPT_SEQ) THEN MIN(N.CLPT_SEQ)
+                                                                      WHEN MIN(O.CLPT_SEQ) < MIN(N.CLPT_SEQ) THEN MIN(O.CLPT_SEQ)
+                                                                      ELSE MIN(O.CLPT_SEQ)
+                                                                 END  CLPT_SEQ
+                                                          FROM   VSK_VSL_PORT_SKD O, VSK_VSL_PORT_SKD N, cod
+                                                          WHERE  O.VSL_CD     = cod.old_vsl_cd
+                                                          AND    O.SKD_VOY_NO = cod.old_skd_voy_no
+                                                          AND    O.SKD_DIR_CD = cod.old_skd_dir_cd
+                                                          AND    O.YD_CD      = cod.old_pod_yd_cd
+                                                          AND    N.VSL_CD     = cod.new_vsl_cd
+                                                          AND    N.SKD_VOY_NO = cod.new_skd_voy_no
+                                                          AND    N.SKD_DIR_CD = cod.new_skd_dir_cd
+                                                          AND    N.YD_CD      = cod.new_pod_yd_cd ) ) A )
+               AND    V.VPS_PORT_CD = M.LOC_CD
+               AND    M.DELT_FLG    = 'N') RSO
+  from cod			]]></sql>
+			<params>
+				<param name="cod_rhnd_port_cd" type="12" value="SGSINKA" out="N"/>
+				<param name="pctl_no" type="12" value="R0912300000357340001" out="N"/>
+				<param name="bkg_no" type="12" value="PHXYB205062" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

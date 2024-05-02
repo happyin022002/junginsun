@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LeaseReportDBDAOsearchOnHireResultbyTermLessorSummaryRSQL">
+			<desc><![CDATA[임차장비 임차실적 상세조회 (On-Hire Result by Lease Term/Lessor-Option)
+ Term Change 조건에 따른 조회로직 수정
+ "Including"  -> 해당월 LSI 로 시작, 짝 lso 가 찾기==> TERM CHANGE FLAG 무시
+ "Excluding" -> 해당월 LSI 가 T/C='N' 로 시작, 짝 lso 가 T/C='N' 만
+ "Only"       -> 해당월 LSI  T/C='N', LSO가 T/C='Y' , 실제 반납한 LSO(기준 LSI 보다 큰 LSO 이고 T/C='N')]]></desc>
+			<sql><![CDATA[
+WITH PARAM
+AS (
+    SELECT  
+         @[period_stdt] PERIOD_STDT
+        ,@[period_eddt] PERIOD_EDDT
+        ,@[loc_cd] LOC_CD
+        ,@[loc_tp] LOC_TP
+        ,@[vndr_seq] VNDR_SEQ
+        ,@[company]  COMPANY
+        ,@[term_change] TERM_CHANGE /* Including(NULL), Excluding('N'), Only('Y') */
+	FROM   DUAL
+)
+SELECT  LSTM_CD,VNDR_SEQ,VNDR_ABBR_NM AS SUPPLIER,
+        (
+		      #foreach($key IN ${tysz})
+		          #if($velocityCount < $tysz.size())
+		              $key + 
+		          #else
+		              $key
+		          #end
+		      #end 
+		  	) AS DIV_TOTAL ,
+  		 	 #foreach($key IN ${tysz})
+		          #if($velocityCount < $tysz.size())
+		              $key , 
+		          #else
+		              $key
+		          #end
+		      #end         
+FROM    (
+SELECT  ROW_NUMBER() OVER (ORDER BY LSTM_CD, VNDR_SEQ) RN
+        , CASE WHEN  GROUPING(LSTM_CD) = 1 AND GROUPING(VNDR_SEQ) = 1 THEN 'TOTAL' WHEN GROUPING(LSTM_CD     ) = 1 THEN 'G.TTL' ELSE LSTM_CD    END AS LSTM_CD
+        , CASE WHEN  GROUPING(LSTM_CD) = 0 AND GROUPING(VNDR_SEQ) = 1 THEN  'S.TTL'  ELSE TO_CHAR(VNDR_SEQ,'000000') END AS VNDR_SEQ 
+        , VNDR_ABBR_NM,
+	      #foreach($key IN ${tysz})
+         	#if($velocityCount < $tysz.size())
+		       SUM(DECODE(DD, '$key', EE, 0)) AS $key, 
+		    #else
+		       SUM(DECODE(DD, '$key', EE, 0)) AS $key
+		     #end
+        #end         
+FROM    (       /* CASE 1 : Term Change =무시. 해당월 LSI 로 시작, 짝 lso 가 찾기==> TERM CHANGE FLAG 무시 */
+        SELECT   T10.CNTR_NO, T10.AGMT_CTY_CD, T10.AGMT_SEQ
+                , T10.CNTR_STS_CD                 AS LSI_STS_CD
+                , T10.CNTR_STS_EVNT_DT            AS LSI_EVNT_DT
+                , T10.CNTR_LSTM_CNG_FLG           AS LSI_LSTM_CHG_CD
+                , T12.CNTR_STS_CD                 AS LSO_STS_CD
+                , T12.CNTR_STS_EVNT_DT            AS LSO_EVNT_DT
+                , NVL(T12.CNTR_LSTM_CNG_FLG, 'N') AS LSO_LSTM_CHG_CD
+                , NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD'), 'YYYYMMDD')) - T10.CNTR_STS_EVNT_DT + 1 AS USED_DAYS
+                , T13.CNTR_TPSZ_CD AS DD
+                , 1 AS EE
+                , T15.REF_NO
+                , T15.LSTM_CD
+                , T17.VNDR_ABBR_NM                              
+                , ROW_NUMBER() OVER (PARTITION BY T10.CNTR_NO ORDER BY T10.CNTR_NO) RN
+                , T15.VNDR_SEQ, T10.COMPANY
+        FROM    (
+                SELECT  T01.CNTR_NO, T01.CNTR_STS_SEQ, T01.YD_CD, T01.AGMT_CTY_CD, T01.AGMT_SEQ, T01.CNTR_STS_EVNT_DT, T01.CNTR_STS_CD, T01.CNTR_LSTM_CNG_FLG
+                	    , T01.RCC_CD, T01.LCC_CD, T01.SCC_CD,
+                        (
+                        SELECT /*+ INDEX_ASC(T02 XPKMST_CNTR_STS_HIS) */
+                               CNTR_STS_SEQ
+                        FROM   MST_CNTR_STS_HIS T02
+                        WHERE  T01.CNTR_NO      = T02.CNTR_NO
+                        AND    T01.CNTR_STS_SEQ < T02.CNTR_STS_SEQ
+                        AND    T02.CNTR_STS_CD  = 'LSO'
+                        AND    ROWNUM           = 1
+                        ) AS FST_CNTR_STS_SEQ
+                        , P.VNDR_SEQ, P.COMPANY
+                FROM    MST_CNTR_STS_HIS T01,
+                        PARAM P
+                WHERE   1=1
+                AND     DECODE(NVL(TERM_CHANGE, 'I'), 'I', 'I')   = NVL(TERM_CHANGE, 'I')                
+                #if (${dii} != '' )
+  					#if (${dii} == 'N' )
+          		AND CNTR_STS_CD IN ('LSI','OWN')
+  					#elseif (${dii} == 'Y' ) 
+          		AND CNTR_STS_CD = 'DII'
+  					#end
+				#else
+				AND CNTR_STS_CD IN ('LSI','DII','OWN')
+				#end
+                AND     T01.AGMT_SEQ      <> 999990               
+                AND     CNTR_STS_EVNT_DT BETWEEN TO_DATE(P.PERIOD_STDT, 'YYYYMMDD') AND TO_DATE(P.PERIOD_EDDT, 'YYYYMMDD')
+                ) T10,
+                MST_CNTR_STS_HIS T12,
+                MST_CONTAINER    T13,
+                MDM_CNTR_TP_SZ   T14,
+                LSE_AGREEMENT    T15,
+                MDM_VENDOR       T17
+        WHERE   1=1
+        AND     T10.CNTR_NO             = T13.CNTR_NO
+        AND     T13.CNTR_TPSZ_CD        = T14.CNTR_TPSZ_CD
+        AND     T10.CNTR_NO             = T12.CNTR_NO      (+)  
+        AND     T10.FST_CNTR_STS_SEQ    = T12.CNTR_STS_SEQ (+)
+        AND     T10.AGMT_CTY_CD         = T15.AGMT_CTY_CD
+        AND     T10.AGMT_SEQ            = T15.AGMT_SEQ
+        AND     T15.VNDR_SEQ            = T17.VNDR_SEQ
+        AND     T13.CO_CRE_FLG         = 'N'
+        #if (${vndr_seq} != '' ) 
+		AND     T10.VNDR_SEQ            = T17.VNDR_SEQ
+		#end
+        			
+		#if (${cntr_tpsz_cd_str} != '' )
+	    AND  T13.CNTR_TPSZ_CD IN( #foreach($key IN ${cntr_tpsz_cd})
+	        #if($velocityCount < $cntr_tpsz_cd.size())
+	           '$key',
+	        #else
+	           '$key'
+	        #end
+	                             #end )
+		#end
+		#if (${company} != '' )
+		AND T13.CNTR_USE_CO_CD = T10.COMPANY 
+		#end
+		#if (${lstm_cd_str} != '' ) 
+		AND   T15.LSTM_CD IN ( #foreach($key IN ${lstm_cd})
+			                                 #if($velocityCount < $lstm_cd.size())
+			                                     '$key',
+			                                 #else
+			                                     '$key'
+			                                 #end
+			                             #end )
+				#end			
+        UNION ALL /* CASE 2 : 해당월 LSI 가 T/C='N' 로 시작, 짝 lso 가 T/C='N' 만 */
+        SELECT   T10.CNTR_NO, T10.AGMT_CTY_CD, T10.AGMT_SEQ
+                , T10.CNTR_STS_CD                 AS LSI_STS_CD
+                , T10.CNTR_STS_EVNT_DT            AS LSI_EVNT_DT
+                , T10.CNTR_LSTM_CNG_FLG           AS LSI_LSTM_CHG_CD
+                , T12.CNTR_STS_CD                 AS LSO_STS_CD
+                , T12.CNTR_STS_EVNT_DT            AS LSO_EVNT_DT
+                , NVL(T12.CNTR_LSTM_CNG_FLG, 'N') AS LSO_LSTM_CHG_CD
+                , NVL(T12.CNTR_STS_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD'), 'YYYYMMDD')) - T10.CNTR_STS_EVNT_DT + 1 AS USED_DAYS
+                , T13.CNTR_TPSZ_CD AS DD
+                , 1 AS EE
+                , T15.REF_NO
+                , T15.LSTM_CD
+                , T17.VNDR_ABBR_NM               
+                , ROW_NUMBER() OVER (PARTITION BY T10.CNTR_NO ORDER BY T10.CNTR_NO) RN
+                , T15.VNDR_SEQ, T10.COMPANY
+        FROM    (
+                SELECT  T01.CNTR_NO, T01.CNTR_STS_SEQ, T01.YD_CD, T01.AGMT_CTY_CD, T01.AGMT_SEQ, T01.CNTR_STS_EVNT_DT
+                        , T01.CNTR_STS_CD, T01.CNTR_LSTM_CNG_FLG, T01.RCC_CD, T01.LCC_CD, T01.SCC_CD,
+                        (
+                        SELECT /*+ INDEX_ASC(T02 XPKMST_CNTR_STS_HIS) */
+                                CNTR_STS_SEQ
+                        FROM   MST_CNTR_STS_HIS T02
+                        WHERE  T01.CNTR_NO      = T02.CNTR_NO
+                        AND    T01.CNTR_STS_SEQ < T02.CNTR_STS_SEQ
+                        AND    T02.CNTR_STS_CD  = 'LSO'
+                        AND    ROWNUM           = 1
+                        ) AS FST_CNTR_STS_SEQ
+                        , P.VNDR_SEQ, P.COMPANY
+                FROM    MST_CNTR_STS_HIS T01,
+                        PARAM P
+                WHERE   1=1
+                AND     DECODE(TERM_CHANGE, 'N', 'N')   = TERM_CHANGE
+                #if (${dii} != '' )
+  								#if (${dii} == 'N' )
+          		AND     CNTR_STS_CD IN ('LSI','OWN')
+  				    			#elseif (${dii} == 'Y' ) 
+          		AND     CNTR_STS_CD = 'DII'
+  								#end
+				#else
+				AND     CNTR_STS_CD IN ('LSI','DII','OWN')
+				#end
+                AND     T01.AGMT_SEQ      <> 999990
+                         
+                AND     CNTR_STS_EVNT_DT BETWEEN TO_DATE(P.PERIOD_STDT, 'YYYYMMDD') AND TO_DATE(P.PERIOD_EDDT, 'YYYYMMDD')
+                ) T10,
+                MST_CNTR_STS_HIS T12,
+                MST_CONTAINER    T13,
+                MDM_CNTR_TP_SZ   T14,
+                LSE_AGREEMENT    T15,
+                MDM_VENDOR       T17
+        WHERE   1=1
+        AND     T10.CNTR_NO             = T13.CNTR_NO
+        AND     T13.CNTR_TPSZ_CD        = T14.CNTR_TPSZ_CD
+        AND     T10.CNTR_NO             = T12.CNTR_NO      (+)  
+        AND     T10.FST_CNTR_STS_SEQ    = T12.CNTR_STS_SEQ (+)
+        AND     T10.AGMT_CTY_CD         = T15.AGMT_CTY_CD
+        AND     T10.AGMT_SEQ            = T15.AGMT_SEQ
+        AND     T15.VNDR_SEQ            = T17.VNDR_SEQ
+        AND     T13.CO_CRE_FLG         = 'N'
+        AND     'N'                     = T10.CNTR_LSTM_CNG_FLG
+        AND     'N'                     = NVL(T12.CNTR_LSTM_CNG_FLG,  'N')
+        #if (${vndr_seq} != '' ) 
+		AND     T10.VNDR_SEQ            = T17.VNDR_SEQ
+		#end				
+		#if (${cntr_tpsz_cd_str} != '' )
+	    AND  T13.CNTR_TPSZ_CD IN( #foreach($key IN ${cntr_tpsz_cd})
+	                                     #if($velocityCount < $cntr_tpsz_cd.size())
+	                                        '$key',
+	                                     #else
+	                                        '$key'
+	                                     #end
+	                                 #end )
+		#end
+		#if (${company} != '' )
+		AND T13.CNTR_USE_CO_CD = T10.COMPANY 
+		#end
+		#if (${lstm_cd_str} != '' ) 
+		AND   T15.LSTM_CD IN ( #foreach($key IN ${lstm_cd})
+		                          #if($velocityCount < $lstm_cd.size())
+			                                     '$key',
+			                                 #else
+			                                     '$key'
+			                                 #end
+		                             #end )
+		#end
+        UNION ALL /* CASE 3 : 해당월 LSO 가 T/C='Y' 로 시작, 짝 LSI  를 찾고, 실제 반납한 LSO(기준 LSO 보다 큰 LSO 이고 T/C='N') */
+        SELECT  T10.CNTR_NO, T10.AGMT_CTY_CD, T10.AGMT_SEQ
+                , T10.CNTR_STS_CD                 AS LSI_STS_CD                
+                , T10.LSI_EVNT_DT                     
+                , T10.CNTR_LSTM_CNG_FLG           AS LSI_LSTM_CHG_CD
+                , T10.LSO_STS_CD
+                , T10.LSO_EVNT_DT
+                , NVL(T10.LSO_LSTM_CHG_CD, 'N')   AS LSO_LSTM_CHG_CD
+                , NVL(LSO_EVNT_DT, TO_DATE(TO_CHAR(SYSDATE, 'YYYYMMDD'), 'YYYYMMDD')) - LSI_EVNT_DT + 1 AS USED_DAYS
+                , T13.CNTR_TPSZ_CD AS DD
+                , 1 AS EE
+                , T15.REF_NO
+                , T15.LSTM_CD
+                , T17.VNDR_ABBR_NM
+                , ROW_NUMBER() OVER (PARTITION BY T10.CNTR_NO ORDER BY T10.CNTR_NO) RN
+                , T15.VNDR_SEQ, '' AS COMPANY
+        FROM    (
+                SELECT  T12.CNTR_NO, T12.AGMT_CTY_CD, T12.AGMT_SEQ, T12.CNTR_STS_EVNT_DT AS LSI_EVNT_DT, T12.CNTR_STS_SEQ
+                        , T12.CNTR_STS_CD, T12.CNTR_LSTM_CNG_FLG, T12.RCC_CD AS LSI_RCC_CD, T12.LCC_CD AS LSI_LCC_CD, T12.SCC_CD AS LSI_SCC_CD, T12.YD_CD AS LSI_YD_CD
+                        , T11.VNDR_SEQ, T11.COMPANY
+                        , ROW_NUMBER(               ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS RN
+                        , LEAD(T12.RCC_CD           ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_RCC_CD                        
+                        , LEAD(T12.LCC_CD           ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_LCC_CD
+                        , LEAD(T12.SCC_CD           ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_SCC_CD
+                        , LEAD(T12.YD_CD            ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_YD_CD                        
+                        , LEAD(T12.CNTR_STS_CD      ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_STS_CD
+                        , LEAD(T12.CNTR_STS_EVNT_DT ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_EVNT_DT
+                        , LEAD(T12.CNTR_STS_SEQ     ) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_STS_SEQ
+                        , LEAD(T12.CNTR_LSTM_CNG_FLG) OVER (PARTITION BY T12.CNTR_NO ORDER BY  T12.CNTR_STS_SEQ) AS LSO_LSTM_CHG_CD
+                FROM    (
+                        SELECT T01.CNTR_NO,
+                               T01.CNTR_STS_SEQ,
+                               T01.YD_CD,
+                               T01.AGMT_CTY_CD,
+                               T01.AGMT_SEQ,
+                               T01.CNTR_STS_EVNT_DT,
+                               T01.CNTR_STS_CD,
+                               T01.CNTR_LSTM_CNG_FLG,
+                               T01.RCC_CD,
+                               (SELECT /*+ INDEX_ASC(T03 XPKMST_CNTR_STS_HIS) */
+                                       CNTR_STS_SEQ
+                                FROM   MST_CNTR_STS_HIS T03
+                                WHERE  T02.CNTR_NO = T03.CNTR_NO
+                                AND    T02.CNTR_STS_SEQ < T03.CNTR_STS_SEQ
+                                AND    T03.CNTR_LSTM_CNG_FLG = 'N'
+                                AND    T03.CNTR_STS_CD = 'LSO'
+                                AND    ROWNUM = 1 ) AS LSO_CNTR_STS_SEQ ,
+                               P.VNDR_SEQ,
+                               P.COMPANY,                              
+                               P.LOC_TP AS P_LOC_TP,
+                               P.LOC_CD AS P_LOC_CD
+                        FROM   MST_CNTR_STS_HIS T01,
+                         /* LSI */
+                          MST_CNTR_STS_HIS T02,
+                         /* LSI 이후 TERM CHANAGED LSO */
+                          PARAM P
+                        WHERE  1=1
+                        AND    DECODE(TERM_CHANGE, 'Y', 'Y') = TERM_CHANGE
+                        AND    T01.CNTR_NO = T02.CNTR_NO
+                        AND    T01.CNTR_STS_SEQ = T02.PRNR_STS_SEQ 
+                    #if (${dii} != '' ) 
+                       #if (${dii} == 'N' )
+                        AND    T01.CNTR_STS_CD IN ('LSI','OWN') 
+                       #elseif (${dii} == 'Y' )
+                        AND    T01.CNTR_STS_CD = 'DII' 
+                       #end 
+                   #else
+                        AND    T01.CNTR_STS_CD IN ('LSI','DII','OWN') 
+                   #end
+                        AND    T02.CNTR_LSTM_CNG_FLG = 'Y'
+                        AND    T01.AGMT_SEQ <> 999990
+                        AND    T01.CNTR_STS_EVNT_DT BETWEEN TO_DATE(P.PERIOD_STDT, 'YYYYMMDD') AND TO_DATE(P.PERIOD_EDDT, 'YYYYMMDD') 
+                        ) T11, MST_CNTR_STS_HIS T12                        
+                WHERE   T11.CNTR_NO         = T12.CNTR_NO
+                AND     T12.CNTR_STS_SEQ    IN (T11.CNTR_STS_SEQ, T11.LSO_CNTR_STS_SEQ)                       
+                )                T10,
+                MST_CONTAINER    T13,
+                MDM_CNTR_TP_SZ   T14,
+                LSE_AGREEMENT    T15,
+                MDM_VENDOR       T17
+        WHERE   1=1
+        AND     T10.CNTR_NO             = T13.CNTR_NO
+        AND     T13.CNTR_TPSZ_CD        = T14.CNTR_TPSZ_CD
+        AND     T10.AGMT_CTY_CD         = T15.AGMT_CTY_CD
+        AND     T10.AGMT_SEQ            = T15.AGMT_SEQ
+        AND     T15.VNDR_SEQ            = T17.VNDR_SEQ
+        AND     T13.CO_CRE_FLG         = 'N'
+        AND     RN                      = 1       				
+		#if (${cntr_tpsz_cd_str} != '' )
+	    AND  T13.CNTR_TPSZ_CD IN( #foreach($key IN ${cntr_tpsz_cd})
+	                                     #if($velocityCount < $cntr_tpsz_cd.size())
+	                                        '$key',
+	                                     #else
+	                                        '$key'
+	                                     #end
+	                                 #end )
+		#end
+		#if (${company} != '' )
+		AND T13.CNTR_USE_CO_CD = T10.COMPANY 
+		#end
+		#if (${lstm_cd_str} != '' ) 
+		AND   T15.LSTM_CD IN ( #foreach($key IN ${lstm_cd})
+			                                 #if($velocityCount < $lstm_cd.size())
+			                                     '$key',
+			                                 #else
+			                                     '$key'
+			                                 #end
+			                             #end )
+		#end    
+        ) T20
+WHERE   1=1
+GROUP BY GROUPING SETS ((LSTM_CD), (LSTM_CD,VNDR_SEQ, VNDR_ABBR_NM), ())
+)			]]></sql>
+			<params>
+				<param name="period_stdt" type="12" value="" out="N"/>
+				<param name="period_eddt" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="loc_tp" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="12" value="" out="N"/>
+				<param name="company" type="12" value="" out="N"/>
+				<param name="term_change" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

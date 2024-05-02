@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ArrivalNoticeDBDAOsearchNoticeHistoryListRSQL">
+			<desc><![CDATA[UI-BKG-0001 Notice Sent History]]></desc>
+			<sql><![CDATA[
+/* 0001 - NoticeVO - BKG_NTC_HIS Index creation required for search as period  */
+SELECT NTC_KND_CD_DESC
+     , BL_NO
+     , BKG_NO
+     , CN_NM
+     , NF_NM
+     , SND_RTY_KNT
+     , BKG_NTC_SND_RSLT_CD
+     , BKG_NTC_SND_RSLT_CTNT
+     , NTC_FAX_NO_EML
+     , SND_RQST_DT -- SENT RQST
+     , SND_DT  -- FINAL SENT
+     , SND_GDT
+     , SND_OFC_CD
+     , SND_USR_ID
+     , USR_NM
+     , ROW_COUNT
+FROM (
+      SELECT 
+      #if (${sch_tp} == 'D')
+             /*+ INDEX_SS_ASC (NHIS XAK2BKG_NTC_HIS)  */
+      #end
+             DECODE(NHIS.NTC_KND_CD, 'PH', 'Pre-Hold', 'CF', 'Confirm-Hold'
+                                   , NKCD.INTG_CD_VAL_DP_DESC ) AS NTC_KND_CD_DESC
+           , BKGM.BL_NO
+           , BKGM.BKG_NO
+           , REPLACE(CCST.CUST_NM, CHR(10), ' ') AS CN_NM
+           , REPLACE(NCST.CUST_NM, CHR(10), ' ') AS NF_NM
+           , NHIS.SND_RTY_KNT
+           , NVL(DECODE (NHIS.NTC_VIA_CD
+                         , 'F', DECODE(NHIS.BKG_NTC_SND_RSLT_CD, NULL, NULL, '5', 'S', '6', 'F', '4','F','W')
+                         , 'M', DECODE(NHIS.BKG_NTC_SND_RSLT_CD, NULL, NULL, '3', 'S', '4', 'F', 'W')
+                        )
+                 , DECODE (NHIS.NTC_VIA_CD
+                           , 'F', DECODE(FXSD.FAX_PROC_STS_CD, '5', 'S', '6', 'F', '4','F','W')
+                           , 'M', DECODE(EMSD.EML_PROC_STS_CD, '3', 'S', '4', 'F', 'W')
+                          )
+                 ) AS BKG_NTC_SND_RSLT_CD  
+           , NVL(DECODE (NHIS.NTC_VIA_CD
+                         , 'F', DECODE(NHIS.BKG_NTC_SND_RSLT_CD, NULL, NULL, '5', 'Success', '6', NHIS.FAX_NTC_SND_RSLT_MSG, '4','ERR','Sending')
+                         , 'M', DECODE(NHIS.BKG_NTC_SND_RSLT_CD, NULL, NULL, '3', 'Success', '4', 'Fail', 'Sending')
+                        )
+                 , DECODE (NHIS.NTC_VIA_CD
+                           , 'F', DECODE(FXSD.FAX_PROC_STS_CD, '5', 'Success','6', FXSD.FAX_ERR_MSG,'4','ERR','Sending')
+                           , 'M', DECODE(EMSD.EML_PROC_STS_CD, '3', 'Success','4', 'Fail', 'Sending')
+                          )
+                 ) AS BKG_NTC_SND_RSLT_CTNT
+      
+           , DECODE(NHIS.NTC_VIA_CD, 'F', NHIS.NTC_FAX_NO, 'M', NHIS.NTC_EML) AS NTC_FAX_NO_EML
+           , TO_CHAR(NHIS.SND_RQST_DT, 'YYYY-MM-DD HH24:MI', 'NLS_DATE_LANGUAGE=ENGLISH') SND_RQST_DT -- SENT RQST
+           , TO_CHAR( NVL(NHIS.SND_DT,DECODE(NHIS.NTC_VIA_CD, 'F',FXSD.FAX_SND_LOCL_DT,'M',GLOBALDATE_PKG.TIME_CONV_FNC(COM_ConstantMgr_PKG.COM_getBaseLocationCode_FNC, EMSD.EML_DT,BKG_COM_USER_LOC_FNC(NHIS.SND_USR_ID)) )) , 'YYYY-MM-DD HH24:MI', 'NLS_DATE_LANGUAGE=ENGLISH') SND_DT  -- FINAL SENT
+           , TO_CHAR(NHIS.SND_GDT, 'YYYY-MM-DD HH24:MI', 'NLS_DATE_LANGUAGE=ENGLISH') SND_GDT  -- FINAL SENT
+           , NHIS.SND_OFC_CD
+           , NHIS.SND_USR_ID
+           , CUSR.USR_NM
+           , ROW_NUMBER() OVER (ORDER BY NHIS.SND_DT DESC ) ROW_NUM
+           , COUNT(1) OVER () ROW_COUNT
+        FROM VSK_VSL_PORT_SKD VSKD
+           , BKG_VVD BVVD
+           , BKG_BOOKING BKGM
+           , BKG_CUSTOMER CCST
+           , BKG_CUSTOMER NCST
+           , BKG_NTC_HIS NHIS
+           , COM_USER CUSR
+           , (SELECT INTG_CD_VAL_CTNT
+                   , INTG_CD_VAL_DP_DESC
+                FROM COM_INTG_CD_DTL
+               WHERE INTG_CD_ID = 'CD01552' -- NOTICE KIND CODE
+              ) NKCD
+           , COM_FAX_SND_INFO FXSD  -- Fax Sent History
+           , COM_EML_SND_INFO EMSD  -- Email Sent History  -- eq_ctrl_ofc_cd 조건 삭제 20091012 (container 조건도 삭제)
+       WHERE NHIS.NTC_VIA_CD IN ('F', 'M')
+      #if (${sch_tp} == 'V') 
+            AND VSKD.VSL_CD  = SUBSTR(@[vvd],1,4)      -- VVD (OPTIONAL 1)
+            AND VSKD.SKD_VOY_NO = SUBSTR(@[vvd],5,4)   -- VVD (OPTIONAL 1)
+            AND VSKD.SKD_DIR_CD = SUBSTR(@[vvd],9,1)   -- VVD (OPTIONAL 1)
+            AND VSKD.VPS_PORT_CD = @[pod_cd]
+      #elseif (${sch_tp} == 'D')
+            AND NHIS.SND_RQST_DT -- 변경 20091124
+                BETWEEN TO_DATE(REPLACE(@[snd_dt_fm], '-', ''), 'YYYYMMDD') 
+                    AND TO_DATE(REPLACE(@[snd_dt_to], '-', ''), 'YYYYMMDD') +1  -- DURATION (OPTIONAL 2)
+            AND BVVD.POD_CD = @[pod_cd]
+      #elseif (${sch_tp} == 'B')
+            --AND NHIS.BKG_NO = (SELECT BKG_NO FROM BKG_BOOKING WHERE BL_NO = bl_no )
+            AND BKGM.BL_NO = @[bl_no]
+      #else 
+            AND 1 = 0
+      #end
+      #if (${ofc_cd} != '' && ${sch_tp} != 'B' )
+            AND NHIS.SND_OFC_CD = @[ofc_cd]
+      #end
+      #if (${cust_ref_no} != '')
+            AND BKGM.BKG_NO IN (SELECT BREF.BKG_NO
+                                  FROM BKG_REFERENCE BREF
+                                 WHERE BREF.BKG_REF_TP_CD IN ('BKPO', 'CTPO', 'CMPO') -- P/O, per Container P/O, per C/M
+                                   AND BREF.CUST_REF_NO_CTNT = @[cust_ref_no] 
+                                )
+      #end
+      #if (${bkg_ntc_snd_rslt_cd} != '')
+         AND NVL(DECODE (NHIS.NTC_VIA_CD
+                         , 'F', DECODE(NHIS.BKG_NTC_SND_RSLT_CD, NULL, NULL, '5', 'S', '6', 'F', 'W')
+                         , 'M', DECODE(NHIS.BKG_NTC_SND_RSLT_CD, NULL, NULL, '3', 'S', '4', 'F', 'W')
+                        )
+                 , DECODE (NHIS.NTC_VIA_CD
+                         , 'F', DECODE(FXSD.FAX_PROC_STS_CD, '5', 'S', '6', 'F', 'W')
+                         , 'M', DECODE(EMSD.EML_PROC_STS_CD, '3', 'S', '4', 'F', 'W')
+                        )
+                ) = @[bkg_ntc_snd_rslt_cd]
+      #end
+         AND NHIS.NTC_KND_CD IN ('AN', 'AV', 'PH', 'CF', 'DO', 'BL' )
+      #if (${ntc_knd_cd} != '' && ${ntc_knd_cd} != 'HN')
+         AND NHIS.NTC_KND_CD = @[ntc_knd_cd]
+      #end
+      #if (${ntc_knd_cd} != '' && ${ntc_knd_cd} == 'HN')
+         AND NHIS.NTC_KND_CD IN ('PH','CF')
+      #end
+
+      #if (${snd_usr_id} != '')
+         AND NHIS.SND_USR_ID = @[snd_usr_id]
+      #end
+         AND BVVD.VSL_CD = VSKD.VSL_CD 
+      #if (${sch_tp} == 'V') 
+         AND BVVD.SKD_VOY_NO = VSKD.SKD_VOY_NO  -- VVD기준일 경우 VVD와 BVVD가 연결되어야 한다.
+         AND BVVD.SKD_DIR_CD = VSKD.SKD_DIR_CD
+         AND BVVD.POD_CD = VSKD.VPS_PORT_CD
+         AND BVVD.POD_CLPT_IND_SEQ = VSKD.CLPT_IND_SEQ
+      #else
+         AND BVVD.SKD_VOY_NO = VSKD.SKD_VOY_NO(+)  -- VVD기준으로 볼 경우가 아닌 경우 Schedule이 없어도 데이터가 나오게 한다.
+         AND BVVD.SKD_DIR_CD = VSKD.SKD_DIR_CD(+)
+         AND BVVD.POD_CD = VSKD.VPS_PORT_CD(+)
+         AND BVVD.POD_CLPT_IND_SEQ = VSKD.CLPT_IND_SEQ(+)
+      #end
+         AND BKGM.BKG_NO = BVVD.BKG_NO
+--         AND BKGM.POD_CD = BVVD.POD_CD
+#if ( ${ts_flg} != 'Y')     
+         AND BVVD.POD_CD = BKGM.POD_CD
+#else
+         AND BVVD.POD_CD = BKGM.PST_RLY_PORT_CD
+#end
+         AND CCST.BKG_NO = BKGM.BKG_NO
+         AND CCST.BKG_CUST_TP_CD = 'C'
+         AND NCST.BKG_NO = BKGM.BKG_NO
+         AND NCST.BKG_CUST_TP_CD = 'N'
+         AND NHIS.BKG_NO = BKGM.BKG_NO
+         AND CUSR.USR_ID(+) = NHIS.SND_USR_ID
+         AND NKCD.INTG_CD_VAL_CTNT(+) = NHIS.NTC_KND_CD
+         AND FXSD.FAX_SND_NO(+) = DECODE(NHIS.NTC_VIA_CD, 'F', NHIS.SND_ID)
+         AND EMSD.EML_SND_NO(+) = DECODE(NHIS.NTC_VIA_CD, 'M', NHIS.SND_ID)
+     ) RSLT
+#if (${excel_flg} != 'Y')
+WHERE ROW_NUM BETWEEN (TO_NUMBER(NVL(@[page_no], '1')) -1) * TO_NUMBER(@[pagerows]) +1
+                   AND TO_NUMBER(NVL(@[page_no], '1')) * TO_NUMBER(@[pagerows])
+#end
+ORDER BY SND_RQST_DT DESC			]]></sql>
+			<params>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="snd_dt_fm" type="12" value="" out="N"/>
+				<param name="snd_dt_to" type="12" value="" out="N"/>
+				<param name="bl_no" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="cust_ref_no" type="12" value="" out="N"/>
+				<param name="bkg_ntc_snd_rslt_cd" type="12" value="" out="N"/>
+				<param name="ntc_knd_cd" type="12" value="" out="N"/>
+				<param name="snd_usr_id" type="12" value="" out="N"/>
+				<param name="page_no" type="12" value="" out="N"/>
+				<param name="pagerows" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

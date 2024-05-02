@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="RegionDepartureReportDBDAOSearchImpRdrVSLAllocRSQL">
+			<desc><![CDATA[Import RDR VSL Allocation 조회]]></desc>
+			<sql><![CDATA[
+SELECT 'I' IBFLAG,
+       A.CRR_CD                  AS OPR_CD,
+       A.TTL_QTY                 AS BASIC_SLOT,
+       B.R_TEU                   AS RELEASE_SLOT,
+       B.S_TEU                   AS SWAP_SLOT,
+       (NVL(A.TTL_QTY, 0) + NVL(B.R_TEU, 0) + NVL(B.S_TEU, 0)) TTL_ALLOC,
+       A.TTL_WGT                 AS BASIC_WGT,
+       B.R_WGT                   AS RELEASE_WGT,
+       B.S_WGT                   AS SWAP_WGT,
+       A.TTL_WGT+B.R_WGT+B.S_WGT AS TOT_WGT,
+       (NVL(A.TTL_WGT, 0) + NVL(B.R_WGT, 0) + NVL(B.S_WGT, 0)) TTL_WEIGHT,
+       TEU AS TEU_WGT,
+       CASE
+         WHEN B.R_TEU > 0 THEN 'F'
+         WHEN B.R_WGT > 0 THEN 'F'
+         ELSE 'U'
+       END BSA_TYPE
+FROM   (SELECT A.CRR_CD,
+               SUM(DECODE(A.BSA_OP_JB_CD, '007', DECODE(B.PORT_BSA_CAPA, NULL, A.CRR_BSA_CAPA, 0, A.CRR_BSA_CAPA, B.PORT_BSA_CAPA))) AS TTL_QTY,
+               SUM(DECODE(A.BSA_OP_JB_CD, '009', DECODE(B.PORT_BSA_CAPA, NULL, A.CRR_BSA_CAPA, 0, A.CRR_BSA_CAPA, B.PORT_BSA_CAPA))) AS TTL_WGT,
+               SUM(DECODE(A.BSA_OP_JB_CD, '008', DECODE(B.PORT_BSA_CAPA, NULL, A.CRR_BSA_CAPA, 0, A.CRR_BSA_CAPA, B.PORT_BSA_CAPA))) AS TEU
+        FROM   BSA_VVD_OTR_CRR A,
+               (SELECT B.RLANE_CD,
+                       B.DIR_CD,
+                       B.TRD_CD,
+                       B.CRR_CD,
+                       B.BSA_OP_JB_CD,
+                       SUBSTR(MAX('0'||B.BSA_SEQ||B.PORT_BSA_CAPA), 3) PORT_BSA_CAPA
+                FROM   BSA_SLT_CHTR_PORT_DWN B
+                WHERE  PORT_CD(+) = @[port_cd]
+                AND    RLANE_CD = (SELECT D.RLANE_CD
+                        FROM   MDM_REV_LANE R,
+                               MDM_DTL_REV_LANE D,
+                               VSK_VSL_PORT_SKD V
+                        WHERE  D.RLANE_CD = R.RLANE_CD
+                        AND    V.VSL_CD = @[vsl_cd]
+                        AND    V.SKD_VOY_NO = @[voy_no]
+                        AND    V.SKD_DIR_CD = @[dir_cd]
+                        AND    V.VPS_PORT_CD = @[port_cd]
+                        AND    R.VSL_SLAN_CD = V.SLAN_CD
+                        AND    ( D.FM_CONTI_CD,
+                                       D.TO_CONTI_CD ) IN (SELECT CONTI_CD,
+                                       NVL(LEAD_CONTI_CD, CONTI_CD)
+                                FROM   (SELECT V.CLPT_SEQ,
+                                               V.VPS_PORT_CD,
+                                               L.CONTI_CD,
+                                               LEAD(CONTI_CD) OVER (PARTITION BY V.VSL_CD, V.SKD_VOY_NO, V.SKD_DIR_CD
+                                                ORDER BY V.CLPT_SEQ) LEAD_CONTI_CD
+                                        FROM   VSK_VSL_PORT_SKD V,
+                                               MDM_LOCATION L
+                                        WHERE  V.VSL_CD = @[vsl_cd]
+                                        AND    V.SKD_VOY_NO = @[voy_no]
+                                        AND    V.SKD_DIR_CD = @[dir_cd]
+                                        AND    V.VPS_PORT_CD = L.LOC_CD )
+                                WHERE  	1 = 1
+								----AND		CONTI_CD = [region]
+								AND    	CONTI_CD = (SELECT ML.CONTI_CD FROM MDM_LOCATION ML WHERE ML.LOC_CD  = @[port_cd])
+                                AND    	CONTI_CD <> NVL(LEAD_CONTI_CD, 'X') )
+                        AND    D.VSL_SLAN_DIR_CD = NVL('E', D.VSL_SLAN_DIR_CD) --:skd_dir_cd
+                        AND    D.DELT_FLG = 'N'
+                        AND    ROWNUM = 1 )
+                AND    DIR_CD = @[dir_cd]
+                AND    BSA_OP_JB_CD IN ('007', '009')
+                GROUP BY RLANE_CD, DIR_CD, TRD_CD, CRR_CD, BSA_OP_JB_CD ) B
+        WHERE  A.RLANE_CD = B.RLANE_CD(+)
+        AND    A.SKD_DIR_CD = B.DIR_CD(+)
+        AND    A.TRD_CD = B.TRD_CD(+)
+        AND    A.CRR_CD = B.CRR_CD(+)
+        AND    A.BSA_OP_JB_CD = B.BSA_OP_JB_CD(+)
+        AND    A.RLANE_CD = (SELECT D.RLANE_CD
+                FROM   MDM_REV_LANE R,
+                       MDM_DTL_REV_LANE D,
+                       VSK_VSL_PORT_SKD V
+                WHERE  D.RLANE_CD = R.RLANE_CD
+                AND    V.VSL_CD = @[vsl_cd]
+                AND    V.SKD_VOY_NO = @[voy_no]
+                AND    V.SKD_DIR_CD = @[dir_cd]
+                AND    V.VPS_PORT_CD = @[port_cd]
+                AND    R.VSL_SLAN_CD = V.SLAN_CD
+                AND    ( D.FM_CONTI_CD,
+                               D.TO_CONTI_CD ) IN (SELECT CONTI_CD,
+                               NVL(LEAD_CONTI_CD, CONTI_CD)
+                        FROM   (SELECT V.CLPT_SEQ,
+                                       V.VPS_PORT_CD,
+                                       L.CONTI_CD,
+                                       LEAD(CONTI_CD) OVER (PARTITION BY V.VSL_CD, V.SKD_VOY_NO, V.SKD_DIR_CD
+                                        ORDER BY V.CLPT_SEQ) LEAD_CONTI_CD
+                                FROM   VSK_VSL_PORT_SKD V,
+                                       MDM_LOCATION L
+                                WHERE  V.VSL_CD = @[vsl_cd]
+                                AND    V.SKD_VOY_NO = @[voy_no]
+                                AND    V.SKD_DIR_CD = @[dir_cd]
+                                AND    V.VPS_PORT_CD = L.LOC_CD )
+                        WHERE  	1 = 1
+						----AND		CONTI_CD = [region]
+						AND    	CONTI_CD = (SELECT ML.CONTI_CD FROM MDM_LOCATION ML WHERE ML.LOC_CD  = @[port_cd])
+                        AND    	CONTI_CD <> NVL(LEAD_CONTI_CD, 'X') )
+                AND    D.VSL_SLAN_DIR_CD = NVL(@[dir_cd], D.VSL_SLAN_DIR_CD) --:skd_dir_cd
+                AND    D.DELT_FLG = 'N'
+                AND    ROWNUM = 1 )
+        AND    A.VSL_CD = @[vsl_cd]
+        AND    A.SKD_VOY_NO = @[voy_no]
+        AND    A.SKD_DIR_CD = @[dir_cd]
+        AND    A.BSA_OP_JB_CD IN ('007', '009', '008')
+        AND    ( A.CRR_BSA_CAPA > 0
+                OR     B.PORT_BSA_CAPA > 0 )
+        GROUP BY A.CRR_CD, A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD ) A,
+       (SELECT C.CRR_CD,
+               DECODE(C.CRR_CD, COM_ConstantMgr_PKG.COM_getCompanyCode_FNC(), C.PUR_TEU_CAPA, C.SLS_TEU_CAPA) R_TEU,
+               DECODE(C.CRR_CD, COM_ConstantMgr_PKG.COM_getCompanyCode_FNC(), C.PUR_WGT, C.SLS_WGT) R_WGT,
+               C.SLT_SWAP_TEU_CAPA S_TEU,
+               C.SLT_SWAP_WGT S_WGT
+        FROM   BSA_VVD_MST A,
+               BSA_VVD_SWAP_INFO C,
+               (SELECT D.RLANE_CD,
+                       D.TRD_CD
+                FROM   MDM_REV_LANE R,
+                       MDM_DTL_REV_LANE D,
+                       VSK_VSL_PORT_SKD V
+                WHERE  D.RLANE_CD = R.RLANE_CD
+                AND    V.VSL_CD = @[vsl_cd]
+                AND    V.SKD_VOY_NO = @[voy_no]
+                AND    V.SKD_DIR_CD = @[dir_cd]
+                AND    V.VPS_PORT_CD = @[port_cd]
+                AND    R.VSL_SLAN_CD = V.SLAN_CD
+                AND    ( D.FM_CONTI_CD,
+                               D.TO_CONTI_CD ) IN (SELECT CONTI_CD,
+                               NVL(LEAD_CONTI_CD, CONTI_CD)
+                        FROM   (SELECT V.CLPT_SEQ,
+                                       V.VPS_PORT_CD,
+                                       L.CONTI_CD,
+                                       LEAD(CONTI_CD) OVER (PARTITION BY V.VSL_CD, V.SKD_VOY_NO, V.SKD_DIR_CD
+                                        ORDER BY V.CLPT_SEQ) LEAD_CONTI_CD
+                                FROM   VSK_VSL_PORT_SKD V,
+                                       MDM_LOCATION L
+                                WHERE  V.VSL_CD = @[vsl_cd]
+                                AND    V.SKD_VOY_NO = @[voy_cd]
+                                AND    V.SKD_DIR_CD = @[dir_cd]
+                                AND    V.VPS_PORT_CD = L.LOC_CD )
+                        WHERE  	1 = 1
+						----AND		CONTI_CD = [region]
+						AND    	CONTI_CD = (SELECT ML.CONTI_CD FROM MDM_LOCATION ML WHERE ML.LOC_CD  = @[port_cd])
+                        AND    CONTI_CD <> NVL(LEAD_CONTI_CD, 'X') )
+                AND    D.VSL_SLAN_DIR_CD = NVL(@[dir_cd], D.VSL_SLAN_DIR_CD)
+                AND    D.DELT_FLG = 'N'
+                AND    ROWNUM = 1 ) B
+        WHERE  A.VSL_CD = @[vsl_cd]
+        AND    A.SKD_VOY_NO = @[voy_no]
+        AND    A.SKD_DIR_CD = @[dir_cd]
+        AND    A.TRD_CD = C.TRD_CD
+        AND    A.RLANE_CD = C.RLANE_CD
+        AND    A.VSL_CD = C.VSL_CD
+        AND    A.SKD_VOY_NO = C.SKD_VOY_NO
+        AND    A.SKD_DIR_CD = C.SKD_DIR_CD
+        AND    A.TRD_CD = B.TRD_CD
+        AND    A.RLANE_CD = B.RLANE_CD ) B
+WHERE  A.CRR_CD = B.CRR_CD(+)
+ORDER BY A.CRR_CD			]]></sql>
+			<params>
+				<param name="port_cd" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="voy_no" type="12" value="" out="N"/>
+				<param name="dir_cd" type="12" value="" out="N"/>
+				<param name="voy_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

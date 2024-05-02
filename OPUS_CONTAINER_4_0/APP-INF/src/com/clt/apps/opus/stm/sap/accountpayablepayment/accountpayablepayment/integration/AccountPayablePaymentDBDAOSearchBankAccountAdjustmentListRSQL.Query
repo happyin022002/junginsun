@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AccountPayablePaymentDBDAOSearchBankAccountAdjustmentListRSQL">
+			<desc><![CDATA[Bank Account의 Balance 정보를 조회]]></desc>
+			<sql><![CDATA[
+SELECT  SBA.BANK_NM
+      , SBA.BANK_ACCT_SEQ
+      , SBA.BANK_BRNC_NM
+      , SBA.BANK_ACCT_NO
+      , SBA.BANK_ACCT_NM
+      , SBA.CURR_CD
+      , SBA.BANK_ACCT_TP_MN_NM
+      , SBA.BANK_ACCT_TP_SUB_NM
+      , TO_CHAR(TO_DATE(@[bank_stmt_dt], 'YYYY-MM-DD'),'YYYY-MM-DD') AS BANK_STMT_DT  --TO_CHAR(SBA.BANK_STMT_DT, 'YYYY-MM-DD') AS BANK_STMT_DT
+      , OPUSADM.SAP_GET_CUR_AMT_FNC(SBA.CURR_CD, SBBA.CTRL_BGN_BAL_AMT) AS CTRL_BGN_BAL_AMT
+      , OPUSADM.SAP_GET_CUR_AMT_FNC(SBA.CURR_CD, SBBA.CTRL_TTL_RCT_AMT) AS CTRL_TTL_RCT_AMT
+      , OPUSADM.SAP_GET_CUR_AMT_FNC(SBA.CURR_CD, SBBA.CTRL_TTL_PAY_AMT) AS CTRL_TTL_PAY_AMT
+      , SBBA2.BANK_STMT_DESC AS BANK_STMT_DESC
+      , (SELECT NVL(DP_PRCS_KNT, 0) FROM MDM_CURRENCY M WHERE M.CURR_CD = SBA.CURR_CD AND ROWNUM = 1 ) AS INV_CURR_PRCS
+      , SBBA.CRE_USR_ID AS USR_ID
+      , OPUSADM.SAP_GET_CUR_AMT_FNC(SBA.CURR_CD, NVL(STI2.RECEIPT_AMOUNT, 0)) AS RECEIPT_AMT_TODAY
+      , OPUSADM.SAP_GET_CUR_AMT_FNC(SBA.CURR_CD, NVL(STI2.PAYMENT_AMOUNT, 0)) AS PAYMENT_AMT_TODAY
+      , CASE WHEN NVL(TO_CHAR(SBBA2.BANK_STMT_DT,'YYYYMMDD'), REPLACE(@[bank_stmt_dt],'-')) = REPLACE(@[bank_stmt_dt],'-') THEN TRIM(OPUSADM.SAP_GET_CUR_AMT_FNC(SBA.CURR_CD, SBBA2.CTRL_TTL_RCT_AMT))
+             ELSE TRIM(OPUSADM.SAP_GET_CUR_AMT_FNC(SBA.CURR_CD, 0))
+        END AS AFT_TTL_RCT_AMT
+      , CASE WHEN NVL(TO_CHAR(SBBA2.BANK_STMT_DT,'YYYYMMDD'), REPLACE(@[bank_stmt_dt],'-')) = REPLACE(@[bank_stmt_dt],'-') THEN TRIM(OPUSADM.SAP_GET_CUR_AMT_FNC(SBA.CURR_CD, SBBA2.CTRL_TTL_PAY_AMT))
+             ELSE TRIM(OPUSADM.SAP_GET_CUR_AMT_FNC(SBA.CURR_CD, 0))
+        END AS AFT_TTL_PAY_AMT
+      , CASE WHEN NVL(TO_CHAR(SBBA2.BANK_STMT_DT,'YYYYMMDD'), REPLACE(@[bank_stmt_dt],'-')) = REPLACE(@[bank_stmt_dt],'-') THEN TRIM(OPUSADM.SAP_GET_CUR_AMT_FNC(SBA.CURR_CD, SBBA2.CTRL_ENDG_BAL_AMT))
+             ELSE TRIM(OPUSADM.SAP_GET_CUR_AMT_FNC(SBA.CURR_CD, SBBA2.CTRL_BGN_BAL_AMT + SBBA2.CTRL_TTL_RCT_AMT - SBBA2.CTRL_TTL_PAY_AMT))
+        END AS AFT_ENDG_BAL_AMT
+      , DECODE(SBBA2.BANK_STMT_DT, NULL, 'N', 'Y') AS ADJ_CHK
+      , DECODE(STI2.BANK_ACCOUNT_SEQ, NULL, 'N', 'Y') AS TRX_CHK
+      , CASE WHEN SBBA2.BANK_STMT_DT IS NOT NULL THEN '0' ELSE
+             CASE WHEN STI2.BANK_ACCOUNT_SEQ IS NOT NULL THEN '1' ELSE '0' END 
+        END AS SAVE_CHK  -- 1 SAVE 대상, 0 SAVE 대상이 아님.
+FROM    (SELECT  SBA.BANK_NM
+               , SBA.BANK_ACCT_SEQ
+               , SBA.BANK_BRNC_NM
+               , SBA.BANK_ACCT_NO
+               , SBA.BANK_ACCT_NM
+               , SBA.CURR_CD
+               , SBA.BANK_ACCT_TP_MN_NM
+               , SBA.BANK_ACCT_TP_SUB_NM
+               , NVL(MAX(SBBA.BANK_STMT_DT), TO_DATE(@[bank_stmt_dt],'YYYY-MM-DD') - 1) AS BANK_STMT_DT
+         FROM    (SELECT  SBB.BANK_NM
+                        , SBA.BANK_ACCT_SEQ
+                        , SBB.BANK_BRNC_NM
+                        , SBA.BANK_ACCT_NO
+                        , SBA.BANK_ACCT_NM
+                        , SBA.CURR_CD
+                        , (SELECT SLD.LU_DESC 
+                           FROM   SCO_LU_DTL SLD 
+                           WHERE  SLD.LU_TP_CD = 'BANK ACCOUNT TYPE(L)'
+                           AND    SLD.LU_CD = SBA.BANK_ACCT_TP_MN_CD 
+                           AND    ROWNUM = 1) AS BANK_ACCT_TP_MN_NM
+                        , (SELECT SLD.LU_DESC 
+                           FROM   SCO_LU_DTL SLD 
+                           WHERE  SLD.LU_TP_CD = 'BANK ACCOUNT TYPE(M)' 
+                           AND    SLD.LU_CD = SBA.BANK_ACCT_TP_SUB_CD 
+                           AND    ROWNUM = 1) AS BANK_ACCT_TP_SUB_NM
+                  FROM    SAP_BANK_ACCT SBA
+                        , SAP_BANK_BRNC SBB
+                  WHERE   1 = 1 
+                  AND     SBA.BANK_BRNC_SEQ = SBB.BANK_BRNC_SEQ
+                  AND     SBA.BANK_ACCT_TP_NM = 'INTERNAL'
+                  AND     ((DECODE(@[ctrl_ofc], 'AP', SBA.AP_CTRL_OFC_CD, 'AR', SBA.AR_OFC_CD) = @[ofc_cd])
+                           OR (@[ctrl_ofc] = 'ALL' AND (SBA.AP_CTRL_OFC_CD = @[ofc_cd] OR SBA.AR_OFC_CD = @[ofc_cd]))) 
+                  #if (${inv_curr_cd} != '')
+                    AND   SBA.CURR_CD =@[inv_curr_cd]
+                  #end   
+                  #if (${bank_acct_tp_mn_cd} != '')
+                    AND   SBA.BANK_ACCT_TP_MN_CD =@[bank_acct_tp_mn_cd]
+                  #end 
+                  #if (${bank_acct_tp_sub_cd} != '')
+                    AND   SBA.BANK_ACCT_TP_SUB_CD =@[bank_acct_tp_sub_cd]
+                  #end
+                 ) SBA
+               , SAP_BANK_BAL_ADJ SBBA
+         WHERE   1 = 1
+         AND     SBA.BANK_ACCT_SEQ = SBBA.BANK_ACCT_SEQ(+)
+         AND     SBBA.BANK_STMT_DT(+) < TO_DATE(@[bank_stmt_dt], 'YYYY-MM-DD')
+         GROUP   BY SBA.BANK_NM
+                  , SBA.BANK_ACCT_SEQ
+                  , SBA.BANK_BRNC_NM
+                  , SBA.BANK_ACCT_NO
+                  , SBA.BANK_ACCT_NM
+                  , SBA.CURR_CD
+                  , SBA.BANK_ACCT_TP_MN_NM
+                  , SBA.BANK_ACCT_TP_SUB_NM   
+        ) SBA
+      , SAP_BANK_BAL_ADJ SBBA
+      , SAP_BANK_BAL_ADJ SBBA2
+      , (SELECT  STI.BANK_ACCOUNT_SEQ
+               , SUM(STI.PAYMENT_AMOUNT)         AS PAYMENT_AMOUNT
+               , SUM(STI.RECEIPT_AMOUNT)         AS RECEIPT_AMOUNT
+         FROM    SAP_TRX_INQ_V STI
+         WHERE   STI.CLEARED_DATE = TO_DATE(@[bank_stmt_dt], 'YYYY-MM-DD')
+         GROUP   BY STI.BANK_ACCOUNT_SEQ) STI2
+WHERE   SBA.BANK_ACCT_SEQ = SBBA.BANK_ACCT_SEQ(+)
+AND     SBA.BANK_STMT_DT  = SBBA.BANK_STMT_DT(+)
+AND     SBA.BANK_ACCT_SEQ = SBBA2.BANK_ACCT_SEQ(+)
+AND     SBBA2.BANK_STMT_DT(+) = TO_DATE(@[bank_stmt_dt], 'YYYY-MM-DD')
+AND     SBA.BANK_ACCT_SEQ = STI2.BANK_ACCOUNT_SEQ(+)
+ORDER   BY SBA.BANK_NM
+         , SBA.BANK_ACCT_SEQ			]]></sql>
+			<params>
+				<param name="bank_stmt_dt" type="12" value="" out="N"/>
+				<param name="ctrl_ofc" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="inv_curr_cd" type="12" value="" out="N"/>
+				<param name="bank_acct_tp_mn_cd" type="12" value="" out="N"/>
+				<param name="bank_acct_tp_sub_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

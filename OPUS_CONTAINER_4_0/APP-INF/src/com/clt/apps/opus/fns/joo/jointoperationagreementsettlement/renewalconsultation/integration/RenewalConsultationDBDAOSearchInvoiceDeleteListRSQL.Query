@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="RenewalConsultationDBDAOSearchInvoiceDeleteListRSQL">
+			<desc><![CDATA[삭제할 Invoice 목록 조회.]]></desc>
+			<sql><![CDATA[
+WITH V_MDM_ORG AS (
+    SELECT D.OFC_CD
+         , D.LOC_CD
+         , D.AP_CTR_CD
+         , D.AP_OFC_CD
+         , D.FINC_RGN_CD
+      FROM MDM_ORGANIZATION D
+         , MDM_ORGANIZATION E
+     WHERE D.OFC_CD = E.AP_OFC_CD
+       AND E.OFC_CD = @[ofc_cd]
+       AND ROWNUM   = 1
+)
+SELECT INV.INV_NO
+     , INV.ACCTG_CRR_CD
+     , INV.RE_DIVR_CD
+     , INV.CUST_VNDR_CNT_CD
+     , INV.CUST_VNDR_SEQ
+     , INV.PRNR_REF_NO
+     , INV.LOCL_CURR_CD
+     , INV.TOT_AMOUNT AS ACT_AMT
+     , INV.ACCT_YRMON
+     --, INV.AR_AP_DIV_CD
+     --, 'F0' AS EVID_TP_CD
+     --, INV.INV_NO AS CSR_OFFST_NO
+     --, TO_CHAR(TO_DATE(INV.ACCT_YRMON,'YYYYMM'),'RR/MM')||' '||INV.ACCTG_CRR_CD||' settlement' AS CSR_DESC
+     , ORG.OFC_CD AS SLP_ISS_OFC_CD /*Login Office*/
+     --, ORG.FINC_RGN_CD AS SLP_ISS_RGN_CD
+     , DECODE(INV.RE_DIVR_CD, 'R', '18', '06') AS SLP_TP_CD
+     , DECODE(INV.RE_DIVR_CD, 'R', 'T' , (CASE WHEN INV.TOT_AMOUNT< 0 THEN 'C' ELSE 'S' END)) AS SLP_FUNC_CD
+     , ORG.AP_OFC_CD AS SLP_OFC_CD /*AP OFFICE*/
+     , TO_CHAR(TO_DATE(INV.RQST_DT,'YYYYMMDD'),'RRMM') AS SLP_ISS_DT
+     , NULL AS SLP_SER_NO
+     --, DECODE(INV.RE_DIVR_CD, 'E', (CASE WHEN INV.TOT_AMOUNT< 0 THEN 'CREDIT' ELSE 'STANDARD' END), NULL) AS CSR_TP_CD
+     , CASE WHEN INV.RE_DIVR_CD = 'R' THEN 
+                 ( SELECT M.CUST_LGL_ENG_NM
+                     FROM MDM_CUSTOMER M
+                    WHERE M.DELT_FLG = 'N'
+                      AND M.CUST_CNT_CD   = INV.CUST_VNDR_CNT_CD
+                      AND M.CUST_SEQ      = INV.CUST_VNDR_SEQ )
+            ELSE
+                 ( SELECT M.VNDR_LGL_ENG_NM
+                     FROM MDM_VENDOR M
+                    WHERE M.DELT_FLG = 'N'
+                      AND M.VNDR_SEQ      = INV.CUST_VNDR_SEQ )
+       END AS CUST_VNDR_ENG_NM
+  FROM (     
+        SELECT INV.INV_NO
+             , INV.ACCTG_CRR_CD
+             , INV.RE_DIVR_CD
+             , INV.CUST_VNDR_CNT_CD
+             , INV.CUST_VNDR_SEQ
+             , INV.PRNR_REF_NO
+             , INV.LOCL_CURR_CD
+             , SUM(INV.ACT_AMT) AS TOT_AMOUNT
+             , INV.ACCT_YRMON
+             , INV.AR_AP_DIV_CD
+             , TO_CHAR(GLOBALDATE_PKG.TIME_LOCAL_FNC(GLOBALDATE_PKG.GET_LOCCD_FNC('SINHO')),'YYYYMMDD') AS RQST_DT
+             , TO_CHAR(GLOBALDATE_PKG.TIME_LOCAL_FNC(GLOBALDATE_PKG.GET_LOCCD_FNC('SINHO')),'YYYYMMDD') AS ISS_DT
+          FROM (
+                SELECT INV.INV_NO
+                     , INV.ACCTG_CRR_CD
+                     , INV.RE_DIVR_CD
+                     , DECODE(INV.RE_DIVR_CD,'R',SUBSTR(INV.PRNR_REF_NO,1,2), NULL) AS CUST_VNDR_CNT_CD
+                     , DECODE(INV.RE_DIVR_CD,'R',SUBSTR(INV.PRNR_REF_NO,3), INV.PRNR_REF_NO) AS CUST_VNDR_SEQ
+                     , DECODE(INV.RE_DIVR_CD,'R','R', 'P') AS AR_AP_DIV_CD
+                     , INV.PRNR_REF_NO
+                     , INV.LOCL_CURR_CD
+                     , INV.JO_CRR_CD
+                     , INV.ACT_AMT
+                     , INV.ACCT_YRMON
+                  FROM JOO_INVOICE INV
+                 WHERE 1=1
+                   AND INV.ACCT_YRMON   BETWEEN REPLACE(@[fr_acct_yrmon],'-') AND REPLACE(@[to_acct_yrmon],'-')
+                   AND TRIM(INV.SLP_TP_CD||INV.SLP_FUNC_CD||INV.SLP_OFC_CD||INV.SLP_ISS_DT||INV.SLP_SER_NO) IS NULL
+#if (${jo_crr_cds} != '' && ${jo_crr_cds} != 'ALL') 
+                   /* Condition Actual Carrier */ 
+                   AND INV.ACCTG_CRR_CD IN ( #foreach($key IN ${jo_crr_cds})#if($velocityCount < $jo_crr_cds.size()) '$key', #else '$key' #end #end)
+#end
+#if (${auth_ofc_cd}!='')
+                   /* Condition Auth Office Cd */
+                   AND EXISTS ( SELECT 'X'
+                                  FROM JOO_INV_DTL DTL
+                                     , JOO_STL_TGT TGT
+                                     , JOO_CRR_AUTH CA
+                                 WHERE DTL.ACCT_YRMON   = INV.ACCT_YRMON
+                                   AND DTL.JO_CRR_CD    = INV.JO_CRR_CD
+                                   AND DTL.INV_NO       = INV.INV_NO
+                                   AND DTL.RE_DIVR_CD   = INV.RE_DIVR_CD
+                                   AND DTL.VSL_CD       = TGT.VSL_CD
+                                   AND DTL.SKD_VOY_NO   = TGT.SKD_VOY_NO
+                                   AND DTL.SKD_DIR_CD   = TGT.SKD_DIR_CD
+                                   AND DTL.REV_DIR_CD   = TGT.REV_DIR_CD
+                                   AND DTL.REV_YRMON    = TGT.REV_YRMON
+                                   AND DTL.STL_VVD_SEQ  = TGT.STL_VVD_SEQ
+                                   AND TGT.JO_CRR_CD    = CA.JO_CRR_CD
+                                   AND TGT.RLANE_CD     = CA.RLANE_CD
+                                   AND CA.DELT_FLG      = 'N'
+                                   AND CA.AUTH_OFC_CD   = @[auth_ofc_cd]
+                               )
+#end
+                 ORDER BY INV.INV_NO
+                     , INV.ACCTG_CRR_CD
+                     , INV.RE_DIVR_CD
+             ) INV
+        WHERE 1=1
+        GROUP BY INV.INV_NO
+             , INV.ACCTG_CRR_CD
+             , INV.RE_DIVR_CD
+             , INV.CUST_VNDR_CNT_CD
+             , INV.CUST_VNDR_SEQ
+             , INV.PRNR_REF_NO
+             , INV.LOCL_CURR_CD
+             , INV.ACCT_YRMON
+             , INV.AR_AP_DIV_CD
+        ) INV
+      , V_MDM_ORG ORG
+ WHERE 1=1
+ ORDER BY INV.INV_NO
+     , INV.ACCTG_CRR_CD
+     , INV.RE_DIVR_CD			]]></sql>
+			<params>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="fr_acct_yrmon" type="12" value="" out="N"/>
+				<param name="to_acct_yrmon" type="12" value="" out="N"/>
+				<param name="auth_ofc_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

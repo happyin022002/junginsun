@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="BookingUtilDBDAOSearchPrdReplanCodeRSQL">
+			<desc><![CDATA[BookingUtilDBDAOSearchPrdReplanCode]]></desc>
+			<sql><![CDATA[
+SELECT																															                                                                                
+(CASE                                                                                                                            
+    WHEN GREATEST(NVL(SO_BND,0),NVL(ACT_BND,0)) = 1 THEN --OUTBOUND -> POR, RTERM 변경 불가                                      		  
+    (                                                                                                                            
+    CASE                                                                                                                         
+        WHEN C_POR = 'D' THEN 'E0001'                                                                                            
+        WHEN C_RTERM = 'D' THEN 'E0006'                                                                                          
+		 -- O/B Rail S/O -> POL 변경불가   (# Add 2008.01.23 by sj)                                                                 
+		 --WHEN RD_SO = 'D' AND C_POL = 'D' THEN 'E0002'	                                                                          
+		 -- COP_STS = 'F' AND SUB_STS <> 'R' -> Replan 불가																		  
+		 WHEN C_REPLAN IS NULL THEN 'E0008'																						  
+        ELSE 'E0000'                                                                                                             
+    END                                                                                                                          
+    )                                                                                                                            
+    WHEN GREATEST(NVL(SO_BND,0),NVL(ACT_BND,0)) = 2 THEN --OCEAN -> POR, POL, RTERM 변경 불가                                    		  
+    (                                                                                                                            
+    CASE                                                                                                                         
+        WHEN C_POR = 'D' THEN 'E0001'                                                                                            
+        WHEN C_POL = 'D' THEN 'E0002'                                                                                            
+        WHEN C_RTERM = 'D' THEN 'E0006'                                                                                          
+		 -- COP_STS = 'F' AND SUB_STS <> 'R' -> Replan 불가																		  
+		 WHEN C_REPLAN IS NULL THEN 'E0008'																						  
+        ELSE 'E0000'                                                                                                             
+    END                                                                                                                          
+    )                                                                                                                            
+    WHEN GREATEST(NVL(SO_BND,0),NVL(ACT_BND,0)) = 3 THEN --INBOUND -> POR,POL,POD,RTERM,VVD 변경불가                             	  
+    (                                                                                                                            
+    CASE                                                                                                                         
+		 WHEN C_POD = 'D' AND ACT_STS = 'D' THEN 'E0009'	-- I/B TN/IC -> POD 변경불가(#Add 2008.02.21 by sj)					  
+        WHEN C_POR = 'D' THEN 'E0001'   WHEN C_POL = 'D' THEN 'E0002'   WHEN C_VVD = 'D' THEN 'E0003'                            
+        WHEN C_POD = 'D' THEN 'E0004'   WHEN C_RTERM='D' THEN 'E0006'								                              
+		 -- I/B Door SO -> DEL 변경불가																							  
+		 WHEN ID_SO = 'D' AND C_DEL = 'D' THEN 'E0005'																			  
+		 WHEN ID_SO = 'D' AND C_DTERM = 'D' THEN 'E0007'     --  I/B Door SO -> DEL Term 변경불가	(# Add 2007.11.14 by sj)		  
+		 WHEN RD_SO = 'D' AND C_DEL = 'D' THEN 'E0005'       --  I/B Rail SO -> DEL 변경불가(# Add 2007.11.14 by sj)				  
+		 -- COP_STS = 'F' AND SUB_STS <> 'R' -> Replan 불가																		  
+		 WHEN C_REPLAN IS NULL THEN 'E0008'																						  
+        ELSE 'E0000'                                                                                                             
+    END                                                                                                                          
+    )                                                                                                                            
+    ELSE 'E0000'                                                                                                                 
+END) E_CD
+FROM                                                                                                                             
+(                                                                                                                                
+    SELECT                                                                                                                       
+    PCTL_NO,                                                                                              
+    POR_CD,POL_CD,POD_CD,DEL_CD,BKG_RCV_TERM_CD,BKG_DE_TERM_CD,                                                                  
+    DECODE(M.POR_CD,@[por],'S','D') C_POR,                                                                                            
+    DECODE(M.POL_CD,@[pol],'S','D') C_POL,                                                                                            
+    DECODE(M.POD_CD,@[pod],'S','D') C_POD,                                                                                            
+    DECODE(M.DEL_CD,@[del],'S','D') C_DEL,                                                                                            
+    DECODE(M.TRNK_VSL_CD||M.TRNK_SKD_VOY_NO||M.TRNK_SKD_DIR_CD,@[t_vvd],'S','D') C_VVD,                                                 
+    DECODE(M.BKG_RCV_TERM_CD,@[rcv_t],'S','D') C_RTERM,                                                                                 
+    DECODE(M.BKG_DE_TERM_CD ,@[del_t],'S','D') C_DTERM                                                                                  
+    FROM PRD_PROD_CTL_MST M WHERE PCTL_NO = (SELECT PCTL_NO FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no]  )              
+) BKG,                                                                                                                           
+(                                                                                                                                
+	 SELECT  SO_BND,																											  
+        ( SELECT (CASE 																										  
+                    WHEN SUBSTR(MAX(COST_ACT_GRP_CD), 1, 2) = 'ID' THEN 'D'													  
+                    ELSE 'Y'																									  
+                  END) 																								          
+          FROM TRS_TRSP_SVC_ORD																							  
+          WHERE COP_NO IN                    																					  
+                        (SELECT COP_NO FROM SCE_COP_HDR    																	  
+                         WHERE BKG_NO = @[bkg_no] AND COP_STS_CD NOT IN ('O','X'))				  				  
+          AND COST_ACT_GRP_SEQ = A.COST_ACT_GRP_SEQ																			  
+          AND TRSP_SO_STS_CD IN ('C','R','I','E','X')
+          AND TRSP_SO_TP_CD <> 'S'
+          AND NVL(RPLN_UMCH_FLG,'N') <> 'Y' -- 2010.04.09 추가 by j
+          AND NVL(TRSP_FRST_FLG,'N') <> 'Y'
+          AND NVL(DELT_FLG,'N') <> 'Y'																			  
+       ) ID_SO,																												  
+	    ( SELECT (CASE 																											  
+                    WHEN SUBSTR(MAX(COST_ACT_GRP_CD), 1, 1) IN ('I', 'O') AND													  
+                         (SUBSTR(MAX(COST_ACT_GRP_CD), 3, 1) = 'R' OR SUBSTR(MAX(COST_ACT_GRP_CD), 4, 1) = 'R') THEN 'D'		  
+                    ELSE 'Y'																									  
+                  END) 																										  
+          FROM TRS_TRSP_RAIL_BIL_ORD																							  
+          WHERE COP_NO IN                                              														  
+                        (SELECT COP_NO FROM SCE_COP_HDR                														  
+                         WHERE BKG_NO = @[bkg_no] AND COP_STS_CD NOT IN ('O','X'))				  				  
+          AND COST_ACT_GRP_SEQ = A.COST_ACT_GRP_SEQ																			  
+          AND TRSP_SO_STS_CD IN ('C','R','I','E','X')
+		  AND NVL(TRSP_FRST_FLG,'N') <> 'Y'
+          AND NVL(DELT_FLG,'N') <> 'Y'																			  
+        ) RD_SO																												  
+FROM                                                                															  
+	(																															  
+    SELECT  MAX(COST_ACT_GRP_SEQ) COST_ACT_GRP_SEQ,                                                                              
+		(CASE																													  
+		  	WHEN MAX(COST_ACT_GRP_SEQ) >= 400 AND MAX(COST_ACT_GRP_SEQ) < 600 THEN 2											  
+		  	WHEN MAX(COST_ACT_GRP_SEQ) >= 600 AND MAX(COST_ACT_GRP_SEQ) < 900 THEN 3											  
+		  	WHEN MAX(COST_ACT_GRP_SEQ) IS NULL THEN 0																			  
+		 	 ELSE 1																												  
+	 	END) SO_BND																												  
+    	FROM 
+		  (SELECT MAX(COST_ACT_GRP_SEQ) COST_ACT_GRP_SEQ FROM TRS_TRSP_SVC_ORD 
+    	   WHERE COP_NO IN 
+    	       (SELECT COP_NO FROM SCE_COP_HDR                                                                                           
+     	          WHERE BKG_NO = @[bkg_no]  AND COP_STS_CD NOT IN ('O','X'))
+    	   AND TRSP_SO_STS_CD IN ('C','R','I','E','X')
+           AND TRSP_SO_TP_CD <> 'S'
+           AND NVL(RPLN_UMCH_FLG,'N') <> 'Y' -- 2010.04.09 추가 by j
+           AND NVL(TRSP_FRST_FLG,'N') <> 'Y'
+           AND NVL(DELT_FLG,'N') <> 'Y'
+    	   UNION
+    	   SELECT MAX(COST_ACT_GRP_SEQ) COST_ACT_GRP_SEQ FROM TRS_TRSP_RAIL_BIL_ORD
+    	   WHERE COP_NO IN 
+        	   (SELECT COP_NO FROM SCE_COP_HDR                                                                                           
+     	          WHERE BKG_NO = @[bkg_no]  AND COP_STS_CD NOT IN ('O','X'))
+    	   AND TRSP_SO_STS_CD IN ('C','R','I','E','X')
+		   AND NVL(TRSP_FRST_FLG,'N') <> 'Y'
+           AND NVL(DELT_FLG,'N') <> 'Y'
+    	   ) 
+    ) A																														  
+) SO,                                                                                                                            
+(                                                                                                                                
+    SELECT                                                                         	  										  
+    (CASE   --POD Discharging 은 Ocean 구간으로 간주   																			  
+		 WHEN ACT_BND IN (1,2) THEN 0							  	                                                              
+        WHEN ACT_BND = 3 AND ACT_CD IN ('FUVMUD','FUWMUD') AND  
+            COP_DTL_SEQ = (SELECT MIN(COP_DTL_SEQ) FROM SCE_COP_DTL                                                              
+                           WHERE COP_NO = D.COP_NO AND SUBSTR(COP_DTL_SEQ,1,1) = '6' AND ACT_CD = D.ACT_CD) THEN 2                                                                         
+        ELSE ACT_BND                                                                                                             
+    END) ACT_BND,					                                                                                              
+	 (CASE				                                                                                             			  
+		 WHEN ACT_STS_MAPG_CD = 'TN' OR ACT_STS_MAPG_CD = 'IC' THEN 'D'				                                              
+		 ELSE 'S'				                                                                                              	  
+      END) ACT_STS				                                                                                              	  
+    FROM                                                                                                                         
+    (                                                                                                                            
+        SELECT                                                                                                                   
+            MAX(COP_NO) COP_NO,                                                                                                      
+            MAX(COP_DTL_SEQ) COP_DTL_SEQ,   --MAX(COP_GRP_SEQ) COP_GRP_SEQ,                                                                                            
+            --OP 는 운송전으로 간주                                                                                                  				  
+    		(CASE																													  
+    		  WHEN MAX(COP_DTL_SEQ) >= 4000 AND MAX(COP_DTL_SEQ) < 6000 THEN 2														  
+    		  WHEN MAX(COP_DTL_SEQ) >= 6000 AND MAX(COP_DTL_SEQ) < 9000 THEN 3	    		  													  
+    		  ELSE 0																												  
+    		END) ACT_BND,																											  
+            MAX(ACT_CD) ACT_CD,                                                                                                      
+    		MAX(ACT_STS_MAPG_CD) ACT_STS_MAPG_CD	                                                                     			  
+        FROM                                                                                                                     
+        (                                                                                                                        
+            SELECT                                                                                                               
+            COP_NO, --COP_GRP_SEQ,
+            COP_DTL_SEQ,ACT_CD,ACT_STS_CD,ACT_STS_MAPG_CD                                                     
+            FROM SCE_COP_DTL                                                                                                     
+            WHERE COP_NO IN                                                                                                      
+            (SELECT COP_NO FROM SCE_COP_HDR WHERE BKG_NO = @[bkg_no]  												  
+			  AND COP_STS_CD NOT IN ('X','O') AND NVL(COP_SUB_STS_CD,'X') <> 'R')           	  								  
+            AND ACT_STS_CD = 'F'                                                                                                 
+            ORDER BY  COP_DTL_SEQ DESC         -- COP_GRP_SEQ||COP_DTL_SEQ DESC                                                                               
+        )                                                                                                                        
+        WHERE ROWNUM = 1                                                                                                         
+    ) D                                                                                                                          
+) ACT,                                                                                                                           
+(                                                                                                           					  
+    SELECT MAX(COP_NO) C_REPLAN                                                                                                  
+    FROM SCE_COP_HDR                                                                                                             
+    WHERE BKG_NO = @[bkg_no]                                                                      				  
+    AND (COP_STS_CD IN ('C', 'T') OR (COP_STS_CD = 'F' AND NVL(COP_SUB_STS_CD, 'X') = 'R'))                                      
+) COP			]]></sql>
+			<params>
+				<param name="por" type="12" value="" out="N"/>
+				<param name="pol" type="12" value="" out="N"/>
+				<param name="pod" type="12" value="" out="N"/>
+				<param name="del" type="12" value="" out="N"/>
+				<param name="t_vvd" type="12" value="" out="N"/>
+				<param name="rcv_t" type="12" value="" out="N"/>
+				<param name="del_t" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

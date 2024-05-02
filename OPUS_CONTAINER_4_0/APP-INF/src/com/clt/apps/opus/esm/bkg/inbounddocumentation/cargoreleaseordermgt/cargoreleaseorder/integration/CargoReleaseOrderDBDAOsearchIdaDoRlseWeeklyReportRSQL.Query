@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CargoReleaseOrderDBDAOsearchIdaDoRlseWeeklyReportRSQL">
+			<desc><![CDATA[Indian Office의 DMDT Payment Type별로  D/O 발행 실적을 Weekly별로 조회한다.]]></desc>
+			<sql><![CDATA[
+SELECT SUBS.DMDT_PAY_TP_CD
+     , CDTL.INTG_CD_VAL_DP_DESC AS DMDT_PAY_TP_CD_DESC
+     , SUBS.FIRST_WK
+     , SUBS.SECOND_WK
+     , SUBS.THIRD_WK
+     , SUBS.FORTH_WK
+     , SUBS.FIFTH_WK
+     , NVL(SUBS.MONTHLY, 0) AS MONTHLY      -- IdaDoWeeklyReportVO
+  FROM (SELECT INTG_CD_VAL_CTNT
+             , INTG_CD_VAL_DP_DESC
+             , INTG_CD_VAL_DP_SEQ
+          FROM COM_INTG_CD_DTL
+         WHERE INTG_CD_ID = 'CD02209' ) CDTL -- D/O DEM/DET PAYMENT TYPE CODE
+     , (
+             SELECT SUBQ.DMDT_PAY_TP_CD AS DMDT_PAY_TP_CD
+                      , SUM(SUBQ.FIRST_WK) FIRST_WK
+                      , SUM(SUBQ.SECOND_WK) SECOND_WK
+                      , SUM(SUBQ.THIRD_WK) THIRD_WK
+                      , SUM(SUBQ.FORTH_WK) FORTH_WK
+                      , SUM(SUBQ.FIFTH_WK) FIFTH_WK
+                      , COUNT(1) MONTHLY      -- IdaDoWeeklyReportVO
+              FROM (
+                  SELECT BKDO.DO_NO||BKDO.DO_NO_SPLIT AS DO_NO
+                       , BKDO.IDA_DO_DMDT_PAY_TP_CD AS DMDT_PAY_TP_CD
+                       , MAX(DECODE(WEEK_ODR, 1, 1, 0)) FIRST_WK
+                       , MAX(DECODE(WEEK_ODR, 2, 1, 0)) SECOND_WK
+                       , MAX(DECODE(WEEK_ODR, 3, 1, 0)) THIRD_WK
+                       , MAX(DECODE(WEEK_ODR, 4, 1, 0)) FORTH_WK
+                       , MAX(DECODE(WEEK_ODR, 5, 1, 6, 1, 0)) FIFTH_WK
+                 FROM (
+                        SELECT WEEK_START
+                            , LEAD(WEEK_START) OVER (ORDER BY WEEK_START) WEEK_END
+                                  , ROW_NUMBER() OVER (ORDER BY WEEK_START) WEEK_ODR
+                             FROM (
+                                   #if (${rd_flag} == 'F')
+                                       SELECT DECODE(ROWNUM, 1, TO_DATE(@[evnt_dt_fm], 'YYYYMMDD')  -- RLSE_DATE
+                                                           , 8, TO_DATE(@[evnt_dt_to], 'YYYYMMDD') + 1
+                                                           , NEXT_DAY(TO_DATE(@[evnt_dt_fm], 'YYYYMMDD') -14 , to_char(to_date('20060101', 'YYYYMMDD'), 'day')) + (7 * ROWNUM) -- to_char(to_date('20060101', 'YYYYMMDD'), 'day') 는 항상 일요일이다.
+                                                     ) WEEK_START
+                                       FROM COM_INTG_CD_DTL
+                                       WHERE ROWNUM < 9
+                                   #end
+                                   #if (${rd_flag} == 'S')
+                                       SELECT DECODE(ROWNUM, 1, TO_DATE(@[evnt_dt_ym], 'YYYYMM')  -- RELEASE DATE YM
+                                                           , 8, ADD_MONTHS(TO_DATE(@[evnt_dt_ym], 'YYYYMM') , 1)
+                                                           , NEXT_DAY(TO_DATE(@[evnt_dt_ym], 'YYYYMM') -14 , to_char(to_date('20060101', 'YYYYMMDD'), 'day')) + (7 * ROWNUM) 
+                                                     ) WEEK_START
+                                       FROM COM_INTG_CD_DTL
+                                       WHERE ROWNUM < 9
+                                   #end
+                            ) START_DAYS
+                     WHERE 1= 1 
+                 #if (${rd_flag} == 'F')
+                     AND WEEK_START >= TO_DATE(@[evnt_dt_fm], 'YYYYMMDD')
+                     AND WEEK_START <= TO_DATE (@[evnt_dt_to], 'YYYYMMDD') + 1
+                 #end
+                 #if (${rd_flag} == 'S')
+                     AND WEEK_START >= TO_DATE(@[evnt_dt_ym], 'YYYYMM')
+                     AND WEEK_START <= ADD_MONTHS(TO_DATE (@[evnt_dt_ym], 'YYYYMM'), 1)
+                 #end
+                     GROUP BY WEEK_START
+                     ) WEKS
+                   , BKG_DO_DTL DOTL
+                   , BKG_DO BKDO
+                   , BKG_DO_CNTR DCNT
+                   , BKG_BOOKING BKGM
+                WHERE DOTL.EVNT_OFC_CD = @[evnt_ofc_cd] 
+                AND TRIM(DOTL.EVNT_DT) >= WEKS.WEEK_START
+                AND TRIM(DOTL.EVNT_DT) < WEKS.WEEK_END
+                AND BKDO.BKG_NO = DOTL.BKG_NO
+                AND BKDO.RLSE_SEQ = DOTL.RLSE_SEQ
+                AND BKDO.IDA_DO_DMDT_PAY_TP_CD IS NOT NULL
+            #if (${dmdt_pay_tp_cd} != '')
+                AND 1 = 1 -- AND BKDO.IDA_DO_DMDT_PAY_TP_CD = [dmdt_pay_tp_cd]
+            #end
+                AND DCNT.BKG_NO = BKDO.BKG_NO
+                AND DCNT.RLSE_SEQ = BKDO.RLSE_SEQ
+            #if (${cntr_no} != '')
+                AND DCNT.CNTR_NO = @[cntr_no]
+            #end
+                AND BKGM.BKG_NO = BKDO.BKG_NO
+            #if (${bl_no} != '')
+                AND BKGM.BL_NO = @[bl_no]
+            #end
+                GROUP BY BKDO.DO_NO||BKDO.DO_NO_SPLIT,BKDO.IDA_DO_DMDT_PAY_TP_CD
+           ) SUBQ
+           WHERE 1=1
+           GROUP BY SUBQ.DMDT_PAY_TP_CD
+       ) SUBS
+ WHERE SUBS.DMDT_PAY_TP_CD(+) = CDTL.INTG_CD_VAL_CTNT
+ ORDER BY CDTL.INTG_CD_VAL_DP_SEQ
+			]]></sql>
+			<params>
+				<param name="evnt_dt_fm" type="12" value="" out="N"/>
+				<param name="evnt_dt_to" type="12" value="" out="N"/>
+				<param name="evnt_dt_ym" type="12" value="" out="N"/>
+				<param name="evnt_ofc_cd" type="12" value="" out="N"/>
+				<param name="cntr_no" type="12" value="" out="N"/>
+				<param name="bl_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

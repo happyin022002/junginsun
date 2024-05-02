@@ -1,0 +1,386 @@
+/*=========================================================
+*Copyright(c) 2016 CyberLogitec
+*@FileName : IMDGCodeMgtDBDAOSegregationSimulationOutputVORSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2016.01.26
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2016.01.26 
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.vop.scg.dangerouscargoinformationmgt.imdgcodemgt.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class IMDGCodeMgtDBDAOSegregationSimulationOutputVORSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * Segregation Simulation in a CNTR 화면의 Segregation Validation 목록을 조회한다.
+	  * </pre>
+	  */
+	public IMDGCodeMgtDBDAOSegregationSimulationOutputVORSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		query.append("/*").append("\n"); 
+		query.append("Path : com.clt.apps.opus.vop.scg.dangerouscargoinformationmgt.imdgcodemgt.integration").append("\n"); 
+		query.append("FileName : IMDGCodeMgtDBDAOSegregationSimulationOutputVORSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("WITH UN_NO_TBL AS (" ).append("\n"); 
+		query.append("     SELECT T.SORT_NO" ).append("\n"); 
+		query.append("          , T.IMDG_UN_NO" ).append("\n"); 
+		query.append("          , T.IMDG_UN_NO_SEQ" ).append("\n"); 
+		query.append("          , DECODE(NVL(UN.SEGR_AS_FOR_IMDG_CLSS_CD,''),'',T.IMDG_CLSS_CD,UN.SEGR_AS_FOR_IMDG_CLSS_CD) IMDG_CLSS_CD" ).append("\n"); 
+		query.append("		  , NVL(UN.IMDG_UN_NO_HLD_FLG,'N') IMDG_UN_NO_HLD_FLG" ).append("\n"); 
+		query.append("          , UN.IMDG_COMP_GRP_CD  " ).append("\n"); 
+		query.append("          , CASE WHEN T.LQ_CHK = '1' THEN" ).append("\n"); 
+		query.append("                                          CASE WHEN NVL(UN.IMDG_LMT_QTY,0) = 0 THEN 'LY'" ).append("\n"); 
+		query.append("                                               ELSE 'XX'" ).append("\n"); 
+		query.append("                                          END" ).append("\n"); 
+		query.append("                 WHEN T.EQ_CHK = '1' THEN" ).append("\n"); 
+		query.append("                                          CASE WHEN NVL(UN.IMDG_EXPT_QTY_CD,'E0') = 'E0' THEN 'EY'" ).append("\n"); 
+		query.append("                                               ELSE 'XX'" ).append("\n"); 
+		query.append("                                          END" ).append("\n"); 
+		query.append("                 ELSE 'N'" ).append("\n"); 
+		query.append("            END AS LEQ_CHK  " ).append("\n"); 
+		query.append("          , UN.IMDG_TBL_NO" ).append("\n"); 
+		query.append("       FROM (" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("#foreach(${obj} in ${opt_obj})" ).append("\n"); 
+		query.append("             SELECT $velocityCount          AS SORT_NO" ).append("\n"); 
+		query.append("                  , '$obj.getImdgUnNo()'    AS IMDG_UN_NO" ).append("\n"); 
+		query.append("                  , '$obj.getImdgUnNoSeq()' AS IMDG_UN_NO_SEQ" ).append("\n"); 
+		query.append("                  , '$obj.getImdgClssCd()'  AS IMDG_CLSS_CD" ).append("\n"); 
+		query.append("                  , '$obj.getLqChk()'       AS LQ_CHK" ).append("\n"); 
+		query.append("                  , '$obj.getEqChk()'       AS EQ_CHK" ).append("\n"); 
+		query.append("               FROM DUAL" ).append("\n"); 
+		query.append("     #if($velocityCount < ${obj_size})" ).append("\n"); 
+		query.append("             UNION" ).append("\n"); 
+		query.append("     #end" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("            ------ <STARTING> ---------------------------------------------------" ).append("\n"); 
+		query.append("			--::2015-09-08:by TOP:Adding Checking Logic for Subsdiary Risk(s)::--" ).append("\n"); 
+		query.append("			UNION" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("			SELECT  	3          			AS SORT_NO" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("					,	XX.IMDG_UN_NO" ).append("\n"); 
+		query.append("					,	XX.IMDG_UN_NO_SEQ" ).append("\n"); 
+		query.append("					,	SR.IMDG_SUBS_RSK_LBL_CD" ).append("\n"); 
+		query.append("					,	XX.LQ_CHK" ).append("\n"); 
+		query.append("					,	XX.EQ_CHK" ).append("\n"); 
+		query.append("			FROM		(" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("					#foreach(${obj} in ${opt_obj})" ).append("\n"); 
+		query.append("						SELECT		$velocityCount          AS SORT_NO" ).append("\n"); 
+		query.append("             	     			,	'$obj.getImdgUnNo()'    AS IMDG_UN_NO" ).append("\n"); 
+		query.append("             	     			, 	'$obj.getImdgUnNoSeq()' AS IMDG_UN_NO_SEQ" ).append("\n"); 
+		query.append("             	     			, 	'$obj.getImdgClssCd()'  AS IMDG_CLSS_CD" ).append("\n"); 
+		query.append("            	      			, 	'$obj.getLqChk()'       AS LQ_CHK" ).append("\n"); 
+		query.append("             	     			, 	'$obj.getEqChk()'       AS EQ_CHK" ).append("\n"); 
+		query.append("						FROM		DUAL" ).append("\n"); 
+		query.append("     					#if($velocityCount < ${obj_size})" ).append("\n"); 
+		query.append("						UNION" ).append("\n"); 
+		query.append("     					#end" ).append("\n"); 
+		query.append("					#end" ).append("\n"); 
+		query.append("                    	) XX" ).append("\n"); 
+		query.append("					,	SCG_IMDG_SUBS_RSK_LBL  				SR" ).append("\n"); 
+		query.append("			WHERE 		XX.IMDG_UN_NO     					= SR.IMDG_UN_NO     " ).append("\n"); 
+		query.append("			AND			XX.IMDG_UN_NO_SEQ 					= SR.IMDG_UN_NO_SEQ" ).append("\n"); 
+		query.append("			--::2015-09-08:by TOP:Adding Checking Logic for Subsdiary Risk(s)::--" ).append("\n"); 
+		query.append("			------ <FINISHED> ---------------------------------------------------" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("           ) T, SCG_IMDG_UN_NO UN" ).append("\n"); 
+		query.append("      WHERE T.IMDG_UN_NO     = UN.IMDG_UN_NO" ).append("\n"); 
+		query.append("        AND T.IMDG_UN_NO_SEQ = UN.IMDG_UN_NO_SEQ" ).append("\n"); 
+		query.append(")" ).append("\n"); 
+		query.append("," ).append("\n"); 
+		query.append("UN_NO_SEGR_TBL AS (" ).append("\n"); 
+		query.append("     SELECT B.SORT_NO                           AS SORT_NO" ).append("\n"); 
+		query.append("          , B.IMDG_UN_NO                        AS IMDG_UN_NO" ).append("\n"); 
+		query.append("          , B.IMDG_UN_NO_SEQ                    AS IMDG_UN_NO_SEQ" ).append("\n"); 
+		query.append("          , B.IMDG_CLSS_CD                      AS IMDG_CLSS_CD1" ).append("\n"); 
+		query.append("          , C.IMDG_CLSS_CD                      AS IMDG_CLSS_CD2" ).append("\n"); 
+		query.append("          , B.IMDG_UN_NO_HLD_FLG                AS IMDG_UN_NO_HLD_FLG" ).append("\n"); 
+		query.append("          , B.IMDG_COMP_GRP_CD                  AS IMDG_COMP_GRP_CD" ).append("\n"); 
+		query.append("          , (D.IMDG_SEGR_TP_CD||C.IMDG_SEGR_CD) AS IMDG_SEGR_CD" ).append("\n"); 
+		query.append("          , D.IMDG_SEGR_DESC                    AS IMDG_SEGR_DESC" ).append("\n"); 
+		query.append("          , B.IMDG_TBL_NO                       AS IMDG_TBL_NO" ).append("\n"); 
+		query.append("       FROM UN_NO_TBL           B" ).append("\n"); 
+		query.append("          , SCG_IMDG_UN_NO_SEGR C" ).append("\n"); 
+		query.append("          , SCG_IMDG_SEGR_SYM   D" ).append("\n"); 
+		query.append("      WHERE B.IMDG_UN_NO_HLD_FLG = 'N'" ).append("\n"); 
+		query.append("        AND B.LEQ_CHK            = 'N'" ).append("\n"); 
+		query.append("        AND B.IMDG_UN_NO         = C.IMDG_UN_NO" ).append("\n"); 
+		query.append("        AND B.IMDG_UN_NO_SEQ     = C.IMDG_UN_NO_SEQ     " ).append("\n"); 
+		query.append("        AND C.IMDG_SEGR_CD       = D.IMDG_SEGR_CD" ).append("\n"); 
+		query.append("        AND NVL(D.DELT_FLG,'N')  = 'N' " ).append("\n"); 
+		query.append("        AND D.IMDG_SEGR_TP_CD    = 'C'       " ).append("\n"); 
+		query.append(")" ).append("\n"); 
+		query.append("," ).append("\n"); 
+		query.append("UN_NO_SEGR_GRP_TBL AS (" ).append("\n"); 
+		query.append("     SELECT E.SORT_NO" ).append("\n"); 
+		query.append("          , E.IMDG_UN_NO" ).append("\n"); 
+		query.append("          , E.IMDG_UN_NO_SEQ" ).append("\n"); 
+		query.append("          , E.IMDG_CLSS_CD" ).append("\n"); 
+		query.append("          , E.IMDG_UN_NO_HLD_FLG" ).append("\n"); 
+		query.append("          , F.IMDG_SEGR_GRP_NO" ).append("\n"); 
+		query.append("          , ('G'||F.IMDG_SEGR_GRP_STWG_TP_CD) AS IMDG_SEGR_GRP_STWG_TP_CD" ).append("\n"); 
+		query.append("          , E.IMDG_TBL_NO" ).append("\n"); 
+		query.append("       FROM UN_NO_TBL               E" ).append("\n"); 
+		query.append("          , SCG_IMDG_UN_NO_SEGR_GRP F" ).append("\n"); 
+		query.append("      WHERE E.IMDG_UN_NO_HLD_FLG = 'N'" ).append("\n"); 
+		query.append("        AND E.LEQ_CHK            = 'N'" ).append("\n"); 
+		query.append("        AND E.IMDG_UN_NO     = F.IMDG_UN_NO" ).append("\n"); 
+		query.append("        AND E.IMDG_UN_NO_SEQ = F.IMDG_UN_NO_SEQ" ).append("\n"); 
+		query.append(")" ).append("\n"); 
+		query.append("," ).append("\n"); 
+		query.append("CLSS1_SEGR_TBL AS (" ).append("\n"); 
+		query.append("     SELECT CGS.ROW_IMDG_COMP_GRP_CD" ).append("\n"); 
+		query.append("          , CGS.COL_IMDG_COMP_GRP_CD" ).append("\n"); 
+		query.append("          , ('P'||CGS.IMDG_SEGR_CD) AS IMDG_SEGR_CD" ).append("\n"); 
+		query.append("          , CGS.IMDG_SEGR_NTC_NO " ).append("\n"); 
+		query.append("          , (SELECT MSG.ERR_MSG FROM COM_ERR_MSG MSG WHERE MSG.ERR_MSG_CD = 'SCG00005') IMDG_SEGR_DESC" ).append("\n"); 
+		query.append("       FROM SCG_IMDG_COMP_GRP_SEGR CGS " ).append("\n"); 
+		query.append("      WHERE NOT EXISTS (" ).append("\n"); 
+		query.append("            SELECT 'X'" ).append("\n"); 
+		query.append("              FROM SCG_IMDG_SEGR_SYM SYM" ).append("\n"); 
+		query.append("             WHERE SYM.IMDG_SEGR_CD      = CGS.IMDG_SEGR_NTC_NO" ).append("\n"); 
+		query.append("               AND NVL(SYM.DELT_FLG,'N') = 'N'" ).append("\n"); 
+		query.append("               AND SYM.IMDG_SEGR_TP_CD   = 'P'" ).append("\n"); 
+		query.append("      ) " ).append("\n"); 
+		query.append(")" ).append("\n"); 
+		query.append("," ).append("\n"); 
+		query.append("SEGR_GRP_NOS_TBL AS (" ).append("\n"); 
+		query.append("     SELECT SG.IMDG_UN_NO" ).append("\n"); 
+		query.append("          , SUBSTR(XMLAGG(XMLELEMENT(X, '/' || IMDG_SEGR_GRP_NO) ORDER BY IMDG_SEGR_GRP_NO).EXTRACT('//text()'), 2) IMDG_SEGR_GRP_NOS" ).append("\n"); 
+		query.append("       FROM SCG_IMDG_SEGR_GRP_DTL SG" ).append("\n"); 
+		query.append("      WHERE EXISTS (" ).append("\n"); 
+		query.append("                   SELECT 'Y'" ).append("\n"); 
+		query.append("                     FROM UN_NO_TBL G" ).append("\n"); 
+		query.append("                    WHERE G.IMDG_UN_NO = SG.IMDG_UN_NO" ).append("\n"); 
+		query.append("                   )" ).append("\n"); 
+		query.append("         OR EXISTS (" ).append("\n"); 
+		query.append("                   SELECT 'Y'" ).append("\n"); 
+		query.append("                     FROM UN_NO_SEGR_GRP_TBL H" ).append("\n"); 
+		query.append("                    WHERE H.IMDG_UN_NO = SG.IMDG_UN_NO" ).append("\n"); 
+		query.append("                   )" ).append("\n"); 
+		query.append("      GROUP BY SG.IMDG_UN_NO" ).append("\n"); 
+		query.append(") " ).append("\n"); 
+		query.append("," ).append("\n"); 
+		query.append("SEGR_GRP_NO_TBL AS (" ).append("\n"); 
+		query.append("     SELECT SG.IMDG_UN_NO" ).append("\n"); 
+		query.append("          , IMDG_SEGR_GRP_NO||'' IMDG_SEGR_GRP_NO" ).append("\n"); 
+		query.append("       FROM SCG_IMDG_SEGR_GRP_DTL SG" ).append("\n"); 
+		query.append("      WHERE EXISTS (" ).append("\n"); 
+		query.append("                   SELECT 'Y'" ).append("\n"); 
+		query.append("                     FROM UN_NO_TBL G" ).append("\n"); 
+		query.append("                    WHERE G.IMDG_UN_NO = SG.IMDG_UN_NO" ).append("\n"); 
+		query.append("                   )" ).append("\n"); 
+		query.append("         OR EXISTS (" ).append("\n"); 
+		query.append("                   SELECT 'Y'" ).append("\n"); 
+		query.append("                     FROM UN_NO_SEGR_GRP_TBL H" ).append("\n"); 
+		query.append("                    WHERE H.IMDG_UN_NO = SG.IMDG_UN_NO" ).append("\n"); 
+		query.append("                   )" ).append("\n"); 
+		query.append(")" ).append("\n"); 
+		query.append("SELECT	DISTINCT" ).append("\n"); 
+		query.append("		XX.*" ).append("\n"); 
+		query.append("FROM	(" ).append("\n"); 
+		query.append("		SELECT T.IMDG_UN_NO1" ).append("\n"); 
+		query.append("		     , T.IMDG_UN_NO_SEQ1" ).append("\n"); 
+		query.append("		     , T.IMDG_SEGR_GRP_NO1" ).append("\n"); 
+		query.append("		     , T.CONFLICT_DESC" ).append("\n"); 
+		query.append("		     , T.IMDG_UN_NO2" ).append("\n"); 
+		query.append("		     , T.IMDG_UN_NO_SEQ2" ).append("\n"); 
+		query.append("		     , T.IMDG_SEGR_GRP_NO2" ).append("\n"); 
+		query.append("		  FROM " ).append("\n"); 
+		query.append("		  (" ).append("\n"); 
+		query.append("		    SELECT TST.SORT_NO1" ).append("\n"); 
+		query.append("		         , TST.IMDG_UN_NO1" ).append("\n"); 
+		query.append("		         , TST.IMDG_UN_NO_SEQ1" ).append("\n"); 
+		query.append("		         , '' AS IMDG_SEGR_GRP_NO1" ).append("\n"); 
+		query.append("		         , TST.IMDG_UN_NO_HLD_FLG1" ).append("\n"); 
+		query.append("		         , DECODE(TST.IMDG_SEGR_CD,'C*',CL1.IMDG_SEGR_CD,TST.IMDG_SEGR_CD)    AS IMDG_SEGR_CD" ).append("\n"); 
+		query.append("		         , DECODE(TST.IMDG_SEGR_CD,'C*',CL1.IMDG_SEGR_DESC,TST.CONFLICT_DESC) AS CONFLICT_DESC" ).append("\n"); 
+		query.append("		         , TST.SORT_NO2" ).append("\n"); 
+		query.append("		         , TST.IMDG_UN_NO2" ).append("\n"); 
+		query.append("		         , TST.IMDG_UN_NO_SEQ2" ).append("\n"); 
+		query.append("		         , '' AS IMDG_SEGR_GRP_NO2" ).append("\n"); 
+		query.append("		         , TST.IMDG_UN_NO_HLD_FLG2" ).append("\n"); 
+		query.append("		      FROM " ).append("\n"); 
+		query.append("		         (     " ).append("\n"); 
+		query.append("		          SELECT UNS.SORT_NO            AS SORT_NO1" ).append("\n"); 
+		query.append("		               , UNS.IMDG_UN_NO         AS IMDG_UN_NO1" ).append("\n"); 
+		query.append("		               , UNS.IMDG_UN_NO_SEQ     AS IMDG_UN_NO_SEQ1" ).append("\n"); 
+		query.append("		               , UNS.IMDG_CLSS_CD1      AS IMDG_CLSS_CD1" ).append("\n"); 
+		query.append("		               , UNS.IMDG_COMP_GRP_CD   AS IMDG_SEGR_GRP_NO1" ).append("\n"); 
+		query.append("		               , UNS.IMDG_UN_NO_HLD_FLG AS IMDG_UN_NO_HLD_FLG1" ).append("\n"); 
+		query.append("		               , UNS.IMDG_SEGR_CD       AS IMDG_SEGR_CD" ).append("\n"); 
+		query.append("		               , UNS.IMDG_SEGR_DESC     AS CONFLICT_DESC" ).append("\n"); 
+		query.append("		               , UNT.SORT_NO            AS SORT_NO2" ).append("\n"); 
+		query.append("		               , UNT.IMDG_UN_NO         AS IMDG_UN_NO2" ).append("\n"); 
+		query.append("		               , UNT.IMDG_UN_NO_SEQ     AS IMDG_UN_NO_SEQ2" ).append("\n"); 
+		query.append("		               , UNT.IMDG_COMP_GRP_CD   AS IMDG_SEGR_GRP_NO2" ).append("\n"); 
+		query.append("		               , UNT.IMDG_UN_NO_HLD_FLG AS IMDG_UN_NO_HLD_FLG2" ).append("\n"); 
+		query.append("		            FROM UN_NO_SEGR_TBL UNS" ).append("\n"); 
+		query.append("		               , UN_NO_TBL      UNT" ).append("\n"); 
+		query.append("		           WHERE UNS.IMDG_CLSS_CD2      = UNT.IMDG_CLSS_CD" ).append("\n"); 
+		query.append("		             AND UNT.IMDG_UN_NO_HLD_FLG = 'N'" ).append("\n"); 
+		query.append("		             AND UNT.LEQ_CHK            = 'N'" ).append("\n"); 
+		query.append("		             AND (" ).append("\n"); 
+		query.append("		                 UNS.IMDG_UN_NO     <> UNT.IMDG_UN_NO" ).append("\n"); 
+		query.append("		              OR UNS.IMDG_UN_NO_SEQ <> UNT.IMDG_UN_NO_SEQ" ).append("\n"); 
+		query.append("		              OR UNS.IMDG_CLSS_CD1  <> UNT.IMDG_CLSS_CD" ).append("\n"); 
+		query.append("		             )" ).append("\n"); 
+		query.append("		             AND ((UNS.IMDG_TBL_NO <> UNT.IMDG_TBL_NO) OR UNS.IMDG_TBL_NO IS NULL)" ).append("\n"); 
+		query.append("		         ) TST" ).append("\n"); 
+		query.append("		         , CLSS1_SEGR_TBL CL1" ).append("\n"); 
+		query.append("		     WHERE TST.IMDG_SEGR_GRP_NO1 = CL1.ROW_IMDG_COMP_GRP_CD(+)" ).append("\n"); 
+		query.append("		       AND TST.IMDG_SEGR_GRP_NO2 = CL1.COL_IMDG_COMP_GRP_CD(+)" ).append("\n"); 
+		query.append("		    UNION ALL" ).append("\n"); 
+		query.append("		    SELECT UGT.SORT_NO                   AS SORT_NO1" ).append("\n"); 
+		query.append("		         , UGT.IMDG_UN_NO                AS IMDG_UN_NO1" ).append("\n"); 
+		query.append("		         , UGT.IMDG_UN_NO_SEQ            AS IMDG_UN_NO_SEQ1" ).append("\n"); 
+		query.append("		         , SG1.IMDG_SEGR_GRP_NOS         AS IMDG_SEGR_GRP_NO1 " ).append("\n"); 
+		query.append("		         , UGT.IMDG_UN_NO_HLD_FLG        AS IMDG_UN_NO_HLD_FLG1" ).append("\n"); 
+		query.append("		         , UGT.IMDG_SEGR_GRP_STWG_TP_CD  AS IMDG_SEGR_CD" ).append("\n"); 
+		query.append("		         , DECODE(UGT.IMDG_SEGR_GRP_STWG_TP_CD, 'G1', 'Away from Segregation Group '||UGT.IMDG_SEGR_GRP_NO, 'G2', 'Separated from Segregation Group '||UGT.IMDG_SEGR_GRP_NO, 'N/A') AS CONFLICT_DESC" ).append("\n"); 
+		query.append("		         , UNT.SORT_NO                   AS SORT_NO2" ).append("\n"); 
+		query.append("		         , UNT.IMDG_UN_NO                AS IMDG_UN_NO2" ).append("\n"); 
+		query.append("		         , UNT.IMDG_UN_NO_SEQ            AS IMDG_UN_NO_SEQ2" ).append("\n"); 
+		query.append("		         , SG2.IMDG_SEGR_GRP_NOS         AS IMDG_SEGR_GRP_NO2" ).append("\n"); 
+		query.append("		         , UNT.IMDG_UN_NO_HLD_FLG        AS IMDG_UN_NO_HLD_FLG2" ).append("\n"); 
+		query.append("		      FROM UN_NO_SEGR_GRP_TBL    UGT" ).append("\n"); 
+		query.append("		         , SCG_IMDG_SEGR_GRP_DTL ISG" ).append("\n"); 
+		query.append("		         , UN_NO_TBL             UNT" ).append("\n"); 
+		query.append("		         , SEGR_GRP_NOS_TBL      SG1" ).append("\n"); 
+		query.append("		         , SEGR_GRP_NOS_TBL      SG2" ).append("\n"); 
+		query.append("		     WHERE UGT.IMDG_SEGR_GRP_NO   = ISG.IMDG_SEGR_GRP_NO" ).append("\n"); 
+		query.append("		       AND ISG.IMDG_UN_NO         = UNT.IMDG_UN_NO" ).append("\n"); 
+		query.append("		       AND UNT.IMDG_UN_NO_HLD_FLG = 'N'" ).append("\n"); 
+		query.append("		       AND UNT.LEQ_CHK            = 'N'" ).append("\n"); 
+		query.append("		       AND (" ).append("\n"); 
+		query.append("		           UGT.IMDG_UN_NO     <> UNT.IMDG_UN_NO" ).append("\n"); 
+		query.append("		        OR UGT.IMDG_UN_NO_SEQ <> UNT.IMDG_UN_NO_SEQ" ).append("\n"); 
+		query.append("		        OR UGT.IMDG_CLSS_CD   <> UNT.IMDG_CLSS_CD" ).append("\n"); 
+		query.append("		           )" ).append("\n"); 
+		query.append("		       AND ((UGT.IMDG_TBL_NO <> UNT.IMDG_TBL_NO) OR UGT.IMDG_TBL_NO IS NULL)" ).append("\n"); 
+		query.append("		       AND UGT.IMDG_UN_NO       = SG1.IMDG_UN_NO(+)" ).append("\n"); 
+		query.append("		       AND UNT.IMDG_UN_NO       = SG2.IMDG_UN_NO(+)" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("---- : commented by 2016-01-26 : ----" ).append("\n"); 
+		query.append("----            UNION ALL" ).append("\n"); 
+		query.append("----            SELECT" ).append("\n"); 
+		query.append("----                   UNT1.SORT_NO                   AS SORT_NO1                 " ).append("\n"); 
+		query.append("----                 , UNT1.IMDG_UN_NO                AS IMDG_UN_NO1" ).append("\n"); 
+		query.append("----                 , UNT1.IMDG_UN_NO_SEQ            AS IMDG_UN_NO_SEQ1" ).append("\n"); 
+		query.append("----                 , SG1.IMDG_SEGR_GRP_NO||''       AS IMDG_SEGR_GRP_NO1 " ).append("\n"); 
+		query.append("----                 , '1'                            AS IMDG_UN_NO_HLD_FLG1" ).append("\n"); 
+		query.append("----                 , 'X'                            AS IMDG_SEGR_CD" ).append("\n"); 
+		query.append("----                 , 'Segregation Group ' || SG1.IMDG_SEGR_GRP_NO || ' (' || GRP.IMDG_SEGR_GRP_NM || ')'   AS CONFLICT_DESC" ).append("\n"); 
+		query.append("----                 , UNT2.SORT_NO                   AS SORT_NO2                 " ).append("\n"); 
+		query.append("----                 , UNT2.IMDG_UN_NO                AS IMDG_UN_NO2" ).append("\n"); 
+		query.append("----                 , UNT2.IMDG_UN_NO_SEQ            AS IMDG_UN_NO_SEQ2" ).append("\n"); 
+		query.append("----                 , SG2.IMDG_SEGR_GRP_NO||''       AS IMDG_SEGR_GRP_NO2" ).append("\n"); 
+		query.append("----                 , '3'                            AS IMDG_UN_NO_HLD_FLG2" ).append("\n"); 
+		query.append("----              FROM SEGR_GRP_NO_TBL   SG1" ).append("\n"); 
+		query.append("----                 , SEGR_GRP_NO_TBL   SG2" ).append("\n"); 
+		query.append("----                 , UN_NO_TBL          UNT1" ).append("\n"); 
+		query.append("----                 , UN_NO_TBL          UNT2" ).append("\n"); 
+		query.append("----                 , SCG_IMDG_SEGR_GRP  GRP" ).append("\n"); 
+		query.append("----             WHERE  SG1.IMDG_UN_NO = UNT1.IMDG_UN_NO" ).append("\n"); 
+		query.append("----               AND UNT2.IMDG_UN_NO <> UNT1.IMDG_UN_NO" ).append("\n"); 
+		query.append("----               AND SG2.IMDG_UN_NO <> SG1.IMDG_UN_NO" ).append("\n"); 
+		query.append("----               AND SG1.IMDG_SEGR_GRP_NO = GRP.IMDG_SEGR_GRP_NO" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("		    UNION ALL" ).append("\n"); 
+		query.append("		    SELECT UNT.SORT_NO                   AS SORT_NO1" ).append("\n"); 
+		query.append("		         , UNT.IMDG_UN_NO                AS IMDG_UN_NO1" ).append("\n"); 
+		query.append("		         , UNT.IMDG_UN_NO_SEQ            AS IMDG_UN_NO_SEQ1" ).append("\n"); 
+		query.append("		         , ''                            AS IMDG_SEGR_GRP_NO1 " ).append("\n"); 
+		query.append("		         , UNT.IMDG_UN_NO_HLD_FLG        AS IMDG_UN_NO_HLD_FLG1" ).append("\n"); 
+		query.append("		         , 'HD'                          AS IMDG_SEGR_CD" ).append("\n"); 
+		query.append("		         , (" ).append("\n"); 
+		query.append("		           SELECT MSG.ERR_MSG" ).append("\n"); 
+		query.append("		             FROM COM_ERR_MSG MSG" ).append("\n"); 
+		query.append("		            WHERE MSG.ERR_MSG_CD = 'SCG00004'" ).append("\n"); 
+		query.append("		              AND MSG.LANG_TP_CD = 'ENG'" ).append("\n"); 
+		query.append("		           )                             AS CONFLICT_DESC" ).append("\n"); 
+		query.append("		         , 0                             AS SORT_NO2" ).append("\n"); 
+		query.append("		         , ''                            AS IMDG_UN_NO2" ).append("\n"); 
+		query.append("		         , ''                            AS IMDG_UN_NO_SEQ2" ).append("\n"); 
+		query.append("		         , ''                            AS IMDG_SEGR_GRP_NO2" ).append("\n"); 
+		query.append("		         , ''                            AS IMDG_UN_NO_HLD_FLG2" ).append("\n"); 
+		query.append("		      FROM UN_NO_TBL             UNT" ).append("\n"); 
+		query.append("		     WHERE UNT.IMDG_UN_NO_HLD_FLG = 'Y'" ).append("\n"); 
+		query.append("		    UNION ALL" ).append("\n"); 
+		query.append("		    SELECT UNT.SORT_NO                   AS SORT_NO1" ).append("\n"); 
+		query.append("		         , UNT.IMDG_UN_NO                AS IMDG_UN_NO1" ).append("\n"); 
+		query.append("		         , UNT.IMDG_UN_NO_SEQ            AS IMDG_UN_NO_SEQ1" ).append("\n"); 
+		query.append("		         , ''                            AS IMDG_SEGR_GRP_NO1 " ).append("\n"); 
+		query.append("		         , UNT.IMDG_UN_NO_HLD_FLG        AS IMDG_UN_NO_HLD_FLG1" ).append("\n"); 
+		query.append("		         , 'CK'                          AS IMDG_SEGR_CD" ).append("\n"); 
+		query.append("		         , (" ).append("\n"); 
+		query.append("		           SELECT MSG.ERR_MSG" ).append("\n"); 
+		query.append("		             FROM COM_ERR_MSG MSG" ).append("\n"); 
+		query.append("		            WHERE MSG.ERR_MSG_CD = DECODE(UNT.LEQ_CHK,'LY','SCG50016','EY','SCG50019','SCG50016')" ).append("\n"); 
+		query.append("		              AND MSG.LANG_TP_CD = 'ENG'" ).append("\n"); 
+		query.append("		           )                             AS CONFLICT_DESC" ).append("\n"); 
+		query.append("		         , 0                             AS SORT_NO2" ).append("\n"); 
+		query.append("		         , ''                            AS IMDG_UN_NO2" ).append("\n"); 
+		query.append("		         , ''                            AS IMDG_UN_NO_SEQ2" ).append("\n"); 
+		query.append("		         , ''                            AS IMDG_SEGR_GRP_NO2" ).append("\n"); 
+		query.append("		         , ''                            AS IMDG_UN_NO_HLD_FLG2" ).append("\n"); 
+		query.append("		      FROM UN_NO_TBL             UNT" ).append("\n"); 
+		query.append("		     WHERE UNT.LEQ_CHK = 'LY' OR UNT.LEQ_CHK = 'EY'" ).append("\n"); 
+		query.append("		  ) T" ).append("\n"); 
+		query.append("		  WHERE NVL(T.IMDG_SEGR_CD,'PX') != 'PX'" ).append("\n"); 
+		query.append("		    AND T.IMDG_SEGR_CD != 'CX'" ).append("\n"); 
+		query.append("		  ORDER BY" ).append("\n"); 
+		query.append("		        (CASE WHEN T.SORT_NO1<T.SORT_NO2 THEN T.SORT_NO1 ELSE T.SORT_NO2 END)" ).append("\n"); 
+		query.append("		      , TO_NUMBER(T.IMDG_UN_NO1)+TO_NUMBER(T.IMDG_UN_NO2)" ).append("\n"); 
+		query.append("		      , TO_NUMBER(T.SORT_NO1)" ).append("\n"); 
+		query.append("		      , T.IMDG_UN_NO1" ).append("\n"); 
+		query.append("		      , T.IMDG_UN_NO_SEQ1" ).append("\n"); 
+		query.append("		      , T.IMDG_SEGR_GRP_NO1" ).append("\n"); 
+		query.append("		) XX" ).append("\n"); 
+		query.append("WHERE	1 = 1" ).append("\n"); 
+		query.append("AND		NOT (XX.IMDG_UN_NO1	= XX.IMDG_UN_NO2	AND XX.IMDG_UN_NO_SEQ1 = XX.IMDG_UN_NO_SEQ2)" ).append("\n"); 
+
+	}
+}

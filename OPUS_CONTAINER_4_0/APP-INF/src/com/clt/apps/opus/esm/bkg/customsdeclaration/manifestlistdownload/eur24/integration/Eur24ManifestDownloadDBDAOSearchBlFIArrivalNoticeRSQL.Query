@@ -1,0 +1,321 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="Eur24ManifestDownloadDBDAOSearchBlFIArrivalNoticeRSQL">
+			<desc><![CDATA[SearchBlFIArrivalNotice]]></desc>
+			<sql><![CDATA[
+SELECT        DENSE_RANK() OVER (ORDER BY POD,BL_NO) AS DT_SEQ
+              , DECODE(ENS_SEND_DT,NULL,'',ENS_SEND_DT||CHR(10)||'('||ENS_SEND_GMT_DT||')') AS SENT_TIME
+              , DECODE(ACK_RCV_DT,NULL,'',ACK_RCV_DT||CHR(10)||'('||ACK_RCV_GMT_DT||')') AS RECEIVED_TIME
+              , Y.*
+FROM (
+SELECT 
+    
+     DECODE( ( SELECT BKG_NO FROM BKG_VVD WHERE BKG_NO = X.BKG_NO AND SLAN_CD ='RFS' AND ROWNUM = 1),
+              NULL, 'N', 'Y') AS RFS_YN
+    
+      , CASE WHEN DOWNLOAD_YN = 'N'                          				THEN ''
+           WHEN ACK = 'A' AND RESULT_CD ='348'             				THEN 'Accepted'   ||DECODE(ACK_KND_ID,'S','(S)')
+		   WHEN ACK = 'A' AND RESULT_CD ='900'             				THEN 'Accepted'   ||DECODE(ACK_KND_ID,'S','(S)')  --system ack
+           WHEN ACK = 'R' AND RESULT_CD ='351'             				THEN 'Do Not Load'||DECODE(ACK_KND_ID,'S','(S)')
+           WHEN ACK = 'R' AND RESULT_CD ='398'             				THEN 'Cancellation'    ||DECODE(ACK_KND_ID,'S','(S)')
+           WHEN ACK = 'R'                                  				THEN 'Rejected'   ||DECODE(ACK_KND_ID,'S','(S)')
+           WHEN RESULT_CD ='361'                           				THEN 'Customs Hold'       ||DECODE(ACK_KND_ID,'S','(S)')
+           WHEN ACK = 'A' AND RESULT_CD ='330' OR RESULT_CD ='329'      THEN 'Customs Release'    ||DECODE(ACK_KND_ID,'S','(S)')
+           WHEN RESULT_CD ='100'                           				THEN 'Conditionally Accepted'  ||DECODE(ACK_KND_ID,'S','(S)')
+           WHEN RESULT_CD ='322'                           				THEN 'Customs Release rejection'||DECODE(ACK_KND_ID,'S','(S)')
+           WHEN MSG_SND_NO IS NOT NULL AND RCV IS NULL     				THEN 'Not Received'
+       END AS ENS_RESULT
+       
+    , CASE WHEN DOWNLOAD_YN = 'N'                          					THEN ''
+           WHEN ACK = 'A'                                  					THEN 'A'  --Accepted
+           WHEN ACK = 'R' AND RESULT_CD ='351'             					THEN 'DNL' --Do Not Load
+           WHEN ACK = 'R'                                  					THEN 'R' --Rejected
+           WHEN RESULT_CD ='361'                           					THEN 'H' --Customs Hold
+           WHEN ACK = 'A' AND RESULT_CD ='330' OR RESULT_CD ='329'          THEN 'L' --Customs Release
+           WHEN RESULT_CD ='100'                                		 	THEN 'CA' --Conditionally Accepted
+           WHEN ACK = 'R' AND RESULT_CD ='398'             					THEN 'CC' --Cancellation
+           WHEN RESULT_CD ='322'                                  			THEN 'D' --Customs Relase rejection
+           WHEN MSG_SND_NO IS NOT NULL AND RCV IS NULL     					THEN 'NR' --Not Received
+       END AS RESULT2
+    
+    , DECODE(EDI_MRN,NULL,'Original','Amendment') AS BL_STATUS
+    , X.*
+FROM
+(                    
+  SELECT
+   ACK ,
+   ACK_KND_ID ,
+   ACK_RCV_DT ,
+   ACK_RCV_GMT_DT ,
+   BKG_NO ,
+   BL_NO ,
+   BPOD ,
+   BPOL ,
+   CNTR_CNTR_NO ,
+   DEL ,
+   DOWNLOAD_YN ,
+   EDI_MRN ,
+   KTS_SEND_DT,
+   ENS_SEND_DT ,
+   ENS_SEND_GMT_DT ,
+   EU_1ST_PORT ,
+   MSG_SND_NO,
+   POD ,
+   POL ,
+   RCV ,
+   RESULT_CD,
+   SKD_DIR_CD ,
+   SKD_VOY_NO ,
+   SND_USR_OFC_CD,
+   VSL_CD ,
+   VVD ,
+   RCV_MSG,
+   EDI_RCV_DT ,
+   EDI_RCV_SEQ 
+   FROM 
+(
+SELECT BKG_GET_TOKEN_FNC(RCV,3) AS ACK
+       , BKG_GET_TOKEN_FNC(RCV,5) AS RESULT_CD
+       , TO_CHAR(GLOBALDATE_PKG.TIME_CONV_OFC_FNC(COM_ConstantMgr_PKG.COM_getHeadOfficeCode_FNC(),TO_DATE(BKG_GET_TOKEN_FNC(RCV,4),'YYYY-MM-DD HH24:MI'), SND_USR_OFC_CD ), 'YYYY-MM-DD HH24:MI')  AS ACK_RCV_DT
+       , TO_CHAR(GLOBALDATE_PKG.TIME_CONV_OFC_FNC(COM_ConstantMgr_PKG.COM_getHeadOfficeCode_FNC(),TO_DATE(BKG_GET_TOKEN_FNC(RCV,4),'YYYY-MM-DD HH24:MI'), 'GMT'),           'YYYY-MM-DD HH24:MI')  AS ACK_RCV_GMT_DT
+       , BKG_GET_TOKEN_FNC(RCV,6) AS ACK_KND_ID
+       , BKG_GET_TOKEN_FNC(RCV,7) AS RCV_MSG
+       , DECODE(EBL_NO,NULL,'N','Y')AS DOWNLOAD_YN
+       , MVMT_REF_NO AS EDI_MRN  -- EDI_MRN ENS MRN
+       , NVL(KTS_SEND_DT1,KTS_SEND_DT2) AS KTS_SEND_DT
+       , BKG_GET_TOKEN_FNC(RCV,1) AS EDI_RCV_DT
+       , BKG_GET_TOKEN_FNC(RCV,2) AS EDI_RCV_SEQ
+       , K.*
+FROM (
+SELECT 
+    (
+    SELECT EDI_RCV_DT ||','||EDI_RCV_SEQ ||','||ACK_RCV_STS_CD ||','||TO_CHAR(CRE_DT, 'YYYY-MM-DD HH24:MI') ||','||EUR_CSTMS_ACK_CD ||','||ACK_KND_ID ||','||RJCT_RSN_RMK ||','|| MVMT_REF_NO
+    FROM BKG_CSTMS_ADV_EUR_RCV
+    WHERE RCV_TMS = (
+        SELECT MAX(RCV_TMS)
+        FROM BKG_CSTMS_ADV_EUR_RCV
+        WHERE MSG_RCV_NO = BKG_GET_TOKEN_FNC(KKK.SND, 1)
+          AND (ACK_KND_ID != 'S'
+              OR ACK_RCV_STS_CD != 'A')
+          AND  EUR_CSTMS_ACK_CD <> '348' )
+           ) AS RCV ,
+  BKG_GET_TOKEN_FNC(KKK.SND, 1) AS MSG_SND_NO ,
+  BKG_GET_TOKEN_FNC(KKK.SND, 2) AS ENS_SEND_DT ,
+  BKG_GET_TOKEN_FNC(KKK.SND, 3) AS ENS_SEND_GMT_DT ,
+  BKG_GET_TOKEN_FNC(KKK.SND, 4) AS SND_USR_OFC_CD ,
+
+
+ (
+       SELECT MVMT_REF_NO
+       FROM BKG_CSTMS_EUR_BL EBL
+       WHERE  EBL.BL_NO = KKK.BL_NO
+              AND EBL.CSTMS_PORT_CD = KKK.EU_1ST_PORT
+              AND EBL.VSL_CD = KKK.VSL_CD
+              AND EBL.SKD_VOY_NO = KKK.SKD_VOY_NO
+              AND EBL.SKD_DIR_CD = KKK.SKD_DIR_CD  )  AS MVMT_REF_NO,
+
+  BKG_GET_TOKEN_FNC(KKK.SND, 6) AS KTS_SEND_DT1 ,
+  (
+    SELECT MAX(TO_CHAR(CRE_DT, 'YYYYMMDDHH24'))
+    FROM BKG_CSTMS_ADV_EUR_SND
+    WHERE BL_NO = KKK.BL_NO
+      AND CSTMS_PORT_CD = KKK.EU_1ST_PORT ) AS KTS_SEND_DT2 ,
+  BKG_GET_TOKEN_FNC(KKK.SND, 5) AS EBL_NO ,
+  KKK.*
+---------------------------
+FROM (
+    --SELECT (
+       -- SELECT A.MSG_SND_NO ||','||TO_CHAR(A.SND_DT, 'YYYY-MM-DD HH24:MI') ||','||TO_CHAR(A.SND_GDT, 'YYYY-MM-DD HH24:MI') ||','||A.SND_USR_OFC_CD ||','||A.BL_NO ||','||TO_CHAR(A.CRE_DT, 'YYYYMMDDHH24')
+       -- FROM BKG_CSTMS_ADV_EUR_SND A --, BKG_CSTMS_EUR_BL EBL
+       -- WHERE 1=1
+         -- AND A.EUR_EDI_MSG_TP_ID ='347'
+         -- AND A.bl_no =KK.BL_NO
+          --and A.MSG_SND_NO = (
+            --SELECT MAX(MSG_SND_NO)
+            --FROM BKG_CSTMS_ADV_EUR_SND
+            --WHERE EUR_EDI_MSG_TP_ID ='347'
+              --AND BL_NO =KK.BL_NO) ) AS SND,
+ SELECT (
+        SELECT A.MSG_SND_NO ||','||TO_CHAR(A.SND_DT, 'YYYY-MM-DD HH24:MI') ||','||TO_CHAR(A.SND_GDT, 'YYYY-MM-DD HH24:MI') ||','||A.SND_USR_OFC_CD ||','||A.BL_NO ||','||TO_CHAR(A.CRE_DT, 'YYYYMMDDHH24')
+        FROM BKG_CSTMS_ADV_EUR_SND A 
+        WHERE 1=1
+          AND A.EUR_EDI_MSG_TP_ID ='347'
+          AND A.bl_no =KK.BL_NO
+          and A.MSG_SND_NO = (
+            SELECT MAX(SND.MSG_SND_NO)
+            FROM BKG_CSTMS_ADV_EUR_SND SND ,BKG_CSTMS_EUR_BL B
+            WHERE SND.EUR_EDI_MSG_TP_ID ='347'
+              AND SND.BL_NO =KK.BL_NO
+              AND SND.BL_NO=B.BL_NO
+              AND SND.VSL_CD = B.VSL_CD
+              AND SND.SKD_VOY_NO = B.SKD_VOY_NO
+              AND SND.SKD_DIR_CD = B.SKD_DIR_CD
+              AND SND.CSTMS_PORT_CD = B.CSTMS_PORT_CD
+              AND SND.MSG_SND_NO like KK.BL_NO || '%') ) AS SND,
+      KK.*
+    FROM (
+        SELECT VVD.VSL_CD || VVD.SKD_VOY_NO || VVD.SKD_DIR_CD AS VVD ,
+          VVD.VSL_CD ,
+          VVD.SKD_VOY_NO ,
+          VVD.SKD_DIR_CD ,
+          BKG.BL_NO AS BL_NO ,
+          BKG.BKG_NO AS BKG_NO ,
+          VVD.POL_CD AS POL ,
+          VVD.POD_CD AS POD ,
+          BKG.POL_CD AS BPOL ,
+          BKG.POD_CD AS BPOD ,
+          BKG.DEL_CD AS DEL ,
+          BC.CNTR_NO AS CNTR_CNTR_NO,
+          SUBSTR(@[cstms_port_cd], 1, 5) AS EU_1ST_PORT --
+        FROM BKG_VVD VVD ,
+          BKG_BOOKING BKG ,
+          BKG_BL_DOC BD ,
+          VSK_VSL_PORT_SKD SKD1,  
+          VSK_VSL_PORT_SKD SKD2, 
+          BKG_CONTAINER BC ,
+          BKG_CSTMS_EUR_BL BL
+        WHERE 1=1
+          AND VVD.BKG_NO = BKG.BKG_NO
+          AND BKG.BKG_STS_CD IN ('F','W')
+          AND BKG.BKG_CGO_TP_CD IN ('F','R')
+          AND BKG.BL_NO IS NOT NULL
+          AND BKG.BKG_NO = BD.BKG_NO
+          AND BKG.BKG_NO = BC.BKG_NO(+)
+---------------------------------------
+          AND BKG.BL_NO = BL.BL_NO (+)
+          AND VVD.VSL_CD = BL.VSL_CD
+          AND VVD.SKD_VOY_NO = BL.SKD_VOY_NO
+          AND VVD.SKD_DIR_CD = BL.SKD_DIR_CD
+----------------------------------------
+          AND VVD.VSL_CD = SKD1.VSL_CD
+          AND VVD.SKD_VOY_NO = SKD1.SKD_VOY_NO
+          AND VVD.SKD_DIR_CD = SKD1.SKD_DIR_CD
+          AND VVD.POL_CD = SKD1.VPS_PORT_CD
+          AND VVD.POL_CLPT_IND_SEQ = SKD1.CLPT_IND_SEQ
+          AND SKD2.VSL_CD = VVD.VSL_CD
+          AND SKD2.SKD_VOY_NO = VVD.SKD_VOY_NO
+          AND SKD2.SKD_DIR_CD = VVD.SKD_DIR_CD
+          AND SKD2.CLPT_IND_SEQ = 1
+          AND SKD1.CLPT_SEQ < SKD2.CLPT_SEQ
+ 
+        
+
+          AND VVD.VSL_CD = SUBSTR(@[vvd], 1, 4)
+          AND VVD.SKD_VOY_NO = SUBSTR(@[vvd], 5, 4)
+          AND VVD.SKD_DIR_CD = SUBSTR(@[vvd], 9, 1)
+
+          AND VVD.BKG_NO > ' '
+          AND VVD.SLAN_CD > ' '
+          AND SKD2.VPS_PORT_CD = VVD.POD_CD -- FI (NEW)
+          AND VVD.POD_CD = @[cstms_port_cd]
+          AND SKD2.VPS_PORT_CD = SUBSTR(@[cstms_port_cd], 1, 5)
+         
+		UNION
+
+        SELECT 
+         VVD,
+         VSL_CD,
+         SKD_VOY_NO,
+         SKD_DIR_CD,
+         BL_NO,
+         BKG_NO,
+         POL,
+         POD,
+         BPOL,
+         BPOD,
+         DEL,
+         CNTR_CNTR_NO,
+         EU_1ST_PORT
+         FROM (          
+         SELECT 
+          VVD.VSL_CD || VVD.SKD_VOY_NO || VVD.SKD_DIR_CD AS VVD ,
+          VVD.VSL_CD ,
+          VVD.SKD_VOY_NO ,
+          VVD.SKD_DIR_CD ,
+          BKG.BL_NO AS BL_NO ,
+          BKG.BKG_NO AS BKG_NO ,
+          VVD.POL_CD AS POL ,
+          VVD.POD_CD AS POD ,
+          BKG.POL_CD AS BPOL ,
+          BKG.POD_CD AS BPOD ,
+          BKG.DEL_CD AS DEL ,
+          BC.CNTR_NO AS CNTR_CNTR_NO,
+          SUBSTR(@[cstms_port_cd], 1, 5) AS EU_1ST_PORT --
+         ,ROW_NUMBER() OVER(PARTITION BY ENS.BL_NO ORDER BY ENS.BL_NO,MVMT_REF_NO ASC) RM
+           FROM VSK_VSL_PORT_SKD VSK, BKG_VVD VVD , BKG_CSTMS_EUR_BL ENS , BKG_BOOKING BKG, BKG_CONTAINER BC
+          WHERE 1=1
+          AND VSK.VSL_CD = SUBSTR(@[vvd], 1, 4)
+          AND VSK.SKD_VOY_NO = SUBSTR(@[vvd], 5, 4)
+          AND VSK.SKD_DIR_CD = SUBSTR(@[vvd], 9, 1)
+          AND VSK.VSL_CD = VVD.VSL_CD
+          AND VSK.SKD_VOY_NO = VVD.SKD_VOY_NO
+          AND VSK.SKD_DIR_CD = VVD.SKD_DIR_CD
+          AND VSK.VPS_PORT_CD = VVD.POD_CD
+          AND VSK.CLPT_IND_SEQ = VVD.POD_CLPT_IND_SEQ
+          AND BKG.BKG_NO = BC.BKG_NO(+)
+          --AND VSK.VPS_PORT_CD ='FIKTK'
+          AND VVD.BKG_NO = BKG.BKG_NO
+          AND ENS.BL_NO = BKG.BL_NO
+          AND VSK.CLPT_SEQ > (SELECT MAX(CLPT_SEQ) FROM VSK_VSL_PORT_SKD
+                               WHERE 1=1
+                                 AND VSL_CD = VSK.VSL_CD
+                                 AND SKD_VOY_NO = VSK.SKD_VOY_NO
+                                 AND SKD_DIR_CD = VSK.SKD_DIR_CD
+                                 AND VPS_PORT_CD =@[cstms_port_cd]
+                               )
+        )
+        WHERE RM = 1 
+
+          #if (${chk_all} != '') 
+            
+		  #else 
+            AND 2=1
+		  #end 
+
+          ) KK
+ ) KKK --, (SELECT * FROM BKG_CSTMS_ADV_EUR_RCV WHERE (ACK_RCV_STS_CD <> 'A' OR ACK_KND_ID <> 'S') ) RCV 
+ WHERE 1=1
+ --AND BKG_GET_TOKEN_FNC(KKK.SND, 1) = RCV.MSG_RCV_NO(+)
+) K
+)
+ WHERE 1=1
+  
+
+
+              #if (${form_bl_no} != '') 
+				AND BL_NO = @[form_bl_no]
+             #end
+
+                                          #if (${p_ack_status} == 'A' )
+                                                AND ACK  = 'A' AND RESULT_CD  = '348'
+                                           #elseif (${p_ack_status} == 'R')
+                                                AND ACK  != 'A' AND ACK IS NOT NULL
+                                           #elseif (${p_ack_status} == 'DNL')
+                                                AND RESULT_CD  = '351'
+                                           #elseif (${p_ack_status} == 'NR')
+                                                AND MSG_SND_NO IS NOT NULL AND RCV IS NULL
+                                           #elseif (${p_ack_status} == 'NA')
+                                                AND MSG_SND_NO IS NULL
+
+										   #elseif (${p_ack_status} == 'CA')
+                                                AND RESULT_CD  = '100'
+										   #elseif (${p_ack_status} == 'H')
+                                                AND RESULT_CD  = '361'
+										   #elseif (${p_ack_status} == 'L')
+                                                AND ( RESULT_CD  = '330' OR RESULT_CD  = '329')
+										   #elseif (${p_ack_status} == 'D')
+                                                AND RESULT_CD  = '322'
+										   #elseif (${p_ack_status} == 'CC')
+                                                AND RESULT_CD  = '398'
+                                           #end
+                                           
+ ) X ) Y			]]></sql>
+			<params>
+				<param name="cstms_port_cd" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="form_bl_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

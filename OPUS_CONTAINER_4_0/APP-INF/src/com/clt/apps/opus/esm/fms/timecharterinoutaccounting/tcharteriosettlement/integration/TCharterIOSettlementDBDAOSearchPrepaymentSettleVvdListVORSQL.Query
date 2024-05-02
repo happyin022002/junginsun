@@ -1,0 +1,590 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TCharterIOSettlementDBDAOSearchPrepaymentSettleVvdListVORSQL">
+			<desc><![CDATA[미 정리된 선급금 전표를 항차별로 분리한다]]></desc>
+			<sql><![CDATA[
+WITH V_FMS_VVD AS
+(
+    SELECT V.*
+    FROM (SELECT V.*
+             , (SELECT DECODE(M.REP_TRD_CD,'COM','Y','N')
+                  FROM MDM_REV_LANE M
+                 WHERE M.RLANE_CD = V.RLANE_CD) AS COM_VVD_FLG
+          FROM FMS_VVD V
+         WHERE 1=1
+           AND V.VSL_CD IN (SELECT @[vsl_cd]
+                              FROM DUAL
+                             UNION ALL
+                            SELECT VSL_CD
+                              FROM FMS_ID_VSL
+                             WHERE FLET_CTRT_NO = @[flet_ctrt_no]
+                               AND USE_FLG = 'Y')
+           AND V.VST_DT <= REPLACE(@[vvd_exp_dt],'-')
+           AND V.VED_DT >= REPLACE(@[vvd_eff_dt],'-') 
+       ) V
+    WHERE 1=1
+    AND V.COM_VVD_FLG = 'N'       
+)
+, V_PARAM AS (
+    SELECT @[flet_ctrt_no] AS FLET_CTRT_NO
+         , @[acct_cd] AS ACCT_CD
+         , @[vndr_seq] AS VNDR_SEQ
+         , @[ctr_cd] AS CTR_CD
+         , @[slp_loc_cd] AS SLP_LOC_CD
+         , REPLACE(@[eff_dt],'-','') AS EFF_DT
+         , @[slp_desc] AS CSR_DESC
+         , NULL AS PPAY_HIR_NO
+         , TO_NUMBER(@[inv_seq]) AS INV_SEQ
+         , '' AS VSL_CD
+         , '' AS SKD_VOY_NO
+         , '' AS SKD_DIR_CD
+         , '' AS REV_DIR_CD
+         , @[org_slip_no] AS SLP_KEY_NO
+         , @[org_slp_tp_cd] AS ORG_SLP_TP_CD
+         , @[org_slp_func_cd] AS ORG_SLP_FUNC_CD
+         , @[org_slp_ofc_cd] AS ORG_SLP_OFC_CD
+         , @[org_slp_iss_dt] AS ORG_SLP_ISS_DT
+         , @[org_slp_ser_no] AS ORG_SLP_SER_NO
+         , @[org_slp_seq_no] AS ORG_SLP_SEQ_NO
+         , @[csr_curr_cd] AS CSR_CURR_CD
+         , TO_CHAR(TO_DATE(REPLACE(@[vvd_eff_dt],'-'),'YYYYMMDD'),'YYYY-MM-DD') AS START_DT
+         , TO_CHAR(TO_DATE(REPLACE(@[vvd_exp_dt],'-'),'YYYYMMDD'),'YYYY-MM-DD') AS END_DT
+         , TO_NUMBER(@[slp_amt])*-1 AS CSR_AMT
+         , TO_NUMBER(@[slp_amt])*-1 / DECODE(@[csr_curr_cd], 'USD', 1, (SELECT NVL(EX1.USD_LOCL_XCH_RT,1)
+                                                              FROM GL_MON_XCH_RT EX1
+                                                             WHERE EX1.CURR_CD = @[csr_curr_cd]
+                                                               AND EX1.ACCT_XCH_RT_YRMON = SUBSTR(REPLACE(@[eff_dt],'-',''),1,6)
+                                                               AND EX1.ACCT_XCH_RT_LVL = '1')) AS TRNS_AMT
+      FROM DUAL
+)
+--SELECT * FROM V_PARAM;
+SELECT P.ACCT_CD
+     , P.VNDR_SEQ
+     , P.CTR_CD
+     , P.SLP_LOC_CD
+     , P.EFF_DT
+     , P.CSR_DESC
+     , P.PPAY_HIR_NO
+     , P.INV_SEQ
+     , P.VSL_CD
+     , P.SKD_VOY_NO
+     , P.SKD_DIR_CD
+     , P.REV_DIR_CD
+     , P.SLP_KEY_NO
+     , P.ORG_SLP_TP_CD
+     , P.ORG_SLP_FUNC_CD
+     , P.ORG_SLP_OFC_CD
+     , P.ORG_SLP_ISS_DT
+     , P.ORG_SLP_SER_NO
+     , P.ORG_SLP_SEQ_NO
+     , P.START_DT
+     , P.END_DT
+     , P.CSR_AMT
+     , P.TRNS_AMT
+     , CASE WHEN A.VED_DT IS NULL THEN 'NOVVD'
+            WHEN A.VED_DT < A.EXP_DT THEN 'NOVVD'
+            WHEN B.DISCNT > 0 THEN 'DISVVD'
+            ELSE ''
+       END AS VVD_CD
+  FROM V_PARAM P
+     , (SELECT MIN(A.VST_DT) AS VST_DT
+             , TO_CHAR(MIN(B.EFF_DT),'YYYYMMDD') AS EFF_DT
+             , MAX(A.VED_DT) AS VED_DT
+             , TO_CHAR(MAX(DECODE(B.EXP_DT,TRUNC(B.EXP_DT),B.EXP_DT-1,B.EXP_DT)),'YYYYMMDD') AS EXP_DT
+          FROM V_FMS_VVD A
+             , FMS_INV_DTL B
+             , V_PARAM P
+         WHERE 1=1
+           AND B.FLET_CTRT_NO = P.FLET_CTRT_NO
+           AND A.VST_DT <= TO_CHAR(B.EXP_DT, 'YYYYMMDDHH24MISS')
+           AND A.VED_DT >= TO_CHAR(B.EFF_DT, 'YYYYMMDD')
+           AND B.FLET_ISS_TP_CD = 'PRE'
+           AND B.SLP_TP_CD = P.ORG_SLP_TP_CD
+           AND B.SLP_FUNC_CD= P.ORG_SLP_FUNC_CD
+           AND B.SLP_OFC_CD = P.ORG_SLP_OFC_CD
+           AND B.SLP_ISS_DT = P.ORG_SLP_ISS_DT
+           AND B.SLP_SER_NO = P.ORG_SLP_SER_NO
+           -- AND 	B.ACCT_CD = '510911'
+       ) A
+     , (SELECT SUM(CASE WHEN A.VED_DT <> TO_CHAR(TO_DATE(B.VST_DT,'YYYYMMDD')-1,'YYYYMMDD') THEN 1
+                        ELSE 0
+                   END) DISCNT
+          FROM (SELECT A.VST_DT
+                     , A.VED_DT
+                     , ROW_NUMBER() OVER(PARTITION BY VSL_CD ORDER BY VST_DT DESC) ROW_NUM
+                  FROM V_FMS_VVD A
+                 WHERE 1=1
+               ) A
+             , (SELECT A.VST_DT
+                     , A.VED_DT
+                     , ROW_NUMBER() OVER(PARTITION BY VSL_CD ORDER BY VST_DT DESC) ROW_NUM
+                  FROM V_FMS_VVD A
+                 WHERE 1=1
+               ) B
+         WHERE A.ROW_NUM =B.ROW_NUM+1
+       ) B
+ UNION ALL
+SELECT A.ACCT_CD
+     , A.VNDR_SEQ
+     , A.CTR_CD
+     , A.SLP_LOC_CD
+     , A.EFF_DT
+     , A.CSR_DESC
+     , A.PPAY_HIR_NO
+     , A.INV_SEQ
+     , A.VSL_CD
+     , A.SKD_VOY_NO
+     , A.SKD_DIR_CD
+     , A.REV_DIR_CD
+     , '' SLP_KEY_NO
+     , '' ORG_SLP_TP_CD
+     , '' ORG_SLP_FUNC_CD
+     , '' ORG_SLP_OFC_CD
+     , '' ORG_SLP_ISS_DT
+     , '' ORG_SLP_SER_NO
+     , '' ORG_SLP_SEQ_NO
+     , TO_CHAR(A.START_DT, 'YYYY-MM-DD') START_DT
+     , TO_CHAR(A.END_DT, 'YYYY-MM-DD') END_DT
+     , ROUND(A.TTL_AMT, 2) CSR_AMT
+     , TRUNC(A.TTL_AMT / DECODE(P.CSR_CURR_CD, 'USD', 1, (SELECT NVL(EX1.USD_LOCL_XCH_RT,1)
+                                                  FROM GL_MON_XCH_RT EX1
+                                                 WHERE EX1.CURR_CD = P.CSR_CURR_CD
+                                                   AND EX1.ACCT_XCH_RT_YRMON = SUBSTR(P.EFF_DT,1,6)
+                                                   AND EX1.ACCT_XCH_RT_LVL = '1')), 2) TRNS_AMT
+     , A.VVD_CD                                                   
+  FROM (SELECT SEQ_DT
+             , DT_AMT
+             , MI_AMT
+             , SUM(DT_AMT) OVER (PARTITION BY START_DT, END_DT) TTL_AMT
+             , ROW_NUMBER() OVER (PARTITION BY START_DT, END_DT ORDER BY SEQ_DT) AS MAX_SEQ
+             , START_DT
+             , END_DT
+             , ACCT_CD
+             , VNDR_SEQ
+             , CTR_CD
+             , SLP_LOC_CD
+             , EFF_DT
+             , CSR_DESC
+             , PPAY_HIR_NO
+             , INV_SEQ
+             , VVD_CD
+             , VSL_CD
+             , SKD_VOY_NO
+             , SKD_DIR_CD
+             , REV_DIR_CD
+          FROM ( -- HAP
+                SELECT SEQ_DT
+                     , DT_AMT
+                     , MI_AMT
+                     , DT
+                     , MIN(DT) OVER () AS MIN_DT
+                     , MAX(DT) OVER () AS MAX_DT
+                     , NVL(START_DT, MAX(START_DT) OVER (ORDER BY SEQ_DT)) AS START_DT
+                     , NVL(END_DT , MAX(END_DT ) OVER (ORDER BY SEQ_DT)) AS END_DT
+                     , ACCT_CD
+                     , VNDR_SEQ
+                     , CTR_CD
+                     , SLP_LOC_CD
+                     , EFF_DT
+                     , CSR_DESC
+                     , PPAY_HIR_NO
+                     , INV_SEQ
+                     , VVD_CD
+                     , VSL_CD
+                     , SKD_VOY_NO
+                     , SKD_DIR_CD
+                     , REV_DIR_CD
+                  FROM ( --T11
+                        SELECT START_DT
+                             , END_DT
+                             , DT
+                             , ACCT_CD
+                             , VNDR_SEQ
+                             , CTR_CD
+                             , SLP_LOC_CD
+                             , EFF_DT
+                             , CSR_DESC
+                             , PPAY_HIR_NO
+                             , INV_SEQ
+                             , VVD_CD
+                             , VSL_CD
+                             , SKD_VOY_NO
+                             , SKD_DIR_CD
+                             , REV_DIR_CD
+                          FROM ( --AA
+                                SELECT START_DT
+                                     , END_DT
+                                     , MAX(DECODE(NO, 1, START_DT, END_DT)) AS DT
+                                     , ACCT_CD
+                                     , VNDR_SEQ
+                                     , CTR_CD
+                                     , SLP_LOC_CD
+                                     , EFF_DT
+                                     , CSR_DESC
+                                     , PPAY_HIR_NO
+                                     , INV_SEQ
+                                     , VVD_CD
+                                     , VSL_CD
+                                     , SKD_VOY_NO
+                                     , SKD_DIR_CD
+                                     , REV_DIR_CD
+                                  FROM ( --T01
+                                        SELECT CASE WHEN A.VST_DT <= TO_CHAR(B.EFF_DT, 'YYYYMMDD') THEN TO_DATE(TO_CHAR(B.EFF_DT, 'YYYYMMDD'), 'YYYYMMDD')
+                                                    ELSE TO_DATE(A.VST_DT, 'YYYYMMDD')
+                                               END AS START_DT
+                                             , CASE WHEN A.VED_DT >= TO_CHAR(B.EXP_DT, 'YYYYMMDD') THEN TO_DATE(TO_CHAR(DECODE(B.EXP_DT, TRUNC(B.EXP_DT), B.EXP_DT, DECODE(B.INV_USD_DYS / DECODE(TRUNC(B.INV_USD_DYS), 0, 1), 1, B.EXP_DT-1, B.EXP_DT )), 'YYYYMMDD'), 'YYYYMMDD')
+                                                    ELSE TO_DATE(A.VED_DT, 'YYYYMMDD')
+                                               END AS END_DT
+                                             , B.ACCT_CD
+                                             , P.VNDR_SEQ
+                                             , P.CTR_CD
+                                             , P.SLP_LOC_CD
+                                             , P.EFF_DT
+                                             , (SELECT ACCT_ITM_NM
+                                                  FROM FMS_ACCT_ITM
+                                                 WHERE ACCT_CD = B.ACCT_CD
+                                                   AND ACCT_ITM_SEQ = B.ACCT_ITM_SEQ) CSR_DESC
+                                             , F.PPAY_HIR_NO
+                                             , F.INV_SEQ
+                                             , A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD||A.REV_DIR_CD VVD_CD
+                                             , A.VSL_CD
+                                             , A.SKD_VOY_NO
+                                             , A.SKD_DIR_CD
+                                             , A.REV_DIR_CD
+                                          FROM V_FMS_VVD A
+                                             , FMS_INVOICE F
+                                             , FMS_INV_DTL B
+                                             , V_PARAM P
+                                         WHERE 1=1
+                                           AND F.FLET_CTRT_NO = B.FLET_CTRT_NO
+                                           AND F.FLET_ISS_TP_CD = B.FLET_ISS_TP_CD
+                                           AND F.INV_SEQ = B.INV_SEQ
+                                           AND B.FLET_CTRT_NO = P.FLET_CTRT_NO
+                                           AND B.FLET_ISS_TP_CD = 'PRE'
+                                           AND B.SLP_TP_CD = P.ORG_SLP_TP_CD
+                                           AND B.SLP_FUNC_CD= P.ORG_SLP_FUNC_CD
+                                           AND B.SLP_OFC_CD = P.ORG_SLP_OFC_CD
+                                           AND B.SLP_ISS_DT = P.ORG_SLP_ISS_DT
+                                           AND B.SLP_SER_NO = P.ORG_SLP_SER_NO
+                                           AND B.ACCT_CD = '510911'
+                                           AND B.ACCT_ITM_SEQ NOT IN (  SELECT ACCT_ITM_SEQ
+                                                                          FROM FMS_ACCT_CATE
+                                                                         WHERE FLET_ACCT_CATE_CD = 'AD')
+                                           AND A.VST_DT < TO_CHAR(B.EXP_DT, 'YYYYMMDDHH24MISS')
+                                           AND A.VED_DT >= TO_CHAR(B.EFF_DT, 'YYYYMMDD') ) T01
+                                     , (SELECT 1 NO
+                                          FROM DUAL
+                                         UNION ALL
+                                        SELECT 2
+                                          FROM DUAL ) T02
+                                 GROUP BY START_DT
+                                     , END_DT
+                                     , NO
+                                     , ACCT_CD
+                                     , VNDR_SEQ
+                                     , CTR_CD
+                                     , SLP_LOC_CD
+                                     , EFF_DT
+                                     , CSR_DESC
+                                     , PPAY_HIR_NO
+                                     , INV_SEQ
+                                     , VVD_CD
+                                     , VSL_CD
+                                     , SKD_VOY_NO
+                                     , SKD_DIR_CD
+                                     , REV_DIR_CD ) --AA
+                         WHERE START_DT <= END_DT
+                         GROUP BY START_DT
+                             , END_DT
+                             , dt
+                             , ACCT_CD
+                             , VNDR_SEQ
+                             , CTR_CD
+                             , SLP_LOC_CD
+                             , EFF_DT
+                             , CSR_DESC
+                             , PPAY_HIR_NO
+                             , INV_SEQ
+                             , VVD_CD
+                             , VSL_CD
+                             , SKD_VOY_NO
+                             , SKD_DIR_CD
+                             , REV_DIR_CD 
+                       ) T11
+                     , ( --T12
+                    SELECT SEQ_DT
+                             , ORG_DT_AMT
+                             , MI_AMT
+                             , SEQ_DT2
+                             , MI_AMT * (END_DT - SEQ_DT) * (24*60) AS DT_AMT
+                          FROM ( -- BB
+                                SELECT DT_AMT AS ORG_DT_AMT
+                                     , MI_AMT
+                                     , EFF_DT + SEQ AS SEQ_DT
+                                     , TO_DATE(TO_CHAR(EFF_DT + SEQ, 'YYYYMMDD'), 'YYYYMMDD') SEQ_DT2
+                                     , NVL(LEAD(EFF_DT + SEQ) OVER (ORDER BY EXP_DT, SEQ), EXP_DT) AS END_DT
+                                  FROM ( --T01
+                                        SELECT CASE WHEN F.EFF_DT > H.EFF_DT THEN F.EFF_DT
+                                                    ELSE H.EFF_DT
+                                               END AS EFF_DT
+                                             , CASE WHEN F.EXP_DT > H.EXP_DT THEN H.EXP_DT
+                                                    ELSE F.EXP_DT
+                                               END AS EXP_DT
+                                             , CASE WHEN 'USD' = H.HIR_CURR_N1ST_CD THEN H.HIR_RT_N1ST_AMT
+                                                    ELSE H.HIR_RT_N2ND_AMT
+                                               END AS DT_AMT
+                                             , CASE WHEN 'USD' = H.HIR_CURR_N1ST_CD THEN H.HIR_RT_N1ST_AMT / (24 * 60)
+                                                    ELSE H.HIR_RT_N2ND_AMT / (24 * 60)
+                                               END AS MI_AMT
+                                             , (H.EXP_DT - H.EFF_DT) AS TM
+                                          FROM FMS_HIRE H
+                                             , FMS_INVOICE F
+                                             , FMS_INV_DTL B
+                                             , V_PARAM P
+                                         WHERE H.FLET_CTRT_NO = P.FLET_CTRT_NO
+                                           AND (H.HIR_CURR_N1ST_CD = P.CSR_CURR_CD OR H.HIR_CURR_N2ND_CD = P.CSR_CURR_CD )
+                                           AND H.FLET_CTRT_NO = F.FLET_CTRT_NO
+                                           AND F.FLET_CTRT_NO = B.FLET_CTRT_NO
+                                           AND F.FLET_ISS_TP_CD = B.FLET_ISS_TP_CD
+                                           AND F.INV_SEQ = B.INV_SEQ
+                                           AND B.FLET_CTRT_NO = P.FLET_CTRT_NO
+                                           AND B.FLET_ISS_TP_CD = 'PRE'
+                                           AND B.SLP_TP_CD = P.ORG_SLP_TP_CD
+                                           AND B.SLP_FUNC_CD= P.ORG_SLP_FUNC_CD
+                                           AND B.SLP_OFC_CD = P.ORG_SLP_OFC_CD
+                                           AND B.SLP_ISS_DT = P.ORG_SLP_ISS_DT
+                                           AND B.SLP_SER_NO = P.ORG_SLP_SER_NO
+                                           AND B.ACCT_CD = '510911'
+                                           AND B.ACCT_ITM_SEQ NOT IN (  SELECT ACCT_ITM_SEQ
+                                                                          FROM FMS_ACCT_CATE
+                                                                         WHERE FLET_ACCT_CATE_CD = 'AD') ) T01
+                                     , (SELECT ROWNUM - 1 AS SEQ
+                                          FROM MDM_VENDOR
+                                         WHERE ROWNUM <= 5000 ) T02
+                                 WHERE SEQ BETWEEN 0 AND TM
+                                   AND EFF_DT + SEQ <= EXP_DT
+                                   AND EFF_DT <> EXP_DT ) -- BB
+                               ) T12
+                 WHERE 1=1
+                   --AND T11.DT(+) = T12.SEQ_DT2
+                   AND TO_DATE(TO_CHAR(T11.DT(+), 'YYYYMMDD'), 'YYYYMMDD') = T12.SEQ_DT2
+                 ORDER BY T12.SEQ_DT 
+               ) --HAP
+         WHERE 1=1
+           --AND TO_DATE(TO_CHAR(SEQ_DT, 'YYYYMMDD'), 'YYYYMMDD') BETWEEN MIN_DT AND MAX_DT 
+       ) A
+       , V_PARAM P
+ WHERE A.MAX_SEQ = 1
+   AND ROUND(A.TTL_AMT, 2) > 0
+ UNION ALL
+SELECT A.ACCT_CD
+     , A.VNDR_SEQ
+     , A.CTR_CD
+     , A.SLP_LOC_CD
+     , A.EFF_DT
+     , A.CSR_DESC
+     , A.PPAY_HIR_NO
+     , A.INV_SEQ
+     , A.VSL_CD
+     , A.SKD_VOY_NO
+     , A.SKD_DIR_CD
+     , A.REV_DIR_CD
+     , A.SLP_KEY_NO
+     , A.ORG_SLP_TP_CD
+     , A.ORG_SLP_FUNC_CD
+     , A.ORG_SLP_OFC_CD
+     , A.ORG_SLP_ISS_DT
+     , A.ORG_SLP_SER_NO
+     , A.ORG_SLP_SEQ_NO
+     , A.START_DT
+     , A.END_DT
+     , A.CSR_AMT
+     , A.TRNS_AMT
+     , A.VVD_CD
+  FROM (
+        SELECT B.ACCT_CD
+             , P.VNDR_SEQ
+             , P.CTR_CD
+             , P.SLP_LOC_CD
+             , P.EFF_DT
+             , (SELECT ACCT_ITM_NM
+                  FROM FMS_ACCT_ITM
+                 WHERE ACCT_CD = B.ACCT_CD
+                   AND ACCT_ITM_SEQ = B.ACCT_ITM_SEQ) CSR_DESC
+             , F.PPAY_HIR_NO
+             , F.INV_SEQ
+             , A.VSL_CD
+             , A.SKD_VOY_NO
+             , A.SKD_DIR_CD
+             , A.REV_DIR_CD
+             , '' SLP_KEY_NO
+             , '' ORG_SLP_TP_CD
+             , '' ORG_SLP_FUNC_CD
+             , '' ORG_SLP_OFC_CD
+             , '' ORG_SLP_ISS_DT
+             , '' ORG_SLP_SER_NO
+             , '' ORG_SLP_SEQ_NO
+             , TO_CHAR(CASE WHEN A.VST_DT <= TO_CHAR(B.EFF_DT,'YYYYMMDD') THEN B.EFF_DT
+                            ELSE TO_DATE(A.VST_DT,'YYYYMMDD')
+                       END,'YYYY-MM-DD') START_DT
+             , TO_CHAR(CASE WHEN A.VED_DT >= TO_CHAR(B.EXP_DT,'YYYYMMDD') THEN DECODE(B.EXP_DT,TRUNC(B.EXP_DT),B.EXP_DT,B.EXP_DT)
+                            ELSE TO_DATE(A.VED_DT,'YYYYMMDD')
+                       END,'YYYY-MM-DD') END_DT
+             , TRUNC(B.INV_AMT*(CASE WHEN A.VED_DT < TO_CHAR(B.EXP_DT,'YYYYMMDD') THEN TO_DATE(A.VED_DT, 'YYYYMMDD')
+                                     ELSE B.EXP_DT-1
+                                END - 
+                                CASE WHEN A.VST_DT > TO_CHAR(B.EFF_DT,'YYYYMMDD') THEN TO_DATE(A.VST_DT, 'YYYYMMDD')
+                                     ELSE B.EFF_DT
+                                END +1)/B.INV_USD_DYS,2) CSR_AMT
+             , TRUNC(B.INV_AMT*(CASE WHEN A.VED_DT < TO_CHAR(B.EXP_DT,'YYYYMMDD') THEN TO_DATE(A.VED_DT, 'YYYYMMDD')
+                                     ELSE B.EXP_DT-1
+                                END - 
+                                CASE WHEN A.VST_DT > TO_CHAR(B.EFF_DT,'YYYYMMDD') THEN TO_DATE(A.VST_DT, 'YYYYMMDD')
+                                     ELSE B.EFF_DT
+                                END +1)/B.INV_USD_DYS /DECODE(P.CSR_CURR_CD, 'USD', 1, (SELECT NVL(EX1.USD_LOCL_XCH_RT,1)
+                                                                                  FROM GL_MON_XCH_RT EX1
+                                                                                 WHERE EX1.CURR_CD = P.CSR_CURR_CD
+                                                                                   AND EX1.ACCT_XCH_RT_YRMON = SUBSTR(P.EFF_DT,1,6)
+                                                                                   AND EX1.ACCT_XCH_RT_LVL = '1')),2) TRNS_AMT
+             , A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD||A.REV_DIR_CD VVD_CD
+          FROM V_FMS_VVD A
+             , FMS_INVOICE F
+             , FMS_INV_DTL B
+             , V_PARAM P
+         WHERE 1=1
+           AND F.FLET_CTRT_NO = B.FLET_CTRT_NO
+           AND F.FLET_ISS_TP_CD = B.FLET_ISS_TP_CD
+           AND F.INV_SEQ = B.INV_SEQ
+           AND B.FLET_CTRT_NO = P.FLET_CTRT_NO
+           AND B.FLET_ISS_TP_CD = 'PRE'
+           AND B.SLP_TP_CD = P.ORG_SLP_TP_CD
+           AND B.SLP_FUNC_CD= P.ORG_SLP_FUNC_CD
+           AND B.SLP_OFC_CD = P.ORG_SLP_OFC_CD
+           AND B.SLP_ISS_DT = P.ORG_SLP_ISS_DT
+           AND B.SLP_SER_NO = P.ORG_SLP_SER_NO
+           AND B.ACCT_CD NOT IN ('510911')
+           AND A.VST_DT < TO_CHAR(B.EXP_DT, 'YYYYMMDDHH24MISS')
+           AND A.VED_DT >= TO_CHAR(B.EFF_DT, 'YYYYMMDD')
+       ) A                        
+ WHERE A.CSR_AMT > 0   
+ UNION ALL
+SELECT A.ACCT_CD
+     , A.VNDR_SEQ
+     , A.CTR_CD
+     , A.SLP_LOC_CD
+     , A.EFF_DT
+     , A.CSR_DESC
+     , A.PPAY_HIR_NO
+     , A.INV_SEQ
+     , A.VSL_CD
+     , A.SKD_VOY_NO
+     , A.SKD_DIR_CD
+     , A.REV_DIR_CD
+     , A.SLP_KEY_NO
+     , A.ORG_SLP_TP_CD
+     , A.ORG_SLP_FUNC_CD
+     , A.ORG_SLP_OFC_CD
+     , A.ORG_SLP_ISS_DT
+     , A.ORG_SLP_SER_NO
+     , A.ORG_SLP_SEQ_NO
+     , A.START_DT
+     , A.END_DT
+     , A.CSR_AMT
+     , A.TRNS_AMT
+     , A.VVD_CD
+  FROM (
+        SELECT B.ACCT_CD
+             , P.VNDR_SEQ
+             , P.CTR_CD
+             , P.SLP_LOC_CD
+             , P.EFF_DT
+             , (SELECT ACCT_ITM_NM
+                  FROM FMS_ACCT_ITM
+                 WHERE ACCT_CD = B.ACCT_CD
+                   AND ACCT_ITM_SEQ = B.ACCT_ITM_SEQ) CSR_DESC
+             , F.PPAY_HIR_NO
+             , F.INV_SEQ
+             , A.VSL_CD
+             , A.SKD_VOY_NO
+             , A.SKD_DIR_CD
+             , A.REV_DIR_CD
+             , '' SLP_KEY_NO
+             , '' ORG_SLP_TP_CD
+             , '' ORG_SLP_FUNC_CD
+             , '' ORG_SLP_OFC_CD
+             , '' ORG_SLP_ISS_DT
+             , '' ORG_SLP_SER_NO
+             , '' ORG_SLP_SEQ_NO
+             , TO_CHAR(CASE WHEN A.VST_DT <= TO_CHAR(B.EFF_DT,'YYYYMMDD') THEN B.EFF_DT
+                            ELSE TO_DATE(A.VST_DT,'YYYYMMDD')
+                       END,'YYYY-MM-DD') START_DT
+             , TO_CHAR(CASE WHEN A.VED_DT >= TO_CHAR(B.EXP_DT,'YYYYMMDD') THEN DECODE(B.EXP_DT,TRUNC(B.EXP_DT),B.EXP_DT,B.EXP_DT)
+                            ELSE TO_DATE(A.VED_DT,'YYYYMMDD')
+                       END,'YYYY-MM-DD') END_DT
+             , TRUNC(B.INV_AMT*(CASE WHEN A.VED_DT < TO_CHAR(B.EXP_DT,'YYYYMMDD') THEN TO_DATE(A.VED_DT, 'YYYYMMDD')
+                                     ELSE B.EXP_DT-1
+                                END - 
+                                CASE WHEN A.VST_DT > TO_CHAR(B.EFF_DT,'YYYYMMDD') THEN TO_DATE(A.VST_DT, 'YYYYMMDD')
+                                     ELSE B.EFF_DT
+                                END +1)/B.INV_USD_DYS,2) CSR_AMT
+             , TRUNC(B.INV_AMT*(CASE WHEN A.VED_DT < TO_CHAR(B.EXP_DT,'YYYYMMDD') THEN TO_DATE(A.VED_DT, 'YYYYMMDD')
+                                     ELSE B.EXP_DT-1
+                                END - 
+                                CASE WHEN A.VST_DT > TO_CHAR(B.EFF_DT,'YYYYMMDD') THEN TO_DATE(A.VST_DT, 'YYYYMMDD')
+                                     ELSE B.EFF_DT
+                                END +1)/B.INV_USD_DYS /DECODE(P.CSR_CURR_CD, 'USD', 1, (SELECT NVL(EX1.USD_LOCL_XCH_RT,1)
+                                                                                  FROM GL_MON_XCH_RT EX1
+                                                                                 WHERE EX1.CURR_CD = P.CSR_CURR_CD
+                                                                                   AND EX1.ACCT_XCH_RT_YRMON = SUBSTR(P.EFF_DT,1,6)
+                                                                                   AND EX1.ACCT_XCH_RT_LVL = '1')),2) TRNS_AMT
+             , A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD||A.REV_DIR_CD VVD_CD
+          FROM V_FMS_VVD A
+             , FMS_INVOICE F
+             , FMS_INV_DTL B
+             , V_PARAM P
+         WHERE 1=1
+           AND F.FLET_CTRT_NO = B.FLET_CTRT_NO
+           AND F.FLET_ISS_TP_CD = B.FLET_ISS_TP_CD
+           AND F.INV_SEQ = B.INV_SEQ
+           AND B.FLET_CTRT_NO = P.FLET_CTRT_NO
+           AND B.FLET_ISS_TP_CD = 'PRE'
+           AND B.SLP_TP_CD = P.ORG_SLP_TP_CD
+           AND B.SLP_FUNC_CD= P.ORG_SLP_FUNC_CD
+           AND B.SLP_OFC_CD = P.ORG_SLP_OFC_CD
+           AND B.SLP_ISS_DT = P.ORG_SLP_ISS_DT
+           AND B.SLP_SER_NO = P.ORG_SLP_SER_NO
+           AND B.ACCT_CD IN ('510911')
+           AND B.ACCT_ITM_SEQ IN (  SELECT ACCT_ITM_SEQ
+                                      FROM FMS_ACCT_CATE
+                                     WHERE FLET_ACCT_CATE_CD = 'AD')
+           AND A.VST_DT < TO_CHAR(B.EXP_DT, 'YYYYMMDDHH24MISS')
+           AND A.VED_DT >= TO_CHAR(B.EFF_DT, 'YYYYMMDD')
+        ) A
+ WHERE A.CSR_AMT <> 0    
+ ORDER BY ACCT_CD, START_DT 			]]></sql>
+			<params>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="flet_ctrt_no" type="12" value="" out="N"/>
+				<param name="vvd_exp_dt" type="12" value="" out="N"/>
+				<param name="vvd_eff_dt" type="12" value="" out="N"/>
+				<param name="acct_cd" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="12" value="" out="N"/>
+				<param name="ctr_cd" type="12" value="" out="N"/>
+				<param name="slp_loc_cd" type="12" value="" out="N"/>
+				<param name="eff_dt" type="12" value="" out="N"/>
+				<param name="slp_desc" type="12" value="" out="N"/>
+				<param name="inv_seq" type="12" value="" out="N"/>
+				<param name="org_slip_no" type="12" value="" out="N"/>
+				<param name="org_slp_tp_cd" type="12" value="" out="N"/>
+				<param name="org_slp_func_cd" type="12" value="" out="N"/>
+				<param name="org_slp_ofc_cd" type="12" value="" out="N"/>
+				<param name="org_slp_iss_dt" type="12" value="" out="N"/>
+				<param name="org_slp_ser_no" type="12" value="" out="N"/>
+				<param name="org_slp_seq_no" type="12" value="" out="N"/>
+				<param name="csr_curr_cd" type="12" value="" out="N"/>
+				<param name="slp_amt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,54 @@
+CREATE OR REPLACE FUNCTION TRS_ACT_ROUTE_FNC
+(
+	t_cagc in VARCHAR2,
+	t_n1st in VARCHAR2,
+	t_n2nd in VARCHAR2,
+	t_n3rd in VARCHAR2,
+	t_n4th in VARCHAR2
+) RETURN VARCHAR2
+AUTHID CURRENT_USER
+IS t_ret VARCHAR2(3);
+   o_iot VARCHAR2(1);
+   o_cyd VARCHAR2(1);
+BEGIN
+	o_iot := SUBSTR(t_cagc, 1, 1); -- IN/OUTBOUND/TS구분
+	o_cyd := SUBSTR(t_cagc, 2, 1); -- CY/DOOR구분
+	IF o_iot = 'O' THEN
+		IF o_cyd = 'Y' THEN
+			IF LENGTH(t_n1st) > 4 AND LENGTH(t_n2nd) > 4 AND LENGTH(NVL(t_n3rd, 0)) < 4 AND LENGTH(NVL(t_n4th, 0)) < 4 THEN
+				t_ret := 'OY2'; -- OUTBOUND CY 2POINT 단일
+			ELSIF LENGTH(t_n1st) > 4 AND LENGTH(t_n2nd) > 4 AND LENGTH(t_n3rd) > 4 AND LENGTH(NVL(t_n4th, 0)) < 4 THEN
+				t_ret := 'OY3'; -- OUTBOUND CY 3POINT 복합
+			END IF;
+		ELSIF o_cyd = 'D' THEN
+			IF LENGTH(t_n1st) > 4 AND LENGTH(t_n2nd) > 4 AND LENGTH(t_n3rd) > 4 AND LENGTH(NVL(t_n4th, 0)) < 4 THEN
+				t_ret := 'OD3'; -- OUTBOUND DOOR 3POINT 단일
+			ELSIF LENGTH(t_n1st) > 4 AND LENGTH(t_n2nd) > 4 AND LENGTH(t_n3rd) > 4 AND LENGTH(t_n4th) > 4 THEN
+				t_ret := 'OD4'; -- OUTBOUND DOOR 4POINT 복합
+			END IF;
+		END IF;
+	ELSIF o_iot = 'I' THEN
+		IF o_cyd = 'Y' THEN
+			IF LENGTH(t_n1st) > 4 AND LENGTH(t_n2nd) > 4 AND LENGTH(NVL(t_n3rd, 0)) < 4 AND LENGTH(NVL(t_n4th, 0)) < 4 THEN
+				t_ret := 'IY2'; -- INBOUND DOOR 2POINT 단일
+			ELSIF LENGTH(t_n1st) > 4 AND LENGTH(t_n2nd) > 4 AND LENGTH(t_n3rd) > 4 AND LENGTH(NVL(t_n4th, 0)) < 4 THEN
+				t_ret := 'IY3'; -- INBOUND DOOR 3POINT 복합
+			END IF;
+		ELSIF o_cyd = 'D' THEN
+			IF LENGTH(t_n1st) > 4 AND LENGTH(t_n2nd) > 4 AND LENGTH(t_n3rd) > 4 AND LENGTH(NVL(t_n4th, 0)) < 4 THEN
+				t_ret := 'ID3';
+			ELSIF LENGTH(t_n1st) > 4 AND LENGTH(t_n2nd) > 4 AND LENGTH(t_n3rd) > 4 AND LENGTH(NVL(t_n4th, 0)) > 4 THEN
+				t_ret := 'ID4'; -- INBOUND DOOR 4POINT 복합
+			END IF;
+		END IF;
+	ELSIF o_iot = 'T' THEN
+		IF o_cyd = 'Y' THEN
+			IF LENGTH(t_n1st) > 4 AND LENGTH(t_n2nd) > 4 AND LENGTH(NVL(t_n3rd, 0)) < 4 AND LENGTH(NVL(t_n4th, 0)) < 4 THEN
+				t_ret := 'TY2'; -- INBOUND DOOR 2POINT 단일
+			ELSIF LENGTH(t_n1st) > 4 AND LENGTH(t_n2nd) > 4 AND LENGTH(t_n3rd) > 4 AND LENGTH(NVL(t_n4th, 0)) < 4 THEN
+				t_ret := 'TY3'; -- INBOUND DOOR 3POINT 복합
+			END IF;
+		END IF;
+	END IF;
+	RETURN t_ret;
+END TRS_ACT_ROUTE_FNC;

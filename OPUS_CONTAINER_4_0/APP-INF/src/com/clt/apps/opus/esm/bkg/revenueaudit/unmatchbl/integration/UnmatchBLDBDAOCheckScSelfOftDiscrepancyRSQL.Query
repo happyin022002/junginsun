@@ -1,0 +1,947 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="UnmatchBLDBDAOCheckScSelfOftDiscrepancyRSQL">
+			<desc><![CDATA[UnmatchBLDBDAOCheckScSelfOftDiscrepancyRSQL]]></desc>
+			<sql><![CDATA[
+WITH
+XR AS
+(
+/*******************************************************************************************
+환율 정보 조회
+*******************************************************************************************/
+
+SELECT  CURR_CD         ,
+        USD_LOCL_XCH_RT
+FROM    GL_MON_XCH_RT
+WHERE   ACCT_XCH_RT_YRMON = LEAST(( SELECT TO_CHAR(RT_APLY_DT, 'YYYYMM') FROM BKG_RATE WHERE BKG_NO = @[bkg_no] ), (SELECT MAX(ACCT_XCH_RT_YRMON) FROM GL_MON_XCH_RT ))
+AND     ACCT_XCH_RT_LVL   = '1'
+AND     @[ca_flg]         = 'N'
+
+UNION ALL
+
+SELECT  CURR_CD         ,
+        USD_LOCL_XCH_RT
+FROM    GL_MON_XCH_RT
+WHERE   ACCT_XCH_RT_YRMON = LEAST(( SELECT TO_CHAR(RT_APLY_DT, 'YYYYMM') FROM BKG_RT_HIS WHERE BKG_NO = @[bkg_no] AND CORR_NO = 'TMP0000001' ), (SELECT MAX(ACCT_XCH_RT_YRMON) FROM GL_MON_XCH_RT ))
+AND     ACCT_XCH_RT_LVL   = '1'
+AND     @[ca_flg]         = 'Y'
+) ,
+BK AS
+(
+/*******************************************************************************************
+B/L TYPE CODE 를 SELECT 한다.
+*******************************************************************************************/
+
+SELECT  (
+        SELECT  NVL(RT_BL_TP_CD, 'N')
+        FROM    BKG_RATE
+        WHERE   BKG_NO        = @[bkg_no]
+        AND     @[ca_flg]     = 'N'
+        UNION ALL
+        SELECT  NVL(RT_BL_TP_CD, 'N')
+        FROM    BKG_RT_HIS
+        WHERE   BKG_NO        = @[bkg_no]
+        AND     CORR_NO       = 'TMP0000001'  -- CORRECTION 중인 DATA 를 나타내는 고정된 상수값
+        AND     @[ca_flg]     = 'Y'
+        ) RT_BL_TP_CD ,
+        DECODE(
+          (
+          SELECT  SPLIT_RSN_CD
+          FROM    BKG_BOOKING
+          WHERE   BKG_NO        = ( SELECT FM_BKG_NO FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no] )
+          AND     @[ca_flg]     = 'N'
+          UNION ALL
+          SELECT  SPLIT_RSN_CD
+          FROM    BKG_BOOKING
+          WHERE   BKG_NO        = ( SELECT FM_BKG_NO FROM BKG_BKG_HIS WHERE BKG_NO = @[bkg_no] AND CORR_NO = 'TMP0000001' )
+          AND     @[ca_flg]     = 'Y'
+          )
+          , 'M', 'Y', 'N')  MEMO_BL_FLG ,
+        (
+        SELECT  MAX(BB_CGO_FLG)
+        FROM    BKG_QTY_DTL
+        WHERE   BKG_NO        = @[bkg_no]
+        AND     @[ca_flg]     = 'N'
+        HAVING  MAX(BB_CGO_FLG) IS NOT NULL
+        UNION ALL
+        SELECT  MAX(BB_CGO_FLG)
+        FROM    BKG_QTY_DTL_HIS
+        WHERE   BKG_NO        = @[bkg_no]
+        AND     CORR_NO       = 'TMP0000001'  -- CORRECTION 중인 DATA 를 나타내는 고정된 상수값
+        AND     @[ca_flg]     = 'Y'
+        HAVING  MAX(BB_CGO_FLG) IS NOT NULL
+        ) BB_CGO_FLG,
+        (
+        SELECT MAX(CNTR_PRT_FLG) 
+        FROM BKG_CONTAINER
+        WHERE BKG_NO = @[bkg_no]
+        AND     @[ca_flg]     = 'N'
+        HAVING  MAX(CNTR_PRT_FLG) IS NOT NULL
+        UNION ALL
+        SELECT MAX(CNTR_PRT_FLG)
+        FROM BKG_CNTR_HIS
+        WHERE BKG_NO = @[bkg_no]
+        AND CORR_NO = 'TMP0000001'
+        AND     @[ca_flg]     = 'Y'
+        HAVING  MAX(CNTR_PRT_FLG) IS NOT NULL
+        ) CNTR_PRT_FLG
+FROM    DUAL
+) ,
+BR AS
+(
+/*******************************************************************************************
+INCLUDE 를 제외한 BKG RATE DATA
+COVERED B/L 일 경우는 'DHF', 'NMS', 'CMS', 'ODF' 만 심사 대상으로 처리함.
+*******************************************************************************************/
+
+SELECT  CHG_CD        ,
+        CGO_CATE_CD   ,
+        RCV_TERM_CD   ,
+        DE_TERM_CD    ,
+        RAT_AS_QTY    ,
+        RAT_UT_CD     ,
+        CURR_CD       ,
+        CHG_UT_AMT    ,
+        CHG_AMT       ,
+        ( SELECT BR.CHG_AMT / XR.USD_LOCL_XCH_RT FROM XR WHERE XR.CURR_CD = BR.CURR_CD )  CHG_USD_AMT
+FROM    BKG_CHG_RT  BR
+WHERE   BKG_NO        = @[bkg_no]
+AND     NVL(FRT_INCL_XCLD_DIV_CD, 'N')  = 'N'
+AND     (
+            ( SELECT RT_BL_TP_CD FROM BK ) <> 'C'
+        OR  CHG_CD  IN ( 'DHF', 'NMS', 'CMS', 'ODF' )
+        )
+AND     @[ca_flg]     = 'N'
+
+UNION ALL
+
+SELECT  CHG_CD        ,
+        CGO_CATE_CD   ,
+        RCV_TERM_CD   ,
+        DE_TERM_CD    ,
+        RAT_AS_QTY    ,
+        RAT_UT_CD     ,
+        CURR_CD       ,
+        CHG_UT_AMT    ,
+        CHG_AMT       ,
+        ( SELECT BR.CHG_AMT / XR.USD_LOCL_XCH_RT FROM XR WHERE XR.CURR_CD = BR.CURR_CD )  CHG_USD_AMT
+FROM    BKG_CHG_RT_HIS  BR
+WHERE   BKG_NO        = @[bkg_no]
+AND     CORR_NO       = 'TMP0000001'
+AND     NVL(FRT_INCL_XCLD_DIV_CD, 'N')  = 'N'
+AND     (
+            ( SELECT RT_BL_TP_CD FROM BK ) <> 'C'
+        OR  CHG_CD  IN ( 'DHF', 'NMS', 'CMS', 'ODF' )
+        )
+AND     @[ca_flg]     = 'Y'
+) ,
+B1 AS
+(
+/*******************************************************************************************
+BKG 의 OFT ( OFT, OAR, DAR )
+BL RATING UNIT 을 고려하여 변환한다.
+*******************************************************************************************/
+
+SELECT  BR.*  ,
+        ( SELECT BR.CHG_AMT / XR.USD_LOCL_XCH_RT FROM XR WHERE XR.CURR_CD = BR.CURR_CD )  CHG_USD_AMT
+FROM    (
+        SELECT  BR.OFT_CMB_SEQ  ,
+                BR.CHG_CD       ,
+                BR.CGO_CATE_CD  ,
+                BR.RCV_TERM_CD  ,
+                BR.DE_TERM_CD   ,
+--                CASE
+--                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 1
+--                ELSE BR.RAT_AS_QTY
+--                END RAT_AS_QTY  ,
+				SUM(RAT_AS_QTY) RAT_AS_QTY,
+                CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 'BL'
+                ELSE BR.RAT_UT_CD
+                END RAT_UT_CD   ,
+                BR.CURR_CD      ,
+                SUM(BR.CHG_AMT) CHG_AMT
+        FROM    (
+                SELECT  RA.OFT_CMB_SEQ  ,
+                        BR.*
+                FROM    BR    ,
+                        (
+                        SELECT  DISTINCT
+                                OFT_CMB_SEQ
+                        FROM    BKG_REV_AUD_CHG_TMP
+                        ) RA
+                WHERE   CHG_CD  IN ( 'OFT', 'OAR', 'DAR' )
+                ) BR  ,
+                (
+                SELECT  OFT_CMB_SEQ ,
+                        CHG_CD      ,
+                        MAX(DECODE(RAT_UT_CD, 'BL', 'Y', 'N'))  BL_FLG
+                FROM  BKG_REV_AUD_CHG_TMP
+                WHERE   CHG_CD  IN ( 'OFT', 'OAR', 'DAR' )
+                GROUP BY
+                        OFT_CMB_SEQ ,
+                        CHG_CD
+                ) CK
+        WHERE   CK.OFT_CMB_SEQ(+) = BR.OFT_CMB_SEQ
+        AND     CK.CHG_CD(+)      = BR.CHG_CD
+        GROUP BY
+                BR.OFT_CMB_SEQ  ,
+                BR.CHG_CD       ,
+                BR.CGO_CATE_CD  ,
+                BR.RCV_TERM_CD  ,
+                BR.DE_TERM_CD   ,
+--                CASE
+--                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 1
+--                ELSE BR.RAT_AS_QTY
+--                END             ,
+                CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 'BL'
+                ELSE BR.RAT_UT_CD
+                END             ,
+                BR.CURR_CD
+        ) BR
+) ,
+BU AS(
+/*******************************************************************************************
+적용 가능한 요율이 2개 이상인 경우 필요한 조건에 따라 2개 각각에 Volume을 쪼개 Rating 하기도 함.
+Sample BKG : MEX300444700
+BKG_CHG_RT에 등록된 Volume의 합과 TMP Volume의 합이 일치하고,
+BKG_CHG_RT에 등록된 Unit Rate가 TMP에 존재하는 요율이라면 통과시킬 수 있도록 로직 추가하기 위해 BU 생성  
+*******************************************************************************************/
+
+SELECT  BR.*  ,
+        ( SELECT BR.CHG_UT_AMT / XR.USD_LOCL_XCH_RT FROM XR WHERE XR.CURR_CD = BR.CURR_CD )  CHG_UT_USD_AMT
+FROM    (
+        SELECT  BR.OFT_CMB_SEQ  ,
+                BR.CHG_CD       ,
+                BR.CGO_CATE_CD  ,
+                BR.RCV_TERM_CD  ,
+                BR.DE_TERM_CD   ,
+                CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 1
+                ELSE BR.RAT_AS_QTY
+                END RAT_AS_QTY  ,
+                CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 'BL'
+                ELSE BR.RAT_UT_CD
+                END RAT_UT_CD   ,
+                BR.CURR_CD      ,
+                BR.CHG_UT_AMT 
+        FROM    (
+                SELECT  RA.OFT_CMB_SEQ  ,
+                        BR.*
+                FROM    BR    ,
+                        (
+                        SELECT  DISTINCT
+                                OFT_CMB_SEQ
+                        FROM    BKG_REV_AUD_CHG_TMP
+                        ) RA
+                WHERE   CHG_CD  IN ( 'OFT', 'OAR', 'DAR' )
+                ) BR  ,
+                (
+                SELECT  OFT_CMB_SEQ ,
+                        CHG_CD      ,
+                        MAX(DECODE(RAT_UT_CD, 'BL', 'Y', 'N'))  BL_FLG
+                FROM  BKG_REV_AUD_CHG_TMP
+                WHERE   CHG_CD  IN ( 'OFT', 'OAR', 'DAR' )
+                GROUP BY
+                        OFT_CMB_SEQ ,
+                        CHG_CD
+                ) CK
+        WHERE   CK.OFT_CMB_SEQ(+) = BR.OFT_CMB_SEQ
+        AND     CK.CHG_CD(+)      = BR.CHG_CD
+        ) BR
+),
+BS AS
+(SELECT  BR.*  ,
+        ( SELECT BR.CHG_AMT / XR.USD_LOCL_XCH_RT FROM XR WHERE XR.CURR_CD = BR.CURR_CD )  CHG_USD_AMT
+FROM    (
+        SELECT  BR.OFT_CMB_SEQ  ,
+                BR.CHG_CD       ,
+                BR.CGO_CATE_CD  ,
+                BR.RCV_TERM_CD  ,
+                BR.DE_TERM_CD   ,
+                SUM(CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 1
+                ELSE BR.RAT_AS_QTY
+                END) RAT_AS_QTY  ,
+                CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 'BL'
+                WHEN B.FLEX_HGT_FLG = 'Y' AND BR.RAT_UT_CD IN ('D4','D5') THEN 'FH'
+                ELSE BR.RAT_UT_CD
+                END RAT_UT_CD   ,
+                BR.CURR_CD      ,
+                SUM(BR.CHG_AMT) CHG_AMT
+        FROM    (
+                SELECT  RA.OFT_CMB_SEQ  ,
+                        BR.*
+                FROM    BR    ,
+                        (
+                        SELECT  DISTINCT
+                                OFT_CMB_SEQ
+                        FROM    BKG_REV_AUD_CHG_TMP
+                        ) RA
+                WHERE   CHG_CD  IN ( 'OFT', 'OAR', 'DAR' )
+                ) BR  ,
+                (
+                SELECT  OFT_CMB_SEQ ,
+                        CHG_CD      ,
+                        MAX(DECODE(RAT_UT_CD, 'BL', 'Y', 'N'))  BL_FLG
+                FROM  BKG_REV_AUD_CHG_TMP
+                WHERE   CHG_CD  IN ( 'OFT', 'OAR', 'DAR' )
+                GROUP BY
+                        OFT_CMB_SEQ ,
+                        CHG_CD
+                ) CK  ,
+                BKG_BOOKING B
+        WHERE   CK.OFT_CMB_SEQ(+) = BR.OFT_CMB_SEQ
+        AND     CK.CHG_CD(+)      = BR.CHG_CD
+        AND     B.BKG_NO          = @[bkg_no]
+        GROUP BY
+                BR.OFT_CMB_SEQ  ,
+                BR.CHG_CD       ,
+                BR.CGO_CATE_CD  ,
+                BR.RCV_TERM_CD  ,
+                BR.DE_TERM_CD   ,
+                CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 'BL'
+                WHEN B.FLEX_HGT_FLG = 'Y' AND BR.RAT_UT_CD IN ('D4','D5') THEN 'FH'
+                ELSE BR.RAT_UT_CD
+                END             ,
+                BR.CURR_CD
+        ) BR
+) ,
+R1 AS
+(
+/*******************************************************************************************
+AUDIT 의 OFT ( OFT, OAR, DAR )
+BL RATING UNIT 을 고려하여 변환한다.
+COVERED B/L 일 경우는 'DHF', 'NMS', 'CMS', 'ODF' 만 심사 대상으로 처리함.
+*******************************************************************************************/
+
+SELECT  RA.*  ,
+        ( SELECT RA.CHG_AMT / XR.USD_LOCL_XCH_RT FROM XR WHERE XR.CURR_CD = RA.CURR_CD )  CHG_USD_AMT,
+        ( SELECT RA.CHG_UT_AMT / XR.USD_LOCL_XCH_RT FROM XR WHERE XR.CURR_CD = RA.CURR_CD )  CHG_UT_USD_AMT
+FROM    (
+        SELECT  RA.OFT_CMB_SEQ  ,
+                RA.CHG_CD       ,
+                RA.CGO_CATE_CD  ,
+                RA.RCV_TERM_CD  ,
+                RA.DE_TERM_CD   ,
+                CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 1
+                ELSE RA.RAT_AS_QTY
+                END RAT_AS_QTY  ,
+                CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 'BL'
+                ELSE RA.RAT_UT_CD
+                END RAT_UT_CD   ,
+                RA.CURR_CD      ,
+                RA.CHG_UT_AMT   ,
+                SUM(RA.CHG_AMT) CHG_AMT
+        FROM    BKG_REV_AUD_CHG_TMP RA  ,
+                (
+                SELECT  CHG_CD      ,
+                        MAX(DECODE(RAT_UT_CD, 'BL', 'Y', 'N'))  BL_FLG
+                FROM  BR
+                GROUP BY
+                        CHG_CD
+                ) CK
+        WHERE   CK.CHG_CD(+)      = RA.CHG_CD
+        AND     RA.CHG_CD         IN ( 'OFT', 'OAR', 'DAR' )
+        AND     (
+                    ( SELECT RT_BL_TP_CD FROM BK ) <> 'C'
+                OR  RA.CHG_CD IN ( 'DHF', 'NMS', 'CMS', 'ODF' )
+                )
+        GROUP BY
+                RA.OFT_CMB_SEQ  ,
+                RA.CHG_CD       ,
+                RA.CGO_CATE_CD  ,
+                RA.RCV_TERM_CD  ,
+                RA.DE_TERM_CD   ,
+                CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 1
+                ELSE RA.RAT_AS_QTY
+                END             ,
+                CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 'BL'
+                ELSE RA.RAT_UT_CD
+                END             ,
+                RA.CURR_CD,
+                RA.CHG_UT_AMT
+        ) RA
+) ,
+RS AS
+(
+/*******************************************************************************************
+AUDIT 의 OFT ( OFT, OAR, DAR )
+BL RATING UNIT 을 고려하여 변환한다.
+COVERED B/L 일 경우는 'DHF', 'NMS', 'CMS', 'ODF' 만 심사 대상으로 처리함.
+*******************************************************************************************/
+
+SELECT  RA.*  ,
+        ( SELECT RA.CHG_AMT / XR.USD_LOCL_XCH_RT FROM XR WHERE XR.CURR_CD = RA.CURR_CD )  CHG_USD_AMT
+FROM    (
+        SELECT  RA.OFT_CMB_SEQ  ,
+                RA.CHG_CD       ,
+                RA.CGO_CATE_CD  ,
+                RA.RCV_TERM_CD  ,
+                RA.DE_TERM_CD   ,
+                SUM(CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 1
+                ELSE RA.RAT_AS_QTY
+                END) RAT_AS_QTY  ,
+                CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 'BL'
+                WHEN B.FLEX_HGT_FLG = 'Y' AND RA.RAT_UT_CD IN ('D4','D5') THEN 'FH'
+                ELSE RA.RAT_UT_CD
+                END RAT_UT_CD   ,
+                RA.CURR_CD      ,
+                SUM(RA.CHG_AMT) CHG_AMT
+        FROM    BKG_REV_AUD_CHG_TMP RA  ,
+                BKG_BOOKING B,
+                (
+                SELECT  CHG_CD      ,
+                        MAX(DECODE(RAT_UT_CD, 'BL', 'Y', 'N'))  BL_FLG
+                FROM  BR
+                GROUP BY
+                        CHG_CD
+                ) CK
+        WHERE   CK.CHG_CD(+)      = RA.CHG_CD
+        AND     RA.CHG_CD         IN ( 'OFT', 'OAR', 'DAR' )
+        AND     (
+                    ( SELECT RT_BL_TP_CD FROM BK ) <> 'C'
+                OR  RA.CHG_CD IN ( 'DHF', 'NMS', 'CMS', 'ODF' )
+                )
+        AND     B.BKG_NO         = @[bkg_no]
+        GROUP BY
+                RA.OFT_CMB_SEQ  ,
+                RA.CHG_CD       ,
+                RA.CGO_CATE_CD  ,
+                RA.RCV_TERM_CD  ,
+                RA.DE_TERM_CD   ,
+                CASE
+                WHEN DECODE(CK.BL_FLG, 'Y', 'Y', 'N') = 'Y' THEN 'BL'
+                WHEN B.FLEX_HGT_FLG = 'Y' AND RA.RAT_UT_CD IN ('D4','D5') THEN 'FH'
+                ELSE RA.RAT_UT_CD
+                END             ,
+                RA.CURR_CD
+        ) RA
+),
+C1 AS
+(
+/*******************************************************************************************
+OFT 가 일치하는 OFT_CMB_SEQ 를 SELECT 한다.
+B1 와 R1 가 모두 값이 없으면 C1 이 값이 없어서 불일치하는 것으로 표현되므로,
+UNION ALL 로 전체 OFT_CMB_SEQ 를 가져오는 부분을 추가하였음.
+*******************************************************************************************/
+
+(
+SELECT  OFT_CMB_SEQ
+FROM    (
+        SELECT  R1.OFT_CMB_SEQ        ,
+                SUM(DECODE(B1.CHG_CD, NULL, 1, 0))  UMCH_CNT
+        FROM    (
+                SELECT  OFT_CMB_SEQ   ,
+                        CHG_CD        ,
+                        CGO_CATE_CD   ,
+                        RCV_TERM_CD   ,
+                        DE_TERM_CD    ,
+                        RAT_AS_QTY    ,
+                        RAT_UT_CD     ,
+                        CURR_CD       ,
+                        CHG_AMT       ,
+                        CHG_USD_AMT
+                FROM    R1
+                WHERE   OFT_CMB_SEQ   NOT IN  (
+                                              SELECT  DISTINCT
+                                                      A.OFT_CMB_SEQ
+                                              FROM    (
+                                                      SELECT  OFT_CMB_SEQ   ,
+                                                              CHG_CD        ,
+                                                              COUNT(1)  CNT
+                                                      FROM    R1
+                                                      GROUP BY
+                                                              OFT_CMB_SEQ ,
+                                                              CHG_CD
+                                                      ) A ,
+                                                      (
+                                                      SELECT  OFT_CMB_SEQ   ,
+                                                              CHG_CD        ,
+                                                              COUNT(1)  CNT
+                                                      FROM    B1
+                                                      GROUP BY
+                                                              OFT_CMB_SEQ   ,
+                                                              CHG_CD
+                                                      ) B
+                                              WHERE   B.OFT_CMB_SEQ(+)  = A.OFT_CMB_SEQ
+                                              AND     B.CHG_CD(+)       = A.CHG_CD
+                                              AND     B.CNT(+)          = A.CNT
+                                              AND     B.CHG_CD          IS NULL
+                                              )
+                ) R1
+                LEFT OUTER JOIN B1
+                ON      B1.OFT_CMB_SEQ  = R1.OFT_CMB_SEQ
+                AND     B1.CHG_CD       = R1.CHG_CD
+                AND     B1.CGO_CATE_CD  = R1.CGO_CATE_CD
+                AND     B1.RCV_TERM_CD  = R1.RCV_TERM_CD
+                AND     B1.DE_TERM_CD   = R1.DE_TERM_CD
+                AND     B1.RAT_AS_QTY   = R1.RAT_AS_QTY
+                AND     (
+                            B1.RAT_UT_CD  = R1.RAT_UT_CD
+                        OR  (
+                                B1.RAT_UT_CD  IN ( '20', '40', 'HC', '45', '53' )
+                            AND ( SELECT A.CNTR_SZ_CD FROM PRI_RAT_UT A WHERE A.RAT_UT_CD = B1.RAT_UT_CD )  = ( SELECT A.CNTR_SZ_CD FROM PRI_RAT_UT A WHERE A.RAT_UT_CD = R1.RAT_UT_CD )
+                            )
+                        OR  (
+                                R1.RAT_UT_CD  IN ( '20', '40', 'HC', '45', '53' )
+                            AND ( SELECT A.CNTR_SZ_CD FROM PRI_RAT_UT A WHERE A.RAT_UT_CD = R1.RAT_UT_CD )  = ( SELECT A.CNTR_SZ_CD FROM PRI_RAT_UT A WHERE A.RAT_UT_CD = B1.RAT_UT_CD )
+                            )
+                        )
+                AND     ABS(B1.CHG_USD_AMT - R1.CHG_USD_AMT) <= 5
+        GROUP BY  R1.OFT_CMB_SEQ
+        )
+WHERE   UMCH_CNT  = 0
+
+INTERSECT
+
+SELECT  B1.OFT_CMB_SEQ
+FROM    (
+        SELECT  OFT_CMB_SEQ ,
+                SUM(CHG_USD_AMT)  CHG_USD_AMT
+        FROM    B1
+        GROUP BY  OFT_CMB_SEQ
+        ) B1  ,
+        (
+        SELECT  OFT_CMB_SEQ ,
+                SUM(CHG_USD_AMT)  CHG_USD_AMT
+        FROM    R1
+        GROUP BY  OFT_CMB_SEQ
+        ) R1
+WHERE   R1.OFT_CMB_SEQ  = B1.OFT_CMB_SEQ
+AND     ABS(B1.CHG_USD_AMT - R1.CHG_USD_AMT) <= 5
+)
+
+UNION ALL
+
+SELECT  OFT_CMB_SEQ
+FROM    (
+        SELECT  RS.OFT_CMB_SEQ        ,
+                SUM(DECODE(BS.CHG_CD, NULL, 1, 0))  UMCH_CNT
+        FROM    (
+                SELECT  OFT_CMB_SEQ   ,
+                        CHG_CD        ,
+                        CGO_CATE_CD   ,
+                        RCV_TERM_CD   ,
+                        DE_TERM_CD    ,
+                        RAT_AS_QTY    ,
+                        RAT_UT_CD     ,
+                        CURR_CD       ,
+                        CHG_AMT       ,
+                        CHG_USD_AMT
+                FROM    RS
+                WHERE   OFT_CMB_SEQ   NOT IN  (
+                                              SELECT  DISTINCT
+                                                      A.OFT_CMB_SEQ
+                                              FROM    (
+                                                      SELECT  OFT_CMB_SEQ   ,
+                                                              CHG_CD        ,
+                                                              COUNT(1)  CNT
+                                                      FROM    RS
+                                                      GROUP BY
+                                                              OFT_CMB_SEQ ,
+                                                              CHG_CD
+                                                      ) A ,
+                                                      (
+                                                      SELECT  OFT_CMB_SEQ   ,
+                                                              CHG_CD        ,
+                                                              COUNT(1)  CNT
+                                                      FROM    RS
+                                                      GROUP BY
+                                                              OFT_CMB_SEQ   ,
+                                                              CHG_CD
+                                                      ) B
+                                              WHERE   B.OFT_CMB_SEQ(+)  = A.OFT_CMB_SEQ
+                                              AND     B.CHG_CD(+)       = A.CHG_CD
+                                              AND     B.CNT(+)          = A.CNT
+                                              AND     B.CHG_CD          IS NULL
+                                              )
+                ) RS
+                LEFT OUTER JOIN BS
+                ON      BS.OFT_CMB_SEQ  = RS.OFT_CMB_SEQ
+                AND     BS.CHG_CD       = RS.CHG_CD
+                AND     BS.CGO_CATE_CD  = RS.CGO_CATE_CD
+                AND     BS.RCV_TERM_CD  = RS.RCV_TERM_CD
+                AND     BS.DE_TERM_CD   = RS.DE_TERM_CD
+                AND     BS.RAT_AS_QTY   = RS.RAT_AS_QTY
+                AND     (
+                            BS.RAT_UT_CD  = RS.RAT_UT_CD
+                        OR  (
+                                BS.RAT_UT_CD  IN ( '20', '40', 'HC', '45', '53' )
+                            AND ( SELECT A.CNTR_SZ_CD FROM PRI_RAT_UT A WHERE A.RAT_UT_CD = BS.RAT_UT_CD )  
+                                = ( SELECT A.CNTR_SZ_CD FROM PRI_RAT_UT A WHERE A.RAT_UT_CD = RS.RAT_UT_CD )
+                            )
+                        OR  (
+                                RS.RAT_UT_CD  IN ( '20', '40', 'HC', '45', '53' )
+                            AND ( SELECT A.CNTR_SZ_CD FROM PRI_RAT_UT A WHERE A.RAT_UT_CD = RS.RAT_UT_CD ) 
+                                = ( SELECT A.CNTR_SZ_CD FROM PRI_RAT_UT A WHERE A.RAT_UT_CD = BS.RAT_UT_CD )
+                            )
+                        )
+                AND     ABS(BS.CHG_USD_AMT - RS.CHG_USD_AMT) <= 5
+        GROUP BY  RS.OFT_CMB_SEQ
+        )
+WHERE   UMCH_CNT  = 0
+
+UNION ALL
+
+/*******************************************************************************************
+적용 가능한 요율이 2개 이상인 경우 필요한 조건에 따라 2개 각각에 Volume을 쪼개 Rating 하기도 함.
+Sample BKG : MEX300444700
+BKG_CHG_RT에 등록된 Volume의 합과 TMP Volume의 합이 일치하고,
+BKG_CHG_RT에 등록된 Unit Rate가 TMP에 존재하는 요율이라면 통과시킬 수 있도록 로직 추가
+(B_QTY는 해당 BKG 전체에 대한 Charge 별 Volume 합, R_QTY는 OFT_CMB_SEQ/Charge 별 Volume 합)
+*******************************************************************************************/
+SELECT OFT_CMB_SEQ
+FROM (
+        SELECT R1.OFT_CMB_SEQ        ,
+            SUM(BU.RAT_AS_QTY) OVER (PARTITION BY BU.CHG_CD, BU.RAT_UT_CD, BU.CGO_CATE_CD, BU.RCV_TERM_CD, BU.DE_TERM_CD) B_QTY,
+            SUM(BU.RAT_AS_QTY) OVER (PARTITION BY BU.CHG_CD) B_TTL_QTY,
+            SUM(R1.RAT_AS_QTY) OVER (PARTITION BY R1.OFT_CMB_SEQ, R1.CHG_CD, R1.RAT_UT_CD, R1.CGO_CATE_CD, R1.RCV_TERM_CD, R1.DE_TERM_CD) R_QTY,
+            SUM(R1.RAT_AS_QTY) OVER (PARTITION BY R1.OFT_CMB_SEQ, R1.CHG_CD) R_TTL_QTY
+        FROM    (
+                SELECT  OFT_CMB_SEQ   ,
+                        CHG_CD        ,
+                        CGO_CATE_CD   ,
+                        RCV_TERM_CD   ,
+                        DE_TERM_CD    ,
+                        RAT_AS_QTY    ,
+                        RAT_UT_CD     ,
+                        CURR_CD       ,
+                        CHG_AMT       ,
+                        CHG_USD_AMT,
+                        CHG_UT_USD_AMT
+                FROM    R1
+                WHERE   R1.CHG_CD = 'OFT'
+                ) R1
+                LEFT OUTER JOIN (SELECT OFT_CMB_SEQ, CHG_CD, CGO_CATE_CD, RCV_TERM_CD, DE_TERM_CD, RAT_UT_CD, SUM(RAT_AS_QTY) RAT_AS_QTY, SUM(CHG_UT_USD_AMT) CHG_UT_USD_AMT
+                                    FROM BU GROUP BY OFT_CMB_SEQ, CHG_CD, CGO_CATE_CD, RCV_TERM_CD, DE_TERM_CD, RAT_UT_CD) BU
+                ON      BU.OFT_CMB_SEQ  = R1.OFT_CMB_SEQ
+                AND     BU.CHG_CD       = 'OFT'
+                AND     BU.CHG_CD       = R1.CHG_CD
+                AND     BU.CGO_CATE_CD  = R1.CGO_CATE_CD
+                AND     BU.RCV_TERM_CD  = R1.RCV_TERM_CD
+                AND     BU.DE_TERM_CD   = R1.DE_TERM_CD
+                AND     (
+                            BU.RAT_UT_CD  = R1.RAT_UT_CD
+                        OR  (
+                                BU.RAT_UT_CD  IN ( '20', '40', 'HC', '45', '53' )
+                            AND ( SELECT A.CNTR_SZ_CD FROM PRI_RAT_UT A WHERE A.RAT_UT_CD = BU.RAT_UT_CD )  = ( SELECT A.CNTR_SZ_CD FROM PRI_RAT_UT A WHERE A.RAT_UT_CD = R1.RAT_UT_CD )
+                            )
+                        OR  (
+                                R1.RAT_UT_CD  IN ( '20', '40', 'HC', '45', '53' )
+                            AND ( SELECT A.CNTR_SZ_CD FROM PRI_RAT_UT A WHERE A.RAT_UT_CD = R1.RAT_UT_CD )  = ( SELECT A.CNTR_SZ_CD FROM PRI_RAT_UT A WHERE A.RAT_UT_CD = BU.RAT_UT_CD )
+                            )
+                        )
+                AND     ABS(BU.CHG_UT_USD_AMT - R1.CHG_UT_USD_AMT) <= 5
+
+        ), BK
+WHERE (B_QTY = R_QTY AND B_TTL_QTY = R_TTL_QTY)
+OR (BK.RT_BL_TP_CD = 'N' AND BK.CNTR_PRT_FLG = 'Y')
+
+UNION ALL
+
+SELECT  DISTINCT
+        OFT_CMB_SEQ
+FROM    BKG_REV_AUD_CHG_TMP A
+WHERE ( SELECT COUNT(1) FROM B1 WHERE B1.OFT_CMB_SEQ = A.OFT_CMB_SEQ ) = 0
+AND   ( SELECT COUNT(1) FROM R1 WHERE R1.OFT_CMB_SEQ = A.OFT_CMB_SEQ ) = 0
+
+UNION ALL
+SELECT  C.OFT_CMB_SEQ
+FROM            
+        (
+                SELECT  OFT_CMB_SEQ   ,
+                        CHG_CD        ,
+                        RAT_UT_CD     ,
+                        CGO_CATE_CD   ,
+                        RCV_TERM_CD   ,
+                        DE_TERM_CD    ,
+						SUM(RAT_AS_QTY) RAT_AS_QTY,
+                        SUM(CHG_USD_AMT) CHG_USD_AMT
+                FROM    R1
+                WHERE   CHG_CD  IN ( 'OFT', 'OAR', 'DAR' )
+                GROUP BY OFT_CMB_SEQ, CHG_CD, RAT_UT_CD, CGO_CATE_CD, RCV_TERM_CD, DE_TERM_CD
+        ) C
+        LEFT OUTER JOIN
+        (
+                SELECT  OFT_CMB_SEQ   ,
+                        CHG_CD        ,
+                        RAT_UT_CD     ,
+                        CGO_CATE_CD   ,
+                        RCV_TERM_CD   ,
+                        DE_TERM_CD    ,
+						SUM(RAT_AS_QTY) RAT_AS_QTY,
+                        SUM(CHG_USD_AMT) CHG_USD_AMT
+                FROM    B1
+                WHERE   CHG_CD  IN ( 'OFT', 'OAR', 'DAR' )
+                GROUP BY OFT_CMB_SEQ, CHG_CD, RAT_UT_CD, CGO_CATE_CD, RCV_TERM_CD, DE_TERM_CD
+                    
+        ) B
+        ON C.OFT_CMB_SEQ=B.OFT_CMB_SEQ 
+        AND C.CHG_CD = B.CHG_CD 
+        AND C.RAT_UT_CD = B.RAT_UT_CD
+        AND C.CGO_CATE_CD = B.CGO_CATE_CD
+        AND C.RCV_TERM_CD = B.RCV_TERM_CD
+        AND C.DE_TERM_CD = B.DE_TERM_CD
+WHERE ABS(B.CHG_USD_AMT-C.CHG_USD_AMT) <= 5
+AND C.RAT_AS_QTY = B.RAT_AS_QTY
+) ,
+RA AS
+(
+/*******************************************************************************************
+OFT 금액, SURCAHRGE 금액 등을 고려하여 비교대상이 되는 AUDIT DATA 를 SELECT 한다.
+*******************************************************************************************/
+
+SELECT  CHG_CD        ,
+        CGO_CATE_CD   ,
+        RCV_TERM_CD   ,
+        DE_TERM_CD    ,
+        RAT_AS_QTY    ,
+        RAT_UT_CD     ,
+        CURR_CD       ,
+        CHG_UT_AMT    ,
+        CHG_AMT       ,
+        ( SELECT RA.CHG_AMT / XR.USD_LOCL_XCH_RT FROM XR WHERE XR.CURR_CD = RA.CURR_CD )  CHG_USD_AMT
+FROM    BKG_REV_AUD_CHG_TMP RA
+WHERE   OFT_CMB_SEQ
+        =
+        (
+        SELECT  OFT_CMB_SEQ
+        FROM    (
+                SELECT  OFT_CMB_SEQ   ,
+                        ROW_NUMBER() OVER ( ORDER BY OFT_CHG_AMT, SUR_CHG_AMT, OFT_CMB_SEQ )  ROW_NUMBER
+                FROM    (
+                        SELECT  RA.OFT_CMB_SEQ  ,
+                                SUM(
+                                CASE
+                                WHEN CHG_CD IN ( 'OFT', 'OAR', 'DAR' ) THEN RA.RAT_AS_QTY * RA.CHG_UT_AMT / DECODE(RA.RAT_UT_CD, 'PC', 100, 1) / XR.USD_LOCL_XCH_RT
+                                ELSE 0
+                                END
+                                ) OFT_CHG_AMT   ,
+                                SUM(
+                                CASE
+                                WHEN CHG_CD NOT IN ( 'OFT', 'OAR', 'DAR' ) THEN RA.RAT_AS_QTY * RA.CHG_UT_AMT / DECODE(RA.RAT_UT_CD, 'PC', 100, 1) / XR.USD_LOCL_XCH_RT
+                                ELSE 0
+                                END
+                                ) SUR_CHG_AMT
+                        FROM    BKG_REV_AUD_CHG_TMP RA  ,
+                                XR
+                        WHERE   XR.CURR_CD = RA.CURR_CD
+                        GROUP BY
+                                RA.OFT_CMB_SEQ
+                        )
+                )
+        WHERE   ROW_NUMBER  = 1
+        )
+) ,
+D1 AS
+(
+SELECT  B.BKG_ITM_LOG   ,
+        C.CTRT_ITM_LOG
+FROM    (
+        SELECT  REPLACE(LTRIM(SYS_CONNECT_BY_PATH(
+                  '[' || RAT_UT_CD || '][' || SUBSTR(TO_CHAR(RAT_AS_QTY, '999.00'), 2) || ']'
+                  ,'^|^'), '^|^'), '^|^', ' ') BKG_ITM_LOG
+        FROM    (
+                SELECT  RAT_UT_CD ,
+                        SUM(RAT_AS_QTY) RAT_AS_QTY  ,
+                        ROW_NUMBER() OVER ( ORDER BY RAT_UT_CD )  ROW_NUMBER  ,
+                        COUNT(1) OVER () CNT
+                FROM    BR
+                WHERE   CHG_CD  = 'OFT'
+                GROUP BY
+                        RAT_UT_CD
+                )
+        WHERE   LEVEL   = CNT
+        START WITH ROW_NUMBER = 1
+        CONNECT BY
+                ROW_NUMBER        = PRIOR ROW_NUMBER + 1
+        ) B
+        FULL OUTER JOIN
+        (
+        SELECT  REPLACE(LTRIM(SYS_CONNECT_BY_PATH(
+                  '[' || RAT_UT_CD || '][' || SUBSTR(TO_CHAR(RAT_AS_QTY, '999.00'), 2) || ']'
+                  ,'^|^'), '^|^'), '^|^', ' ') CTRT_ITM_LOG
+        FROM    (
+                SELECT  RAT_UT_CD ,
+                        SUM(RAT_AS_QTY) RAT_AS_QTY  ,
+                        ROW_NUMBER() OVER ( ORDER BY RAT_UT_CD )  ROW_NUMBER  ,
+                        COUNT(1) OVER () CNT
+                FROM    RA
+                WHERE   CHG_CD  = 'OFT'
+                GROUP BY
+                        RAT_UT_CD
+                )
+        WHERE   LEVEL   = CNT
+        START WITH ROW_NUMBER = 1
+        CONNECT BY
+                ROW_NUMBER        = PRIOR ROW_NUMBER + 1
+        ) C
+        ON 1 = 1
+) ,
+D2 AS
+(
+SELECT  B.BKG_ITM_LOG   ,
+        C.CTRT_ITM_LOG
+FROM    (
+        SELECT  REPLACE(LTRIM(SYS_CONNECT_BY_PATH(
+                  '[' || CGO_CATE_CD || '][' || SUBSTR(TO_CHAR(RAT_AS_QTY, '999.00'), 2) || ']'
+                  ,'^|^'), '^|^'), '^|^', ' ') BKG_ITM_LOG
+        FROM    (
+                SELECT  CGO_CATE_CD ,
+                        SUM(RAT_AS_QTY) RAT_AS_QTY  ,
+                        ROW_NUMBER() OVER ( ORDER BY CGO_CATE_CD )  ROW_NUMBER  ,
+                        COUNT(1) OVER () CNT
+                FROM    BR
+                WHERE   CHG_CD  = 'OFT'
+                GROUP BY
+                        CGO_CATE_CD
+                )
+        WHERE   LEVEL   = CNT
+        START WITH ROW_NUMBER = 1
+        CONNECT BY
+                ROW_NUMBER        = PRIOR ROW_NUMBER + 1
+        ) B
+        FULL OUTER JOIN
+        (
+        SELECT  REPLACE(LTRIM(SYS_CONNECT_BY_PATH(
+                  '[' || CGO_CATE_CD || '][' || SUBSTR(TO_CHAR(RAT_AS_QTY, '999.00'), 2) || ']'
+                  ,'^|^'), '^|^'), '^|^', ' ') CTRT_ITM_LOG
+        FROM    (
+                SELECT  CGO_CATE_CD ,
+                        SUM(RAT_AS_QTY) RAT_AS_QTY  ,
+                        ROW_NUMBER() OVER ( ORDER BY CGO_CATE_CD )  ROW_NUMBER  ,
+                        COUNT(1) OVER () CNT
+                FROM    RA
+                WHERE   CHG_CD  = 'OFT'
+                GROUP BY
+                        CGO_CATE_CD
+                )
+        WHERE   LEVEL   = CNT
+        START WITH ROW_NUMBER = 1
+        CONNECT BY
+                ROW_NUMBER        = PRIOR ROW_NUMBER + 1
+        ) C
+        ON 1 = 1
+) ,
+D3 AS
+(
+SELECT  B.BKG_ITM_LOG   ,
+        C.CTRT_ITM_LOG
+FROM    (
+        SELECT  REPLACE(LTRIM(SYS_CONNECT_BY_PATH(
+                  '[' || CHG_CD || ']['
+                      || CURR_CD || ']['
+                      || SUBSTR(TO_CHAR(CHG_UT_AMT, '999,999,999.00'), 2) || ']['
+                      || SUBSTR(TO_CHAR(RAT_AS_QTY, '999.00'), 2) || ']['
+                      || RAT_UT_CD || ']['
+                      || CGO_CATE_CD || ']['
+                      || RCV_TERM_CD || '/' || DE_TERM_CD || ']'
+                  ,'^|^'), '^|^'), '^|^', CHR(10)) BKG_ITM_LOG
+        FROM    (
+                SELECT  CHG_CD        ,
+                        CURR_CD       ,
+                        CHG_UT_AMT    ,
+                        RAT_AS_QTY    ,
+                        RAT_UT_CD     ,
+                        CGO_CATE_CD   ,
+                        RCV_TERM_CD   ,
+                        DE_TERM_CD    ,
+                        ROW_NUMBER() OVER ( ORDER BY CHG_CD, CURR_CD, RAT_UT_CD, CGO_CATE_CD )  ROW_NUMBER  ,
+                        COUNT(1) OVER () CNT
+                FROM    BR
+                WHERE   CHG_CD  IN ( 'OFT', 'OAR', 'DAR' )
+                )
+        WHERE   LEVEL   = CNT
+        START WITH ROW_NUMBER = 1
+        CONNECT BY
+                ROW_NUMBER        = PRIOR ROW_NUMBER + 1
+        ) B
+        FULL OUTER JOIN
+        (
+        SELECT  REPLACE(LTRIM(SYS_CONNECT_BY_PATH(
+                  '[' || CHG_CD || ']['
+                      || CURR_CD || ']['
+                      || SUBSTR(TO_CHAR(CHG_UT_AMT, '999,999,999.00'), 2) || ']['
+                      || SUBSTR(TO_CHAR(RAT_AS_QTY, '999.00'), 2) || ']['
+                      || RAT_UT_CD || ']['
+                      || CGO_CATE_CD || ']['
+                      || RCV_TERM_CD || '/' || DE_TERM_CD || ']'
+                  ,'^|^'), '^|^'), '^|^', CHR(10)) CTRT_ITM_LOG
+        FROM    (
+                SELECT  CHG_CD        ,
+                        CURR_CD       ,
+                        CHG_UT_AMT    ,
+                        RAT_AS_QTY    ,
+                        RAT_UT_CD     ,
+                        CGO_CATE_CD   ,
+                        RCV_TERM_CD   ,
+                        DE_TERM_CD    ,
+                        ROW_NUMBER() OVER ( ORDER BY CHG_CD, CURR_CD, RAT_UT_CD, CGO_CATE_CD )  ROW_NUMBER  ,
+                        COUNT(1) OVER () CNT
+                FROM    RA
+                WHERE   CHG_CD  IN ( 'OFT', 'OAR', 'DAR' )
+                )
+        WHERE   LEVEL   = CNT
+        START WITH ROW_NUMBER = 1
+        CONNECT BY
+                ROW_NUMBER        = PRIOR ROW_NUMBER + 1
+        ) C
+        ON 1 = 1
+) ,
+D4 AS
+(
+SELECT  B.BKG_ITM_LOG   ,
+        C.CTRT_ITM_LOG
+FROM    (
+        SELECT  'TOTAL AMOUNT : [USD][' || ( SELECT SUBSTR(TO_CHAR(SUM(BR.CHG_USD_AMT), '999,999,999.00'), 2)  FROM BR WHERE BR.CHG_CD IN ( 'OFT', 'OAR', 'DAR' ) ) || ']' BKG_ITM_LOG
+        FROM    DUAL
+        ) B
+        FULL OUTER JOIN
+        (
+        SELECT  'TOTAL AMOUNT : [USD][' || ( SELECT SUBSTR(TO_CHAR(SUM(RA.CHG_USD_AMT), '999,999,999.00'), 2)  FROM RA WHERE RA.CHG_CD IN ( 'OFT', 'OAR', 'DAR' ) ) || ']'  CTRT_ITM_LOG
+        FROM    DUAL
+        ) C
+        ON 1 = 1
+)
+SELECT  'E'   UMCH_TP_CD      ,
+        ( SELECT BKG_ITM_LOG FROM D1 )  || CHR(10) || '-----------------------------------------------' || CHR(10) || ( SELECT BKG_ITM_LOG FROM D2 )    || CHR(10) || '-----------------------------------------------' || CHR(10) || ( SELECT BKG_ITM_LOG FROM D3 )    || CHR(10) || '-----------------------------------------------' || CHR(10) || ( SELECT BKG_ITM_LOG FROM D4 )    BKG_ITM_LOG     ,
+        ( SELECT CTRT_ITM_LOG FROM D1 ) || CHR(10) || '-----------------------------------------------' || CHR(10) || ( SELECT CTRT_ITM_LOG FROM D2 ) || CHR(10) || '-----------------------------------------------' || CHR(10) || ( SELECT CTRT_ITM_LOG FROM D3 ) || CHR(10) || '-----------------------------------------------' || CHR(10) || ( SELECT CTRT_ITM_LOG FROM D4 ) CTRT_ITM_LOG    ,
+        'U'   MTCH_UMCH_TP_CD ,
+        ( SELECT UMCH_TP_DESC FROM BKG_REV_UMCH_TP WHERE UMCH_TP_CD = 'E' ) UMCH_TP_DESC  ,
+        ( SELECT INTG_CD_VAL_DP_DESC FROM COM_INTG_CD_DTL WHERE INTG_CD_ID = 'CD02456' AND INTG_CD_VAL_CTNT = 'U' ) MTCH_UMCH_TP_DESC
+FROM    BK  ,
+        ( SELECT COUNT(1) CNT FROM C1 ) X
+WHERE   X.CNT = 0
+AND     BK.RT_BL_TP_CD  NOT IN ( 'B', 'C', 'M' )
+AND     BK.MEMO_BL_FLG  = 'N'
+--AND     BK.BB_CGO_FLG   = 'N'
+
+
+/*******************************************************************************************
+'D' ERROR 가 아닌 경우에만 'E' 를 표시한다.
+*******************************************************************************************/
+
+/*******************************************************************************************
+신규 BKG 만 대상으로 한다.
+*******************************************************************************************/
+
+AND     LENGTH(@[bkg_no]) = 12			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="ca_flg" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

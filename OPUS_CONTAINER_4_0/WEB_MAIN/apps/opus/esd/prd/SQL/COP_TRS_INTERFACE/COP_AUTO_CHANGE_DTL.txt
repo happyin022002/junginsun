@@ -1,0 +1,389 @@
+/*
+Modified History
+06-12-05 Ocean  Shuttle 구간 데이터 추출 로직 추가 sdkang
+06-12-05 Ocean  customer nominated trucker 추가
+06-12-05 ROUT ORG, DEST, SEQ 추가
+06-12-06 Loading Due Date 대신 VVD 입력되는 CASE 추가
+*/
+
+
+--:PCTL_NO	String	
+--:R_TERM	String	Z
+--:D_TERM	String	Y
+--:INLND_ROUT_ORG	String	USLGBM1
+--:IO_BND_CD	String	I
+--:INLND_ROUT_SEQ	String	1
+--:INLND_ROUT_DEST	String	USAVQY1
+--:PRE_ADD_NOD	String	USLGBM1
+--:ADD_NOD1	String	USLGBR1
+--:ADD_NOD2	String	USLGBM1
+
+--insert into PRD_PROD_CTL_ROUT_DTL
+--(
+--PCTL_NO,PCTL_SEQ,ORG_NOD_CD,DEST_NOD_CD,NOD_LNK_DIV_CD,PCTL_IO_BND_CD,TRSP_MOD_CD,CUST_NOMI_TRKR_FLG,PCTL_WTR_DIV_CD,
+--ORG_NOD_TP_CD,DEST_NOD_TP_CD, MTY_YD_FLG,
+--ARR_ST_DT,DEP_FSH_DT,TZ_DWLL_TM_HRS,
+--N1ST_VNDR_SEQ,N2ND_VNDR_SEQ,N3RD_VNDR_SEQ
+--,VSL_SLAN_CD,CRR_CD,VSL_CD,SKD_VOY_NO,SKD_DIR_CD
+--,ROUT_ORG_NOD_CD,ROUT_DEST_NOD_CD,ROUT_SEQ
+--)
+--
+--,COST_ACT_GRP_SEQ
+
+SELECT                                                                                                                   
+:PCTL_NO||lpad(gp1,4,0) pctl_no, ord pctl_seq,                                                                                  
+NODE_NEW1,NODE_NEW2,NODE_NEW_KIND,OI_BND_CD,substr(trsp_mod_cd,1,2) trsp_mod_cd,substr(trsp_mod_cd,3,1) CUST_NOMI_TRKR_FLG ,   
+decode(trsp_mod_cd,'WD','W','VD','V') WTR_DIV_CD,NODE1_TP,NODE2_TP,                                                      
+(                                                                                                                        
+ CASE                                                                                                                     
+ WHEN F_NO2 = 0  AND NODE_NEW_KIND = 'N' AND :R_TERM <> 'S' THEN 'Y'                                                             -- :R_TERM
+ WHEN F_NO2 = 13 AND NODE_NEW_KIND = 'N' AND :D_TERM <> 'S' THEN 'Y'                                                             -- :D_TERM
+ ELSE 'N' END                                                                                                             
+ ) MTY_YD_FLG,                                                                                                            
+ TO_CHAR(TO_DATE(PRD_GET_SKD_STR_FNC(LEAD(SKD_TIME,CNT-ORD,NULL) OVER(PARTITION BY GP1 ORDER BY ORD),                                 
+     ORD,NODE_NEW_KIND,DECODE(NODE_NEW_KIND,'N','A','D')),'yyyymmdd hh24:mi:ss'),'yyyymmdd hh24:mi:ss') A_TIME,                                 
+TO_CHAR(TO_DATE(PRD_GET_SKD_STR_FNC(LEAD(SKD_TIME,CNT-ORD,NULL) OVER(PARTITION BY GP1 ORDER BY ORD),                                 
+     ORD,NODE_NEW_KIND,DECODE(NODE_NEW_KIND,'N','D','A')),'yyyymmdd hh24:mi:ss'),'yyyymmdd hh24:mi:ss') D_TIME,                                 
+(                                                                                                                        
+CASE                                                                                                                     
+    WHEN NODE_NEW_KIND = 'L' THEN                                                                                        
+        TO_NUMBER(PRD_GET_SKD_STR_FNC(LEAD(SKD_TIME,CNT-ORD,NULL) OVER(PARTITION BY GP1 ORDER BY ORD),ORD,NODE_NEW_KIND,'T'))   
+    WHEN NODE_NEW_KIND = 'N' THEN                                                                                        
+        TZTM_DW_HRS                                                                                                      
+END                                                                                                                      
+) ACT_DWTS_HRS,                                                                                                          
+(CASE WHEN NODE_NEW_KIND = 'N' THEN N1ST_VNDR_SEQ                                                                        
+     WHEN NODE_NEW_KIND = 'L' AND F_NO2 =0 AND :R_TERM = 'D' THEN  LEAD(N1ST_VNDR_SEQ, 1)                                       --:R_TERM
+                              OVER ( PARTITION BY GP1,NODE_NEW_KIND ORDER BY ORD)                                        
+     WHEN NODE_NEW_KIND = 'L' AND F_NO2 =12 AND :D_TERM = 'D' THEN  LAG(N1ST_VNDR_SEQ, 1)                                       -- :D_TERM
+                              OVER ( PARTITION BY GP1,NODE_NEW_KIND ORDER BY ORD)                                        
+     ELSE N1ST_VNDR_SEQ                                                                                                  	                                                                                                            
+   END                                                                                                                   
+   ) N1ST_VNDR_SEQ,                                                                                                      
+N2ND_VNDR_SEQ,N3RD_VNDR_SEQ,SLANE,                                                                                       
+'' CRR_CD,                                                                                                               
+'' VSL_CD,                                                                                                               
+'' VOY_NO,                                                                                                               
+'' dir_cd,INLND_ROUT_CMB_FLG, INLND_ROUT_INV_BIL_PATT_CD,                                                                
+RAIL_CRR_TYPE, INLND_ROUT_INCL_STTL_FLG, TRSP_AGMT_OFC_CTY_CD, TRSP_AGMT_SEQ, AGMT_REF_NO,                               
+R_ORG2, R_DEST2, R_seq2,                                                                                                 
+PRD_GET_SKD_STR_FNC(LEAD(SKD_TIME,CNT-ORD,NULL) OVER(PARTITION BY GP1 ORDER BY ORD),ORD,NODE_NEW_KIND,'CT') CNST             
+FROM                                                                                                                     
+(                                                                                                                        
+    WITH ROUT_TBL AS                                                                                                     
+    (                                                                                                                    
+       SELECT                                                                                                            
+        GP1,F_NO2,L_N0,O1,NODE_NEW1,NODE1_TP,NODE_NEW2,NODE2_TP,NODE_NEW_KIND,OI_BND_CD,trsp_mod_cd,TZTM_DW_HRS,         
+        N1ST_VNDR_SEQ,N2ND_VNDR_SEQ,N3RD_VNDR_SEQ,                                                                       
+        R_ORG2, R_DEST2, R_seq2,S_DATE,S_TYPE,SLANE,DIR_CD,INLND_ROUT_CMB_FLG, INLND_ROUT_INV_BIL_PATT_CD,               
+        RAIL_CRR_TYPE, INLND_ROUT_INCL_STTL_FLG, TRSP_AGMT_OFC_CTY_CD, TRSP_AGMT_SEQ, AGMT_REF_NO,                        
+        (                                                                                                                
+        F_NO2||':'||NODE_NEW1||':'||NODE_NEW2||':'||NODE_NEW_KIND||':'||OI_BND_CD||':'                                   
+        ||NVL(SUBSTR(TRSP_MOD_CD,1,2),'NON')||':'||NVL(TZTM_DW_HRS,'0')||':'||NVL(SLANE,'NON')||':'||S_TYPE||':'         
+        ||NVL(DIR_CD,'X')||':') SKD_STR,                                                                                 
+        COUNT(*) over (PARTITION BY GP1) CNT,                                                                            
+        ROW_NUMBER() over (PARTITION BY GP1 ORDER BY O1) ORD                                                             
+        FROM                                                                                                             
+        (                                                                                                                
+            SELECT                                                                                                       
+             GP1,F_NO2,L_N0,O1,NODE_NEW1,(SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = NODE_NEW1) NODE1_TP,             
+             DECODE(LENGTH(NODE_NEW2),7,NODE_NEW2,SUBSTR(NODE_NEW2,3,7))  NODE_NEW2,                                     
+             DECODE(LENGTH(NODE_NEW2),7,'N',SUBSTR(NODE_NEW2,18,1))  INLND_ROUT_CMB_FLG,                                 
+             DECODE(LENGTH(NODE_NEW2),7,'',SUBSTR(NODE_NEW2,19,3))  INLND_ROUT_INV_BIL_PATT_CD,                          
+             DECODE(LENGTH(NODE_NEW2),7,'',SUBSTR(NODE_NEW2,22,3))  RAIL_CRR_TYPE,                                       
+             DECODE(LENGTH(NODE_NEW2),7,'',SUBSTR(NODE_NEW2,25,3))  TRSP_AGMT_OFC_CTY_CD,                                
+             DECODE(LENGTH(NODE_NEW2),7,'',SUBSTR(NODE_NEW2,28,6))  TRSP_AGMT_SEQ,                                       
+             DECODE(LENGTH(NODE_NEW2),7,'',SUBSTR(NODE_NEW2,34,15))  AGMT_REF_NO,                                        
+             DECODE(LENGTH(NODE_NEW2),7,'',SUBSTR(NODE_NEW2,49,1))  INLND_ROUT_INCL_STTL_FLG,                            
+
+             (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = DECODE(LENGTH(NODE_NEW2),7,NODE_NEW2,SUBSTR(NODE_NEW2,3,7))) 
+              NODE2_TP,NODE_NEW_KIND,OI_BND_CD,                                                                          
+            (                                                                                                            
+            CASE                                                                                                         
+                WHEN NODE_NEW_KIND='N' THEN 'X'                                                                         
+                WHEN NODE_NEW_KIND='L' AND F_NO2 IN (0,12) THEN 'TD'                                                       
+                                                                                                                         
+               WHEN NODE_NEW_KIND='L' AND LENGTH(NODE_NEW2) > 7 THEN SUBSTR(NODE_NEW2,10,2)                              
+                                                                                                                         
+                  END                                                                                                    
+            ) trsp_mod_cd,                                                                                               
+            (                                                                                                            
+            CASE                                                                                                         
+                WHEN NODE_NEW_KIND='N' AND F_NO2 IN (1,12)                                                               
+                                   AND (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = NODE_NEW1) = 'Z' THEN                                                                             
+                (                                                                                                        
+                     SELECT CGO_HNDL_TM_HRS FROM MDM_ZONE WHERE ZN_CD = NODE_NEW1                                        
+                 )                                                                                                        
+                 WHEN NODE_NEW_KIND='N' AND F_NO2 = 1 AND :R_TERM ='S' AND  R_seq2 = 0 AND                                       -- :R_TERM
+                       (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = NODE_NEW1) <> 'Z' THEN 0                            
+                WHEN NODE_NEW_KIND='N' AND F_NO2 = 12 AND :D_TERM ='S' AND  R_seq2 = 0 AND                                       -- :D_TERM
+                       (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = NODE_NEW1) <> 'Z' THEN  0                                       
+                 WHEN NODE_NEW_KIND='N' AND (SELECT NOD_TP_CD FROM PRD_NODE WHERE NOD_CD = NODE_NEW1) <> 'Z' THEN         
+                 (                                                                                                        
+                    SELECT DECODE(F_NO2,13,0,DECODE(F_NO2,0,0,DECODE(:PM_F,'Y',                                                --:PM_F
+                    DECODE(:RF_CNTR,'Y',RF_MIN_DWLL_HRS, DRY_MIN_DWLL_HRS),                                                       --:RF_CNTR
+                    DECODE(:RF_CNTR,'Y',RF_AVG_DWLL_HRS,DRY_AVG_DWLL_HRS) )))                                                     --:RF_CNTR
+                    FROM MDM_YARD WHERE YD_CD = NODE_NEW1                                                                 
+                 )                                                                                                        
+                WHEN  NODE_NEW_KIND='L' AND :R_TERM = 'D' AND F_NO2 = 0   THEN                                                  --:R_TERM
+                (SELECT TZTM_HRS FROM MDM_ZONE WHERE ZN_CD = NODE_NEW2 )                                                 
+                                                                                                                         
+                WHEN  NODE_NEW_KIND='L' AND :D_TERM = 'D' AND F_NO2 = 12  THEN                                                  --:D_TERM
+                (SELECT TZTM_HRS FROM MDM_ZONE WHERE ZN_CD = NODE_NEW2 )                                                 
+                                                                                                                          
+                WHEN  NODE_NEW_KIND='L' AND :R_TERM NOT IN ( 'D','S' ) AND F_NO2 = 0   THEN 24                                  --:R_TERM
+                WHEN  NODE_NEW_KIND='L' AND :D_TERM NOT IN ( 'D','S' ) AND F_NO2 = 12  THEN 24                                  --:D_TERM
+                                                                                                                         
+                ELSE                                                                                                     
+                 (SELECT TZTM_HRS                                                                                        
+                    FROM PRD_INLND_EACH_LNK                                                                              
+                   WHERE lnk_org_nod_cd = NODE_NEW1                                                                      
+                    AND lnk_dest_nod_cd = DECODE(LENGTH(NODE_NEW2),7,NODE_NEW2,SUBSTR(NODE_NEW2,3,7))                    
+                    AND TRSP_MOD_CD = DECODE(LENGTH(NODE_NEW2),7,'TD',SUBSTR(NODE_NEW2,10,2))                     
+                    )                                                                                                    
+                                                                                                                         
+            END                                                                                                          
+            ) TZTM_DW_HRS,                                                                                               
+           '' SLANE,                                                                                                     
+            (                                                                                                            
+            CASE                                                                                                         
+                WHEN NODE_NEW_KIND='N' THEN                                                                              
+                (                                                                                                        
+                    SELECT TO_CHAR(N1ST_VNDR_SEQ)                                                                        
+                    FROM MDM_YARD                                                                                        
+                    WHERE YD_CD = NODE_NEW1                                                                              
+                )                                                                                                        
+                                                                                                                         
+                WHEN NODE_NEW_KIND='L' AND LENGTH(NODE_NEW2) > 7 THEN SUBSTR(NODE_NEW2,12,6)                             
+                                                                                                                         
+            END                                                                                                          
+            ) N1ST_VNDR_SEQ,                                                                                             
+            (                                                                                                            
+            CASE                                                                                                         
+                WHEN NODE_NEW_KIND='N' THEN                                                                              
+                (                                                                                                        
+                    SELECT N2ND_VNDR_SEQ                                                                                 
+                    FROM MDM_YARD                                                                                        
+                    WHERE YD_CD = NODE_NEW1                                                                              
+                )                                                                                                        
+             END                                                                                                         
+             ) N2ND_VNDR_SEQ,                                                                                            
+            (                                                                                                            
+            CASE                                                                                                         
+                WHEN NODE_NEW_KIND='N' THEN                                                                              
+                (                                                                                                        
+                    SELECT N3RD_VNDR_SEQ                                                                                 
+                    FROM MDM_YARD                                                                                        
+                    WHERE YD_CD = NODE_NEW1                                                                              
+                )                                                                                                        
+             END                                                                                                         
+             ) N3RD_VNDR_SEQ,                                                                                            
+            '' DIR_CD,                                                                                                   
+            R_ORG2, R_DEST2, R_seq2,                                                                                     
+            NVL((SELECT MIN(ARR_ST_DT) FROM PRD_PROD_CTL_ROUT_DTL WHERE PCTL_NO = :PCTL_NO AND ORG_NOD_CD = :INLND_ROUT_ORG                         --:PCTL_NO ,:INLND_ROUT_ORG
+            		AND NOD_LNK_DIV_CD ='N'),SYSDATE) S_DATE,                                                              
+            NVL(:SKD_TYPE ,'D') S_TYPE                                                                                            --:SKD_TYPE
+            FROM                                                                                                         
+            (                                                                                                            
+                SELECT                                                                                                   
+                GP1,  F_N0 AS F_NO2, L_N0, O1,                                                                           
+                DECODE(LENGTH(NODE1),7,NODE1,SUBSTR(NODE1,3,7)) NODE_NEW1,                                               
+                (CASE L_N0 WHEN 1 THEN NODE1 WHEN 2 THEN LEAD(NODE1, 1, NULL) OVER (PARTITION BY GP1 ORDER BY GP1,F_N0,L_N0,O1) END ) NODE_NEW2,        
+                (CASE L_N0 WHEN 1 THEN 'N' WHEN 2 THEN 'L' END) NODE_NEW_KIND,                                           
+                :IO_BND_CD as  OI_BND_CD,                                                                                          --:IO_BND_CD
+                R_ORG2, R_DEST2, R_seq2                                                                                  
+                FROM                                                                                                     
+                (                                                                                                        
+                    SELECT                                                                                               
+                    F_N0,                                                                                                
+                    GP1,                                                                                                 
+                    NODE1, ROWNUM O1,                                                                                    
+                    R_ORG2,                                                                                              
+                    R_DEST2,                                                                                             
+                    R_seq2                                                                                               
+                    FROM                                                                                                 
+                    (                                                                                                    
+                        SELECT F_N0,                                                                                     
+                        GP1,                                                                                             
+                        (                                                                                                
+                        CASE F_N0                                                                                        
+                            WHEN 0 THEN MTPU_CY    WHEN 1 THEN R_ORG                                                     
+                            WHEN 2 THEN R_NODE01   WHEN 3 THEN R_NODE02   WHEN 4 THEN R_NODE03   WHEN 5 THEN R_NODE04    
+                            WHEN 6 THEN R_NODE05   WHEN 7 THEN R_NODE06   WHEN 8 THEN R_NODE07   WHEN 9 THEN R_NODE08    
+                            WHEN 10 THEN R_NODE09 WHEN 11 THEN R_NODE10  WHEN 12 THEN R_DEST WHEN 13 THEN MTRTN_CY       
+                            ELSE 'N/A'                                                                                   
+                        END                                                                                              
+                        ) NODE1,                                                                                         
+                        R_ORG2,R_DEST2,R_seq2                                                                            
+                        FROM                                                                                             
+                        (                                                                                                
+                            SELECT                                                                                       
+                            MTPU_CY,                                                                                     
+                            ROUT_ORG_NOD_CD R_ORG,                                                                       
+                            R_NODE01,                                                                                    
+                            R_NODE02,                                                                                    
+                            R_NODE03,                                                                                    
+                            R_NODE04,                                                                                    
+                            R_NODE05,                                                                                    
+                            R_NODE06,                                                                                    
+                            R_NODE07,                                                                                    
+                            R_NODE08,                                                                                    
+                            R_NODE09,                                                                                    
+                            R_NODE10,                                                                                    
+                            DEL AS R_DEST,                                                                               
+                            MTRTN_CY,                                                                                    
+                            ROUT_ORG_NOD_CD R_ORG2,                                                                      
+                            ROUT_DEST_NOD_CD R_DEST2,                                                                    
+                           ROUT_SEQ R_seq2,                                                                              
+                            ROWNUM GP1                                                                                   
+                            from                                                                                         
+                            (                                                                                            
+                                SELECT                                                                                   
+                                ROUT_ORG_NOD_CD,                                                                         
+                                ROUT_DEST_NOD_CD,                                                                        
+                                ROUT_SEQ,                                                                                
+                                ROUT_ORG_NOD_CD AS POD0,                                                                 
+                                DECODE(:IO_BND_CD,'I','',DECODE(:R_TERM,'S',DECODE(ROUT_SEQ,0,'',ROUT_ORG_NOD_CD),                       --:IO_BND_CD,:R_TERM
+                                      DECODE(:MTPU_CY,'',MAX(DECODE(:R_TERM,'D',Z.REP_YD_CD , L.MTY_PKUP_YD_CD)),:MTPU_CY))) MTPU_CY,         --:MTPU_CY,:R_TERM,:MTPU_CY
+                                MAX(DECODE(ROUT_DTL_SEQ, 1 , DECODE(CNT, 1 , '', LNK_DEST_NOD_CD))) R_NODE01,            
+                                MAX(DECODE(ROUT_DTL_SEQ, 2 , DECODE(CNT, 2 , '', LNK_DEST_NOD_CD))) R_NODE02,            
+                                MAX(DECODE(ROUT_DTL_SEQ, 3 , DECODE(CNT, 3 , '', LNK_DEST_NOD_CD))) R_NODE03,            
+                                MAX(DECODE(ROUT_DTL_SEQ, 4 , DECODE(CNT, 4 , '', LNK_DEST_NOD_CD))) R_NODE04,            
+                                MAX(DECODE(ROUT_DTL_SEQ, 5 , DECODE(CNT, 5 , '', LNK_DEST_NOD_CD))) R_NODE05,            
+                                MAX(DECODE(ROUT_DTL_SEQ, 6 , DECODE(CNT, 6 , '', LNK_DEST_NOD_CD))) R_NODE06,            
+                                MAX(DECODE(ROUT_DTL_SEQ, 7 , DECODE(CNT, 7 , '', LNK_DEST_NOD_CD))) R_NODE07,            
+                                MAX(DECODE(ROUT_DTL_SEQ, 8 , DECODE(CNT, 8 , '', LNK_DEST_NOD_CD))) R_NODE08,            
+                                MAX(DECODE(ROUT_DTL_SEQ, 9 , DECODE(CNT, 9 , '', LNK_DEST_NOD_CD))) R_NODE09,            
+                                MAX(DECODE(ROUT_DTL_SEQ, 10, DECODE(CNT, 10, '', LNK_DEST_NOD_CD))) R_NODE10,            
+                                MAX(LNK_DEST_NOD_CD) DEL,                                                                
+                                DECODE(:IO_BND_CD,'O','',DECODE(:D_TERM,'S',DECODE(ROUT_SEQ,0,'',ROUT_DEST_NOD_CD),                      --:IO_BND_CD,:D_TERM
+                                     DECODE(:MTRTN_CY,'',MAX(DECODE(:D_TERM,'D',Z.REP_YD_CD, L.EQ_RTN_YD_CD)),:MTRTN_CY))) MTRTN_CY            --:MTRTN_CY,:D_TERM,:MTRTN_CY
+                                FROM                                                                                     
+                                (                                                                                        
+                                    SELECT M.ROUT_ORG_NOD_CD,                                                            
+                                    M.ROUT_DEST_NOD_CD,                                                                  
+                                    M.ROUT_SEQ,                                                                          
+                                    M.PRIO_SEQ,                                                                          
+                                    RPAD(D.ROUT_DTL_SEQ,2,' ')||D.LNK_DEST_NOD_CD||D.TRSP_MOD_CD||LPAD(NVL(D.VNDR_SEQ,0),6,0)||         
+                                    NVL(D.INLND_ROUT_CMB_FLG,'N')||LPAD(NVL(M.INLND_ROUT_INV_BIL_PATT_CD,' '),3,' ') ||  
+                                    RPAD(NVL(D.RAIL_CRR_TP_CD,' '),3,' ') || RPAD(NVL(D.TRSP_AGMT_OFC_CTY_CD,' '),3,' ') || LPAD(NVL(D.TRSP_AGMT_SEQ,0),6,0) || 
+                                    RPAD(NVL(D.AGMT_REF_NO,' '),15,' ') || RPAD(NVL(M.INLND_ROUT_INCL_STTL_FLG,' '),1,' ')     
+                                     LNK_DEST_NOD_CD,                                                                     
+                                    D.ROUT_DTL_SEQ,                                                                      
+                                    COUNT(*) OVER (PARTITION BY M.ROUT_ORG_NOD_CD, M.ROUT_DEST_NOD_CD, M.ROUT_SEQ        
+                                    ORDER BY M.ROUT_ORG_NOD_CD, M.ROUT_DEST_NOD_CD, M.ROUT_SEQ) AS CNT                   
+                                    FROM PRD_INLND_ROUT_MST M, PRD_INLND_ROUT_DTL D                      
+                                    WHERE (M.ROUT_ORG_NOD_CD,M.ROUT_DEST_NOD_CD ,M.ROUT_SEQ ) =                          
+                                       (                                                                                 
+                                           SELECT ROUT_ORG_NOD_CD, ROUT_DEST_NOD_CD, ROUT_SEQ                            
+                                           FROM                                                                          
+                                            (                                                                            
+                                             SELECT ROUT_ORG_NOD_CD,ROUT_DEST_NOD_CD,ROUT_SEQ,PRIO_SEQ ,                 
+                                               ROUT                                                                       
+                                             FROM (                                                                      
+                                                  select M1.ROUT_ORG_NOD_CD, M1.ROUT_DEST_NOD_CD, M1.ROUT_SEQ, M1.PRIO_SEQ,    
+                                                       (select replace(max(D1.ROUT_ORG_NOD_CD||                          
+                                                               sys_connect_by_path(D1.TRSP_MOD_CD||'@*'||LPAD(D1.VNDR_SEQ,6,0)||'@*'||NVL(INLND_ROUT_CMB_FLG,'N')||'@*'     
+                                                               ||D1.LNK_DEST_NOD_CD, '-')),'@*','-')                     
+                                                        from prd_inlnd_rout_dtl D1                                       
+                                                        where D1.ROUT_ORG_NOD_CD =M1.ROUT_ORG_NOD_CD                     
+                                                        	and D1.ROUT_DEST_NOD_CD = M1.ROUT_DEST_NOD_CD                  
+                                                        	and D1.ROUT_SEQ =M1.ROUT_SEQ                                   
+                                                        start with D1.ROUT_ORG_NOD_CD =M1.ROUT_ORG_NOD_CD                
+                                                        	and D1.ROUT_DEST_NOD_CD = M1.ROUT_DEST_NOD_CD                  
+                                                        	and D1.ROUT_SEQ =M1.ROUT_SEQ and D1.ROUT_DTL_SEQ =1             
+                                                        connect by prior D1.ROUT_DTL_SEQ +1 = D1.ROUT_DTL_SEQ            
+                                                            and D1.ROUT_ORG_NOD_CD = M1.ROUT_ORG_NOD_CD                  
+                                                            and D1.ROUT_DEST_NOD_CD = M1.ROUT_DEST_NOD_CD                
+                                                            and D1.ROUT_SEQ =M1.ROUT_SEQ                                 
+                                                        ) ROUT                                                           
+                                                 from PRD_INLND_ROUT_MST M1                                              
+                                                 WHERE M1.ROUT_ORG_NOD_CD =:INLND_ROUT_ORG                                             --:INLND_ROUT_ORG
+                                                 	AND M1.ROUT_DEST_NOD_CD =:INLND_ROUT_DEST                                            --:INLND_ROUT_DEST
+                                                    AND NVL(M1.PCTL_IO_BND_CD,:IO_BND_CD) IN ( :IO_BND_CD ,'B')                                                      --:IO_BND_CD,:IO_BND_CD -- 4.29 irg
+                                                    AND NVL(M1.DELT_FLG,'N') <> 'Y'   
+                                                    AND NVL(M1.INLND_ROUT_INCL_STTL_FLG,'N') = NVL(:INCL_STTL_SO_FLG,NVL(M1.INLND_ROUT_INCL_STTL_FLG,'N'))                                                    
+                                                 	AND (SUBSTR(M1.ROUT_ORG_NOD_CD,1,5), SUBSTR(M1.ROUT_DEST_NOD_CD,1,5)) =
+                                                 	     (SELECT SUBSTR(NVL(:ROUT_ORG_NOD_CD2,ROUT_ORG_NOD_CD),1,5), SUBSTR(NVL(:ROUT_DEST_NOD_CD2,ROUT_DEST_NOD_CD),1,5) 
+                                                 	      FROM PRD_PROD_CTL_ROUT_DTL
+                                                 	      WHERE PCTL_NO = :OLD_PCTL_NO
+                                                 	      AND PCTL_IO_BND_CD = :IO_BND_CD
+                                                 	      AND ROWNUM =1)
+                                                 	AND EXISTS
+                                                    (SELECT 'X' FROM PRD_INLND_ROUT_DTL H
+                                                    WHERE H.ROUT_ORG_NOD_CD = M1.ROUT_ORG_NOD_CD
+                                                    AND H.ROUT_DEST_NOD_CD = M1.ROUT_DEST_NOD_CD
+                                                    AND H.ROUT_SEQ = M1.ROUT_SEQ
+                                                    AND ( H.LNK_DEST_NOD_CD LIKE NVL(DECODE(:IO_BND_CD,'I',:ITHUB,NULL),H.LNK_DEST_NOD_CD)||'%' 
+                                                          AND EXISTS
+                                                          (SELECT 'X' FROM PRD_NODE N
+                                                          WHERE N.NOD_CD = DECODE(:ITHUB,NULL,N.NOD_CD,H.LNK_DEST_NOD_CD)
+                                                          AND N.NOD_TP_CD <> DECODE(:ITHUB,NULL,'X','Z') )
+                                                    OR H.LNK_ORG_NOD_CD LIKE NVL(DECODE(:IO_BND_CD,'I',:ITHUB,NULL),H.LNK_ORG_NOD_CD)||'%'
+                                                         AND EXISTS
+                                                          (SELECT 'X' FROM PRD_NODE N
+                                                          WHERE N.NOD_CD = DECODE(:ITHUB,NULL,N.NOD_CD,H.LNK_ORG_NOD_CD)   
+                                                          AND N.NOD_TP_CD <> DECODE(:ITHUB,NULL,'X','Z')) )                                                      
+                                                    )    
+                                                 )
+                                              WHERE ROUT LIKE REPLACE(REGEXP_REPLACE(:SUB_ROUT,'-......-','-______-'),'XX','%')       --:SUB_ROUT
+                                              ORDER BY  PRIO_SEQ    
+                                             )                                                                             
+                                           WHERE ROWNUM =1                                                                 
+                                       )                                                                                 
+                                    AND M.ROUT_ORG_NOD_CD =D.ROUT_ORG_NOD_CD                                             
+                                    AND M.ROUT_DEST_NOD_CD =D.ROUT_DEST_NOD_CD                                           
+                                    AND M.ROUT_SEQ =D.ROUT_SEQ                                                           
+                                    AND EXISTS                                                                           
+                                    (SELECT 'X' FROM PRD_NODE N                                                          
+                                    WHERE N.NOD_CD = DECODE(:IO_BND_CD ,'I',M.ROUT_DEST_NOD_CD,'O',M.ROUT_ORG_NOD_CD)              --:IO_BND_CD
+                                        AND DECODE(N.NOD_TP_CD,'Z','D',N.NOD_TP_CD) IN                                   
+                                             (DECODE(DECODE(:IO_BND_CD,'O',:R_TERM,:D_TERM),'D','D','Y','D',''),                                       --:IO_BND_CD,:R_TERM,:D_TERM
+                                              DECODE(DECODE(:IO_BND_CD,'O',:R_TERM,:D_TERM),'T','B','F','B','Y','B','S','B',''),               --:IO_BND_CD,:R_TERM,:D_TERM
+                                              DECODE(DECODE(:IO_BND_CD,'O',:R_TERM,:D_TERM),'T','M','F','M','Y','M','S','M',''),               --:IO_BND_CD,:R_TERM,:D_TERM
+                                              DECODE(DECODE(:IO_BND_CD,'O',:R_TERM,:D_TERM),'Y','Y','S','Y',''),                               --:IO_BND_CD,:R_TERM,:D_TERM
+                                              DECODE(DECODE(:IO_BND_CD,'O',:R_TERM,:D_TERM),'Y','R','S','R','') )  )                           --:IO_BND_CD,:R_TERM,:D_TERM
+                                    ORDER BY M.ROUT_SEQ, D.ROUT_DTL_SEQ                                                  
+                                ) M , MDM_ZONE Z, MDM_LOCATION L                                                         
+                                WHERE Z.ZN_CD(+) = DECODE(:IO_BND_CD,'O',M.ROUT_ORG_NOD_CD,M.ROUT_DEST_NOD_CD)            --:IO_BND_CD
+                                AND L.LOC_CD(+) = SUBSTR(DECODE(:IO_BND_CD,'O',M.ROUT_ORG_NOD_CD,M.ROUT_DEST_NOD_CD),1,5) --:IO_BND_CD
+                               GROUP BY M.ROUT_ORG_NOD_CD, M.ROUT_DEST_NOD_CD, M.ROUT_SEQ                       
+                               )                                                                                
+                                WHERE DECODE(:IO_BND_CD,'I','X',DECODE(NVL(:R_TERM,'S'),'S','S',MTPU_CY)) IS NOT NULL                              --:IO_BND_CD,:R_TERM
+                                  AND DECODE(:IO_BND_CD,'O','X',DECODE(NVL(:D_TERM,'S'),'S','S',MTRTN_CY)) IS NOT NULL                             --:IO_BND_CD, :D_TERM
+                        ),                                                                                               
+                        (                                                                                                
+                            SELECT CPY_NO F_N0 FROM COM_CPY_NO WHERE CPY_NO <=13                                 
+                        )                                                                                                
+                    )                                                                                                    
+                    WHERE NODE1 IS NOT NULL                                                                              
+                ),                                                                                                       
+                (                                                                                                        
+                    SELECT CPY_NO L_N0 FROM COM_CPY_NO WHERE CPY_NO IN (1,2)                                     
+                )                                                                                                        
+                ORDER BY 1,2,3                                                                                           
+            )                                                                                                            
+            WHERE (F_NO2 <> 13 OR L_N0 <> 2 )  AND NODE_NEW2 IS NOT NULL                                                
+            ORDER BY 1,2,3                                                                                               
+        ) ORDER BY GP1,O1, L_N0                                                                                          
+                                                                                                                         
+                                                                                                                         
+                                                                                                                         
+    )   --WITH TBL                                                                                                       
+    SELECT                                                                                                               
+    GP1,F_NO2,L_N0,O1,NODE_NEW1,NODE1_TP,NODE_NEW2,NODE2_TP,NODE_NEW_KIND,OI_BND_CD,trsp_mod_cd,TZTM_DW_HRS,             
+    TO_NUMBER(N1ST_VNDR_SEQ) N1ST_VNDR_SEQ,N2ND_VNDR_SEQ,N3RD_VNDR_SEQ,DIR_CD,                                           
+    R_ORG2,R_DEST2,R_seq2,S_DATE,S_TYPE,SLANE,CNT,ORD, INLND_ROUT_CMB_FLG,INLND_ROUT_INV_BIL_PATT_CD,                    
+    RAIL_CRR_TYPE, INLND_ROUT_INCL_STTL_FLG, TRSP_AGMT_OFC_CTY_CD, TRSP_AGMT_SEQ, AGMT_REF_NO,                                             
+    (                                                                                                                    
+    CASE                                                                                                                 
+        WHEN CNT = ORD THEN                                                                                              
+            PRD_GET_SKD_FNC(DECODE(S_TYPE,'V',:VVD ,TO_CHAR(S_DATE,'yyyymmdd hh24:mi:ss')),                                      --:VVD
+            S_TYPE,replace(sys_connect_by_path(SKD_STR,'-')||'-',','),                                                   
+            ORD,NVL(:CONST_COM ,NULL),NVL(:CONST_DCG,NULL),'Y','N')                                                                         --:CONST_COM ,:CONST_DCG
+    END                                                                                                                  
+    ) SKD_TIME                                                                                                           
+    FROM ROUT_TBL                                                                                                        
+    start with ORD = 1 connect by prior ORD = ORD - 1 and prior GP1 = GP1                                                
+)        ;
+		

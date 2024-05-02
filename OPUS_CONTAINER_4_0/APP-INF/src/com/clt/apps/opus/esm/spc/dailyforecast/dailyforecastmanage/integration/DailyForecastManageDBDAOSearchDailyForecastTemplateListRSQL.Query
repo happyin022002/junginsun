@@ -1,0 +1,409 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="DailyForecastManageDBDAOSearchDailyForecastTemplateListRSQL">
+			<desc><![CDATA[Daily Forecast Template을 조회한다.
+2015.07.22. SKY[CLT-000042051-10] Virtual add call - VT_ADD_CALL_FLG IS  NULL  로직 추가]]></desc>
+			<sql><![CDATA[
+WITH PARAMS AS 
+       (SELECT @[year] AS COST_YR 
+            , @[week] AS COST_WK 
+            , @[duration] AS DUR 
+            , @[trade] AS TRD_CD 
+            , @[subtrade] AS SUB_TRD_CD 
+            , @[lane] AS RLANE_CD 
+            , @[bound] AS DIR_CD
+            , (SELECT N4TH_PRNT_OFC_CD  FROM SPC_OFC_LVL
+              WHERE 1=1
+              AND OFC_CD = @[office]
+              ) RGN_OFC_CD
+            , @[office] AS FCAST_OFC_CD  
+            , @[OPERATOR] AS SALESREP 
+            , @[fcast] AS CUSTOMER 
+            , @[vvd] AS VVD 
+         FROM DUAL 
+       )  
+     , VVDLS AS 
+       (SELECT DISTINCT SLS_YRMON 
+            , COST_WK 
+            , TRD_CD 
+            , SUB_TRD_CD 
+            , RLANE_CD 
+            , DIR_CD 
+            , VSL_CD 
+            , SKD_VOY_NO 
+            , SKD_DIR_CD 
+            , IOC_CD 
+         FROM 
+              (SELECT MV.SLS_YRMON 
+                   , MV.COST_WK 
+                   , MV.TRD_CD 
+                   , MV.SUB_TRD_CD 
+                   , MV.RLANE_CD 
+                   , MV.DIR_CD 
+                   , MV.VSL_CD 
+                   , MV.SKD_VOY_NO 
+                   , MV.DIR_CD AS SKD_DIR_CD 
+                   , MV.IOC_CD 
+                FROM COA_MON_VVD MV /* VVD 값 들어올 경우 조건 추가 */ 
+                   , PARAMS P 
+               WHERE SUBSTR(MV.SLS_YRMON, 1, 4)||MV.COST_WK IN 
+                     (SELECT COST_YR||COST_WK 
+                       FROM 
+                            (SELECT P.COST_YR 
+                                 , P.COST_WK 
+                              FROM COA_WK_PRD P 
+                             WHERE P.COST_YR||P.COST_WK >= @[year]||@[week] 
+                          ORDER BY P.COST_YR||P.COST_WK 
+                            ) Z 
+                      WHERE ROWNUM <= P.DUR 
+                     ) 
+                     AND MV.TRD_CD = P.TRD_CD 
+                     AND MV.SUB_TRD_CD LIKE P.SUB_TRD_CD||'%' 
+                     AND MV.RLANE_CD LIKE P.RLANE_CD||'%' 
+                     AND MV.DIR_CD = P.DIR_CD 
+                     AND 
+                     ( 
+                         MV.DELT_FLG IS NULL 
+                         OR MV.DELT_FLG = 'N' 
+                     ) 
+                     AND MV.RLANE_CD <> 'RBCCO' 
+					 #if (${vvd} != '') 
+                     AND MV.VSL_CD = SUBSTR(@[vvd], 1, 4) 
+                     AND MV.SKD_VOY_NO = SUBSTR(@[vvd] , 5, 4) 
+                     AND MV.DIR_CD = SUBSTR(@[vvd], 9, 1) 
+                     #end 
+              ) 
+       ) 
+     , VVD_POL AS 
+       (SELECT SLS_YRMON 
+            , COST_WK 
+            , TRD_CD 
+            , SUB_TRD_CD 
+            , RLANE_CD 
+            , M.VSL_CD 
+            , M.SKD_VOY_NO 
+            , M.SKD_DIR_CD 
+            , NVL(V.YD_CD, M.POL_CD) AS POL_CD 
+            , MAX 
+              ( 
+                     (SELECT DECODE(MAX(S.SKD_CNG_STS_CD), 'S', 0, NVL(MAX(S.CLPT_SEQ), -1)) 
+                       FROM VSK_VSL_PORT_SKD S 
+                      WHERE S.VSL_CD = M.VSL_CD 
+                            AND S.SKD_VOY_NO = M.SKD_VOY_NO 
+                            AND S.SKD_DIR_CD = M.SKD_DIR_CD 
+                            AND S.VPS_PORT_CD = M.POL_CD
+                            AND S.VT_ADD_CALL_FLG IS  NULL
+                            AND 
+                            ( 
+                                S.SKD_CNG_STS_CD IS NULL 
+                                OR S.SKD_CNG_STS_CD <> 'S' 
+                            ) 
+                     ) 
+                 ) AS POL_SEQ 
+               , MAX 
+                 ( 
+                        (SELECT MLOC.CONTI_CD 
+                          FROM MDM_LOCATION MLOC 
+                         WHERE M.POL_CD = MLOC.LOC_CD 
+                        ) 
+                    ) AS POL_CONTI 
+                  , MIN(CD_DP_SEQ) AS CD_DP_SEQ 
+                  , SUB_OFC_CD 
+                  , RGN_OFC_CD 
+                  , IOC_TS_CD 
+               FROM 
+                    (SELECT 1 AS FLG 
+                         , V.SLS_YRMON 
+                         , V.COST_WK 
+                         , V.TRD_CD 
+                         , V.SUB_TRD_CD 
+                         , V.RLANE_CD 
+                         , V.VSL_CD 
+                         , V.SKD_VOY_NO 
+                         , V.SKD_DIR_CD 
+                         , M.POL_CD 
+                         , M.CD_DP_SEQ 
+                         , P.FCAST_OFC_CD   AS SUB_OFC_CD 
+                         , M.SLS_RGN_OFC_CD AS RGN_OFC_CD 
+                         , M.IOC_TS_CD 
+                      FROM VVDLS V 
+                         , SPC_FCAST_OFC_POL_MAPG M 
+                         , PARAMS P 
+                     WHERE 1=1 
+                           AND M.TRD_CD = V.TRD_CD 
+                           AND M.SUB_TRD_CD = V.SUB_TRD_CD 
+                           AND M.RLANE_CD = V.RLANE_CD 
+                           AND M.DIR_CD = V.DIR_CD 
+                           AND M.SLS_OFC_CD = P.RGN_OFC_CD 
+                           AND M.BSE_YRWK = 
+                           (SELECT /*+ INDEX_DESC(MI XPKSPC_FCAST_OFC_POL_MAPG) */ 
+                                  MI.BSE_YRWK 
+                             FROM SPC_FCAST_OFC_POL_MAPG MI 
+                            WHERE MI.TRD_CD = M.TRD_CD 
+                                  AND MI.SUB_TRD_CD = M.SUB_TRD_CD 
+                                  AND MI.RLANE_CD = M.RLANE_CD 
+                                  AND MI.DIR_CD = M.DIR_CD 
+                                  AND MI.SLS_OFC_CD = M.SLS_OFC_CD 
+                                  AND MI.BSE_YRWK <= SUBSTR(V.SLS_YRMON, 1, 4)||V.COST_WK 
+                                  AND ROWNUM = 1 
+                           ) 
+                    ) M 
+                  , VSK_VSL_PORT_SKD V 
+              WHERE M.VSL_CD = V.VSL_CD 
+                    AND M.SKD_VOY_NO = V.SKD_VOY_NO 
+                    AND M.SKD_DIR_CD = V.SKD_DIR_CD 
+                    AND M.POL_CD = V.VPS_PORT_CD 
+                    AND V.VT_ADD_CALL_FLG IS  NULL
+              GROUP BY SLS_YRMON 
+                  , COST_WK 
+                  , TRD_CD 
+                  , SUB_TRD_CD 
+                  , RLANE_CD 
+                  , M.VSL_CD 
+                  , M.SKD_VOY_NO 
+                  , M.SKD_DIR_CD 
+                  , NVL(V.YD_CD, M.POL_CD) 
+                  , SUB_OFC_CD 
+                  , RGN_OFC_CD 
+                  , IOC_TS_CD 
+             ) 
+           , TEMP_VVD AS 
+             (SELECT SLS_YRMON 
+                  , COST_WK 
+                  , TRD_CD 
+                  , SUB_TRD_CD 
+                  , RLANE_CD 
+                  , VSL_CD 
+                  , SKD_VOY_NO 
+                  , SKD_DIR_CD 
+                  , VSL_CD || SKD_VOY_NO || SKD_DIR_CD AS VVD 
+                  , POL_CD AS POL_YD_CD 
+                  , POD_CD AS POD_YD_CD --  , POL_SEQ 
+                    --  , CD_DP_SEQ 
+                    --  , MIN(POD_SEQ) AS POD_SEQ 
+                  , FCAST_OFC_CD --  , SUB_OFC_CD 
+                  , IOC_TS_CD 
+				  #if (${operator} == 'Y') 
+                  , SREP_CD AS SREP_USR_ID 
+                  #end  
+                  #if (${fcast} == 'Y') 
+                  , FCAST_CUST_TP_CD 
+                  , CUST_CNT_CD 
+                  , CUST_SEQ 
+                  --20160203.ADD
+                  , CTRT_CUST_CNT_CD
+                  , CTRT_CUST_SEQ
+                  , CTRT_CUST_NM
+                  #end 
+               FROM 
+                    (SELECT SL.SLS_YRMON 
+                         , SL.COST_WK 
+                         , RL.TRD_CD 
+                         , RL.SUB_TRD_CD 
+                         , RL.RLANE_CD 
+                         , SL.VSL_CD 
+                         , SL.SKD_VOY_NO 
+                         , SL.SKD_DIR_CD 
+                         , SL.POL_CD 
+                         , SL.POL_SEQ 
+                         , SL.CD_DP_SEQ 
+                         , SL.POL_CONTI 
+                         , SD.YD_CD AS POD_CD 
+                         , TO_NUMBER(DECODE(SD.SKD_CNG_STS_CD, 'S', NULL, SD.CLPT_SEQ)) AS POD_SEQ 
+                         , DECODE(SL.SUB_OFC_CD,SL.RGN_OFC_CD,SL.RGN_OFC_CD,SL.SUB_OFC_CD) AS FCAST_OFC_CD 
+                        -- , SL.SUB_OFC_CD 
+                         , SL.IOC_TS_CD 
+                         , MLOC.CONTI_CD AS POD_CONTI 
+                         , DECODE(SL.POL_SEQ, NULL, 'Y', 'N') AS POL_SKIP 
+                         , RL.IOC_CD  
+                         #if (${operator} == 'Y') 
+                         , SRCM.SREP_CD 
+                         #end  
+                         #if (${fcast} == 'Y') 
+                         , SRCM.FCAST_CUST_TP_CD 
+                         , SRCM.CUST_CNT_CD 
+                         , SRCM.CUST_SEQ 
+                         --20160203.ADD
+                         , SRCM.CTRT_CUST_CNT_CD
+                         , SRCM.CTRT_CUST_SEQ
+                         ,(SELECT CUST_LGL_ENG_NM FROM MDM_CUSTOMER WHERE CUST_CNT_CD = SRCM.CTRT_CUST_CNT_CD AND CUST_SEQ = SRCM.CTRT_CUST_SEQ) CTRT_CUST_NM
+                         #end  
+                      FROM VSK_VSL_PORT_SKD SD 
+                         , VVD_POL SL 
+                         , MDM_DTL_REV_LANE RL 
+                         , MDM_LOCATION MLOC  
+                         #if (${operator} == 'Y' || ${fcast} == 'Y') 
+                         , SPC_SLS_REP_CUST_MAPG SRCM /* sales Rep customer 체크 된 경우 사용 */ 
+                         #end  
+                     WHERE SUBSTR(SL.POL_CD, 1, 5) NOT IN ('EGSCA', 'PAPCA') 
+                           AND SD.VPS_PORT_CD NOT IN ('EGSCA', 'PAPCA') 
+                           AND SL.POL_SEQ >= 0 
+                           AND SD.VSL_CD = SL.VSL_CD 
+                           AND SD.SKD_VOY_NO = SL.SKD_VOY_NO 
+                           AND SD.SKD_DIR_CD = SL.SKD_DIR_CD 
+                           AND 
+                           ( 
+                               SD.SKD_CNG_STS_CD IS NULL 
+                               OR SD.SKD_CNG_STS_CD <> 'S' 
+                           ) 
+                           AND SD.CLPT_SEQ > SL.POL_SEQ
+                           AND SD.VT_ADD_CALL_FLG IS  NULL
+                           AND RL.TRD_CD = SL.TRD_CD 
+                           AND RL.SUB_TRD_CD = SL.SUB_TRD_CD 
+                           AND RL.RLANE_CD = SL.RLANE_CD 
+                           AND RL.VSL_SLAN_DIR_CD = SL.SKD_DIR_CD 
+                           AND RL.FM_CONTI_CD = SL.POL_CONTI 
+                           AND SD.VPS_PORT_CD = MLOC.LOC_CD 
+                           AND RL.TO_CONTI_CD = MLOC.CONTI_CD 
+                           AND RL.DELT_FLG = 'N' 
+                           #if (${operator} == 'Y' || ${fcast} == 'Y') 
+                           AND SL.TRD_CD = SRCM.TRD_CD(+) 
+                           AND SL.SUB_TRD_CD = SRCM.SUB_TRD_CD(+) 
+                           AND SL.RLANE_CD = SRCM.RLANE_CD(+) 
+                           AND SL.SUB_OFC_CD = SRCM.SLS_OFC_CD(+) 
+                           AND SL.SKD_DIR_CD = SRCM.DIR_CD(+) 
+                           #end 
+                    ) 
+              GROUP BY SLS_YRMON 
+                  , COST_WK 
+                  , TRD_CD 
+                  , SUB_TRD_CD 
+                  , RLANE_CD 
+                  , VSL_CD 
+                  , SKD_VOY_NO 
+                  , SKD_DIR_CD 
+                  , POL_CD 
+                  , POL_SEQ 
+                  , CD_DP_SEQ 
+                  , POD_CD 
+                  , FCAST_OFC_CD 
+             --   , SUB_OFC_CD, 
+                  , IOC_TS_CD  
+                  #if (${operator} == 'Y') 
+                  , SREP_CD 
+                  #end 
+                  #if (${fcast} == 'Y') 
+                  , FCAST_CUST_TP_CD 
+                  , CUST_CNT_CD 
+                  , CUST_SEQ 
+                  --20160203.ADD
+                  , CTRT_CUST_CNT_CD
+                  , CTRT_CUST_SEQ
+                  , CTRT_CUST_NM
+                  #end 
+           ORDER BY SLS_YRMON 
+                  ,COST_WK 
+                  ,TRD_CD 
+                  ,SUB_TRD_CD 
+                  ,RLANE_CD 
+                  ,VSL_CD 
+                  ,SKD_VOY_NO 
+                  ,SKD_DIR_CD 
+                  ,POL_CD 
+                  ,POD_CD 
+                  ,FCAST_OFC_CD  
+                  #if (${operator} == 'Y') 
+                  ,SREP_CD 
+                  #end 
+                  #if (${fcast} == 'Y') 
+                  ,FCAST_CUST_TP_CD 
+                  ,CUST_CNT_CD 
+                  ,CUST_SEQ 
+                  --20160203.ADD
+                  , CTRT_CUST_CNT_CD
+                  , CTRT_CUST_SEQ
+                  , CTRT_CUST_NM
+                  #end 
+             ) 
+      #if(${operator} == 'Y' && ${fcast} == 'Y')  
+      SELECT SUBSTR(TV.SLS_YRMON, 1, 4) AS SLS_YRMON
+           , TV.COST_WK 
+           , TV.TRD_CD 
+           , TV.SUB_TRD_CD 
+           , TV.RLANE_CD 
+           , TV.VSL_CD 
+           , TV.SKD_VOY_NO 
+           , TV.SKD_DIR_CD 
+           , TV.VVD 
+           , TV.POL_YD_CD 
+           , TV.POD_YD_CD 
+           , TV.FCAST_OFC_CD 
+           , TV.IOC_TS_CD 
+           , TV.SREP_USR_ID 
+           , TV.FCAST_CUST_TP_CD 
+           , TV.CUST_CNT_CD 
+           , TV.CUST_SEQ 
+           --20160203.ADD
+           , TV.CTRT_CUST_CNT_CD
+           , TV.CTRT_CUST_SEQ
+           , TV.CTRT_CUST_NM
+           , FC.FCAST_TTL_QTY 
+           , FC.FCAST_40FT_HC_QTY 
+           , FC.FCAST_45FT_HC_QTY 
+           , FC.FCAST_RF_QTY 
+           , FC.FCAST_TTL_WGT 
+        FROM TEMP_VVD TV 
+           , SPC_DLY_FCAST_CUST FC 
+       WHERE 1=1               
+             AND TV.RLANE_CD = FC.RLANE_CD(+) 
+             AND TV.VSL_CD = FC.VSL_CD(+) 
+             AND TV.SKD_VOY_NO = FC.SKD_VOY_NO(+) 
+             AND TV.SKD_DIR_CD = FC.SKD_DIR_CD(+) 
+             AND TV.FCAST_OFC_CD = FC.FCAST_OFC_CD(+) 
+             AND TV.IOC_TS_CD = FC.IOC_TS_CD(+) 
+             AND TV.SREP_USR_ID = FC.SREP_USR_ID(+) 
+             AND TV.FCAST_CUST_TP_CD = FC.FCAST_CUST_TP_CD(+) 
+             AND TV.CUST_CNT_CD = FC.CUST_CNT_CD(+) 
+             AND TV.CUST_SEQ = FC.CUST_SEQ(+) 
+             AND TV.POL_YD_CD = FC.POL_YD_CD(+) 
+             AND TV.POD_YD_CD = FC.POD_YD_CD(+) 
+      #end 
+      #if (${operator} != 'Y' || ${fcast} != 'Y') 
+      SELECT SUBSTR(TV.SLS_YRMON, 1, 4) AS SLS_YRMON
+           , TV.COST_WK 
+           , TV.TRD_CD 
+           , TV.SUB_TRD_CD 
+           , TV.RLANE_CD 
+           , TV.VSL_CD 
+           , TV.SKD_VOY_NO 
+           , TV.SKD_DIR_CD 
+           , TV.VVD 
+           , TV.POL_YD_CD 
+           , TV.POD_YD_CD 
+           , TV.FCAST_OFC_CD 
+           , TV.IOC_TS_CD 
+           #if (${operator} == 'Y') 
+           , TV.SREP_USR_ID 
+           #end 
+           #if (${fcast} == 'Y') 
+           , TV.FCAST_CUST_TP_CD 
+           , TV.CUST_CNT_CD 
+           , TV.CUST_SEQ 
+           --20160203.ADD
+           , TV.CTRT_CUST_CNT_CD
+           , TV.CTRT_CUST_SEQ
+           , TV.CTRT_CUST_NM
+           #end 
+           , NULL AS FCAST_TTL_QTY 
+           , NULL AS FCAST_40FT_HC_QTY 
+           , NULL AS FCAST_45FT_HC_QTY 
+           , NULL AS FCAST_TTL_WGT 
+        FROM TEMP_VVD TV 
+     #end			]]></sql>
+			<params>
+				<param name="year" type="12" value="" out="N"/>
+				<param name="week" type="12" value="" out="N"/>
+				<param name="duration" type="12" value="" out="N"/>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="subtrade" type="12" value="" out="N"/>
+				<param name="lane" type="12" value="" out="N"/>
+				<param name="bound" type="12" value="" out="N"/>
+				<param name="office" type="12" value="" out="N"/>
+				<param name="OPERATOR" type="12" value="" out="N"/>
+				<param name="fcast" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

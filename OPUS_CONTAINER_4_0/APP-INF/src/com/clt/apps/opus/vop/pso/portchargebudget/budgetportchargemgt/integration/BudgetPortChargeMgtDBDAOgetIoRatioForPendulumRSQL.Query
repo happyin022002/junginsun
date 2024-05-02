@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="BudgetPortChargeMgtDBDAOgetIoRatioForPendulumRSQL">
+			<desc><![CDATA[Pendulum io ration 조회]]></desc>
+			<sql><![CDATA[
+-- IoRatio VO
+WITH V_PARAM AS ( --NAET0071E
+    SELECT @[vsl_cd]       AS VSL_CD
+         , @[skd_voy_no]    AS SKD_VOY_NO
+         , @[skd_dir_cd]    AS SKD_DIR_CD
+         , @[yd_cd]         AS YD_CD
+         , REPLACE (@[exe_yrmon], '-', '')         AS EXE_YRMON
+         , NVL(@[clpt_ind_seq],(SELECT MIN(P.CLPT_IND_SEQ)
+                      FROM VSK_VSL_PORT_SKD P
+                     WHERE 1=1
+                       AND P.VSL_CD         = @[vsl_cd]
+                       AND P.SKD_VOY_NO     = @[skd_voy_no]
+                       AND P.SKD_DIR_CD     = @[skd_dir_cd]
+                       AND P.YD_CD          = @[yd_cd]
+                       AND NVL(P.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 Add*/   
+                       AND NVL(P.SKD_CNG_STS_CD, ' ') != 'S' )) AS CLPT_IND_SEQ
+      FROM DUAL
+)
+SELECT A.VSL_CD
+     , A.SKD_VOY_NO
+     , A.SKD_DIR_CD
+     , A.TURN
+     , A.SLAN_CD
+     , A.VPS_PORT_CD
+     , A.RLANE_DIR_CD
+     , A.OB_RTO ORI_OB_RTO
+     , A.IB_RTO ORI_IB_RTO
+     , CASE WHEN A.OB_RTO_CNT = A.TOT_CNT AND A.TOT_CNT = 1 THEN DECODE(A.TURN, 'N', 100, 'Y', 50,  0) ELSE A.OB_RTO END AS OB_RTO
+     , CASE WHEN A.IB_RTO_CNT = A.TOT_CNT AND A.TOT_CNT = 1 THEN DECODE(A.TURN, 'N', 100, 'Y', 50,  0) ELSE A.IB_RTO END AS IB_RTO
+     , A.RLANE_CD
+     , A.REV_YRMON
+     , A.RLANE_RANK
+  FROM (
+        SELECT A.*
+             , ROWNUM AS RNUM
+          FROM (
+                SELECT A.*
+                  FROM ( 
+                        SELECT VSL_CD
+                             , SKD_VOY_NO
+                             , SKD_DIR_CD
+                             , TURN
+                             , SLAN_CD
+                             , VPS_PORT_CD
+                             , RLANE_DIR_CD
+                             , OB_RTO
+                             , IB_RTO
+                             , RLANE_CD
+                             , REV_YRMON
+                             , RLANE_RANK
+                             , SUM(CASE WHEN OB_RTO > 0 THEN 1 ELSE 0 END) AS OB_RTO_CNT
+                             , SUM(CASE WHEN IB_RTO > 0 THEN 1 ELSE 0 END) AS IB_RTO_CNT
+                             , COUNT(A.VSL_CD) OVER () AS TOT_CNT
+                          FROM (
+                                SELECT D.*
+                                  FROM (
+                                         --Monthly Estimated 의 경우
+                                        SELECT DISTINCT V.VSL_CD
+                                             , V.SKD_VOY_NO
+                                             , V.SKD_DIR_CD
+                                             , V.TURN TURN
+                                             , V.SLAN_CD
+                                             , V.VPS_PORT_CD
+                                             , D.REV_DIR_CD RLANE_DIR_CD
+                                             , DECODE (V.TURN, 'Y', 50,NVL(OB_RTO,100) ) OB_RTO
+                                             , DECODE (V.TURN, 'Y',  0,NVL(IB_RTO,  0) ) IB_RTO
+                                             , D.RLANE_CD
+                                             , (SELECT MAX(REV_YRMON)
+                                                  FROM GL_ESTM_REV_VVD B
+                                                 WHERE B.EXE_YRMON      = V.EXE_YRMON
+                                                   AND B.VSL_CD         = V.VSL_CD
+                                                   AND B.SKD_VOY_NO     = V.SKD_VOY_NO
+                                                   AND B.SKD_DIR_CD     = V.SKD_DIR_CD
+                                                   AND B.RLANE_CD       = D.RLANE_CD
+                                                   AND B.REV_DIR_CD     = D.REV_DIR_CD
+                                                ) AS REV_YRMON
+                                             , DENSE_RANK() OVER (ORDER BY D.REV_DIR_CD, D.RLANE_CD) RLANE_RANK
+                                          FROM PSO_PORT_EXPN_DIV D
+                                             , (SELECT DISTINCT A.VSL_CD
+                                                     , A.SKD_VOY_NO
+                                                     , A.SKD_DIR_CD
+                                                     , DECODE(A.TURN_PORT_IND_CD,'N',DECODE(A.TURN_PORT_FLG,'Y','Y','N'),'Y') TURN
+                                                     , A.SLAN_CD
+                                                     , A.VPS_PORT_CD
+                                                     , P.EXE_YRMON
+                                                  FROM VSK_VSL_PORT_SKD A
+                                                     --, GL_ESTM_REV_VVD B
+                                                     , V_PARAM P
+                                                 WHERE 1=1
+                                                   AND A.VSL_CD         = P.VSL_CD
+                                                   AND A.SKD_VOY_NO     = P.SKD_VOY_NO
+                                                   AND A.SKD_DIR_CD     = P.SKD_DIR_CD
+                                                   AND A.YD_CD          = P.YD_CD
+                                                   AND A.CLPT_IND_SEQ   = P.CLPT_IND_SEQ
+                                                   AND A.TURN_PORT_IND_CD IN ('N', 'Y')
+                                                   AND NVL(A.SKD_CNG_STS_CD, 'X') <> 'S'
+                                                   AND NVL(A.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 Add*/  
+                                               ) V
+                                         WHERE 1 = 1
+                                            /*pendulum Case.*/
+                                           AND V.SLAN_CD        = D.SLAN_CD
+                                           AND V.SKD_DIR_CD     = D.SKD_DIR_CD
+                                           AND V.VPS_PORT_CD    = D.LOC_CD
+                                          ) D
+                                    WHERE 1=1
+                                      --AND RLANE_RANK = 1
+                                      
+                                 UNION ALL
+                                 
+                                SELECT D.*
+                                  FROM (
+                                         --Monthly Estimated 의 경우
+                                        SELECT DISTINCT V.VSL_CD
+                                             , V.SKD_VOY_NO
+                                             , V.SKD_DIR_CD
+                                             , V.TURN TURN
+                                             , V.SLAN_CD
+                                             , V.VPS_PORT_CD
+                                             , D.REV_DIR_CD RLANE_DIR_CD
+                                             , DECODE (V.TURN, 'Y',  0,NVL(OB_RTO,  0) ) OB_RTO
+                                             , DECODE (V.TURN, 'Y', 50,NVL(IB_RTO,100) ) IB_RTO
+                                             , D.RLANE_CD
+                                             , (SELECT MAX(REV_YRMON)
+                                                  FROM GL_ESTM_REV_VVD B
+                                                 WHERE B.EXE_YRMON      = V.EXE_YRMON
+                                                   AND B.VSL_CD         = V.VSL_CD
+                                                   AND B.SKD_VOY_NO     = V.SKD_VOY_NO
+                                                   AND B.SKD_DIR_CD     = V.SKD_DIR_CD
+                                                   AND B.RLANE_CD       = D.RLANE_CD
+                                                   AND B.REV_DIR_CD     = D.REV_DIR_CD
+                                                ) AS REV_YRMON
+                                             , DENSE_RANK() OVER (ORDER BY D.REV_DIR_CD, D.RLANE_CD) RLANE_RANK
+                                          FROM PSO_PORT_EXPN_DIV D
+                                             , (SELECT DISTINCT V.VSL_CD
+                                                     , V.SKD_VOY_NO
+                                                     , V.SKD_DIR_CD
+                                                     , DECODE(V.TURN_PORT_IND_CD,'N',DECODE(V.TURN_PORT_FLG,'Y','Y','N'),'Y') AS TURN
+                                                     , V.SLAN_CD
+                                                     , V.VPS_PORT_CD
+                                                     , P.EXE_YRMON
+                                                  FROM VSK_VSL_PORT_SKD V
+                                                     --, GL_ESTM_REV_VVD B
+                                                     , V_PARAM P
+                                                 WHERE 1=1
+                                                   AND V.VSL_CD         = P.VSL_CD
+                                                   AND V.SKD_VOY_NO     = P.SKD_VOY_NO
+                                                   AND V.SKD_DIR_CD     = P.SKD_DIR_CD
+                                                   AND V.YD_CD          = P.YD_CD
+                                                   AND V.CLPT_IND_SEQ   = P.CLPT_IND_SEQ
+                                                   AND V.TURN_PORT_IND_CD IN ('D', 'V', 'F')
+                                                   AND NVL(V.SKD_CNG_STS_CD, 'X') <> 'S'
+                                                   AND NVL(V.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 Add*/  
+                                               ) V
+                                         WHERE 1 = 1
+                                            /*pendulum Case.*/
+                                           AND V.SLAN_CD        = D.SLAN_CD
+                                           AND V.SKD_DIR_CD     = D.SKD_DIR_CD
+                                           AND V.VPS_PORT_CD    = D.LOC_CD
+                                          ) D
+                                    WHERE 1=1
+                                      --AND RLANE_RANK = 1                                    
+                                ) A
+                          GROUP BY VSL_CD
+                             , SKD_VOY_NO
+                             , SKD_DIR_CD
+                             , TURN
+                             , SLAN_CD
+                             , VPS_PORT_CD
+                             , RLANE_DIR_CD
+                             , OB_RTO
+                             , IB_RTO
+                             , RLANE_CD
+                             , REV_YRMON
+                             , RLANE_RANK
+                       ) A
+                 ORDER BY A.RLANE_RANK
+               ) A
+         WHERE 1=1
+           AND ROWNUM < 3 /*2건 이하의 Row를 리턴하게 한다.*/
+         ORDER BY OB_RTO DESC, A.RLANE_RANK
+       ) A
+ WHERE 1=1
+ ORDER BY A.OB_RTO DESC			]]></sql>
+			<params>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="yd_cd" type="12" value="" out="N"/>
+				<param name="exe_yrmon" type="12" value="" out="N"/>
+				<param name="clpt_ind_seq" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,568 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="GeneralBookingSearchDBDAOsearchEdiForNoticeRSQL">
+			<desc><![CDATA[searchEdiForNotice]]></desc>
+			<sql><![CDATA[
+WITH EDI_ID AS
+     (SELECT GROUP_EDI_ID
+           , GROUP_NM
+           , EDI_RECEIVE_ID
+           , BKG_CFM_FLG
+           , BL_DRFT_FLG
+           , CGO_TRAK_FLG
+           , CASE WHEN REF_TP_CD IN ('7SC','7RFA') THEN REF_CODE ELSE SUBSTR(REF_CODE,2) END AS REF_CODE
+           , SUBSTR(REF_TP_CD, 2) REF_TP_CD
+           , REF_TP_CD||'@'||CASE WHEN REF_TP_CD IN ('7SC','7RFA') THEN REF_CODE ELSE SUBSTR(REF_CODE,2) END AS REF_TMP
+        FROM (SELECT GRP.ESVC_GRP_CD      GROUP_EDI_ID
+                   , GRP.ESVC_GRP_NM      GROUP_NM
+                   , GRP.CUST_TRD_PRNR_ID EDI_RECEIVE_ID
+                   , GRP_CUST.BKG_CFM_FLG
+                   , GRP_Cust.BL_DRFT_FLG
+                   , GRP_Cust.CGO_TRAK_FLG
+                   , DECODE(CUST.BKG_CUST_TP_CD, 'S','1','C','2','N','3','F','4','A','5','6')
+                     ||CUST.CUST_CNT_CD||TRIM(TO_CHAR(CUST.CUST_SEQ,'000009')) REF_CODE
+                   , DECODE(CUST.BKG_CUST_TP_CD, 'S','1SH','C','2CN','N','3NF','F','4FF','A','5AN','6EX') REF_TP_CD
+                FROM BKG_EDI_GRP_CUST GRP_CUST
+                   , BKG_EDI_GRP GRP
+                   , BKG_CUSTOMER CUST
+               WHERE GRP.ESVC_GRP_CD       = GRP_CUST.ESVC_GRP_CD
+                 AND GRP.CO_CD             = GRP_CUST.CO_CD
+                 AND CUST.CUST_CNT_CD      = GRP_CUST.CNT_CD
+                 AND CUST.CUST_SEQ         = GRP_CUST.CUST_SEQ
+--                 AND GRP.CO_CD             = 'H'
+                 AND GRP.ESVC_GRP_DELT_FLG = 'N'
+                 AND GRP_CUST.DELT_FLG     = 'N'
+                 AND CUST.CUST_CNT_CD      IS NOT NULL
+                 AND CUST.BKG_NO           = @[bkg_no]
+               UNION
+              SELECT GRP.ESVC_GRP_CD      GROUP_EDI_ID
+                   , GRP.ESVC_GRP_NM      GROUP_NM
+                   , GRP.CUST_TRD_PRNR_ID EDI_RECEIVE_ID
+                   , GRP_CUST.BKG_CFM_FLG
+                   , GRP_CUST.BL_DRFT_FLG
+                   , GRP_CUST.CGO_TRAK_FLG
+                   , DECODE(GRP_CUST.BKG_CTRT_TP_CD, '1', BK.SC_NO, '2', BK.RFA_NO) REF_CODE
+                   , DECODE(GRP_CUST.BKG_CTRT_TP_CD, '1', '7SC', '2', '7RFA') REF_TP_CD
+                FROM BKG_EDI_GRP GRP
+                   , BKG_EDI_GRP_CUST GRP_CUST
+                   , BKG_BOOKING BK
+               WHERE GRP.ESVC_GRP_CD = GRP_CUST.ESVC_GRP_CD
+                 AND GRP.CO_CD       = GRP_CUST.CO_CD
+                 AND DECODE(GRP_CUST.BKG_CTRT_TP_CD, '1', BK.SC_NO, '2', BK.RFA_NO)        = GRP_CUST.SC_NO
+                 --AND 'H'             = GRP.CO_CD
+                 AND 'N'             = GRP.ESVC_GRP_DELT_FLG
+                 AND ' '             < GRP_CUST.SC_NO
+                 AND 'N'             = GRP_CUST.DELT_FLG
+                 AND (BK.SC_NO        IS NOT NULL  OR BK.RFA_NO IS NOT NULL)
+                 AND BK.BKG_NO       = @[bkg_no])
+       ORDER BY REF_CODE, REF_TP_CD)
+SELECT NTC_KND_NM
+     , KIND.NTC_KND_CD
+     , REF_TP_CD
+     , REF_CODE
+     , EDI_RECEIVE_ID
+     , GROUP_EDI_ID
+     , GROUP_NM
+     , SENDER
+     , SENDER_NM
+     , SEND_DT
+     , BKG_NTC_SND_RSLT_CD
+     , (SELECT INTG_CD_VAL_DP_DESC
+          FROM COM_INTG_CD_DTL
+         WHERE DECODE(MST.NTC_KND_CD,'PS','CD01636','CD02396') = INTG_CD_ID
+           AND INTG_CD_VAL_CTNT = 
+               DECODE(MST.NTC_KND_CD,'PS',
+                   MST.BKG_NTC_SND_RSLT_CD,
+                   DECODE(MST.BKG_NTC_SND_RSLT_CD,'A',3,'F',4,'N',4,NULL))
+       ) AS RESULT
+  FROM (SELECT DECODE(INTG_CD_VAL_DP_DESC,'Booking Receipt',                'Booking (Customer)'
+                                         ,'Booking Confirmation (Terminal)','Booking (Terminal)'
+                                         ,INTG_CD_VAL_DP_DESC) NTC_KND_NM
+             , INTG_CD_VAL_CTNT NTC_KND_CD
+             , DECODE(INTG_CD_VAL_CTNT,'BL',1,'BK',2,'BT',3,'CN',4,'FC',5,'CT',6,'EX',7,'IM',8,9) ORD
+          FROM COM_INTG_CD_DTL
+         WHERE 'CD01552' = INTG_CD_ID
+           AND INTG_CD_VAL_CTNT IN ('BK','BL','BT','CN','FC','IM')--,'EX'
+#if ('SGSIN'==${pol_cd})
+         UNION
+        SELECT 'PSA I/F', 'PS', 9 FROM DUAL
+#end
+       ) KIND
+     , (SELECT NTC_KND_CD
+             , REF_TP_CD
+             , REF_CODE
+             , EDI_RECEIVE_ID
+             , GROUP_EDI_ID
+             , GROUP_NM
+             , SENDER
+             , SENDER_NM
+             , SEND_DT
+             , BKG_NTC_SND_RSLT_CD
+          FROM (SELECT 'BL' NTC_KND_CD
+                     , SUBSTRB(MIN(REF_TMP),2,INSTR(MIN(REF_TMP),'@')-2) AS REF_TP_CD
+                     , SUBSTRB(MIN(REF_TMP),INSTR(MIN(REF_TMP),'@')+1) AS REF_CODE
+                     , EDI_ID.EDI_RECEIVE_ID
+                     , EDI_ID.GROUP_EDI_ID
+                     , EDI_ID.GROUP_NM
+                     , DECODE(GROUP_EDI_ID,ESVC_GRP_CD,NTC.SND_USR_ID,NULL) AS SENDER
+                     , DECODE(GROUP_EDI_ID,ESVC_GRP_CD,(SELECT USR.USR_NM FROM COM_USER USR WHERE USR.USR_ID = NTC.SND_USR_ID),NULL) AS SENDER_NM
+                     , DECODE(GROUP_EDI_ID,ESVC_GRP_CD,TO_CHAR(NTC.SND_RQST_DT, 'YYYY-MM-DD HH24:MI'),NULL) AS SEND_DT
+                     , DECODE(GROUP_EDI_ID,ESVC_GRP_CD,NTC.BKG_NTC_SND_RSLT_CD,NULL) AS BKG_NTC_SND_RSLT_CD
+                  FROM EDI_ID, BKG_NTC_HIS NTC
+                 WHERE EDI_ID.EDI_RECEIVE_ID = NTC.EDI_ID(+)
+                   AND 'Y'  = EDI_ID.BL_DRFT_FLG
+                   AND 'E'  = NTC.NTC_VIA_CD(+)
+                   AND 'BL' = NTC.NTC_KND_CD(+)
+                   AND @[bkg_no] = NTC.BKG_NO(+)
+                   AND GROUP_EDI_ID = NTC.ESVC_GRP_CD(+)
+                   AND NVL(NTC.HIS_SEQ,1) =
+                       NVL2(NTC.HIS_SEQ,(SELECT MAX(HIS_SEQ)
+                                           FROM BKG_NTC_HIS
+                                          WHERE BKG_NO     = NTC.BKG_NO
+                                            AND NTC_VIA_CD = NTC.NTC_VIA_CD
+                                            AND NTC_KND_CD = NTC.NTC_KND_CD
+                                            AND EDI_ID     = NTC.EDI_ID
+                                            AND NVL(ESVC_GRP_CD,1) = NVL(NTC.ESVC_GRP_CD,1)
+                                        ),1)
+                 GROUP BY EDI_RECEIVE_ID
+                     , GROUP_EDI_ID
+                     , GROUP_NM
+                     , SND_USR_ID
+                     , NTC.SND_RQST_DT
+                     , NTC.BKG_NTC_SND_RSLT_CD
+                     , NTC.ESVC_GRP_CD)
+         UNION
+        SELECT NTC_KND_CD
+             , REF_TP_CD
+             , REF_CODE
+             , EDI_RECEIVE_ID
+             , GROUP_EDI_ID
+             , GROUP_NM
+             , SENDER
+             , SENDER_NM
+             , SEND_DT
+             , BKG_NTC_SND_RSLT_CD
+          FROM (SELECT 'BK' NTC_KND_CD
+                     , 'UN' AS REF_TP_CD
+                     , REF_CODE AS REF_CODE
+                     , EDI_ID.EDI_RECEIVE_ID
+                     , EDI_ID.GROUP_EDI_ID AS GROUP_EDI_ID
+                     , '' GROUP_NM
+                     , NTC.SND_USR_ID AS SENDER
+                     , (SELECT USR.USR_NM FROM COM_USER USR WHERE USR.USR_ID = NTC.SND_USR_ID) AS SENDER_NM
+                     , TO_CHAR(NTC.SND_RQST_DT, 'YYYY-MM-DD HH24:MI') AS SEND_DT
+                     , NTC.BKG_NTC_SND_RSLT_CD AS BKG_NTC_SND_RSLT_CD
+                  FROM (SELECT BB.BKG_NO
+                               ,BHCC.ATTR_CTNT3 group_edi_iD
+                               ,BHCC.ATTR_CTNT1 AS EDI_RECEIVE_ID
+                               ,BHCC.ATTR_CTNT2 AS ref_code
+                        FROM BKG_BOOKING BB
+                             ,BKG_HRD_CDG_CTNT BHCC
+                        WHERE BB.BKG_NO = @[bkg_no]
+                        AND BHCC.HRD_CDG_ID = 'CUSTOMER_301U'
+                        AND EXISTS (SELECT 'X' FROM BKG_CUSTOMER BC WHERE BC.BKG_NO = BB.BKG_NO
+                                                                    AND BC.CUST_CNT_CD||BC.CUST_SEQ = BHCC.ATTR_CTNT2)
+                        AND NOT EXISTS (SELECT 'X' FROM BKG_XTER_RQST_MST MST WHERE MST.BKG_NO = BB.BKG_NO
+                                                                              AND MST.DOC_TP_CD = 'B'
+                                                                              AND MST.BKG_UPLD_STS_CD = 'F'
+                                                                              AND BHCC.ATTR_CTNT1 = CASE WHEN MST.XTER_SNDR_ID <> 'PEGASUS' THEN MST.XTER_SNDR_ID
+                                                                                                  ELSE (SELECT BHCC1.ATTR_CTNT2 
+                                                                                                        FROM BKG_HRD_CDG_CTNT BHCC1
+                                                                                                        WHERE BHCC1.HRD_CDG_ID = 'CUSTOMER_301_EDI_ID'
+                                                                                                        AND BHCC1.ATTR_CTNT1 = MST.PGSS_EDI_ID
+                                                                                                        AND ROWNUM = 1) END
+                                                                              AND MST.XTER_RQST_VIA_CD <> 'WEB')) EDI_ID
+                       , BKG_NTC_HIS NTC
+                   WHERE EDI_ID.EDI_RECEIVE_ID = NTC.EDI_ID(+)
+                   AND 'E'  = NTC.NTC_VIA_CD(+)
+                   AND 'BK' = NTC.NTC_KND_CD(+)
+                   AND EDI_ID.BKG_NO  = NTC.BKG_NO(+)
+                   AND GROUP_EDI_ID = NTC.ESVC_GRP_CD(+)
+                   AND NVL(NTC.HIS_SEQ,1) =
+                       NVL2(NTC.HIS_SEQ,(SELECT MAX(HIS_SEQ)
+                                           FROM BKG_NTC_HIS
+                                          WHERE BKG_NO     = NTC.BKG_NO
+                                            AND NTC_VIA_CD = NTC.NTC_VIA_CD
+                                            AND NTC_KND_CD = NTC.NTC_KND_CD
+                                            AND EDI_ID     = NTC.EDI_ID
+                                            AND NVL(ESVC_GRP_CD,1) = NVL(NTC.ESVC_GRP_CD,1)
+                                        ),1)
+                 )
+           UNION 
+           SELECT 'BK' NTC_KND_CD
+             ,'' REF_TP_CD
+             ,'' REF_CODE
+             ,EDI_RECEIVE_ID AS EDI_RECEIVE_ID
+             ,'' GROUP_EDI_ID
+             ,'' GROUP_NM
+             , NTC.SND_USR_ID AS SENDER
+             , (SELECT USR.USR_NM FROM COM_USER USR WHERE USR.USR_ID = NTC.SND_USR_ID) AS SENDER_NM
+             , TO_CHAR(NTC.SND_RQST_DT, 'YYYY-MM-DD HH24:MI') AS SEND_DT
+             , NTC.BKG_NTC_SND_RSLT_CD AS BKG_NTC_SND_RSLT_CD
+           FROM (SELECT  MST.BKG_NO
+                         ,(SELECT BHCC.ATTR_CTNT3
+                           FROM BKG_HRD_CDG_CTNT BHCC
+                           WHERE BHCC.HRD_CDG_ID = 'CUSTOMER_301_EDI_ID'
+                           AND   BHCC.ATTR_CTNT2 = CASE WHEN MST.XTER_SNDR_ID <> 'PEGASUS' THEN MST.XTER_SNDR_ID
+                                                   ELSE (SELECT BHCC1.ATTR_CTNT2 FROM BKG_HRD_CDG_CTNT BHCC1
+                                                                                 WHERE BHCC1.HRD_CDG_ID = 'CUSTOMER_301_EDI_ID'
+                                                                                 AND BHCC1.ATTR_CTNT1 = MST.PGSS_EDI_ID) END
+                            AND ROWNUM = 1) AS EDI_RECEIVE_ID 
+                            FROM BKG_XTER_RQST_MST MST
+                            WHERE MST.BKG_NO =  @[bkg_no]
+                             AND MST.DOC_TP_CD = 'B'
+                             AND MST.BKG_UPLD_STS_CD = 'F'
+                             AND MST.XTER_RQST_VIA_CD <> 'WEB'
+                             AND MST.XTER_RQST_SEQ = (SELECT MAX(MST1.XTER_RQST_SEQ) FROM BKG_XTER_RQST_MST MST1 
+                                                                                     WHERE MST.XTER_SNDR_ID = MST1.XTER_SNDR_ID 
+                                                                                     AND MST.BKG_NO = MST1.BKG_NO
+                                                                                     AND MST1.DOC_TP_CD = 'B'
+                                                                                     AND MST1.BKG_UPLD_STS_CD = 'F'
+                                                                                     AND MST1.XTER_RQST_VIA_CD <> 'WEB'
+                                                     )
+                                              )MST, BKG_NTC_HIS NTC
+           
+           WHERE 'E'  = NTC.NTC_VIA_CD(+)
+           AND 'BK'   = NTC.NTC_KND_CD(+)
+           AND MST.EDI_RECEIVE_ID = NTC.EDI_ID(+)
+           AND MST.BKG_NO  = NTC.BKG_NO(+)
+                   AND NVL(NTC.HIS_SEQ,1) =
+                       NVL2(NTC.HIS_SEQ,(SELECT MAX(HIS_SEQ)
+                                           FROM BKG_NTC_HIS
+                                          WHERE BKG_NO     = NTC.BKG_NO
+                                            AND NTC_VIA_CD = NTC.NTC_VIA_CD
+                                            AND NTC_KND_CD = NTC.NTC_KND_CD
+                                            AND EDI_ID     = NTC.EDI_ID
+                                            ),1)
+
+         UNION
+        SELECT NTC_KND_CD
+             , REF_TP_CD
+             , REF_CODE
+             , EDI_RECEIVE_ID
+             , GROUP_EDI_ID
+             , GROUP_NM
+             , SENDER
+             , SENDER_NM
+             , SEND_DT
+             , BKG_NTC_SND_RSLT_CD
+          FROM (SELECT 'BT' NTC_KND_CD
+                     , '' REF_TP_CD
+                     , NTC.YD_CD REF_CODE
+                     , NTC.EDI_ID EDI_RECEIVE_ID
+                     , '' GROUP_EDI_ID
+                     , '' GROUP_NM
+                     , NTC.SND_USR_ID SENDER
+                     , (SELECT USR.USR_NM FROM COM_USER USR WHERE USR.USR_ID = NTC.SND_USR_ID) SENDER_NM
+                     , TO_CHAR(NTC.SND_RQST_DT,'YYYY-MM-DD HH24:MI') SEND_DT
+                     , NTC.BKG_NTC_SND_RSLT_CD
+                  FROM BKG_BOOKING BK
+                     , (SELECT NTC.BKG_NO
+                             , NTC.SND_USR_ID, NTC.SND_RQST_DT, NTC.BKG_NTC_SND_RSLT_CD
+                             , EDI_YD.EDI_RCV_ID EDI_ID, EDI_YD.YD_CD
+                          FROM BKG_NTC_HIS NTC
+                             , (SELECT DISTINCT EY.RCVR_TRD_PRNR_ID AS EDI_RCV_ID
+                                     , EY.PRNR_PORT_CD AS PORT_CD
+                                     , EY.PRNR_SUB_LNK_CD AS YD_CD
+                                     , BK.BKG_NO
+                                  FROM BKG_EDI_TRD_PRNR_SUB_LNK EY
+                                     , BKG_EDI_SUB_LNK_MSG MSG
+                                     , BKG_VVD VVD
+                                     , BKG_BOOKING BK
+                                 WHERE BK.BKG_NO   = @[bkg_no]
+                                   AND BK.BKG_NO   = VVD.BKG_NO
+                                   AND EY.TRD_PRNR_SUB_LNK_SEQ = MSG.TRD_PRNR_SUB_LNK_SEQ
+                                   AND EY.PRNR_SUB_LNK_DIV_CD = '1'
+                                   AND MSG.EDI_MSG_TP_ID      = '301'
+                                   AND MSG.MSG_TP_DESC = '1'
+                                   AND (   (EY.PRNR_SUB_LNK_CD = BK.POL_NOD_CD AND MSG.EDI_MSG_IND_CD IN ('1', '2')) -- BKG
+                                        OR (EY.PRNR_SUB_LNK_CD = VVD.POL_YD_CD AND VVD.VSL_PRE_PST_CD IN ('S','T') AND MSG.EDI_MSG_IND_CD = '6') --pre t/s port
+                                        OR (EY.PRNR_SUB_LNK_CD = VVD.POL_YD_CD AND VVD.VSL_PRE_PST_CD = 'U' AND MSG.EDI_MSG_IND_CD = '7') --post t/s port
+                                       )
+                                ) EDI_YD
+                          WHERE 'E'  = NTC.NTC_VIA_CD(+)
+                            AND 'BT' = NTC.NTC_KND_CD(+)
+                            AND EDI_YD.BKG_NO = NTC.BKG_NO(+)
+                            AND EDI_YD.EDI_RCV_ID = NTC.EDI_ID(+)
+                            AND NVL(NTC.HIS_SEQ,1) =
+                                NVL2(NTC.HIS_SEQ,(SELECT MAX(HIS_SEQ)
+                                                    FROM BKG_NTC_HIS
+                                                   WHERE BKG_NO     = NTC.BKG_NO
+                                                     AND NTC_VIA_CD = NTC.NTC_VIA_CD
+                                                     AND NTC_KND_CD = NTC.NTC_KND_CD
+                                                     AND EDI_ID     = NTC.EDI_ID
+                                                     AND NVL(ESVC_GRP_CD,1) = NVL(NTC.ESVC_GRP_CD,1)
+                                                 ),1)) NTC
+                 WHERE NTC.BKG_NO = BK.BKG_NO(+)
+                 GROUP BY YD_CD
+                     , EDI_ID
+                     , SND_USR_ID
+                     , NTC.SND_RQST_DT
+                     , NTC.BKG_NTC_SND_RSLT_CD)
+         UNION
+        SELECT NTC_KND_CD
+             , REF_TP_CD
+             , REF_CODE
+             , EDI_RECEIVE_ID
+             , GROUP_EDI_ID
+             , GROUP_NM
+             , SENDER
+             , SENDER_NM
+             , SEND_DT
+             , BKG_NTC_SND_RSLT_CD
+          FROM (SELECT 'CN' NTC_KND_CD
+                     , '' REF_TP_CD
+                     , NTC.YD_CD REF_CODE
+                     , NTC.EDI_ID EDI_RECEIVE_ID
+                     , '' GROUP_EDI_ID
+                     , '' GROUP_NM
+                     , NTC.SND_USR_ID SENDER
+                     , (SELECT USR.USR_NM FROM COM_USER USR WHERE USR.USR_ID = NTC.SND_USR_ID) SENDER_NM
+                     , TO_CHAR(NTC.SND_RQST_DT,'YYYY-MM-DD HH24:MI') SEND_DT
+                     , NTC.BKG_NTC_SND_RSLT_CD
+                  FROM BKG_BOOKING BK
+                     , (SELECT NTC.BKG_NO
+                             , NTC.SND_USR_ID
+                             , NTC.SND_RQST_DT
+                             , NTC.BKG_NTC_SND_RSLT_CD
+                             , EY.RCVR_TRD_PRNR_ID EDI_ID
+                             , EY.PRNR_SUB_LNK_CD AS YD_CD
+                          FROM BKG_NTC_HIS NTC
+                             , BKG_EDI_TRD_PRNR_SUB_LNK EY
+                             , BKG_EDI_SUB_LNK_MSG MSG
+                             , BKG_BOOKING BK
+                         WHERE 'E'       = NTC.NTC_VIA_CD(+)
+                           AND 'CN'      = NTC.NTC_KND_CD(+)
+                           AND BK.MTY_PKUP_YD_CD = EY.PRNR_SUB_LNK_CD(+)
+                           AND 'Y'       = EY.EDI_SND_FLG(+)
+                           AND BK.BKG_NO = NTC.BKG_NO(+)
+                           AND BK.BKG_NO = @[bkg_no]
+                           AND EY.TRD_PRNR_SUB_LNK_SEQ = MSG.TRD_PRNR_SUB_LNK_SEQ
+                           AND MSG.EDI_MSG_TP_ID = '301'
+                           AND MSG.EDI_MSG_IND_CD = '5'
+                           AND MSG.MSG_TP_DESC = '1'
+                           AND NVL(NTC.HIS_SEQ,1) =
+                               NVL2(NTC.HIS_SEQ,(SELECT MAX(HIS_SEQ)
+                                                   FROM BKG_NTC_HIS
+                                                  WHERE BKG_NO     = NTC.BKG_NO
+                                                    AND NTC_VIA_CD = NTC.NTC_VIA_CD
+                                                    AND NTC_KND_CD = NTC.NTC_KND_CD
+                                                    AND EDI_ID     = NTC.EDI_ID
+                                                    AND NVL(ESVC_GRP_CD,1) = NVL(NTC.ESVC_GRP_CD,1)
+                                                ),1) ) NTC
+                 WHERE NTC.BKG_NO = BK.BKG_NO(+)
+                 GROUP BY YD_CD
+                     , EDI_ID
+                     , SND_USR_ID
+                     , NTC.SND_RQST_DT
+                     , NTC.BKG_NTC_SND_RSLT_CD)
+         UNION
+        SELECT NTC_KND_CD
+             , REF_TP_CD
+             , REF_CODE
+             , EDI_RECEIVE_ID
+             , GROUP_EDI_ID
+             , GROUP_NM
+             , SENDER
+             , SENDER_NM
+             , SEND_DT
+             , BKG_NTC_SND_RSLT_CD
+          FROM (SELECT 'FC' NTC_KND_CD
+                     , '' REF_TP_CD
+                     , NTC.YD_CD REF_CODE
+                     , NTC.EDI_ID EDI_RECEIVE_ID
+                     , '' GROUP_EDI_ID
+                     , '' GROUP_NM
+                     , NTC.SND_USR_ID SENDER
+                     , (SELECT USR.USR_NM FROM COM_USER USR WHERE USR.USR_ID = NTC.SND_USR_ID) SENDER_NM
+                     , TO_CHAR(NTC.SND_RQST_DT,'YYYY-MM-DD HH24:MI') SEND_DT
+                     , NTC.BKG_NTC_SND_RSLT_CD
+                  FROM BKG_BOOKING BK
+                     , (SELECT NTC.BKG_NO
+                             , NTC.SND_USR_ID
+                             , NTC.SND_RQST_DT
+                             , NTC.BKG_NTC_SND_RSLT_CD
+                             , EY.RCVR_TRD_PRNR_ID EDI_ID
+                             , EY.PRNR_SUB_LNK_CD AS YD_CD
+                          FROM BKG_NTC_HIS NTC
+                             , BKG_EDI_TRD_PRNR_SUB_LNK EY
+                             , BKG_EDI_SUB_LNK_MSG MSG
+                             , BKG_BOOKING BK
+                         WHERE 'E'       = NTC.NTC_VIA_CD(+)
+                           AND 'FC'      = NTC.NTC_KND_CD(+)
+                           AND BK.FULL_RTN_YD_CD = EY.PRNR_SUB_LNK_CD(+)
+                           AND 'Y'       = EY.EDI_SND_FLG(+)
+                           AND BK.BKG_NO = NTC.BKG_NO(+)
+                           AND BK.BKG_NO = @[bkg_no]
+                           AND EY.TRD_PRNR_SUB_LNK_SEQ = MSG.TRD_PRNR_SUB_LNK_SEQ
+                           AND MSG.EDI_MSG_TP_ID = '301'
+                           AND MSG.EDI_MSG_IND_CD = '4'
+                           AND MSG.MSG_TP_DESC = '1'
+                           AND NVL(NTC.HIS_SEQ,1) =
+                               NVL2(NTC.HIS_SEQ,(SELECT MAX(HIS_SEQ)
+                                                   FROM BKG_NTC_HIS
+                                                  WHERE BKG_NO     = NTC.BKG_NO
+                                                    AND NTC_VIA_CD = NTC.NTC_VIA_CD
+                                                    AND NTC_KND_CD = NTC.NTC_KND_CD
+                                                    AND EDI_ID     = NTC.EDI_ID
+                                                    AND NVL(ESVC_GRP_CD,1) = NVL(NTC.ESVC_GRP_CD,1)
+                                                ),1) ) NTC
+                 WHERE NTC.BKG_NO = BK.BKG_NO(+)
+                 GROUP BY YD_CD
+                     , EDI_ID
+                     , SND_USR_ID
+                     , NTC.SND_RQST_DT
+                     , NTC.BKG_NTC_SND_RSLT_CD)
+         UNION
+        SELECT 'CT' NTC_KND_CD
+             , '' REF_TP_CD
+             , '' REF_CODE
+             , EDI_ID.EDI_RECEIVE_ID
+             , EDI_ID.GROUP_EDI_ID
+             , EDI_ID.GROUP_NM
+             , '' SENDER
+             , '' SENDER_NM
+             , '' SEND_DT
+             , '' BKG_NTC_SND_RSLT_CD
+          FROM EDI_ID
+         WHERE 'Y' = EDI_ID.CGO_TRAK_FLG
+/* --deleting becuase export function is out of scope. 2015-08-10 by Hayley Burch
+         UNION
+        SELECT NTC_KND_CD
+             , REF_TP_CD
+             , REF_CODE
+             , EDI_RECEIVE_ID
+             , GROUP_EDI_ID
+             , GROUP_NM
+             , SENDER
+             , SENDER_NM
+             , SEND_DT
+             , BKG_NTC_SND_RSLT_CD
+          FROM (SELECT 'EX' NTC_KND_CD
+                     , '' REF_TP_CD
+                     , NTC.YD_CD REF_CODE
+                     , NTC.EDI_ID EDI_RECEIVE_ID
+                     , '' GROUP_EDI_ID
+                     , '' GROUP_NM
+                     , NTC.SND_USR_ID SENDER
+                     , (SELECT USR.USR_NM FROM COM_USER USR WHERE USR.USR_ID = NTC.SND_USR_ID) SENDER_NM
+                     , TO_CHAR(NTC.SND_RQST_DT,'YYYY-MM-DD HH24:MI') SEND_DT
+                     , NTC.BKG_NTC_SND_RSLT_CD
+                  FROM BKG_BOOKING BK
+                     , (SELECT NTC.BKG_NO
+                             , NTC.SND_USR_ID, NTC.SND_RQST_DT, NTC.BKG_NTC_SND_RSLT_CD
+                             , EDI_YD.RCVR_TRD_PRNR_ID EDI_ID
+							 , EDI_YD.PRNR_SUB_LNK_CD AS YD_CD
+                          FROM BKG_NTC_HIS NTC, BKG_BOOKING BK
+                             , COM_SYS_AREA_GRP_ID AREA
+                             , BKG_EDI_TRD_PRNR_SUB_LNK EDI_YD
+                             , BKG_EDI_SUB_LNK_MSG MSG
+                         WHERE 'E'       = NTC.NTC_VIA_CD(+)
+                           AND 'EX'      = NTC.NTC_KND_CD(+)
+                           AND BK.BKG_NO = NTC.BKG_NO(+)
+                           AND BK.BKG_NO = [bkg_no]
+                           AND EDI_YD.TRD_PRNR_SUB_LNK_SEQ = MSG.TRD_PRNR_SUB_LNK_SEQ
+                           AND MSG.MSG_TP_DESC = '1'
+                           AND NVL(NTC.HIS_SEQ,1) =
+                               NVL2(NTC.HIS_SEQ,(SELECT MAX(HIS_SEQ)
+                                                   FROM BKG_NTC_HIS
+                                                  WHERE BKG_NO     = NTC.BKG_NO
+                                                    AND NTC_VIA_CD = NTC.NTC_VIA_CD
+                                                    AND NTC_KND_CD = NTC.NTC_KND_CD
+                                                    AND EDI_ID     = NTC.EDI_ID
+                                                    AND NVL(ESVC_GRP_CD,1) = NVL(NTC.ESVC_GRP_CD,1)
+                                                ),1)
+                           AND AREA.CNT_CD = SUBSTR(BK.POL_CD, 1, 2)
+                           AND BK.POL_NOD_CD LIKE SUBSTR(EDI_YD.PRNR_SUB_LNK_CD, 1, 5)||'%'
+                           AND EDI_YD.PRNR_SUB_LNK_CD IS NOT NULL
+                           ) NTC
+                 WHERE NTC.BKG_NO = BK.BKG_NO(+)
+                 GROUP BY YD_CD
+                     , EDI_ID
+                     , SND_USR_ID
+                     , NTC.SND_RQST_DT
+                     , NTC.BKG_NTC_SND_RSLT_CD)
+*/
+         UNION
+        SELECT NTC_KND_CD
+             , REF_TP_CD
+             , REF_CODE
+             , EDI_RECEIVE_ID
+             , GROUP_EDI_ID
+             , GROUP_NM
+             , SENDER
+             , SENDER_NM
+             , SEND_DT
+             , BKG_NTC_SND_RSLT_CD
+          FROM (SELECT 'IM' NTC_KND_CD
+                     , '' REF_TP_CD
+                     , NTC.YD_CD REF_CODE
+                     , NTC.EDI_ID EDI_RECEIVE_ID
+                     , '' GROUP_EDI_ID
+                     , '' GROUP_NM
+                     , NTC.SND_USR_ID SENDER
+                     , (SELECT USR.USR_NM FROM COM_USER USR WHERE USR.USR_ID = NTC.SND_USR_ID) SENDER_NM
+                     , TO_CHAR(NTC.SND_RQST_DT,'YYYY-MM-DD HH24:MI') SEND_DT
+                     , NTC.BKG_NTC_SND_RSLT_CD
+                  FROM BKG_BOOKING BK
+                     , (SELECT NTC.BKG_NO
+                             , NTC.SND_USR_ID, NTC.SND_RQST_DT, NTC.BKG_NTC_SND_RSLT_CD
+                             , EDI_YD.RCVR_TRD_PRNR_ID EDI_ID
+							 , EDI_YD.PRNR_SUB_LNK_CD AS YD_CD
+                          FROM BKG_NTC_HIS NTC
+							 , BKG_BOOKING BK
+                             , BKG_EDI_TRD_PRNR_SUB_LNK EDI_YD
+                             , BKG_EDI_SUB_LNK_MSG MSG
+                         WHERE 'E'       = NTC.NTC_VIA_CD(+)
+                           AND 'IM'      = NTC.NTC_KND_CD(+)
+                           AND BK.POD_NOD_CD = EDI_YD.PRNR_SUB_LNK_CD(+)
+                           AND BK.BKG_NO = NTC.BKG_NO(+)
+                           AND BK.BKG_NO = @[bkg_no]
+                           AND EDI_YD.TRD_PRNR_SUB_LNK_SEQ = MSG.TRD_PRNR_SUB_LNK_SEQ
+                           AND MSG.MSG_TP_DESC = '1'
+                           AND EDI_MSG_TP_ID = 'COPRAR'
+                           AND EDI_YD.PRNR_SUB_LNK_DIV_CD = '1'--Yard
+                           AND NVL(NTC.HIS_SEQ,1) =
+                               NVL2(NTC.HIS_SEQ,(SELECT MAX(HIS_SEQ)
+                                                   FROM BKG_NTC_HIS
+                                                  WHERE BKG_NO     = NTC.BKG_NO
+                                                    AND NTC_VIA_CD = NTC.NTC_VIA_CD
+                                                    AND NTC_KND_CD = NTC.NTC_KND_CD
+                                                    AND EDI_ID     = NTC.EDI_ID
+                                                    AND NVL(ESVC_GRP_CD,1) = NVL(NTC.ESVC_GRP_CD,1)
+                                                ),1) ) NTC
+                 WHERE NTC.BKG_NO = BK.BKG_NO(+)
+                 GROUP BY YD_CD
+                     , EDI_ID
+                     , SND_USR_ID
+                     , NTC.SND_RQST_DT
+                     , NTC.BKG_NTC_SND_RSLT_CD)
+#if ('SGSIN'==${pol_cd})
+         UNION
+        SELECT 'PS' NTC_KND_CD
+             , '' REF_TP_CD
+             , '' REF_CODE
+             , 'PSACBI' EDI_RECEIVE_ID
+             , '' GROUP_EDI_ID
+             , '' GROUP_NM
+             , NVL(PSA.SND_USR_ID,PSA.UPD_USR_ID) AS SENDER
+             ,  (SELECT USR.USR_NM FROM COM_USER USR WHERE USR.USR_ID = NVL(PSA.SND_USR_ID,PSA.UPD_USR_ID)) AS SENDER_NM
+             , TO_CHAR(PSA.SND_DT,'YYYY-MM-DD HH24:MI') AS SEND_DT
+             , PSA.ACK_RCV_STS_CD AS BKG_NTC_SND_RSLT_CD
+          FROM BKG_CSTMS_PSA_BKG PSA
+         WHERE BKG_NO = @[bkg_no]
+           AND BKG_SEQ =
+               (SELECT MAX(BKG_SEQ)
+                  FROM BKG_CSTMS_PSA_BKG
+                 WHERE BKG_NO = PSA.BKG_NO)
+#end
+       ) MST
+ WHERE KIND.NTC_KND_CD = MST.NTC_KND_CD(+)
+ ORDER BY ORD,DECODE(REF_TP_CD,'SH',1,'CN',2,'NF',3,'FF',4,'AN',5,'EX',6,7),EDI_RECEIVE_ID,GROUP_EDI_ID			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="SINZ2060024" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

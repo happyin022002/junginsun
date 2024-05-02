@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TCharterIOInquiryDBDAOSearchCapitalBudgetSumListRSQL">
+			<desc><![CDATA[TCharterIOInquiryDBDAOSearchCapitalBudgetSumListRSQL]]></desc>
+			<sql><![CDATA[
+WITH V_SUMDATA AS (
+SELECT TI_C11
+     , SUM(TI_V11) TI_V11
+     , TI_C12
+     , SUM(TI_V12) TI_V12
+     , TO_C21
+     , SUM(TO_V21) TO_V21
+     , TO_C22
+     , SUM(TO_V22) TO_V22
+  FROM (
+SELECT DECODE(IO, 'TI', CUR01 ) AS TI_C11
+     , DECODE(IO, 'TI', TTL_AMT01) AS TI_V11
+     , DECODE(IO, 'TI', CUR02 ) AS TI_C12
+     , DECODE(IO, 'TI', TTL_AMT02) AS TI_V12
+     , DECODE(IO, 'TO', CUR01 ) AS TO_C21
+     , DECODE(IO, 'TO', TTL_AMT01) AS TO_V21
+     , DECODE(IO, 'TO', CUR02 ) AS TO_C22
+     , DECODE(IO, 'TO', TTL_AMT02) AS TO_V22
+  FROM (SELECT AGMT
+             , VSL_NM
+             , PAY_TP
+             , RK
+             , DT
+             , DT2
+             , TO_DT
+             , DIFF_MIN
+             , SUBSTR(AGMT, 5, 2) AS IO
+             , CALC_POINT
+             , KEY_VALUE
+             , AMT01
+             , CUR01
+             , AMT02
+             , AMT03
+             , CUR02
+             , ROUND(SUM(AMT03) OVER (PARTITION BY KEY_VALUE), 2) AS TTL_AMT01
+             , ROUND(SUM(AMT04) OVER (PARTITION BY KEY_VALUE), 2) AS TTL_AMT02
+          FROM (SELECT AGMT
+                     , VSL_NM
+                     , PAY_TP
+                     , RK
+                     , DT
+                     , DT2
+                     , TO_DT
+                     , (DT2 - DT) * (24 * 60) AS DIFF_MIN
+                     , AMT01
+                     , CUR01
+                     , AMT02
+                     , ( (DT2 - DT) * (24 * 60) * AMT01 ) AS AMT03
+                     , ( (DT2 - DT) * (24 * 60) * AMT02 ) AS AMT04
+                     , CUR02
+                     , CALC_POINT
+                     , AGMT ||'-'|| PAY_TP ||'-'|| RK ||'-'|| SUBSTR(MAX(CALC_POINT||TO_CHAR(DT, 'YYYY-MM-DD')) OVER (PARTITION BY AGMT, PAY_TP, RK ORDER BY DT ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 2, 10) AS KEY_VALUE
+                  FROM (SELECT T01.*
+                             , NVL(LEAD(DT) OVER (PARTITION BY AGMT, T02.CTRT_PAY_TERM_CD ORDER BY AGMT, DT) 
+                             , CASE WHEN TO_DT < TO_DATE(TO_CHAR(DT, 'YYYYMMDD')||'235959', 'YYYYMMDDHH24MISS') THEN TO_DT
+                                    ELSE TO_DATE(TO_CHAR(DT, 'YYYYMMDD')||'235959', 'YYYYMMDDHH24MISS')
+                               END ) AS DT2
+                             , T02.EFF_DT
+                             , T02.EXP_DT
+                             , T02.CTRT_PAY_TERM_CD AS PAY_TP
+                             , DENSE_RANK() OVER (PARTITION BY AGMT ORDER BY AGMT, EFF_DT) AS RK
+                             , CASE WHEN (T02.CTRT_PAY_TERM_CD = 'A') AND (TO_CHAR(T01.DT, 'DD') IN ('01', '16')) THEN 'Y'
+                                    WHEN (T02.CTRT_PAY_TERM_CD = 'B') THEN DECODE(MOD(ROW_NUMBER() OVER (PARTITION BY AGMT, T02.CTRT_PAY_TERM_CD ORDER BY AGMT, DT) + 14, 15), 0, 'Y', 'N')
+                                    WHEN (T02.CTRT_PAY_TERM_CD = 'C') AND TO_CHAR(T01.DT, 'DD') = TO_CHAR(T01.FM_DT, 'DD') THEN 'Y'
+                                    ELSE 'N'
+                               END AS CALC_POINT
+                          FROM (SELECT FLET_CTRT_NO AS AGMT
+                                     , VSL_NM
+                                     , EFF_DT + SEQ AS DT
+                                     , EFF_DT AS FM_DT
+                                     , EXP_DT AS TO_DT
+                                     , AMT01
+                                     , CUR01
+                                     , AMT02
+                                     , CUR02
+                                  FROM (SELECT T01.FLET_CTRT_NO
+                                             , T01.EFF_DT
+                                             , T01.EXP_DT
+                                             , (T01.EXP_DT - T01.EFF_DT) AS TM
+                                             , VSL_ENG_NM AS VSL_NM
+                                             , HIR_RT_N1ST_AMT / ( 24 * 60 ) AS AMT01
+                                             , HIR_CURR_N1ST_CD AS CUR01
+                                             , HIR_RT_N2ND_AMT / ( 24 * 60 ) AS AMT02
+                                             , HIR_CURR_N2ND_CD AS CUR02
+                                          FROM FMS_HIRE T01
+                                             , MDM_VSL_CNTR T2
+                                             , FMS_CONTRACT C
+                                         WHERE SUBSTR(T01.FLET_CTRT_NO, 1, 4) = T2.VSL_CD
+                                           AND C.FLET_CTRT_NO = T01.FLET_CTRT_NO
+                                           AND C.FLET_CTRT_FACT_CD = 'ACT'
+											#if (${vsl_cd} != '')
+						                      AND C.VSL_CD IN (
+                                                SELECT @[vsl_cd]
+                                                  FROM DUAL
+                                                UNION
+                                                SELECT Y.VSL_CD
+                                                  FROM FMS_CONTRACT Z
+                                                     , FMS_ID_VSL Y
+                                                 WHERE 1=1
+                                                   AND Z.VSL_CD = @[vsl_cd]
+                                                   AND Z.FLET_CTRT_NO = Y.FLET_CTRT_NO
+                                                   AND Y.FLET_RPT_FLG = 'Y'
+                                                )
+					  						#end
+                                           AND ((TO_DATE(@[eff_dt], 'YYYYMMDD' ) BETWEEN T01.EFF_DT AND T01.EXP_DT )
+                                                    OR (TO_DATE(@[eff_dt]||'235959', 'YYYYMMDDHH24MISS') BETWEEN T01.EFF_DT AND T01.EXP_DT )
+                                                    OR (T01.EFF_DT BETWEEN TO_DATE(@[eff_dt], 'YYYYMMDD' ) AND TO_DATE(@[exp_dt]||'235959', 'YYYYMMDDHH24MISS'))
+                                                    OR (T01.EXP_DT BETWEEN TO_DATE(@[eff_dt], 'YYYYMMDDHH24MI') AND TO_DATE(@[exp_dt]||'235959', 'YYYYMMDDHH24MISS')) /* 조회 기간*/
+                                                  ) )
+                                     , (SELECT ROWNUM - 1 AS SEQ
+                                          FROM MDM_VENDOR
+                                         WHERE ROWNUM <= 5000) /* 최고 기간(EXP_DT - EFF_DT)을 약 13년을 설정했으며 그 이상이 되면 문제가 됨.*/
+                                 WHERE SEQ BETWEEN 0 AND TM
+                                   AND EFF_DT + SEQ <> EXP_DT /* FMS_HIRE에 대한 마지막 날짜와 다음 계약에 시작날짜가 중복 발생 방지 */
+                                  ) T01
+                             , FMS_PAY_TERM T02
+                         WHERE 1 =1
+                           AND AGMT = T02.FLET_CTRT_NO
+                           AND DT BETWEEN T02.EFF_DT AND T02.EXP_DT ) T11
+                 WHERE 1=1
+                   AND DT <> EXP_DT /* FMS_PAY_TERM에 대한 마지막 날짜와 다음 계약에 시작날짜가 중복 발생 방지 */
+                 ORDER BY AGMT, RK, DT ) T21
+         WHERE 1=1
+         ORDER BY AGMT, RK, DT )
+ WHERE 1=1
+   AND DT BETWEEN TO_DATE(@[eff_dt], 'YYYYMMDD') AND TO_DATE(@[exp_dt]||'235959', 'YYYYMMDDHH24MISS')
+   AND CALC_POINT = 'Y'
+    )
+GROUP BY TI_C11, TI_C12, TO_C21, TO_C22
+)      
+SELECT A.TI_C11 AS TI_CURR_CD
+     , A.TI_V11 AS TI_INV_AMT
+     , B.TI_C12 AS TI_CURR_CD2
+     , B.TI_V12 AS TI_INV_AMT2
+     , C.TO_C21 AS TO_CURR_CD
+     , C.TO_V21 AS TO_INV_AMT
+     , D.TO_C22 AS TO_CURR_CD2
+     , D.TO_V22 AS TO_INV_AMT2
+  FROM (SELECT TI_C11 FROM (
+        SELECT DISTINCT TI_C11 FROM V_SUMDATA WHERE TI_C11 IS NOT NULL UNION
+        SELECT DISTINCT TI_C12 FROM V_SUMDATA WHERE TI_C12 IS NOT NULL UNION
+        SELECT DISTINCT TO_C21 FROM V_SUMDATA WHERE TO_C21 IS NOT NULL UNION
+        SELECT DISTINCT TO_C22 FROM V_SUMDATA WHERE TO_C22 IS NOT NULL 
+        ) ORDER BY 1) CUR
+     , (SELECT TI_C11 AS NKEY
+             , TI_C11
+             , SUM(TI_V11) AS TI_V11
+          FROM V_SUMDATA
+         WHERE TI_C11 IS NOT NULL
+         GROUP BY TI_C11 ) A
+     , (SELECT TI_C12 AS NKEY
+             , TI_C12
+             , SUM(TI_V12) AS TI_V12
+          FROM V_SUMDATA
+         WHERE TI_C12 IS NOT NULL
+         GROUP BY TI_C12 ) B
+     , (SELECT TO_C21 AS NKEY
+             , TO_C21
+             , SUM(TO_V21) AS TO_V21
+          FROM V_SUMDATA
+         WHERE TO_C21 IS NOT NULL
+         GROUP BY TO_C21 ) C
+     , (SELECT TO_C22 AS NKEY
+             , TO_C22
+             , SUM(TO_V22) AS TO_V22
+          FROM V_SUMDATA
+         WHERE TO_C22 IS NOT NULL
+         GROUP BY TO_C22 ) D
+ WHERE CUR.TI_C11 = A.NKEY (+)
+   AND CUR.TI_C11 = B.NKEY (+)
+   AND CUR.TI_C11 = C.NKEY (+)
+   AND CUR.TI_C11 = D.NKEY (+)			]]></sql>
+			<params>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="eff_dt" type="12" value="" out="N"/>
+				<param name="exp_dt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,176 @@
+/*=========================================================
+*Copyright(c) 2010 CyberLogitec
+*@FileName : TCharterIOConsultationDBDAOSearchTaxMasterEvidenceRSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2010.05.07
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2010.05.07 
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.fms.timecharterinoutaccounting.tcharterioconsultation.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class TCharterIOConsultationDBDAOSearchTaxMasterEvidenceRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * TCharterIOConsultationDBDAOSearchTaxMasterEvidenceRSQL
+	  * </pre>
+	  */
+	public TCharterIOConsultationDBDAOSearchTaxMasterEvidenceRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("csr_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.clt.apps.opus.esm.fms.timecharterinoutaccounting.tcharterioconsultation.integration").append("\n"); 
+		query.append("FileName : TCharterIOConsultationDBDAOSearchTaxMasterEvidenceRSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT TAX_INV_YRMON," ).append("\n"); 
+		query.append("       OFC_CD," ).append("\n"); 
+		query.append("	   DOC_EVID_TP_CD," ).append("\n"); 
+		query.append("       TAX_VAT_TP_CD," ).append("\n"); 
+		query.append("       TAX_NAID_FLG," ).append("\n"); 
+		query.append("       TAX_DIV_CD," ).append("\n"); 
+		query.append("       FA_FLG," ).append("\n"); 
+		query.append("       TAX_PL_CD," ).append("\n"); 
+		query.append("       TAX_NSL_FLG," ).append("\n"); 
+		query.append("       SPL_RGST_NO," ).append("\n"); 
+		query.append("       OWNR_NM," ).append("\n"); 
+		query.append("       CO_NM," ).append("\n"); 
+		query.append("       BZCT_NM," ).append("\n"); 
+		query.append("       BZTP_NM," ).append("\n"); 
+		query.append("       SPL_ADDR," ).append("\n"); 
+		query.append("       ISS_DT," ).append("\n"); 
+		query.append("       SPL_AMT," ).append("\n"); 
+		query.append("       TAX_AMT," ).append("\n"); 
+		query.append("       TOTAL_AMT" ).append("\n"); 
+		query.append("  FROM (" ).append("\n"); 
+		query.append("        SELECT SUBSTR(TAX_INV_YRMON,1,4) || '-' || " ).append("\n"); 
+		query.append("               SUBSTR(TAX_INV_YRMON,5,2) TAX_INV_YRMON," ).append("\n"); 
+		query.append("               OFC_CD," ).append("\n"); 
+		query.append("			   DOC_EVID_TP_CD," ).append("\n"); 
+		query.append("               TAX_VAT_TP_CD," ).append("\n"); 
+		query.append("               TAX_NAID_FLG," ).append("\n"); 
+		query.append("               TAX_DIV_CD," ).append("\n"); 
+		query.append("               FA_FLG," ).append("\n"); 
+		query.append("               TAX_PL_CD," ).append("\n"); 
+		query.append("               TAX_NSL_FLG," ).append("\n"); 
+		query.append("               SUBSTR(SPL_RGST_NO,1,3) || '-' || " ).append("\n"); 
+		query.append("               SUBSTR(SPL_RGST_NO,4,2) || '-' || " ).append("\n"); 
+		query.append("               SUBSTR(SPL_RGST_NO,6) SPL_RGST_NO," ).append("\n"); 
+		query.append("               OWNR_NM," ).append("\n"); 
+		query.append("               CO_NM," ).append("\n"); 
+		query.append("               BZCT_NM," ).append("\n"); 
+		query.append("               BZTP_NM," ).append("\n"); 
+		query.append("               SPL_ADDR," ).append("\n"); 
+		query.append("               SUBSTR(ISS_DT,1,4) || '-' || " ).append("\n"); 
+		query.append("               SUBSTR(ISS_DT,5,2) || '-' || " ).append("\n"); 
+		query.append("               SUBSTR(ISS_DT,7,2) ISS_DT," ).append("\n"); 
+		query.append("               TO_CHAR(SPL_AMT,'FM999,999,999,999,999,990') SPL_AMT," ).append("\n"); 
+		query.append("               TO_CHAR(TAX_AMT,'FM999,999,999,999,999,990') TAX_AMT," ).append("\n"); 
+		query.append("               TO_CHAR(SPL_AMT + TAX_AMT,'FM999,999,999,999,999,990') TOTAL_AMT" ).append("\n"); 
+		query.append("          FROM FMS_TAX" ).append("\n"); 
+		query.append("         WHERE    SLP_TP_CD" ).append("\n"); 
+		query.append("               || SLP_FUNC_CD" ).append("\n"); 
+		query.append("               || SLP_OFC_CD" ).append("\n"); 
+		query.append("               || SLP_ISS_DT" ).append("\n"); 
+		query.append("               || SLP_SER_NO = @[csr_no]" ).append("\n"); 
+		query.append("       )" ).append("\n"); 
+		query.append("UNION ALL" ).append("\n"); 
+		query.append("SELECT BIL_INV_YRMON," ).append("\n"); 
+		query.append("       OFC_CD," ).append("\n"); 
+		query.append("	   DOC_EVID_TP_CD," ).append("\n"); 
+		query.append("       BIL_VAT_TP_CD," ).append("\n"); 
+		query.append("       BIL_NAID_FLG," ).append("\n"); 
+		query.append("       BIL_DIV_CD," ).append("\n"); 
+		query.append("       FA_FLG," ).append("\n"); 
+		query.append("       BIL_PL_CD," ).append("\n"); 
+		query.append("       BIL_NSL_FLG," ).append("\n"); 
+		query.append("       SPL_RGST_NO," ).append("\n"); 
+		query.append("       OWNR_NM," ).append("\n"); 
+		query.append("       CO_NM," ).append("\n"); 
+		query.append("       BZCT_NM," ).append("\n"); 
+		query.append("       BZTP_NM," ).append("\n"); 
+		query.append("       SPL_ADDR," ).append("\n"); 
+		query.append("       ISS_DT," ).append("\n"); 
+		query.append("       SPL_AMT," ).append("\n"); 
+		query.append("       BIL_AMT," ).append("\n"); 
+		query.append("       TOTAL_AMT" ).append("\n"); 
+		query.append("  FROM (" ).append("\n"); 
+		query.append("        SELECT SUBSTR(BIL_INV_YRMON,1,4) || '-' || " ).append("\n"); 
+		query.append("               SUBSTR(BIL_INV_YRMON,5,2) BIL_INV_YRMON," ).append("\n"); 
+		query.append("               OFC_CD," ).append("\n"); 
+		query.append("			   DOC_EVID_TP_CD," ).append("\n"); 
+		query.append("               NULL BIL_VAT_TP_CD," ).append("\n"); 
+		query.append("               NULL BIL_NAID_FLG," ).append("\n"); 
+		query.append("               BIL_DIV_CD," ).append("\n"); 
+		query.append("               NULL FA_FLG," ).append("\n"); 
+		query.append("               BIL_PL_CD," ).append("\n"); 
+		query.append("               NULL BIL_NSL_FLG," ).append("\n"); 
+		query.append("               SUBSTR(SPL_RGST_NO,1,3) || '-' || " ).append("\n"); 
+		query.append("               SUBSTR(SPL_RGST_NO,4,2) || '-' || " ).append("\n"); 
+		query.append("               SUBSTR(SPL_RGST_NO,6) SPL_RGST_NO," ).append("\n"); 
+		query.append("               OWNR_NM," ).append("\n"); 
+		query.append("               CO_NM," ).append("\n"); 
+		query.append("               BZCT_NM," ).append("\n"); 
+		query.append("               BZTP_NM," ).append("\n"); 
+		query.append("               SPL_ADDR," ).append("\n"); 
+		query.append("               SUBSTR(ISS_DT,1,4) || '-' || " ).append("\n"); 
+		query.append("               SUBSTR(ISS_DT,5,2) || '-' || " ).append("\n"); 
+		query.append("               SUBSTR(ISS_DT,7,2) ISS_DT," ).append("\n"); 
+		query.append("               TO_CHAR(SPL_AMT,'FM999,999,999,999,999,990') SPL_AMT," ).append("\n"); 
+		query.append("               '0' BIL_AMT," ).append("\n"); 
+		query.append("               TO_CHAR(SPL_AMT,'FM999,999,999,999,999,990') TOTAL_AMT" ).append("\n"); 
+		query.append("          FROM FMS_BILL" ).append("\n"); 
+		query.append("         WHERE    SLP_TP_CD" ).append("\n"); 
+		query.append("               || SLP_FUNC_CD" ).append("\n"); 
+		query.append("               || SLP_OFC_CD" ).append("\n"); 
+		query.append("               || SLP_ISS_DT" ).append("\n"); 
+		query.append("               || SLP_SER_NO = @[csr_no]" ).append("\n"); 
+		query.append("       )" ).append("\n"); 
+
+	}
+}

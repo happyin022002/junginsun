@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CarrierSettlementProcessDBDAOGetReeferTDRRSQL">
+			<desc><![CDATA[Reefer의 RDR 데이터를 가져온다.]]></desc>
+			<sql><![CDATA[
+SELECT 
+       O.RF_20_QTY  AS USD_SLT_BSA_QTY_20 
+      ,O.RF_40_QTY  AS USD_SLT_BSA_QTY_40
+      ,P.RF_20_PRC  AS RF_SCG_PRC_20     
+      ,P.RF_40_PRC  AS RF_SCG_PRC_40     
+FROM   JOO_STL_VVD J
+     , (
+         SELECT M.TRD_CD, M.RLANE_CD, M.DIR_CD, M.BSA_SLT_PRC_FM_DT, M.BSA_SLT_PRC_TO_DT
+              , SUM(DECODE(M.RT_TEU_FLG, 'A', D.UC_AMT, 'T', D.UC_AMT, 0)) RF_20_PRC
+              , SUM(DECODE(M.RT_TEU_FLG, 'A', D.UC_AMT, 'F', D.UC_AMT, 0)) RF_40_PRC
+           FROM BSA_RF_SCG_MST M
+              , BSA_RF_SCG_SLT_PRC D
+          WHERE M.BSA_SLT_COST_TP_CD = D.BSA_SLT_COST_TP_CD
+            AND M.RF_SCG_SLT_PRC_SEQ = D.RF_SCG_SLT_PRC_SEQ
+            AND M.TRD_CD             = D.TRD_CD
+            AND M.RLANE_CD           = D.RLANE_CD
+            AND M.DIR_CD             = D.DIR_CD
+            --2010.01.21 박효숙차장 TDR인 경우 Inter/Ocean 구분이 없으며 Long Leg(Ocean)을 가져와야함
+            AND M.BSA_SLT_COST_TP_CD = '018'
+            AND M.DELT_FLG           = 'N'
+            AND D.TRD_CD    = @[trd_cd]
+            AND D.RLANE_CD  = @[rlane_cd]
+            AND D.DIR_CD    = @[skd_dir_cd]
+            AND D.CRR_CD    = @[jo_crr_cd]
+         GROUP BY M.TRD_CD, M.RLANE_CD, M.DIR_CD, M.BSA_SLT_PRC_FM_DT, M.BSA_SLT_PRC_TO_DT
+       )P
+     , (
+       SELECT D.OPR_CD, D.VSL_CD, D.VOY_NO, D.DIR_CD, H.PORT_CD POL, D.POD,
+              SUM(DECODE(D.STATUS,'LM',DECODE(D.TEMP,NULL,0,DECODE(D.CNTR_SIZE,'2',1,'3',1,0)),'LI',
+                  DECODE(D.TEMP,NULL,0,DECODE(D.CNTR_SIZE,'2',1,'3',1,0)),'LT',
+                  DECODE(D.TEMP,NULL,0,DECODE(D.CNTR_SIZE,'2',1,'3',1,0)),0)) RF_20_QTY,
+              SUM(DECODE(D.STATUS,'LM',DECODE(D.TEMP,NULL,0,DECODE(D.CNTR_SIZE,'4',1,'H',1,'L',1,0)),'LI',
+                  DECODE(D.TEMP,NULL,0,DECODE(D.CNTR_SIZE,'4',1,'H',1,'L',1,0)),'LT',
+                    DECODE(D.TEMP,NULL,0,DECODE(D.CNTR_SIZE,'4',1,'H',1,'L',1,0)),0)) RF_40_QTY
+         FROM   TDR_HEADER H, TDR_CNTR_DETAIL D
+         WHERE 1=1
+         AND    H.PORT_CD  = @[fm_port_cd]
+         AND    D.POD      = @[to_port_cd]
+         AND    H.VSL_CD   = D.VSL_CD
+         AND    H.VOY_NO   = D.VOY_NO
+         AND    H.DIR_CD   = D.DIR_CD
+         AND    H.PORT_CD  = D.PORT_CD
+         AND    H.CALL_IND = D.CALL_IND
+         AND    D.STATUS   = 'LT'
+         AND   (D.OPR_CD, H.VSL_CD, H.VOY_NO, H.DIR_CD) IN 
+        (SELECT B.JO_CRR_CD, A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD
+         FROM   JOO_STL_VVD A,
+                (
+         		    SELECT DECODE(@[re_divr_cd], 'E', COM_CONSTANTMGR_PKG.COM_getCompanyCode_FNC, @[jo_crr_cd]) AS JO_CRR_CD, TO_DATE('99991231','YYYYMMDD') AS EFF_ETA_DT
+         		    FROM   DUAL
+         		    UNION  ALL
+         		    SELECT JO_N2ND_CRR_CD AS JO_CRR_CD, EFF_ETA_DT
+         		    FROM   JOO_CRR_MRG A
+         		    WHERE  A.DELT_FLG       = 'N'
+         		    AND    A.ACCTG_CRR_CD   = @[jo_crr_cd]
+         		    AND    A.JO_N1ST_CRR_CD = DECODE(@[re_divr_cd], 'E', COM_CONSTANTMGR_PKG.COM_getCompanyCode_FNC, @[jo_crr_cd])
+         		    AND    A.TRD_CD         = @[trd_cd]
+         		    AND    A.RLANE_CD       = @[rlane_cd]
+                ) B
+         WHERE  A.BZC_PORT_ETA_DT <= B.EFF_ETA_DT
+         AND    A.ACCT_YRMON    = REPLACE(@[acct_yrmon],'-','')
+         AND    A.JO_CRR_CD     = @[jo_crr_cd]
+         AND    A.TRD_CD        = @[trd_cd]
+         AND    A.RLANE_CD      = @[rlane_cd]
+         AND    A.RE_DIVR_CD    = @[re_divr_cd]
+         AND    A.JO_STL_ITM_CD = @[jo_stl_itm_cd]
+         AND    A.JO_MNU_NM     = @[jo_mnu_nm]
+         AND    A.JO_STL_CFM_CD = 'Y'
+         )
+         AND    D.TEMP IS NOT NULL
+       GROUP BY OPR_CD, D.VSL_CD, D.VOY_NO, D.DIR_CD, H.PORT_CD, POD          
+       )O
+WHERE J.ACCT_YRMON    = REPLACE(@[acct_yrmon],'-','')
+  AND J.JO_CRR_CD     = @[jo_crr_cd]
+  AND J.TRD_CD        = @[trd_cd]
+  AND J.RLANE_CD      = @[rlane_cd]
+  AND J.VSL_CD        = @[vsl_cd]
+  AND J.SKD_VOY_NO    = @[skd_voy_no]
+  AND J.SKD_DIR_CD    = @[skd_dir_cd]
+  AND J.RE_DIVR_CD    = @[re_divr_cd]
+  AND J.JO_STL_ITM_CD = @[jo_stl_itm_cd]
+  AND J.JO_MNU_NM     = @[jo_mnu_nm]
+  AND J.JO_STL_CFM_CD = 'Y'
+  AND J.TRD_CD        = P.TRD_CD(+)
+  AND J.RLANE_CD      = P.RLANE_CD(+)
+  AND J.SKD_DIR_CD    = P.DIR_CD(+)
+  AND J.VSL_CD        = O.VSL_CD(+)
+  AND J.SKD_VOY_NO    = O.VOY_NO(+)
+  AND J.SKD_DIR_CD    = O.DIR_CD(+)
+  AND J.UC_BSS_PORT_ETD_DT BETWEEN TO_DATE(P.BSA_SLT_PRC_FM_DT(+),'YYYYMMDDHH24MISS') AND TO_DATE(P.BSA_SLT_PRC_TO_DT(+),'YYYYMMDDHH24MISS')			]]></sql>
+			<params>
+				<param name="trd_cd" type="12" value="IAS" out="N"/>
+				<param name="rlane_cd" type="12" value="NHSIA" out="N"/>
+				<param name="skd_dir_cd" type="12" value="E" out="N"/>
+				<param name="jo_crr_cd" type="12" value="STX" out="N"/>
+				<param name="fm_port_cd" type="12" value="SGSIN" out="N"/>
+				<param name="to_port_cd" type="12" value="VNSGN" out="N"/>
+				<param name="re_divr_cd" type="12" value="R" out="N"/>
+				<param name="acct_yrmon" type="12" value="2009-05" out="N"/>
+				<param name="jo_stl_itm_cd" type="12" value="R/F" out="N"/>
+				<param name="jo_mnu_nm" type="12" value="R/F" out="N"/>
+				<param name="vsl_cd" type="12" value="HNMN" out="N"/>
+				<param name="skd_voy_no" type="12" value="0034" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

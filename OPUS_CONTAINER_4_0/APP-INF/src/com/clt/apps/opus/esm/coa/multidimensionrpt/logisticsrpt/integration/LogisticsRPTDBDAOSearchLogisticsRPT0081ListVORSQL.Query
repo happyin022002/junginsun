@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LogisticsRPTDBDAOSearchLogisticsRPT0081ListVORSQL">
+			<desc><![CDATA[Logistics Exp. by Office [ESM_COA_0081화면] 쿼리1]]></desc>
+			<sql><![CDATA[
+SELECT   P_REPORT
+        ,COST_YRMON||COST_WK AS COST_YRMONWK
+        ,COST_YRMON
+        ,COST_WK
+        ,RHQ_CD
+        ,CTRL_OFC_CD
+        ,COST_ACT_GRP_TP_CD
+        ,COA_GET_CD_NM_FNC('CD01065', DECODE(COST_ACT_GRP_TP_CD, 'N', 'TM', 'TR')) LGS_KPI_COST_GRP_NM
+        ,KPI_CD
+        ,COA_GET_CD_NM_FNC(DECODE(P_KPITYPE, '1', 'CD01064', 'CD00950'), KPI_CD) KPI_NM
+        ,SUM(VOL) VOL
+        ,SUM(TM_AMT + TR_AMT) TOTAL_COST
+        ,SUM(TM_AMT + TR_AMT) / DECODE(SUM(VOL), 0, 1, SUM(VOL)) UNIT_COST
+        ,'3' KPI_ORDER
+FROM (
+       SELECT   #if (${f_chkprd} == 'W')
+                  /*+  FULL(c3) PARALLEL(c3,4)*/
+                #else
+                  /*+ ordered FULL(c3) PARALLEL(c3,4) use_nl(c6)*/
+                #end
+               C1.P_REPORT       /*split을 안하면 모두 X, 두개다 있는경우, month만 있는경우, week만 있는경우*/
+              ,(CASE WHEN C1.P_SPLIT_MW||P_CHKPRD = 'TW' THEN C2.SLS_YRMON
+                     WHEN C1.P_SPLIT_MW||P_CHKPRD = 'TM' THEN C2.COST_YRMON
+                     ELSE 'X'
+                END) AS COST_YRMON
+              ,(CASE WHEN C1.P_SPLIT_MW||P_CHKPRD = 'TW' THEN C2.COST_WK
+                     ELSE 'X'
+                END) AS COST_WK
+              ,(CASE WHEN C1.P_REPORT = '1' THEN 'X'
+                     ELSE C6.OFC_N2ND_LVL_CD                          
+                 END ) AS RHQ_CD     /*RHQ, Control OFFICE에서만 보여준다.*/
+              ,(CASE WHEN C1.P_REPORT = '3' THEN C6.OFC_N5TH_LVL_CD
+                     ELSE 'X'
+                 END) AS CTRL_OFC_CD    /*Control OFFICE에서만 보여준다.*/
+              ,C5.COST_ACT_GRP_TP_CD
+              ,C1.P_KPITYPE
+              ,(CASE WHEN C1.P_KPITYPE = '1' THEN (CASE WHEN C5.STTL_FLG = 'Y' THEN 'ST' ELSE C5.LGS_KPI_MN_CD END)
+                     ELSE(CASE WHEN C5.STTL_FLG = 'Y' THEN 'SHTL' ELSE C5.LGS_KPI_CD END)
+                 END) AS KPI_CD
+              ,SUM(NVL(C5.CNTR_QTY, 0)) VOL
+              ,SUM(C5.FCNTR_STVG_TTL_AMT) AS TM_AMT
+              ,SUM(C5.FCNTR_TRSP_TTL_AMT) AS TR_AMT
+        FROM (SELECT  @[f_year] P_YEAR
+                  , @[f_fm_mon] P_SCOST_YRMON
+                  , @[f_to_mon] P_ECOST_YRMON
+                  , @[f_sls_mon] P_SLS_MON
+                  , @[f_fm_wk] P_SCOST_WEEK
+                  , @[f_to_wk] P_ECOST_WEEK
+                  , @[f_split_mw] P_SPLIT_MW
+                  , @[f_chkprd] P_CHKPRD
+                  , @[f_report] P_REPORT
+                  , @[f_rhq_cd] P_RHQ_CD
+                  , @[f_ctrl_ofc_cd] P_CTRL_OFC_CD
+                  , @[f_in_out] P_INOUT
+                  ,DECODE(@[f_lgs_kpi_cost_grp_cd], 'TM', 'N', 'TR', 'L', '') P_COST_ACT_GRP_TP_CD   /*P_LGS_KPI_COST_GRP_CD*/
+                  ,@[f_kpi_type] P_KPITYPE
+                  ,@[f_lgs_mn_kpi_cd] P_LGS_KPI_MN_CD
+                  ,@[f_lgs_kpi_cd] P_LGS_KPI_CD
+                  ,@[f_incld_mt] P_INCLD_MT                  
+                  ,DECODE(@[f_lgs_mn_kpi_cd], 'ST', 'Y', 'N') P_MN_SHTL
+                  ,DECODE(@[f_lgs_kpi_cd], 'SHTL', 'Y', 'N') P_SHTL
+             FROM DUAL) C1
+                       ,COA_MON_VVD C2
+                       ,COA_RGST_BKG C3
+                       ,COA_BKG_LGS_SMRY C5
+                       ,COA_OFC_LVL C6
+             WHERE 1 = 1
+
+             #if (${f_chkprd} == 'W')
+                #if (${f_sls_mon} != '')
+               AND SLS_YRMON = C1.P_YEAR || C1.P_SLS_MON
+               AND COST_WK BETWEEN C1.P_SCOST_WEEK AND C1.P_ECOST_WEEK
+                #else
+               AND SLS_YRMON LIKE C1.P_YEAR||'%'  /*SLS_YRMON*/
+               AND COST_WK BETWEEN C1.P_SCOST_WEEK AND C1.P_ECOST_WEEK     /*COST_WK*/
+                #end
+             #elseif (${f_chkprd} == 'M')
+               AND C2.COST_YRMON BETWEEN C1.P_SCOST_YRMON AND C1.P_ECOST_YRMON
+             #end
+
+             #if (${f_lgs_kpi_cd} != '' && ${f_kpi_type} == '2')
+                #if (${f_lgs_kpi_cd} == 'SHTL')
+               AND C5.STTL_FLG = 'Y'
+                #else
+               AND C5.LGS_KPI_CD = C1.P_LGS_KPI_CD
+                #end
+             #end
+
+             #if (${f_lgs_mn_kpi_cd} != '' && ${f_kpi_type} == '1')
+                #if (${f_lgs_mn_kpi_cd} == 'ST')
+               AND C5.STTL_FLG = 'Y'
+                #else
+               AND C5.LGS_KPI_MN_CD = C1.P_LGS_KPI_MN_CD
+                #end
+             #end
+
+             #if (${f_incld_mt} == '')
+               AND C5.COST_ACT_GRP_CD  NOT IN ('NIBC','NOBC')
+             #end
+
+             #if (${f_rhq_cd} != '')                
+               AND C6.OFC_N2ND_LVL_CD = C1.P_RHQ_CD                
+             #end
+
+             #if (${f_ctrl_ofc_cd} != '')
+               AND C6.OFC_N5TH_LVL_CD = C1.P_CTRL_OFC_CD
+             #end
+
+             #if (${f_lgs_kpi_cost_grp_cd} != '')
+               AND C5.COST_ACT_GRP_TP_CD = C1.P_COST_ACT_GRP_TP_CD
+             #end
+
+             #if (${f_in_out} != '')
+               AND CASE C5.COST_ACT_GRP_CD
+                     WHEN 'PRWD' THEN 'O'
+                     WHEN 'POWD' THEN 'I'
+                     WHEN 'TRWD' THEN 'C'
+                     ELSE C5.COST_IO_BND_CD
+                   END = @[f_in_out]
+             #end
+
+               AND C3.BKG_STS_CD IN('F', 'S')
+               AND C3.BL_NO_TP IN('M', '0')
+               AND C2.DELT_FLG NOT IN('Y')
+               AND C3.BKG_CGO_TP_CD NOT IN('P')
+               AND C2.VSL_CD = C3.VSL_CD
+               AND C2.SKD_VOY_NO = C3.SKD_VOY_NO
+               AND C2.DIR_CD = C3.DIR_CD
+               AND C2.TRD_CD = C3.TRD_CD
+               AND C2.RLANE_CD = C3.RLANE_CD
+               AND C2.IOC_CD = C3.IOC_CD
+               AND C3.BKG_NO = C5.BKG_NO
+               AND C5.CTRL_OFC_CD = C6.OFC_CD
+
+             #if (${f_chkprd} == 'W')
+               AND C2.SLS_YRMON BETWEEN C6.OFC_APLY_FM_YRMON  and C6.OFC_APLY_TO_YRMON
+             #elseif (${f_chkprd} == 'M')
+               AND C2.COST_YRMON BETWEEN C6.OFC_APLY_FM_YRMON  and C6.OFC_APLY_TO_YRMON
+             #end
+
+            GROUP BY C1.P_REPORT
+                    ,(CASE WHEN C1.P_SPLIT_MW||P_CHKPRD = 'TW' THEN C2.SLS_YRMON
+                           WHEN C1.P_SPLIT_MW||P_CHKPRD = 'TM' THEN C2.COST_YRMON
+                           ELSE 'X'
+                       END)
+                    ,(CASE WHEN C1.P_SPLIT_MW||P_CHKPRD = 'TW' THEN C2.COST_WK
+                           ELSE 'X'
+                       END)
+                    ,(CASE WHEN C1.P_REPORT = '1' THEN 'X'
+                           ELSE C6.OFC_N2ND_LVL_CD
+                       END)
+                    ,(CASE WHEN C1.P_REPORT = '3' THEN C6.OFC_N5TH_LVL_CD
+                           ELSE 'X'
+                       END)
+                    ,C5.COST_ACT_GRP_TP_CD
+                    ,C1.P_KPITYPE
+                    ,(CASE WHEN C1.P_KPITYPE = '1' THEN (CASE WHEN C5.STTL_FLG = 'Y' THEN 'ST' ELSE C5.LGS_KPI_MN_CD END )
+                           ELSE (CASE WHEN C5.STTL_FLG = 'Y' THEN 'SHTL' ELSE C5.LGS_KPI_CD END)
+                       END)
+     )
+GROUP BY P_REPORT
+        ,COST_YRMON
+        ,COST_WK
+        ,RHQ_CD
+        ,CTRL_OFC_CD
+        ,COST_ACT_GRP_TP_CD
+        ,KPI_CD
+        ,COA_GET_CD_NM_FNC('CD01065', DECODE(COST_ACT_GRP_TP_CD, 'N', 'TM', 'TR'))
+        ,COA_GET_CD_NM_FNC(DECODE(P_KPITYPE, '1', 'CD01064', 'CD00950'), KPI_CD)
+ORDER BY COST_YRMON
+        ,COST_WK
+        , COST_ACT_GRP_TP_CD DESC
+        ,RHQ_CD
+        ,CTRL_OFC_CD
+        ,KPI_ORDER
+        ,KPI_CD			]]></sql>
+			<params>
+				<param name="f_year" type="12" value="" out="N"/>
+				<param name="f_fm_mon" type="12" value="" out="N"/>
+				<param name="f_to_mon" type="12" value="" out="N"/>
+				<param name="f_sls_mon" type="12" value="" out="N"/>
+				<param name="f_fm_wk" type="12" value="" out="N"/>
+				<param name="f_to_wk" type="12" value="" out="N"/>
+				<param name="f_split_mw" type="12" value="" out="N"/>
+				<param name="f_chkprd" type="12" value="" out="N"/>
+				<param name="f_report" type="12" value="" out="N"/>
+				<param name="f_rhq_cd" type="12" value="" out="N"/>
+				<param name="f_ctrl_ofc_cd" type="12" value="" out="N"/>
+				<param name="f_in_out" type="12" value="" out="N"/>
+				<param name="f_lgs_kpi_cost_grp_cd" type="12" value="" out="N"/>
+				<param name="f_kpi_type" type="12" value="" out="N"/>
+				<param name="f_lgs_mn_kpi_cd" type="12" value="" out="N"/>
+				<param name="f_lgs_kpi_cd" type="12" value="" out="N"/>
+				<param name="f_incld_mt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

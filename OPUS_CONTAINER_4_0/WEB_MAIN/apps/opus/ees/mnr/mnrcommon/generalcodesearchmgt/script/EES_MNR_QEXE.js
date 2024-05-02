@@ -1,0 +1,281 @@
+﻿/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName :  EES_MNR_QEXE.js
+*@FileTitle : EES_MNR_QEXE
+*Open Issues :
+*Change history :
+*@LastModifyDate : 
+*@LastModifier : 
+*@LastVersion : 1.0 		    
+=========================================================*/
+/****************************************************************************************
+  Event code : INIT=0; ADD=1; SEARCH=2; SEARCHLIST=3;
+						MODIFY=4; REMOVE=5; REMOVELIST=6 MULTI=7
+						OTHER CASE : COMMAND01=11; ~ COMMAND20=30;
+ ***************************************************************************************/
+
+    /**	
+     * @extends Mnr   
+     * @class ees_mnr_qexe : business script for ees_mnr_qexe.
+     */ 
+    function ees_mnr_qexe() {    
+    	this.processButtonClick		= tprocessButtonClick;
+    	this.setSheetObject 		= setSheetObject;
+    	this.loadPage 				= loadPage;
+    	this.initSheet 				= initSheet;
+    	this.initControl            = initControl;
+    	this.doActionIBSheet 		= doActionIBSheet;
+    	this.setTabObject 			= setTabObject;
+    	this.validateForm 			= validateForm; 
+    }     
+   	/* developer job	*/  
+	  
+	// common global variables
+	var sheetObjects = new Array();
+	var sheetCnt = 0;
+	
+  
+	/* Event handler processing by button click event */
+	document.onclick = processButtonClick;
+	 
+	/* Event handler processing by button name */
+	function processButtonClick(){
+		
+		var sheetObj = sheetObjects[0];
+		/*******************************************************/
+		var formObject = document.form;
+		try {
+			var srcName = window.event.srcElement.getAttribute("name");
+			if(ComGetBtnDisable(srcName)) return false;
+			switch(srcName) {
+				case "btn_Run":	
+					doActionIBSheet(sheetObj,formObject,IBBATCH);		
+				break;  
+							 		
+				case "btn_FileOpen":
+					var msg = "select query."
+					// open path	
+					var local_path = "C:\\query";	
+																
+					var file = sheetObj.OpenFileDialog(msg,"",local_path,"SQL script(*.sql)|*.sql|All files(*.*)|*.*|Backup Files(*.~*)|*.~*");	
+						
+					if(file.indexOf('\\') == -1){
+						break; 					
+					}	
+					//file load 	   
+  					var fileObject = new ActiveXObject("Scripting.FileSystemObject");
+									 	
+					var fOpen = fileObject.OpenTextFile(file,1);
+					var tempTxt = "";
+					while(!fOpen.AtEndOfStream){
+						tempTxt += fOpen.Readline();	
+					}
+					fOpen.close();	 
+																
+					tempTxt = tempTxt.replace(/;/g,';\n\n');				
+					formObject.mnr_query.value = tempTxt;  
+				break;
+				
+				case "btn_GetInsert":		
+					doActionIBSheet(sheetObj,formObject,IBCREATE);
+					break;
+										 
+				case "btn_SendEDI": 							
+					doActionIBSheet(sheetObj,formObject,IBSEARCH_ASYNC01);  			
+					//ComOpenWindowCenter("http://203.246.150.28:9001/opuscntr/sppMain.ws?authKey=5555", "xx", 1024, 768, false, true);
+					break;									 
+			} // end switch
+		} catch(e) {
+			if( e == "[object Error]") {
+				ComFuncErrMsg(e); 
+			} else {
+				ComFuncErrMsg(e); 
+			}	
+		}
+	}
+	
+	 /**
+     * registering IBSheet Object as list
+     * adding process for list in case of needing batch processing with other items
+     * defining list on the top of source
+     */
+    function setSheetObject(sheet_obj){
+       sheetObjects[sheetCnt++] = sheet_obj;
+    }   
+     
+    /**
+     * initializing sheet
+     * implementing onLoad event handler in body tag
+     * adding first-served functions after loading screen.
+     */
+    function loadPage() {
+		initControl();
+        for(i=0;i<sheetObjects.length;i++){
+            initSheet(sheetObjects[i],i + 1); 
+        }	       
+    } 
+			
+    /**
+     * setting sheet initial values and header
+     * param : sheetObj, sheetNo
+     * adding case as numbers of counting sheets
+     */
+    function initSheet(sheetObj,sheetNo) {
+        var cnt = 0;
+		var sheetID = sheetObj.id;
+        switch(sheetID) { 
+            case "sheet1":
+                with (sheetObj) {
+                    //setting Host information[HostIp, Port, PagePath]
+                    if (location.hostname != "") InitHostInfo(location.hostname, location.port, page_path);
+			}  		  
+			break;  		
+        }	
+    }	
+	
+ // handling process for sheet
+    function doActionIBSheet(sheetObj,formObj,sAction) {
+        switch(sAction) {	
+			case IBBATCH:      //EXE
+				if(validateForm(sheetObj,formObj,sAction)){	 
+					var query = formObj.mnr_query.value;  
+					query = query.replace(/&/g,'☞');   
+					var sCondition = new Array (  	
+						new Array("EesMnrQexe",query,ComGetObjValue(formObj.run_cnt)) 	
+					)			
+					var sXml = MnrQexeRun(sheetObj,sCondition);   
+									
+					if(MnrComGetErrMsg(sXml) == null){
+						var arrXml = sXml.split("|$$|");	
+						var retValue = new Array();	
+						for(var i = 0; i < arrXml.length; i++){ 	  
+							retValue[i] =  MnrXml2ComboString(arrXml[i], "cd_id", "cd_desc");
+						} 	
+						
+						var resultStr = "";	
+						if(retValue[0] != null){ 
+							for(var j = 0; j < retValue[0].length;j++){ 
+								var tempText = retValue[0][j].split("|");   
+								resultStr += (tempText[0] + "\n RESULT ==>" + tempText[1] + "\n"); 
+							}		
+						}	
+						// return result
+						alert(resultStr);	
+					} else {
+						var exception = "Exception : " + ComGetEtcData(sXml,"Exception");
+						var msg = "ERROR MSG : " + MnrComGetErrMsg(sXml)
+						// return error message
+						alert(exception + "\n" + msg); 
+					}	
+					
+				}	     	
+				break;  
+				
+			case IBCREATE:      //GET
+				if(validateForm(sheetObj,formObj,sAction)){		 
+					var query = formObj.mnr_query.value;  
+					query = query.replace(/&/g,'☞');
+					var sCondition = new Array (  	
+						new Array("EesMnrQexe",query, "GET")    	
+					)	
+					var comboList = MnrComSearchCombo(sheetObj,sCondition);   
+						 
+					var tempStr = "";    	 	  												
+					if(comboList[0] != null){  	       
+						for(var j = 0; j < comboList[0].length;j++){ 
+							var tempText = comboList[0][j].split("|");	 		  		
+							tempStr += (tempText[1] + "\n"); 						
+						}		  			 				    
+					}				  
+					   
+					var resultStr = formObj.mnr_query.value;
+					resultStr += "\n\n ============================================  RESULT ============================================\n\n";
+					resultStr += tempStr;  
+					formObj.mnr_query.value = resultStr;		 		   
+				}			     	
+				break;  
+				
+			case IBSEARCH_ASYNC01:      //EDI SEND 
+				if(validateForm(sheetObj,formObj,sAction)){		 
+					var f_query = '';					
+					f_query += 'f_cmd' + '=' + COMMAND40 + '&'; 
+					f_query += 'ibflag=X&';	 			
+					f_query += 'del_chk=0&'; 	  
+					f_query += 'check_type' + '=' + '' + '&';	
+					f_query += 'check_value' + '=' + '';	
+																		        
+					var sXml = sheetObj.GetSearchXml("MNR_COMGS.do","" ,f_query,true);
+				}				     	
+				break;  
+					
+			case IBCLEAR:      //initializing    
+				break;
+		}		
+    }     
+
+
+    /**
+     * handling process for input validation
+     */         
+    function validateForm(sheetObj,formObj,sAction){
+        with(formObj){      
+			if(sAction==IBSEARCH) {        
+				//if (!ComChkValid(formObj)) return false;        
+			} 	 	
+        }       	
+        return true; 
+    }
+	
+	function initControl() {       
+	    //Axon handling event1. event catch  
+		var formObject = document.form;       
+	    axon_event.addListenerForm  ('blur',     'obj_deactivate',  formObject); 			  
+	    axon_event.addListenerFormat('focus',    'obj_activate',    formObject);             
+	    axon_event.addListenerFormat('keypress', 'obj_keypress', 	formObject);            
+		axon_event.addListenerFormat('change',	 'obj_change',	formObject); 
+	}             
+			   	
+	//Axon handling event2. handling event   
+	function obj_deactivate(){      
+	    ComChkObjValid(event.srcElement); 
+	} 
+			
+	function obj_activate(){   
+	    ComClearSeparator(event.srcElement);
+	}        
+						
+	function obj_change(){ 	     
+		var obj      = event.srcElement; 
+		var formObj  = document.form; 
+		var sheetObj = sheetObjects[0]; 
+		if ( ComTrim(obj.value) != "" ) {
+			switch(ComGetEvent("name")) {      
+	    		case "":       
+				   	break;      
+			}       
+	    } 
+	}    
+				        
+	function obj_keypress(){   
+	    obj = event.srcElement;    
+	    if(obj.dataformat == null) return; 
+	    window.defaultStatus = obj.dataformat;
+					 			              
+	    switch(obj.dataformat) {   
+	        case "ymd":   
+	        case "int":       
+				ComKeyOnlyNumber(obj); 
+	            break;     
+	        case "float":    
+	            ComKeyOnlyNumber(obj, "-.");
+	            break; 
+	        case "eng":   
+	            ComKeyOnlyAlphabet();
+				break;   
+	        case "engup":   
+				ComKeyOnlyAlphabet('uppernum');            
+	            break; 
+	    }         
+	}	
+
+/* developer job */

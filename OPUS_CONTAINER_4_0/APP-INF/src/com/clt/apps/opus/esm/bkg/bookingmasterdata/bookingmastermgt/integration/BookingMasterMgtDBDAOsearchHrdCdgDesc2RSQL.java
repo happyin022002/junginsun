@@ -1,0 +1,105 @@
+/*=========================================================
+*Copyright(c) 2015 CyberLogitec
+*@FileName : BookingMasterMgtDBDAOsearchHrdCdgDesc2RSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2015.06.24
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2015.06.24 
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.bkg.bookingmasterdata.bookingmastermgt.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class BookingMasterMgtDBDAOsearchHrdCdgDesc2RSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * HrdCdgDesc 테이블에서 select한다.
+	  * </pre>
+	  */
+	public BookingMasterMgtDBDAOsearchHrdCdgDesc2RSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("hrd_cdg_desc",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("hrd_cdg_id",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.clt.apps.opus.esm.bkg.bookingmasterdata.bookingmastermgt.integration").append("\n"); 
+		query.append("FileName : BookingMasterMgtDBDAOsearchHrdCdgDesc2RSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT " ).append("\n"); 
+		query.append("HRD_CDG_ID," ).append("\n"); 
+		query.append("HRD_CDG_DESC," ).append("\n"); 
+		query.append("ATTR_NM1," ).append("\n"); 
+		query.append("ATTR_NM2," ).append("\n"); 
+		query.append("ATTR_NM3," ).append("\n"); 
+		query.append("ATTR_NM4," ).append("\n"); 
+		query.append("ATTR_NM5," ).append("\n"); 
+		query.append("ATTR_NM6," ).append("\n"); 
+		query.append("ATTR_NM7," ).append("\n"); 
+		query.append("ATTR_NM8," ).append("\n"); 
+		query.append("ATTR_NM9," ).append("\n"); 
+		query.append("ATTR_NM10" ).append("\n"); 
+		query.append("FROM BKG_HRD_CDG_DESC" ).append("\n"); 
+		query.append("where 1=1" ).append("\n"); 
+		query.append("AND HRD_CDG_ID in ( select ATTR_CTNT1 from bkg_HRD_CDG_CTNT" ).append("\n"); 
+		query.append("                    where HRD_CDG_ID in ('HRD_CDG_MGMT_LIST') )" ).append("\n"); 
+		query.append("#if (${hrd_cdg_id}!='')" ).append("\n"); 
+		query.append("	AND UPPER(HRD_CDG_ID) LIKE UPPER('%'||@[hrd_cdg_id]||'%')" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("#if (${hrd_cdg_desc}!='')" ).append("\n"); 
+		query.append("	AND UPPER(HRD_CDG_DESC) LIKE UPPER('%'||@[hrd_cdg_desc]||'%')" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("ORDER BY HRD_CDG_ID" ).append("\n"); 
+
+	}
+}

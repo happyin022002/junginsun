@@ -1,0 +1,507 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : CommonListVO.java
+*@FileTitle : CommonListVO
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.10.01
+*@LastModifier : 이호선
+*@LastVersion : 1.0
+* 2009.10.01 이호선 
+* 1.0 Creation
+=========================================================*/
+
+package com.clt.apps.opus.ees.mst.mstcommon.mstcommon.vo;
+
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+
+import javax.servlet.http.HttpServletRequest;
+
+import com.clt.framework.component.common.AbstractValueObject;
+import com.clt.framework.component.util.JSPUtil;
+
+/**
+ * Table Value Ojbect<br>
+ * 관련 Event 에서 생성, 서버실행요청시 Data 전달역할을 수행하는 Value Object
+ *
+ * @author 이호선
+ * @since J2EE 1.6
+ * @see AbstractValueObject
+ */
+
+public class CommonListVO extends AbstractValueObject {
+
+	private static final long serialVersionUID = 1L;
+	
+	private Collection<CommonListVO> models = new ArrayList<CommonListVO>();
+	
+	/* Column Info */
+	private String curDate = null;
+	/* Column Info */
+	private String locCd = null;
+	/* VO Data Value( C:Creation, U:Update, D:Delete ) */
+	private String ibflag = null;
+	/* Column Info */
+	private String ydChkFlg = null;
+	/* Column Info */
+	private String vndrSeq = null;
+	/* Column Info */
+	private String eqKndCd = null;
+	/* Column Info */
+	private String code = null;
+	/* Column Info */
+	private String codeNm = null;
+	/* Column Info */
+	private String eqTpszCd = null;
+	/* Page Number */
+	private String pagerows = null;
+	/* Column Info */
+	private String sakuraAcctCd = null;
+	/* Column Info */
+	private String opusAcctCd = null;
+	/* Column Info */
+	private String acctNm = null;
+
+	/*	테이블 컬럼의 값을 저장하는 Hashtable */
+	private HashMap<String, String> hashColumns = new HashMap<String, String>();
+
+	/*	테이블 컬럼에 대응되는 멤버변수를 저장하는 Hashtable */
+	private HashMap<String, String> hashFields = new HashMap<String, String>();
+	
+	public CommonListVO() {}
+
+	public CommonListVO(String ibflag, String pagerows, String locCd, String vndrSeq, String code, String eqKndCd, String codeNm, String eqTpszCd, String curDate, String ydChkFlg
+			,String sakuraAcctCd ,String opusAcctCd ,String acctNm) {
+		this.curDate = curDate;
+		this.locCd = locCd;
+		this.ibflag = ibflag;
+		this.ydChkFlg = ydChkFlg;
+		this.vndrSeq = vndrSeq;
+		this.eqKndCd = eqKndCd;
+		this.code = code;
+		this.codeNm = codeNm;
+		this.eqTpszCd = eqTpszCd;
+		this.sakuraAcctCd = sakuraAcctCd;
+		this.opusAcctCd = opusAcctCd;
+		this.acctNm = acctNm;
+		this.pagerows = pagerows;
+	}
+	
+	/**
+	 * 테이블 컬럼에 저장할 값을 Hashtable<"column_name", "value"> 로 반환
+	 * @return HashMap
+	 */
+	public HashMap<String, String> getColumnValues(){
+		this.hashColumns.put("cur_date", getCurDate());
+		this.hashColumns.put("loc_cd", getLocCd());
+		this.hashColumns.put("ibflag", getIbflag());
+		this.hashColumns.put("yd_chk_flg", getYdChkFlg());
+		this.hashColumns.put("vndr_seq", getVndrSeq());
+		this.hashColumns.put("eq_knd_cd", getEqKndCd());
+		this.hashColumns.put("code", getCode());
+		this.hashColumns.put("code_nm", getCodeNm());
+		this.hashColumns.put("eq_tpsz_cd", getEqTpszCd());
+		this.hashColumns.put("sakra_acct_cd", getSakuraAcctCd());
+		this.hashColumns.put("opus_acct_cd", getOpusAcctCd());
+		this.hashColumns.put("acct_nm", getAcctNm());
+		this.hashColumns.put("pagerows", getPagerows());
+		return this.hashColumns;
+	}
+	
+	/**
+	 * 컬럼명에 대응되는 멤버변수명을 저장하여 Hashtable<"column_name", "variable"> 로 반환   
+	 * @return
+	 */
+	public HashMap<String, String> getFieldNames(){
+		this.hashFields.put("cur_date", "curDate");
+		this.hashFields.put("loc_cd", "locCd");
+		this.hashFields.put("ibflag", "ibflag");
+		this.hashFields.put("yd_chk_flg", "ydChkFlg");
+		this.hashFields.put("vndr_seq", "vndrSeq");
+		this.hashFields.put("eq_knd_cd", "eqKndCd");
+		this.hashFields.put("code", "code");
+		this.hashFields.put("code_nm", "codeNm");
+		this.hashFields.put("eq_tpsz_cd", "eqTpszCd");
+		this.hashFields.put("sakra_acct_cd", "sakuraAcctCd");
+		this.hashFields.put("opus_acct_cd", "opusAcctCd");
+		this.hashFields.put("acct_nm", "acctNm");
+		this.hashFields.put("pagerows", "pagerows");
+		return this.hashFields;
+	}
+	
+	/**
+	 * Column Info
+	 * @return curDate
+	 */
+	public String getCurDate() {
+		return this.curDate;
+	}
+	
+	/**
+	 * Column Info
+	 * @return locCd
+	 */
+	public String getLocCd() {
+		return this.locCd;
+	}
+	
+	/**
+	 * VO Data Value( C:Creation, U:Update, D:Delete )
+	 * @return ibflag
+	 */
+	public String getIbflag() {
+		return this.ibflag;
+	}
+	
+	/**
+	 * Column Info
+	 * @return ydChkFlg
+	 */
+	public String getYdChkFlg() {
+		return this.ydChkFlg;
+	}
+	
+	/**
+	 * Column Info
+	 * @return vndrSeq
+	 */
+	public String getVndrSeq() {
+		return this.vndrSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @return eqKndCd
+	 */
+	public String getEqKndCd() {
+		return this.eqKndCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @return code
+	 */
+	public String getCode() {
+		return this.code;
+	}
+	
+	/**
+	 * Column Info
+	 * @return codeNm
+	 */
+	public String getCodeNm() {
+		return this.codeNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @return eqTpszCd
+	 */
+	public String getEqTpszCd() {
+		return this.eqTpszCd;
+	}
+	
+	/**
+	 * Page Number
+	 * @return pagerows
+	 */
+	public String getPagerows() {
+		return this.pagerows;
+	}
+	
+	/**
+	 * SAKURA ACCT CD
+	 * @return sakuraAcctCd
+	 */
+	public String getSakuraAcctCd() {
+		return this.sakuraAcctCd;
+	}
+	
+	/**
+	 * OPUS ACCT CD
+	 * @return opusAcctCd
+	 */
+	public String getOpusAcctCd() {
+		return this.opusAcctCd;
+	}
+	
+	/**
+	 * ACCT NM
+	 * @return acctNm
+	 */
+	public String getAcctNm() {
+		return this.acctNm;
+	}
+
+	/**
+	 * Column Info
+	 * @param curDate
+	 */
+	public void setCurDate(String curDate) {
+		this.curDate = curDate;
+	}
+	
+	/**
+	 * Column Info
+	 * @param locCd
+	 */
+	public void setLocCd(String locCd) {
+		this.locCd = locCd;
+	}
+	
+	/**
+	 * VO Data Value( C:Creation, U:Update, D:Delete )
+	 * @param ibflag
+	 */
+	public void setIbflag(String ibflag) {
+		this.ibflag = ibflag;
+	}
+	
+	/**
+	 * Column Info
+	 * @param ydChkFlg
+	 */
+	public void setYdChkFlg(String ydChkFlg) {
+		this.ydChkFlg = ydChkFlg;
+	}
+	
+	/**
+	 * Column Info
+	 * @param vndrSeq
+	 */
+	public void setVndrSeq(String vndrSeq) {
+		this.vndrSeq = vndrSeq;
+	}
+	
+	/**
+	 * Column Info
+	 * @param eqKndCd
+	 */
+	public void setEqKndCd(String eqKndCd) {
+		this.eqKndCd = eqKndCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param code
+	 */
+	public void setCode(String code) {
+		this.code = code;
+	}
+	
+	/**
+	 * Column Info
+	 * @param codeNm
+	 */
+	public void setCodeNm(String codeNm) {
+		this.codeNm = codeNm;
+	}
+	
+	/**
+	 * Column Info
+	 * @param eqTpszCd
+	 */
+	public void setEqTpszCd(String eqTpszCd) {
+		this.eqTpszCd = eqTpszCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param sakuraAcctCd
+	 */
+	public void setSakuraAcctCd(String sakuraAcctCd) {
+		this.sakuraAcctCd = sakuraAcctCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param opusAcctCd
+	 */
+	public void setOpusAcctCd(String opusAcctCd) {
+		this.opusAcctCd = opusAcctCd;
+	}
+	
+	/**
+	 * Column Info
+	 * @param acctNm
+	 */
+	public void setAcctNm(String acctNm) {
+		this.acctNm = acctNm;
+	}
+	
+	/**
+	 * Page Number
+	 * @param pagerows
+	 */
+	public void setPagerows(String pagerows) {
+		this.pagerows = pagerows;
+	}
+	
+	/**
+	 * Request 의 데이터를 추출하여 VO 의 멤버변수에 설정.
+	 * @param request
+	 */
+	public void fromRequest(HttpServletRequest request) {
+		setCurDate(JSPUtil.getParameter(request, "cur_date", ""));
+		setLocCd(JSPUtil.getParameter(request, "loc_cd", ""));
+		setIbflag(JSPUtil.getParameter(request, "ibflag", ""));
+		setYdChkFlg(JSPUtil.getParameter(request, "yd_chk_flg", ""));
+		setVndrSeq(JSPUtil.getParameter(request, "vndr_seq", ""));
+		setEqKndCd(JSPUtil.getParameter(request, "eq_knd_cd", ""));
+		setCode(JSPUtil.getParameter(request, "code", ""));
+		setCodeNm(JSPUtil.getParameter(request, "code_nm", ""));
+		setEqTpszCd(JSPUtil.getParameter(request, "eq_tpsz_cd", ""));
+		setSakuraAcctCd(JSPUtil.getParameter(request, "sakra_acct_cd", ""));
+		setOpusAcctCd(JSPUtil.getParameter(request, "opus_acct_cd", ""));
+		setAcctNm(JSPUtil.getParameter(request, "acct_nm", ""));
+		setPagerows(JSPUtil.getParameter(request, "pagerows", ""));
+	}
+
+	/**
+	 * Request 의 데이터를 VO 배열로 변환하여 반환.
+	 * @param request
+	 * @return CommonListVO[]
+	 */
+	public CommonListVO[] fromRequestGrid(HttpServletRequest request) {
+		return fromRequestGrid(request, "");
+	}
+
+	/**
+	 * Request 넘어온 여러 건 DATA를 VO Class 에 담는다. 
+	 * @param request
+	 * @param prefix
+	 * @return CommonListVO[]
+	 */
+	public CommonListVO[] fromRequestGrid(HttpServletRequest request, String prefix) {
+		CommonListVO model = null;
+		
+		String[] tmp = request.getParameterValues(prefix + "ibflag");
+  		if(tmp == null)
+   			return null;
+
+  		int length = request.getParameterValues(prefix + "ibflag").length;
+  
+		try {
+			String[] curDate = (JSPUtil.getParameter(request, prefix	+ "cur_date", length));
+			String[] locCd = (JSPUtil.getParameter(request, prefix	+ "loc_cd", length));
+			String[] ibflag = (JSPUtil.getParameter(request, prefix	+ "ibflag", length));
+			String[] ydChkFlg = (JSPUtil.getParameter(request, prefix	+ "yd_chk_flg", length));
+			String[] vndrSeq = (JSPUtil.getParameter(request, prefix	+ "vndr_seq", length));
+			String[] eqKndCd = (JSPUtil.getParameter(request, prefix	+ "eq_knd_cd", length));
+			String[] code = (JSPUtil.getParameter(request, prefix	+ "code", length));
+			String[] codeNm = (JSPUtil.getParameter(request, prefix	+ "code_nm", length));
+			String[] eqTpszCd = (JSPUtil.getParameter(request, prefix	+ "eq_tpsz_cd", length));
+			String[] sakuraAcctCd = (JSPUtil.getParameter(request, prefix	+ "sakra_acct_cd", length));
+			String[] opusAcctCd = (JSPUtil.getParameter(request, prefix	+ "opus_acct_cd", length));
+			String[] acctNm = (JSPUtil.getParameter(request, prefix	+ "acct_nm", length));
+			String[] pagerows = (JSPUtil.getParameter(request, prefix	+ "pagerows", length));
+			
+			for (int i = 0; i < length; i++) {
+				model = new CommonListVO();
+				if (curDate[i] != null)
+					model.setCurDate(curDate[i]);
+				if (locCd[i] != null)
+					model.setLocCd(locCd[i]);
+				if (ibflag[i] != null)
+					model.setIbflag(ibflag[i]);
+				if (ydChkFlg[i] != null)
+					model.setYdChkFlg(ydChkFlg[i]);
+				if (vndrSeq[i] != null)
+					model.setVndrSeq(vndrSeq[i]);
+				if (eqKndCd[i] != null)
+					model.setEqKndCd(eqKndCd[i]);
+				if (code[i] != null)
+					model.setCode(code[i]);
+				if (codeNm[i] != null)
+					model.setCodeNm(codeNm[i]);
+				if (eqTpszCd[i] != null)
+					model.setEqTpszCd(eqTpszCd[i]);
+				if (sakuraAcctCd[i] != null)
+					model.setSakuraAcctCd(sakuraAcctCd[i]);
+				if (opusAcctCd[i] != null)
+					model.setOpusAcctCd(opusAcctCd[i]);
+				if (acctNm[i] != null)
+					model.setAcctNm(acctNm[i]);
+				if (pagerows[i] != null)
+					model.setPagerows(pagerows[i]);
+				models.add(model);
+			}
+
+		} catch (Exception e) {
+			return null;
+		}
+		return getCommonListVOs();
+	}
+
+	/**
+	 * VO 배열을 반환
+	 * @return CommonListVO[]
+	 */
+	public CommonListVO[] getCommonListVOs(){
+		CommonListVO[] vos = (CommonListVO[])models.toArray(new CommonListVO[models.size()]);
+		return vos;
+	}
+	
+	/**
+	 * VO Class의 내용을 String으로 변환
+	 */
+	public String toString() {
+		StringBuffer ret = new StringBuffer();
+		Field[] field = this.getClass().getDeclaredFields();
+		String space = "";
+		try{
+			for(int i = 0; i < field.length; i++){
+				String[] arr = null;
+				arr = getField(field, i);
+				if(arr != null){
+					for(int j = 0; j < arr.length; j++) {
+						ret.append(field[i].getName().concat(space).substring(0, 30).concat("= ") + arr[j] + "\n");
+					}
+				} else {
+					ret.append(field[i].getName() + " =  null \n");
+				}
+			}
+		} catch (Exception ex) {
+			return null;
+		}
+		return ret.toString();
+	}
+	
+	/**
+	 * 필드에 있는 값을 스트링 배열로 반환.
+	 * @param field
+	 * @param i
+	 * @return String[]
+	 */
+	private String[] getField(Field[] field, int i) {
+		String[] arr = null;
+		try{
+			arr = (String[]) field[i].get(this);
+		}catch(Exception ex){
+			arr = null;
+		}
+		return arr;
+	}
+
+	/**
+	* 포맷팅된 문자열에서 특수문자 제거("-","/",",",":")
+	*/
+	public void unDataFormat(){
+		this.curDate = this.curDate .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.locCd = this.locCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.ibflag = this.ibflag .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.ydChkFlg = this.ydChkFlg .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.vndrSeq = this.vndrSeq .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.eqKndCd = this.eqKndCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.code = this.code .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.codeNm = this.codeNm .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.eqTpszCd = this.eqTpszCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.sakuraAcctCd = this.sakuraAcctCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.opusAcctCd = this.opusAcctCd .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.acctNm = this.acctNm .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+		this.pagerows = this.pagerows .replaceAll(",", "").replaceAll("-", "").replaceAll("/", "").replaceAll(":", "");
+	}
+}

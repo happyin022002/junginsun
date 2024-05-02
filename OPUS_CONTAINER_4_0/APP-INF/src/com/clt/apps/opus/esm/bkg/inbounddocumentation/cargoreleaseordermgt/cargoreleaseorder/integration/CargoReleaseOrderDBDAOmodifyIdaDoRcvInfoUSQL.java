@@ -1,0 +1,144 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : CargoReleaseOrderDBDAOmodifyIdaDoRcvInfoUSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.07.22
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2009.07.22 
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.bkg.inbounddocumentation.cargoreleaseordermgt.cargoreleaseorder.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class CargoReleaseOrderDBDAOmodifyIdaDoRcvInfoUSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * Cargo Delivery - D/O (India)Receiver and Actual Consignee Setting(UI_BKG-0936)
+	  * </pre>
+	  */
+	public CargoReleaseOrderDBDAOmodifyIdaDoRcvInfoUSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("rcvr_co_nm",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("pic_nm",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("usr_id",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("rcvr_cnee_nm",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("rcvr_phn_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("do_no_split",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("hbl_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("rcvr_eml",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("do_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.clt.apps.opus.esm.bkg.inbounddocumentation.cargoreleaseordermgt.cargoreleaseorder.integration").append("\n"); 
+		query.append("FileName : CargoReleaseOrderDBDAOmodifyIdaDoRcvInfoUSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("UPDATE BKG_DO" ).append("\n"); 
+		query.append("SET HBL_NO       = @[hbl_no]" ).append("\n"); 
+		query.append(", RCVR_CNEE_NM = @[rcvr_cnee_nm]" ).append("\n"); 
+		query.append(", RCVR_CO_NM   = @[rcvr_co_nm]" ).append("\n"); 
+		query.append(", RCVR_PHN_NO  = @[rcvr_phn_no]" ).append("\n"); 
+		query.append(", PIC_NM       = @[pic_nm]" ).append("\n"); 
+		query.append(", RCVR_EML     = @[rcvr_eml]" ).append("\n"); 
+		query.append(", UPD_USR_ID   = @[usr_id]" ).append("\n"); 
+		query.append(", UPD_DT       = SYSDATE" ).append("\n"); 
+		query.append("WHERE DO_NO = @[do_no]" ).append("\n"); 
+		query.append("#if (${do_no_split} != '')" ).append("\n"); 
+		query.append("AND DO_NO_SPLIT = @[do_no_split]" ).append("\n"); 
+		query.append("#else" ).append("\n"); 
+		query.append("AND DO_NO_SPLIT IS NULL" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+
+	}
+}

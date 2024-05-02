@@ -1,0 +1,148 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : ESM_BKG_0426HTMLAction.java
+*@FileTitle : RDN Issuance by Regional Group
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.05.19
+*@LastModifier : 이승준
+*@LastVersion : 1.0
+* 2009.05.19 이승준
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.bkg.revenueaudit.revenuedebitnote.event;
+
+import javax.servlet.http.HttpServletRequest;
+
+import com.clt.apps.opus.esm.bkg.revenueaudit.revenuedebitnote.vo.CstmBkgRevDrNoteVO;
+import com.clt.apps.opus.esm.bkg.revenueaudit.revenuedebitnote.vo.RevDrNoteVO;
+import com.clt.apps.opus.esm.bkg.revenueaudit.revenuedebitnote.vo.RsltSearchRDNIssueMailingListVO;
+import com.clt.framework.core.controller.html.HTMLActionException;
+import com.clt.framework.core.layer.event.Event;
+import com.clt.framework.core.layer.event.EventResponse;
+import com.clt.framework.support.controller.HTMLActionSupport;
+import com.clt.framework.support.controller.html.FormCommand;
+import com.clt.syscommon.common.table.BkgRevDrAmtVO;
+import com.clt.syscommon.common.table.BkgRevDrNoteProgVO;
+
+/**
+ * HTTP Parser<br>
+ * - com.clt.apps.opus.esm.bkg.revenueaudit 화면을 통해 서버로 전송되는 HTML DOM 객체의 Value를 자바 변수로 Parsing<br>
+ * - Parsing 한 정보를 Event로 변환, request에 담아 RevenueAuditSC로 실행요청<br>
+ * - RevenueAuditSC에서 View(JSP)로 실행결과를 전송하는 EventResponse를 request에 셋팅<br>
+ * @author Seung Jun Lee
+ * @see RevenueAuditEvent 참조
+ * @since J2EE 1.4
+ */
+
+public class ESM_BKG_0426HTMLAction extends HTMLActionSupport {
+
+	private static final long serialVersionUID = 1L;
+	/**
+	 * ESM_BKG_0426HTMLAction 객체를 생성
+	 */
+	public ESM_BKG_0426HTMLAction() {}
+
+	/**
+	 * HTML DOM 객체의 Value를 자바 변수로 Parsing<br>
+	 * HttpRequst의 정보를 RevenueAuditEvent로 파싱하여 request에 셋팅<br>
+	 * @param request HttpServletRequest HttpRequest
+	 * @return Event Event interface를 구현한 객체
+	 * @exception HTMLActionException
+	 */
+	public Event perform(HttpServletRequest request) throws HTMLActionException {
+		
+    	FormCommand command = FormCommand.fromRequest(request);
+		EsmBkg0426Event event = new EsmBkg0426Event();
+        log.debug("::CALL::> ESM_BKG_0426HTMLAction - " + command.getCommand());
+        
+        RevDrNoteVO revDrNoteVO = new RevDrNoteVO();
+		event.setRevDrNoteVO(revDrNoteVO) ;
+		
+		if(command.isCommand(FormCommand.MULTI01)) {
+			event.getRevDrNoteVO().setBkgRevDrNoteVO((CstmBkgRevDrNoteVO)getVO(request, CstmBkgRevDrNoteVO .class));
+			event.getRevDrNoteVO().setBkgRevDrNoteProgVO((BkgRevDrNoteProgVO)getVO(request, BkgRevDrNoteProgVO .class));
+			event.getRevDrNoteVO().setBkgRevDrAmtVOs((BkgRevDrAmtVO[])getVOs(request, BkgRevDrAmtVO .class,""));
+		}
+		else if(command.isCommand(FormCommand.MULTI02)) {
+			event.getRevDrNoteVO().setBkgRevDrNoteVO((CstmBkgRevDrNoteVO)getVO(request, CstmBkgRevDrNoteVO .class));
+			event.getRevDrNoteVO().setBkgRevDrNoteProgVO((BkgRevDrNoteProgVO)getVO(request, BkgRevDrNoteProgVO .class));
+			event.getRevDrNoteVO().setBkgRevDrAmtVOs((BkgRevDrAmtVO[])getVOs(request, BkgRevDrAmtVO .class,""));
+		}
+		else if(command.isCommand(FormCommand.MULTI03)) {
+			event.getRevDrNoteVO().setBkgRevDrNoteVO((CstmBkgRevDrNoteVO)getVO(request, CstmBkgRevDrNoteVO .class));
+			event.getRevDrNoteVO().setBkgRevDrNoteProgVO((BkgRevDrNoteProgVO)getVO(request, BkgRevDrNoteProgVO .class));
+			event.getRevDrNoteVO().setBkgRevDrAmtVOs((BkgRevDrAmtVO[])getVOs(request, BkgRevDrAmtVO .class,""));
+		}
+		else if(command.isCommand(FormCommand.MULTI04)) {
+			event.getRevDrNoteVO().setBkgRevDrNoteVO((CstmBkgRevDrNoteVO)getVO(request, CstmBkgRevDrNoteVO .class));
+			event.getRevDrNoteVO().setBkgRevDrNoteProgVO((BkgRevDrNoteProgVO)getVO(request, BkgRevDrNoteProgVO .class));
+			event.getRevDrNoteVO().setBkgRevDrAmtVOs((BkgRevDrAmtVO[])getVOs(request, BkgRevDrAmtVO .class,""));
+		}
+		else if(command.isCommand(FormCommand.MULTI05)) {
+			event.getRevDrNoteVO().setBkgRevDrNoteVO((CstmBkgRevDrNoteVO)getVO(request, CstmBkgRevDrNoteVO .class));
+			event.getRevDrNoteVO().setBkgRevDrNoteProgVO((BkgRevDrNoteProgVO)getVO(request, BkgRevDrNoteProgVO .class));
+			event.getRevDrNoteVO().setBkgRevDrAmtVOs((BkgRevDrAmtVO[])getVOs(request, BkgRevDrAmtVO .class,""));
+		}
+		else if(command.isCommand(FormCommand.MULTI06)) {
+			event.getRevDrNoteVO().setBkgRevDrNoteVO((CstmBkgRevDrNoteVO)getVO(request, CstmBkgRevDrNoteVO .class));
+			event.getRevDrNoteVO().setBkgRevDrNoteProgVO((BkgRevDrNoteProgVO)getVO(request, BkgRevDrNoteProgVO .class));
+			event.getRevDrNoteVO().setBkgRevDrAmtVOs((BkgRevDrAmtVO[])getVOs(request, BkgRevDrAmtVO .class,""));
+		}
+		else if(command.isCommand(FormCommand.MULTI07)) {
+			event.getRevDrNoteVO().setBkgRevDrNoteVO((CstmBkgRevDrNoteVO)getVO(request, CstmBkgRevDrNoteVO .class));
+			event.getRevDrNoteVO().setBkgRevDrNoteProgVO((BkgRevDrNoteProgVO)getVO(request, BkgRevDrNoteProgVO .class));
+			event.getRevDrNoteVO().setBkgRevDrAmtVOs((BkgRevDrAmtVO[])getVOs(request, BkgRevDrAmtVO .class,""));
+		}
+		else if(command.isCommand(FormCommand.SEARCH01)) {
+			event.getRevDrNoteVO().setSearchGubun("1");
+			event.getRevDrNoteVO().setBkgRevDrNoteVO((CstmBkgRevDrNoteVO)getVO(request, CstmBkgRevDrNoteVO .class));	
+		}
+		else if(command.isCommand(FormCommand.SEARCH02)) {
+			event.getRevDrNoteVO().setSearchGubun("2");
+			event.getRevDrNoteVO().setBkgRevDrNoteVO((CstmBkgRevDrNoteVO)getVO(request, CstmBkgRevDrNoteVO .class));
+		}
+		else if(command.isCommand(FormCommand.SEARCH03)) {
+			event.getRevDrNoteVO().setSearchGubun("3");
+			event.getRevDrNoteVO().setBkgRevDrNoteVO((CstmBkgRevDrNoteVO)getVO(request, CstmBkgRevDrNoteVO .class));
+		}
+		else if(command.isCommand(FormCommand.SEARCH05)) {
+			event.getRevDrNoteVO().setSearchGubun("5");
+			event.getRevDrNoteVO().setBkgRevDrNoteVO((CstmBkgRevDrNoteVO)getVO(request, CstmBkgRevDrNoteVO .class));
+		}
+		else if(command.isCommand(FormCommand.SEARCH06)) { // RDN Issue Mailing List 가져오기 
+			event.setRsltSearchRDNIssueMailingListVO((RsltSearchRDNIssueMailingListVO)getVO(request, RsltSearchRDNIssueMailingListVO.class));
+		}
+		else if(command.isCommand(FormCommand.COMMAND01)) { // 메일일괄발송
+			event.setRsltSearchRDNIssueMailingListVOS((RsltSearchRDNIssueMailingListVO[])getVOs(request, RsltSearchRDNIssueMailingListVO.class, ""));
+			event.setRsltSearchRDNIssueMailingListVO((RsltSearchRDNIssueMailingListVO)getVO(request, RsltSearchRDNIssueMailingListVO.class));
+		}
+
+		request.setAttribute("Event", event);
+
+		return  event;
+	}
+
+	/**
+	 * HttpRequest의 attribute에 업무시나리오 수행결과 값 저장<br>
+	 * ServiceCommand에서 View(JSP)로 실행결과를 전송하는 ResultSet을 request에 셋팅<br>
+	 * 
+	 * @param request HttpServletRequest HttpRequest
+	 * @param eventResponse EventResponse interface를 구현한 객체
+	 */
+	public void doEnd(HttpServletRequest request, EventResponse eventResponse) {
+		request.setAttribute("EventResponse", eventResponse);
+	}
+
+	/**
+	 * HttpRequest의 attribute에 HttpRequest 파싱 수행결과 값 저장<br>
+	 * HttpRequest 파싱 수행결과 값 request에 셋팅<br>
+	 * 
+	 * @param request HttpServletRequest HttpRequest
+	 * @param event Event interface를 구현한 객체
+	 */
+	public void doEnd(HttpServletRequest request, Event event) {
+		request.setAttribute("Event", event);
+	}
+
+}

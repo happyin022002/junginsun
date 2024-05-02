@@ -1,0 +1,465 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PayableRentalCostDBDAOPayableChargeCreationDetailRSQL">
+			<desc><![CDATA[Payable Rental Charge Creation : Charge Detail Search
+ LT일때 Per-Diem LCC로 변경]]></desc>
+			<sql><![CDATA[
+WITH PARAM AS
+     ( SELECT A.*
+            , TO_DATE(@[chg_cost_yrmon], 'YYYYMM')          AS FIRST_DT
+            , LAST_DAY(TO_DATE(@[chg_cost_yrmon],'YYYYMM')) AS LAST_DT
+            , TRUNC(LAST_DAY(TO_DATE(@[chg_cost_yrmon], 'YYYYMM'))) AS BASE_DT
+            , @[chg_seq]                                    AS CHG_SEQ
+            , @[usr_id]                                     AS USR_ID
+       FROM   LSE_AGREEMENT A
+       WHERE  A.AGMT_SEQ    = @[agmt_seq]
+       AND    A.AGMT_CTY_CD = @[agmt_cty_cd]
+     )
+   , OF_LSI_DATA AS
+     ( SELECT CNTR.CNTR_NO
+            , LSI.CNTR_STS_SEQ
+            , LSI.CNTR_STS_CD
+            , LSI.CNTR_STS_EVNT_DT
+            , LSI.LOC_CD
+            , NVL(LSI.RNTL_CHG_FREE_DYS, 0) RNTL_CHG_FREE_DYS
+            , LSI.AGMT_CTY_CD
+            , LSI.AGMT_SEQ
+            , P.LSTM_CD
+            , LSI.CNTR_LFT_CHG_AMT
+            , LSI.CNTR_PKUP_CHG_AMT
+            , LSI.LCC_CD
+            , CNTR.ONH_YD_CD
+       FROM   MST_CONTAINER     CNTR
+            , MST_CNTR_STS_HIS  LSI
+            , PARAM             P
+       WHERE  CNTR.CNTR_NO    = LSI.CNTR_NO
+       AND    LSI.CNTR_STS_EVNT_DT <= P.LAST_DT + 0.99999
+       AND    LSI.CNTR_STS_CD IN ('DII','LSI')
+       AND    LSI.AGMT_SEQ    = P.AGMT_SEQ
+       AND    LSI.AGMT_CTY_CD = P.AGMT_CTY_CD
+     )
+   , OF_LSO_DATA AS
+     ( SELECT LSO.CNTR_NO
+            , CNTR.CNTR_TPSZ_CD
+            , LSO.CNTR_STS_CD
+            , DECODE(LSO.CNTR_STS_CD, 'TLL', LSO.CNTR_LOST_NTFY_DT
+                                           , LSO.CNTR_STS_EVNT_DT - DECODE(LSO.CNTR_LSTM_CNG_FLG, 'Y', 0, 0)) AS CNTR_STS_EVNT_DT
+            , LSO.LOC_CD
+            , LSO.PRNR_STS_SEQ
+            , LSO.CNTR_LFT_CHG_AMT
+            , LSO.CNTR_LSTM_CNG_FLG
+            , LSO.CNTR_DRFF_CR_AMT
+       FROM   MST_CONTAINER     CNTR
+            , MST_CNTR_STS_HIS  LSO
+            , PARAM             P
+       WHERE  CNTR.CNTR_NO    = LSO.CNTR_NO
+       AND    DECODE(LSO.CNTR_STS_CD, 'TLL', CNTR_LOST_NTFY_DT, LSO.CNTR_STS_EVNT_DT - DECODE(LSO.CNTR_LSTM_CNG_FLG, 'Y', 0, 0)) BETWEEN P.FIRST_DT AND P.LAST_DT + 0.99999
+       AND    LSO.CNTR_STS_CD IN ('TLL', 'DIO', 'LSO', 'SCR', 'SRO')
+       AND    LSO.AGMT_SEQ    = P.AGMT_SEQ
+       AND    LSO.AGMT_CTY_CD = P.AGMT_CTY_CD
+     )
+   , ON_LSI_DATA AS
+     ( SELECT SUBSTR(MAX(TO_CHAR(HIS.CNTR_STS_EVNT_DT,'RRRRMMDD') || TO_CHAR(HIS.CNTR_STS_SEQ, '00') || HIS.ROWID), 12) AS ROW_ID
+       FROM   MST_CNTR_STS_HIS  HIS
+            , PARAM             P
+       WHERE  HIS.CNTR_STS_CD IN ('TLL', 'DIO', 'LSO', 'DII', 'LSI', 'SCR', 'SRO')
+       AND    DECODE(HIS.CNTR_STS_CD, 'TLL', HIS.CNTR_LOST_NTFY_DT, HIS.CNTR_STS_EVNT_DT) <= P.LAST_DT
+       AND    HIS.AGMT_SEQ    = P.AGMT_SEQ
+       AND    HIS.AGMT_CTY_CD = P.AGMT_CTY_CD
+       GROUP  BY HIS.CNTR_NO
+       HAVING SUBSTR(MAX(TO_CHAR(DECODE(HIS.CNTR_STS_CD, 'TLL', HIS.CNTR_LOST_NTFY_DT, HIS.CNTR_STS_EVNT_DT),'RRRRMMDD')
+                         || TO_CHAR(HIS.CNTR_STS_SEQ, '00')
+                         || HIS.CNTR_STS_CD), 12, 3)
+                 IN ('DII','LSI')
+     )
+   , CNTR_LIST_DATA AS
+     ( SELECT A.AGMT_CTY_CD
+            , A.AGMT_SEQ
+            , A.LSTM_CD
+            , A.CNTR_NO
+            , A.CNTR_TPSZ_CD
+            , A.ONH_DT
+            , A.OFFH_DT
+            , A.ONH_LOC_CD
+            , A.OFFH_LOC_CD
+            , A.CHG_FREE_DYS
+            , A.USE_STRT_DT
+            , NVL(A.OFFH_DT, P.LAST_DT) - A.USE_STRT_DT + 1 AS COST_DYS -- TTL_DYS
+            , A.PYBL_USE_STRT_DT
+            , CASE WHEN A.PYBL_USE_STRT_DT <= NVL(A.OFFH_DT, P.LAST_DT) + 0.99999 THEN NVL(A.OFFH_DT, P.LAST_DT) - A.PYBL_USE_STRT_DT + 1 ELSE 0 END BIL_DYS
+            , A.CNTR_LSTM_CNG_FLG
+            , A.ONH_STS_CD
+            , A.OFH_STS_CD
+            , A.LFT_ON_CHG_AMT
+            , A.LFT_OF_CHG_AMT
+            , A.PUC_PCR_CHG_AMT
+            , A.DOC_DCR_CHG_AMT
+--            , A.LCC_CD AS ONH_LCC_CD
+            , A.ONH_YD_CD
+            , DECODE(A.LSTM_CD,'LT',CHT.LCC_CD,LOC.SCC_CD) AS ONH_YD_SCC_CD /* 2010.12.13 LT 일때 SCC->LCC변경*/
+--            , LOC.SCC_CD AS ONH_YD_SCC_CD
+       FROM   ( SELECT LSI.AGMT_CTY_CD
+                     , LSI.AGMT_SEQ
+                     , LSI.LSTM_CD
+                     , LSO.CNTR_NO
+                     , LSO.CNTR_TPSZ_CD
+                     , LSI.CNTR_STS_CD      AS ONH_STS_CD
+                     , LSI.CNTR_STS_EVNT_DT AS ONH_DT
+                     , LSI.LOC_CD           AS ONH_LOC_CD
+                     , LSO.CNTR_STS_CD      AS OFH_STS_CD
+                     , LSO.CNTR_STS_EVNT_DT AS OFFH_DT
+                     , LSO.LOC_CD           AS OFFH_LOC_CD
+                     , LSO.CNTR_LFT_CHG_AMT
+                     , LSO.CNTR_LSTM_CNG_FLG
+                     , LSI.RNTL_CHG_FREE_DYS AS CHG_FREE_DYS
+                     , DECODE(TO_CHAR(LSI.CNTR_STS_EVNT_DT, 'YYYYMM'), TO_CHAR(P.FIRST_DT, 'YYYYMM'), LSI.CNTR_STS_EVNT_DT
+                                                                                                    , P.FIRST_DT)
+                                             AS USE_STRT_DT
+                     , CASE WHEN TO_CHAR(LSI.CNTR_STS_EVNT_DT + LSI.RNTL_CHG_FREE_DYS, 'YYYYMM') < TO_CHAR(P.FIRST_DT, 'YYYYMM') THEN P.FIRST_DT
+                            ELSE LSI.CNTR_STS_EVNT_DT + LSI.RNTL_CHG_FREE_DYS
+                       END                   AS PYBL_USE_STRT_DT
+                     , LSI.CNTR_LFT_CHG_AMT  AS LFT_ON_CHG_AMT
+                     , LSO.CNTR_LFT_CHG_AMT  AS LFT_OF_CHG_AMT
+                     , LSI.CNTR_PKUP_CHG_AMT AS PUC_PCR_CHG_AMT
+                     , LSO.CNTR_DRFF_CR_AMT  AS DOC_DCR_CHG_AMT
+--                     , LSI.LCC_CD
+                     , LSI.ONH_YD_CD
+                FROM   OF_LSI_DATA  LSI
+                     , OF_LSO_DATA  LSO
+                     , PARAM        P
+                WHERE  LSI.CNTR_NO      = LSO.CNTR_NO
+                AND    LSI.CNTR_STS_SEQ = LSO.PRNR_STS_SEQ
+                UNION ALL
+                SELECT LSI.AGMT_CTY_CD
+                     , LSI.AGMT_SEQ
+                     , P.LSTM_CD
+                     , LSI.CNTR_NO
+                     , CNTR.CNTR_TPSZ_CD
+                     , LSI.CNTR_STS_CD      AS ONH_STS_CD
+                     , LSI.CNTR_STS_EVNT_DT AS ONH_DT
+                     , LSI.LOC_CD           AS ONH_LOC_CD
+                     , NULL                 AS OFH_STS_CD
+                     , NULL                 AS OFFH_DT
+                     , NULL                 AS OFFH_LOC_CD
+                     , LSI.CNTR_LFT_CHG_AMT
+                     , LSI.CNTR_LSTM_CNG_FLG
+                     , NVL(LSI.RNTL_CHG_FREE_DYS, 0) AS CHG_FREE_DYS
+                     , DECODE(TO_CHAR(LSI.CNTR_STS_EVNT_DT, 'YYYYMM'), TO_CHAR(P.FIRST_DT, 'YYYYMM'), LSI.CNTR_STS_EVNT_DT
+                                                                                                    , P.FIRST_DT)
+                                             AS USE_STRT_DT
+                     , CASE WHEN TO_CHAR(LSI.CNTR_STS_EVNT_DT + NVL(LSI.RNTL_CHG_FREE_DYS, 0), 'YYYYMM') < TO_CHAR(P.FIRST_DT, 'YYYYMM') THEN P.FIRST_DT
+                            ELSE LSI.CNTR_STS_EVNT_DT + NVL(LSI.RNTL_CHG_FREE_DYS, 0)
+                       END                   AS PYBL_USE_STRT_DT
+                     , LSI.CNTR_LFT_CHG_AMT  AS LFT_ON_CHG_AMT
+                     , 0                     AS LFT_OF_CHG_AMT
+                     , LSI.CNTR_PKUP_CHG_AMT AS PUC_PCR_CHG_AMT
+                     , 0                     AS DOC_DCR_CHG_AMT
+--                     , LSI.LCC_CD
+                     , CNTR.ONH_YD_CD
+                FROM   MST_CONTAINER     CNTR
+                     , MST_CNTR_STS_HIS  LSI
+                     , PARAM             P
+                WHERE  CNTR.CNTR_NO     = LSI.CNTR_NO
+                AND    P.AGMT_SEQ    = LSI.AGMT_SEQ
+                AND    P.AGMT_CTY_CD = LSI.AGMT_CTY_CD
+                AND    (LSI.ROWID) IN ( SELECT ROW_ID FROM ON_LSI_DATA )
+              ) A
+            , PARAM P
+            , MDM_YARD     YARD
+            , MDM_LOCATION LOC 			
+  	        , MDM_EQ_ORZ_CHT  CHT /* 2010.12.13 Lcc정보 추가*/
+       WHERE  LOC.LOC_CD = YARD.LOC_CD
+	   AND    LOC.SCC_CD = CHT.SCC_CD
+       AND    YARD.YD_CD = A.ONH_YD_CD
+     )
+   , AGMT_PDGV_DATA AS
+     ( SELECT A.AGMT_CTY_CD
+            , A.AGMT_SEQ
+            , RANK() OVER (PARTITION BY A.AGMT_CTY_CD, A.AGMT_SEQ, A.CNTR_TPSZ_CD ORDER BY A.AGMT_CTY_CD, A.AGMT_SEQ, A.CNTR_TPSZ_CD, A.AGMT_CHG_VAL) AS PDGV_RANK
+            , A.LOC_CD AS PDGV_SCC_CD
+            , A.AGMT_CHG_VAL AS TEU_NO
+             , A.CNTR_TPSZ_CD
+            , A.N1ST_CHG_AMT AS PDM_RT
+       FROM   LSE_AGMT_RT_V A
+            , PARAM       P
+       WHERE  A.CNTR_RNTL_CHG_TP_CD = 'PDGV'
+       AND    A.AGMT_SEQ     = P.AGMT_SEQ 
+       AND    A.AGMT_CTY_CD  = P.AGMT_CTY_CD
+       AND    A.AGMT_VER_SEQ = MST_COMMON_PKG.MST_AGMT_LST_VER_GET_FNC(P.AGMT_CTY_CD, P.AGMT_SEQ, P.BASE_DT)
+     )
+   , APP_PDGM_DATA AS
+     ( SELECT A.PDGV_SCC_CD
+            , A.TEU_NO
+            , NVL(B.TEU_NO2, 999999) AS TEU_NO2
+            , A.CNTR_TPSZ_CD
+            , PDM_RT
+       FROM   AGMT_PDGV_DATA A
+            , ( SELECT AGMT_CTY_CD
+                     , AGMT_SEQ
+                     , PDGV_RANK - 1 AS PDGV_RANK2
+                     , CNTR_TPSZ_CD
+                     , PDGV_SCC_CD
+                     , TEU_NO-1 AS TEU_NO2
+                FROM   AGMT_PDGV_DATA
+                WHERE  PDGV_RANK > 1
+              ) B
+       WHERE  A.AGMT_CTY_CD  = B.AGMT_CTY_CD(+) 
+       AND    A.AGMT_SEQ     = B.AGMT_SEQ(+)
+       AND    A.PDGV_RANK    = B.PDGV_RANK2(+)
+       AND    A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD(+)
+       AND    A.PDGV_SCC_CD  = B.PDGV_SCC_CD(+)
+     )
+SELECT P.CHG_SEQ
+     , A.CNTR_NO
+     , 'PDM' AS LSE_PAY_CHG_TP_CD
+     , A.AGMT_CTY_CD
+     , A.AGMT_SEQ
+     , A.CNTR_TPSZ_CD
+     , TO_CHAR(A.ONH_DT,'YYYYMMDD')  AS ONH_DT
+     , TO_CHAR(A.OFFH_DT,'YYYYMMDD') AS OFFH_DT
+     , A.ONH_LOC_CD
+     , A.OFFH_LOC_CD
+     , A.CHG_FREE_DYS
+--     , B.MNTHLY_TTL_CNT
+     , B.PDM_RT AS PD_RT_AMT
+     , ROUND(A.BIL_DYS*B.PDM_RT,2) AS TTL_COST_AMT
+--     , A.USE_STRT_DT
+     , A.COST_DYS
+--     , A.PYBL_USE_STRT_DT
+     , A.BIL_DYS
+     , P.USR_ID AS CRE_USR_ID
+     , P.USR_ID AS UPD_USR_ID
+FROM   CNTR_LIST_DATA A
+     , ( SELECT A.CNTR_TPSZ_CD
+              , NULL AS ONH_YD_SCC_CD
+              , A.MNTHLY_TTL_CNT
+              , B.PDM_RT
+         FROM   ( SELECT CNTR_TPSZ_CD
+                       , COUNT(CNTR_NO) AS MNTHLY_TTL_CNT
+                  FROM   CNTR_LIST_DATA
+                  GROUP  BY CNTR_TPSZ_CD
+                 )             A
+               , APP_PDGM_DATA B
+               , PARAM         P
+         WHERE  A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD
+         AND    B.TEU_NO <= A.MNTHLY_TTL_CNT AND B.TEU_NO2 >= A.MNTHLY_TTL_CNT
+         AND    P.LSTM_CD <> 'LT'
+         UNION ALL
+         SELECT A.CNTR_TPSZ_CD
+              , A.ONH_YD_SCC_CD
+              , A.MNTHLY_TTL_CNT
+              , NVL(MST_COMMON_PKG.MST_LSE_AGMT_RT_GET_FNC(P.AGMT_CTY_CD, P.AGMT_SEQ, 'PDM', A.CNTR_TPSZ_CD, A.ONH_YD_SCC_CD, P.BASE_DT), 0) AS PDM_RT
+         FROM   ( SELECT CNTR_TPSZ_CD
+                       , ONH_YD_SCC_CD
+                       , COUNT(CNTR_NO) AS MNTHLY_TTL_CNT
+                  FROM   CNTR_LIST_DATA
+                  GROUP  BY CNTR_TPSZ_CD
+                          , ONH_YD_SCC_CD
+                 )              A
+               , PARAM          P
+         WHERE P.LSTM_CD    = 'LT'
+       ) B
+     , PARAM P
+WHERE  A.ONH_YD_SCC_CD   = DECODE(P.LSTM_CD, 'LT', B.ONH_YD_SCC_CD, A.ONH_YD_SCC_CD)
+AND    A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD
+UNION ALL
+SELECT P.CHG_SEQ
+     , A.CNTR_NO
+     , 'LON' AS LSE_PAY_CHG_TP_CD
+     , A.AGMT_CTY_CD
+     , A.AGMT_SEQ
+     , A.CNTR_TPSZ_CD
+     , TO_CHAR(A.ONH_DT,'YYYYMMDD')  AS ONH_DT
+     , TO_CHAR(A.OFFH_DT,'YYYYMMDD') AS OFFH_DT
+     , A.ONH_LOC_CD
+     , A.OFFH_LOC_CD
+     , A.CHG_FREE_DYS
+--     , 0 AS MNTHLY_TTL_CNT
+     , 0 AS PD_RT_AMT --A.LFT_ON_CHG_AMT AS PD_RT_AMT
+     , NVL(A.LFT_ON_CHG_AMT, 0) AS TTL_COST_AMT
+--     , A.USE_STRT_DT
+     , 0 AS COST_DYS --A.COST_DYS
+--     , A.PYBL_USE_STRT_DT
+     , A.BIL_DYS
+     , P.USR_ID AS CRE_USR_ID
+     , P.USR_ID AS UPD_USR_ID
+FROM   CNTR_LIST_DATA A
+     , PARAM          P
+WHERE  A.ONH_STS_CD IN ('DII', 'LSI')
+AND    A.CNTR_LSTM_CNG_FLG <> 'Y'
+AND    A.ONH_DT BETWEEN P.FIRST_DT AND P.LAST_DT + 0.99999
+UNION ALL
+SELECT P.CHG_SEQ
+     , A.CNTR_NO
+     , 'LOF' AS LSE_PAY_CHG_TP_CD
+     , A.AGMT_CTY_CD
+     , A.AGMT_SEQ
+     , A.CNTR_TPSZ_CD
+     , TO_CHAR(A.ONH_DT,'YYYYMMDD')  AS ONH_DT
+     , TO_CHAR(A.OFFH_DT,'YYYYMMDD') AS OFFH_DT
+     , A.ONH_LOC_CD
+     , A.OFFH_LOC_CD
+     , A.CHG_FREE_DYS
+--     , 0 AS MNTHLY_TTL_CNT
+     , 0 AS PD_RT_AMT --A.LFT_OF_CHG_AMT AS PD_RT_AMT
+     , NVL(A.LFT_OF_CHG_AMT, 0) AS TTL_COST_AMT
+--     , A.USE_STRT_DT
+     , 0 AS COST_DYS --A.COST_DYS
+--     , A.PYBL_USE_STRT_DT
+     , A.BIL_DYS
+     , P.USR_ID AS CRE_USR_ID
+     , P.USR_ID AS UPD_USR_ID
+FROM   CNTR_LIST_DATA A
+     , PARAM          P
+WHERE  A.CNTR_LSTM_CNG_FLG <> 'Y'
+AND    A.OFH_STS_CD IN ('DIO', 'LSO')
+AND    A.OFFH_DT BETWEEN P.FIRST_DT AND P.LAST_DT + 0.99999
+UNION ALL
+SELECT P.CHG_SEQ
+     , A.CNTR_NO
+     , CASE WHEN A.PUC_PCR_CHG_AMT > 0 THEN 'PUC'
+            WHEN A.PUC_PCR_CHG_AMT < 0 THEN 'PCR'
+       END AS LSE_PAY_CHG_TP_CD
+     , A.AGMT_CTY_CD
+     , A.AGMT_SEQ
+     , A.CNTR_TPSZ_CD
+     , TO_CHAR(A.ONH_DT,'YYYYMMDD')  AS ONH_DT
+     , TO_CHAR(A.OFFH_DT,'YYYYMMDD') AS OFFH_DT
+     , A.ONH_LOC_CD
+     , A.OFFH_LOC_CD
+     , A.CHG_FREE_DYS
+--     , 0 AS MNTHLY_TTL_CNT
+     , 0 AS PD_RT_AMT --A.PUC_PCR_CHG_AMT AS PD_RT_AMT
+     , NVL(A.PUC_PCR_CHG_AMT, 0) AS TTL_COST_AMT
+--     , A.USE_STRT_DT
+     , 0 AS COST_DYS --A.COST_DYS
+--     , A.PYBL_USE_STRT_DT
+     , A.BIL_DYS
+     , P.USR_ID AS CRE_USR_ID
+     , P.USR_ID AS UPD_USR_ID
+FROM   CNTR_LIST_DATA A
+     , PARAM          P
+WHERE  (A.PUC_PCR_CHG_AMT > 0 OR A.PUC_PCR_CHG_AMT < 0)
+AND    A.ONH_STS_CD IN ('DII', 'LSI')
+AND    A.CNTR_LSTM_CNG_FLG <> 'Y'
+AND    A.ONH_DT BETWEEN P.FIRST_DT AND P.LAST_DT + 0.99999
+UNION ALL
+SELECT P.CHG_SEQ
+     , A.CNTR_NO
+     , CASE WHEN A.DOC_DCR_CHG_AMT > 0 THEN 'DOC'
+            WHEN A.DOC_DCR_CHG_AMT < 0 THEN 'DCR'
+       END AS LSE_PAY_CHG_TP_CD
+     , A.AGMT_CTY_CD
+     , A.AGMT_SEQ
+     , A.CNTR_TPSZ_CD
+     , TO_CHAR(A.ONH_DT,'YYYYMMDD')  AS ONH_DT
+     , TO_CHAR(A.OFFH_DT,'YYYYMMDD') AS OFFH_DT
+     , A.ONH_LOC_CD
+     , A.OFFH_LOC_CD
+     , A.CHG_FREE_DYS
+--     , 0 AS MNTHLY_TTL_CNT
+     , 0 AS PD_RT_AMT --A.DOC_DCR_CHG_AMT AS PD_RT_AMT
+     , NVL(A.DOC_DCR_CHG_AMT, 0) AS TTL_COST_AMT
+--     , A.USE_STRT_DT
+     , 0 AS COST_DYS --A.COST_DYS
+--     , A.PYBL_USE_STRT_DT
+     , A.BIL_DYS
+     , P.USR_ID AS CRE_USR_ID
+     , P.USR_ID AS UPD_USR_ID
+FROM   CNTR_LIST_DATA A
+     , PARAM          P
+WHERE  (A.DOC_DCR_CHG_AMT > 0 OR A.DOC_DCR_CHG_AMT < 0)
+AND    A.OFH_STS_CD IN ('DIO', 'LSO')
+AND    A.OFFH_DT BETWEEN P.FIRST_DT AND P.LAST_DT + 0.99999
+UNION ALL
+SELECT P.CHG_SEQ
+     , A.CNTR_NO
+     , 'GTI' AS LSE_PAY_CHG_TP_CD
+     , A.AGMT_CTY_CD
+     , A.AGMT_SEQ
+     , A.CNTR_TPSZ_CD
+     , TO_CHAR(A.ONH_DT,'YYYYMMDD')  AS ONH_DT
+     , TO_CHAR(A.OFFH_DT,'YYYYMMDD') AS OFFH_DT
+     , A.ONH_LOC_CD
+     , A.OFFH_LOC_CD
+     , A.CHG_FREE_DYS
+--     , 0 AS MNTHLY_TTL_CNT
+     , 0 AS PD_RT_AMT --A.LFT_ON_CHG_AMT AS PD_RT_AMT
+     , NVL(MST_COMMON_PKG.MST_LSE_AGMT_RT_GET_FNC(P.AGMT_CTY_CD, P.AGMT_SEQ, 'GTI', A.CNTR_TPSZ_CD, A.ONH_LOC_CD, P.BASE_DT), 0) AS TTL_COST_AMT
+--     , A.USE_STRT_DT
+     , 0 AS COST_DYS --A.COST_DYS
+--     , A.PYBL_USE_STRT_DT
+     , A.BIL_DYS
+     , P.USR_ID AS CRE_USR_ID
+     , P.USR_ID AS UPD_USR_ID
+FROM   CNTR_LIST_DATA A
+     , PARAM          P
+WHERE  A.ONH_STS_CD IN ('DII', 'LSI')
+AND    A.CNTR_LSTM_CNG_FLG <> 'Y'
+AND    A.ONH_DT BETWEEN P.FIRST_DT AND P.LAST_DT + 0.99999
+UNION ALL
+SELECT P.CHG_SEQ
+     , A.CNTR_NO
+     , 'GTO' AS LSE_PAY_CHG_TP_CD
+     , A.AGMT_CTY_CD
+     , A.AGMT_SEQ
+     , A.CNTR_TPSZ_CD
+     , TO_CHAR(A.ONH_DT,'YYYYMMDD')  AS ONH_DT
+     , TO_CHAR(A.OFFH_DT,'YYYYMMDD') AS OFFH_DT
+     , A.ONH_LOC_CD
+     , A.OFFH_LOC_CD
+     , A.CHG_FREE_DYS
+--     , 0 AS MNTHLY_TTL_CNT
+     , 0 AS PD_RT_AMT --A.LFT_OF_CHG_AMT AS PD_RT_AMT
+     , NVL(MST_COMMON_PKG.MST_LSE_AGMT_RT_GET_FNC(P.AGMT_CTY_CD, P.AGMT_SEQ, 'GTO', A.CNTR_TPSZ_CD, A.ONH_LOC_CD, P.BASE_DT), 0) AS TTL_COST_AMT
+--     , A.USE_STRT_DT
+     , 0 AS COST_DYS --A.COST_DYS
+--     , A.PYBL_USE_STRT_DT
+     , A.BIL_DYS
+     , P.USR_ID AS CRE_USR_ID
+     , P.USR_ID AS UPD_USR_ID
+FROM   CNTR_LIST_DATA A
+     , PARAM          P
+WHERE  A.CNTR_LSTM_CNG_FLG <> 'Y'
+AND    A.OFH_STS_CD IN ('DIO', 'LSO')
+AND    A.OFFH_DT BETWEEN P.FIRST_DT AND P.LAST_DT + 0.99999
+UNION ALL
+SELECT P.CHG_SEQ
+     , A.CNTR_NO
+     , 'DPP' AS LSE_PAY_CHG_TP_CD
+     , A.AGMT_CTY_CD
+     , A.AGMT_SEQ
+     , A.CNTR_TPSZ_CD
+     , TO_CHAR(A.ONH_DT,'YYYYMMDD')  AS ONH_DT
+     , TO_CHAR(A.OFFH_DT,'YYYYMMDD') AS OFFH_DT
+     , A.ONH_LOC_CD
+     , A.OFFH_LOC_CD
+     , A.CHG_FREE_DYS
+--     , 0 AS MNTHLY_TTL_CNT
+     , 0 AS PD_RT_AMT --B.AGMT_CHG_VAL AS PD_RT_AMT
+     , NVL(MST_COMMON_PKG.MST_LSE_AGMT_RT_GET_FNC(P.AGMT_CTY_CD, P.AGMT_SEQ, 'DPP', A.CNTR_TPSZ_CD, A.OFFH_LOC_CD, P.BASE_DT), 0) AS TTL_COST_AMT
+--     , A.USE_STRT_DT
+     , 0 AS COST_DYS --A.COST_DYS
+--     , A.PYBL_USE_STRT_DT
+     , A.BIL_DYS
+     , P.USR_ID AS CRE_USR_ID
+     , P.USR_ID AS UPD_USR_ID
+FROM   CNTR_LIST_DATA A
+     , PARAM          P
+WHERE  A.CNTR_LSTM_CNG_FLG <> 'Y'
+AND    A.OFH_STS_CD IN ('DIO', 'LSO')
+AND    A.OFFH_DT BETWEEN P.FIRST_DT AND P.LAST_DT + 0.99999
+AND    A.AGMT_SEQ = P.AGMT_SEQ
+AND    A.AGMT_CTY_CD = P.AGMT_CTY_CD
+AND    P.DPP_TP_CD = 'Y'			]]></sql>
+			<params>
+				<param name="chg_cost_yrmon" type="12" value="" out="N"/>
+				<param name="chg_seq" type="2" value="" out="N"/>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="agmt_seq" type="2" value="" out="N"/>
+				<param name="agmt_cty_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,536 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CarrierSettlementProcessDBDAOSearchCntrStandardFormatNextReportRSQL">
+			<desc><![CDATA[ROB to next voyage
+[2015.07.21]Virtual Add Calling 처리. VSK_VSL_PORT_SKD.NVL(VT_ADD_CALL_FLG, 'N') = 'N']]></desc>
+			<sql><![CDATA[
+WITH V_VVD AS(
+        SELECT VPS.*
+          FROM (SELECT VPS.VSL_CD
+                     , VPS.SKD_VOY_NO AS SKD_VOY_NO
+                     , VPS.SKD_DIR_CD AS SKD_DIR_CD
+                     , VPS.VPS_PORT_CD AS VPS_PORT_CD
+                     , VPS.CLPT_SEQ AS CLPT_SEQ
+                     , VPS.CLPT_IND_SEQ AS CLPT_IND_SEQ
+                     , VPS.VPS_ETD_DT
+                     , VPS.TURN_SKD_VOY_NO
+                     , VPS.TURN_SKD_DIR_CD
+                     , VPS.TURN_CLPT_IND_SEQ
+                     , VSL.VSL_SLAN_CD
+                  FROM VSK_VSL_SKD VSL
+                     , MDM_VSL_CNTR MVL
+                     , VSK_VSL_PORT_SKD VPS
+                     , MDM_VSL_SVC_LANE_DIR MVS
+                 WHERE 1=1
+                   AND VSL.VSL_CD = @[vsl_cd]
+                   AND VSL.SKD_VOY_NO = @[voy_no]
+#if (${dir_cd} != '') 
+				   AND VSL.SKD_DIR_CD = @[dir_cd]
+#end
+                   AND VSL.VSL_CD = MVL.VSL_CD
+                   AND VSL.VSL_CD = VPS.VSL_CD
+                   AND VSL.SKD_VOY_NO = VPS.SKD_VOY_NO
+                   AND VSL.SKD_DIR_CD = VPS.SKD_DIR_CD
+                   AND (VPS.TURN_PORT_IND_CD IS NULL OR VPS.TURN_PORT_IND_CD NOT IN ('D', 'V', 'F'))
+                   AND (VPS.SKD_CNG_STS_CD IS NULL OR VPS.SKD_CNG_STS_CD != 'S')
+                   AND NVL(VPS.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 Add*/
+                   AND VSL.VSL_SLAN_CD = MVS.VSL_SLAN_CD
+                   AND VSL.SKD_DIR_CD = MVS.VSL_SLAN_DIR_CD
+                 ORDER BY MVS.VSL_SLAN_DIR_SEQ DESC
+                     , VPS.CLPT_SEQ DESC) VPS
+         WHERE 1=1
+           AND ROWNUM = 1 
+        )
+,V_LVL_VVD AS (
+        /* 조회 조건의 이전 항차 */
+        SELECT DISTINCT -LEVEL AS LVL, VPS.VSL_CD, VPS.TURN_SKD_VOY_NO AS SKD_VOY_NO, VPS.TURN_SKD_DIR_CD AS SKD_DIR_CD,'LAG' AS DIR_TP
+         FROM VSK_VSL_PORT_SKD VPS, V_VVD VVD
+        WHERE LEVEL <= FLOOR(TO_NUMBER('3')/2)
+          AND (VPS.TURN_SKD_VOY_NO IS NOT NULL OR VPS.TURN_SKD_DIR_CD IS NOT NULL)
+        START WITH VPS.VSL_CD = VVD.VSL_CD 
+          AND VPS.SKD_VOY_NO = VVD.SKD_VOY_NO 
+          AND VPS.SKD_DIR_CD = VVD.SKD_DIR_CD 
+          AND VPS.TURN_PORT_IND_CD IN ('Y', 'N')
+          AND NVL(VPS.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 Add*/
+        CONNECT BY PRIOR VPS.TURN_SKD_VOY_NO = VPS.SKD_VOY_NO
+          AND PRIOR VPS.TURN_SKD_DIR_CD = VPS.SKD_DIR_CD  
+          AND PRIOR VPS.VSL_CD          = VPS.VSL_CD
+          AND VPS.TURN_PORT_IND_CD IN ('Y', 'N')
+          AND NVL(VPS.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 Add*/
+          AND LEVEL <= FLOOR(TO_NUMBER('3')/2)
+        UNION ALL
+        /* 조회 조건의 항차 */ 
+        SELECT 0 AS LVL, VSL_CD, SKD_VOY_NO, SKD_DIR_CD, 'NOW' AS DIR_TP FROM V_VVD
+        UNION ALL
+        /* 조회 조건의 이후 항차 */
+        SELECT DISTINCT LEVEL AS LVL, VPS.VSL_CD, VPS.TURN_SKD_VOY_NO AS SKD_VOY_NO, VPS.TURN_SKD_DIR_CD AS SKD_DIR_CD, 'LEAD' AS DIR_TP
+         FROM VSK_VSL_PORT_SKD VPS, V_VVD VVD 
+        WHERE LEVEL <= FLOOR(TO_NUMBER('3')/2)
+          AND (VPS.TURN_SKD_VOY_NO IS NOT NULL OR VPS.TURN_SKD_DIR_CD IS NOT NULL)
+        START WITH VPS.VSL_CD = VVD.VSL_CD 
+          AND VPS.SKD_VOY_NO = VVD.SKD_VOY_NO 
+          AND VPS.SKD_DIR_CD = VVD.SKD_DIR_CD 
+          AND VPS.TURN_PORT_IND_CD IN ('D', 'V', 'F')
+          AND NVL(VPS.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 Add*/
+        CONNECT BY PRIOR VPS.TURN_SKD_VOY_NO  = VPS.SKD_VOY_NO 
+          AND PRIOR VPS.TURN_SKD_DIR_CD = VPS.SKD_DIR_CD
+          AND PRIOR VPS.VSL_CD          = VPS.VSL_CD
+          AND VPS.TURN_PORT_IND_CD IN ('D', 'V', 'F')
+          AND NVL(VPS.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 Add*/
+          AND LEVEL <= FLOOR(TO_NUMBER('3')/2)
+)
+,V_PORT_LIST AS (
+        SELECT A.*
+             , B.TP
+             , B.TP_ORD
+          FROM (
+                SELECT A.*
+                     , LAG(A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD) OVER (ORDER BY A.ORD ) LAG_VVD
+                     , LAG(A.VPS_PORT_CD) OVER (ORDER BY A.ORD ) LAG_VPS_PORT_CD
+                     , LAG(A.CLPT_IND_SEQ) OVER (ORDER BY A.ORD ) LAG_CLPT_IND_SEQ
+                  FROM (SELECT 0 ORD
+                             , MAX(VPS.VSL_CD) AS VSL_CD
+                             , MAX(VPS.SKD_VOY_NO) AS SKD_VOY_NO
+                             , MAX(VPS.SKD_DIR_CD) AS SKD_DIR_CD
+                             , MAX(VPS.VPS_PORT_CD) AS VPS_PORT_CD
+                             , MAX(VPS.CLPT_SEQ) AS CLPT_SEQ
+                             , MIN(VPS.CLPT_IND_SEQ) AS CLPT_IND_SEQ
+                             , MIN(VPS.VPS_ETD_DT) AS VPS_ETD_DT
+                             , MIN(VPS.TURN_SKD_VOY_NO) AS TURN_SKD_VOY_NO
+                             , MIN(VPS.TURN_SKD_DIR_CD) AS TURN_SKD_DIR_CD
+                             , MIN(VPS.TURN_CLPT_IND_SEQ) AS TURN_CLPT_IND_SEQ
+                          FROM VSK_VSL_SKD VSL
+                             , MDM_VSL_CNTR MVL
+                             , VSK_VSL_PORT_SKD VPS
+                             , MDM_VSL_SVC_LANE_DIR MVS
+                             , V_VVD V
+                         WHERE 1=1
+                           AND VPS.VSL_CD = V.VSL_CD
+                           AND VPS.SKD_VOY_NO = V.SKD_VOY_NO
+                           AND VPS.SKD_DIR_CD = V.SKD_DIR_CD
+                           AND VPS.VPS_PORT_CD = V.VPS_PORT_CD
+                           AND VSL.VSL_CD = MVL.VSL_CD
+                           AND VSL.VSL_CD = VPS.VSL_CD
+                           AND VSL.SKD_VOY_NO = VPS.SKD_VOY_NO
+                           AND VSL.SKD_DIR_CD = VPS.SKD_DIR_CD
+                           AND (VPS.TURN_PORT_IND_CD IS NULL OR VPS.TURN_PORT_IND_CD NOT IN ('D', 'V', 'F'))
+                           AND (VPS.SKD_CNG_STS_CD IS NULL OR VPS.SKD_CNG_STS_CD != 'S')
+                           AND NVL(VPS.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 Add*/
+                         UNION ALL
+                    SELECT ROWNUM ORD
+                             , VPS.*
+                          FROM (SELECT VPS.VSL_CD
+                                     , VPS.SKD_VOY_NO AS SKD_VOY_NO
+                                     , VPS.SKD_DIR_CD AS SKD_DIR_CD
+                                     , VPS.VPS_PORT_CD AS VPS_PORT_CD
+                                     , VPS.CLPT_SEQ AS CLPT_SEQ
+                                     , VPS.CLPT_IND_SEQ AS CLPT_IND_SEQ
+                                     , VPS.VPS_ETD_DT
+                                     , VPS.TURN_SKD_VOY_NO
+                                     , VPS.TURN_SKD_DIR_CD
+                                     , VPS.TURN_CLPT_IND_SEQ
+                                  FROM VSK_VSL_SKD VSL
+                                     , MDM_VSL_CNTR MVL
+                                     , VSK_VSL_PORT_SKD VPS
+                                     , MDM_VSL_SVC_LANE_DIR MVS
+                                     , V_LVL_VVD V
+                                 WHERE 1=1
+                                   AND V.DIR_TP = 'LEAD'
+                                   AND VPS.VSL_CD = V.VSL_CD
+                                   AND VPS.SKD_VOY_NO = V.SKD_VOY_NO
+                                   AND VPS.SKD_DIR_CD = V.SKD_DIR_CD
+                                   AND VSL.VSL_CD = MVL.VSL_CD
+                                   AND VSL.VSL_CD = VPS.VSL_CD
+                                   AND VSL.SKD_VOY_NO = VPS.SKD_VOY_NO
+                                   AND VSL.SKD_DIR_CD = VPS.SKD_DIR_CD
+                                   AND (VPS.TURN_PORT_IND_CD IS NULL OR VPS.TURN_PORT_IND_CD NOT IN ('D', 'V', 'F'))
+                                   AND (VPS.SKD_CNG_STS_CD IS NULL OR VPS.SKD_CNG_STS_CD != 'S')
+                                   AND NVL(VPS.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 Add*/
+                                   AND VSL.VSL_SLAN_CD = MVS.VSL_SLAN_CD
+                                   AND VSL.SKD_DIR_CD = MVS.VSL_SLAN_DIR_CD
+                                 ORDER BY MVS.VSL_SLAN_DIR_SEQ
+                                     , VPS.CLPT_SEQ ) VPS ) A
+                            ORDER BY A.ORD 
+                ) A
+             , (SELECT 'D' AS TP, 1 AS TP_ORD FROM DUAL UNION ALL
+                SELECT 'L' AS TP, 2 AS TP_ORD FROM DUAL UNION ALL
+                SELECT 'B' AS TP, 3 AS TP_ORD FROM DUAL ) B
+         ORDER BY A.ORD , B.TP_ORD
+                
+         )
+      /*컨테이너 사이즈 : 테이블 정해지면 변경해야함.*/   
+    ,V_SZ_TP AS(
+        SELECT CNTR_TPSZ_CD
+             , DP_SEQ
+          FROM (SELECT DISTINCT 'F'||ATTR_CTNT2 AS CNTR_TPSZ_CD
+                     , MIN(LINE_SEQ) OVER (PARTITION BY ATTR_CTNT2) AS DP_SEQ
+                  FROM JOO_COM_PPT
+                 WHERE 1=1
+                   AND PPT_CD = 'TPSZ MAP'
+                   AND ATTR_CTNT2 IS NOT NULL
+                 UNION ALL
+        SELECT DISTINCT 'E'||ATTR_CTNT4 AS CNTR_TPSZ_CD
+                     , MIN(LINE_SEQ) OVER (PARTITION BY ATTR_CTNT4) AS DP_SEQ
+                  FROM JOO_COM_PPT
+                 WHERE 1=1
+                   AND PPT_CD = 'TPSZ MAP'
+                   AND ATTR_CTNT4 IS NOT NULL )
+         ORDER BY SUBSTR(CNTR_TPSZ_CD,1,1) DESC, DP_SEQ
+    )
+    /*TEST TPSZ */
+    --SELECT * FROM V_SZ_TP;
+/*TEST V_PORT Checked.*/
+--SELECT * FROM V_PORT_LIST;
+/*TEST BAY_PLAN*/
+/*
+SELECT VPS.VSL_CD
+     , VPS.SKD_VOY_NO AS VOY_NO
+     , VPS.SKD_DIR_CD AS DIR_CD
+     , BAY.POD
+     , BAY.FE
+     , BAY.SZTP
+     , BAY.WEIGHT
+  FROM V_PORT_LIST VPS
+     , BAY_PLAN BAY
+ WHERE 1=1
+   AND VPS.TP = 'D'
+   AND VPS.LAG_VVD = BAY.VSL_CD|| BAY.VOY_NO|| BAY.DIR_CD
+   AND VPS.LAG_VPS_PORT_CD = BAY.PORT_CD
+   AND VPS.LAG_CLPT_IND_SEQ = BAY.CALL_IND
+   AND VPS.VPS_PORT_CD = BAY.POD 
+;
+*/
+
+SELECT P.ORD
+     , P.VSL_CD
+     , P.SKD_VOY_NO
+     , P.SKD_DIR_CD
+     , P.VPS_PORT_CD
+     , P.CLPT_SEQ
+     , P.CLPT_IND_SEQ
+     , DECODE(P.TP,'D','Discharge','L','Load','B','Balance') AS TYPE
+     , P.TP_ORD
+     , NVL(V.VOID, 0) AS VOID_QTY
+     , NVL(L.WEIGHT, 0) AS WEIGHT
+     , NVL(L.TOTAL , 0) AS TOTAL
+     , NVL(F_QTY1 , 0) AS F_QTY1
+     , NVL(F_QTY2 , 0) AS F_QTY2
+     , NVL(F_QTY3 , 0) AS F_QTY3
+     , NVL(F_QTY4 , 0) AS F_QTY4
+     , NVL(F_QTY5 , 0) AS F_QTY5
+     , NVL(F_QTY6 , 0) AS F_QTY6
+     , NVL(F_QTY7 , 0) AS F_QTY7
+     , NVL(F_QTY8 , 0) AS F_QTY8
+     , NVL(F_QTY9 , 0) AS F_QTY9
+     , NVL(F_QTY10 , 0) AS F_QTY10
+     , NVL(F_QTY11 , 0) AS F_QTY11
+     , NVL(F_QTY12 , 0) AS F_QTY12
+     , NVL(F_QTY13 , 0) AS F_QTY13
+     , NVL(F_QTY14 , 0) AS F_QTY14
+     , NVL(F_QTY15 , 0) AS F_QTY15
+     , NVL(F_QTY16 , 0) AS F_QTY16
+     , NVL(F_QTY17 , 0) AS F_QTY17
+     , NVL(F_QTY18 , 0) AS F_QTY18
+     , NVL(F_QTY19 , 0) AS F_QTY19
+     , NVL(F_QTY20 , 0) AS F_QTY20
+     , NVL(F_QTY21 , 0) AS F_QTY21
+     , NVL(F_QTY22 , 0) AS F_QTY22
+     , NVL(F_QTY23 , 0) AS F_QTY23
+     , NVL(F_QTY24 , 0) AS F_QTY24
+     , NVL(F_QTY25 , 0) AS F_QTY25
+     , NVL(F_QTY26 , 0) AS F_QTY26
+     , NVL(F_QTY27 , 0) AS F_QTY27
+     , NVL(F_QTY28 , 0) AS F_QTY28
+     , NVL(F_QTY29 , 0) AS F_QTY29
+     , NVL(F_QTY30 , 0) AS F_QTY30
+     , NVL(E_QTY1 , 0) AS E_QTY1
+     , NVL(E_QTY2 , 0) AS E_QTY2
+     , NVL(E_QTY3 , 0) AS E_QTY3
+     , NVL(E_QTY4 , 0) AS E_QTY4
+     , NVL(E_QTY5 , 0) AS E_QTY5
+     , NVL(E_QTY6 , 0) AS E_QTY6
+     , NVL(E_QTY7 , 0) AS E_QTY7
+     , NVL(E_QTY8 , 0) AS E_QTY8
+     , NVL(E_QTY9 , 0) AS E_QTY9
+     , NVL(E_QTY10 , 0) AS E_QTY10
+     , NVL(E_QTY11 , 0) AS E_QTY11
+     , NVL(E_QTY12 , 0) AS E_QTY12
+     , NVL(E_QTY13 , 0) AS E_QTY13
+     , NVL(E_QTY14 , 0) AS E_QTY14
+     , NVL(E_QTY15 , 0) AS E_QTY15
+     , NVL(E_QTY16 , 0) AS E_QTY16
+     , NVL(E_QTY17 , 0) AS E_QTY17
+     , NVL(E_QTY18 , 0) AS E_QTY18
+     , NVL(E_QTY19 , 0) AS E_QTY19
+     , NVL(E_QTY20 , 0) AS E_QTY20
+     , NVL(E_QTY21 , 0) AS E_QTY21
+     , NVL(E_QTY22 , 0) AS E_QTY22
+     , NVL(E_QTY23 , 0) AS E_QTY23
+     , NVL(E_QTY24 , 0) AS E_QTY24
+     , NVL(E_QTY25 , 0) AS E_QTY25
+     , NVL(E_QTY26 , 0) AS E_QTY26
+     , NVL(E_QTY27 , 0) AS E_QTY27
+     , NVL(E_QTY28 , 0) AS E_QTY28
+     , NVL(E_QTY29 , 0) AS E_QTY29
+     , NVL(E_QTY30 , 0) AS E_QTY30
+  FROM V_PORT_LIST P
+     , (SELECT A.VSL_CD
+             , A.VOY_NO
+             , A.DIR_CD
+             , A.PORT_CD
+             , A.TYPE
+             , SUM(A.WEIGHT) AS WEIGHT
+             , NVL(SUM(A.CNT),0) AS TOTAL
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd1]  ,A.CNT,0)) F_QTY1
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd2]  ,A.CNT,0)) F_QTY2
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd3]  ,A.CNT,0)) F_QTY3
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd4]  ,A.CNT,0)) F_QTY4
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd5]  ,A.CNT,0)) F_QTY5
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd6]  ,A.CNT,0)) F_QTY6
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd7]  ,A.CNT,0)) F_QTY7
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd8]  ,A.CNT,0)) F_QTY8
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd9]  ,A.CNT,0)) F_QTY9
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd10] ,A.CNT,0)) F_QTY10
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd11] ,A.CNT,0)) F_QTY11
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd12] ,A.CNT,0)) F_QTY12
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd13] ,A.CNT,0)) F_QTY13
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd14] ,A.CNT,0)) F_QTY14
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd15] ,A.CNT,0)) F_QTY15
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd16] ,A.CNT,0)) F_QTY16
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd17] ,A.CNT,0)) F_QTY17
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd18] ,A.CNT,0)) F_QTY18
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd19] ,A.CNT,0)) F_QTY19
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd20] ,A.CNT,0)) F_QTY20
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd21] ,A.CNT,0)) F_QTY21
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd22] ,A.CNT,0)) F_QTY22
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd23] ,A.CNT,0)) F_QTY23
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd24] ,A.CNT,0)) F_QTY24
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd25] ,A.CNT,0)) F_QTY25
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd26] ,A.CNT,0)) F_QTY26
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd27] ,A.CNT,0)) F_QTY27
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd28] ,A.CNT,0)) F_QTY28
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd29] ,A.CNT,0)) F_QTY29
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[laden_tpsz_cd30] ,A.CNT,0)) F_QTY30
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd1]  ,A.CNT,0)) E_QTY1
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd2]  ,A.CNT,0)) E_QTY2
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd3]  ,A.CNT,0)) E_QTY3
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd4]  ,A.CNT,0)) E_QTY4
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd5]  ,A.CNT,0)) E_QTY5
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd6]  ,A.CNT,0)) E_QTY6
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd7]  ,A.CNT,0)) E_QTY7
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd8]  ,A.CNT,0)) E_QTY8
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd9]  ,A.CNT,0)) E_QTY9
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd10] ,A.CNT,0)) E_QTY10
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd11] ,A.CNT,0)) E_QTY11
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd12] ,A.CNT,0)) E_QTY12
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd13] ,A.CNT,0)) E_QTY13
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd14] ,A.CNT,0)) E_QTY14
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd15] ,A.CNT,0)) E_QTY15
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd16] ,A.CNT,0)) E_QTY16
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd17] ,A.CNT,0)) E_QTY17
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd18] ,A.CNT,0)) E_QTY18
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd19] ,A.CNT,0)) E_QTY19
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd20] ,A.CNT,0)) E_QTY20
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd21] ,A.CNT,0)) E_QTY21
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd22] ,A.CNT,0)) E_QTY22
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd23] ,A.CNT,0)) E_QTY23
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd24] ,A.CNT,0)) E_QTY24
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd25] ,A.CNT,0)) E_QTY25
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd26] ,A.CNT,0)) E_QTY26
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd27] ,A.CNT,0)) E_QTY27
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd28] ,A.CNT,0)) E_QTY28
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd29] ,A.CNT,0)) E_QTY29
+             , SUM(DECODE(A.CNTR_TPSZ_CD,@[empty_tpsz_cd30] ,A.CNT,0)) E_QTY30
+          FROM (
+                SELECT 'D' AS TYPE
+                     , A.VSL_CD
+                     , A.VOY_NO
+                     , A.DIR_CD
+                     , A.PORT_CD
+                     , S.CNTR_TPSZ_CD
+                     , NVL(A.WEIGHT,0) AS WEIGHT
+                     , NVL(A.CNT, 0) AS CNT
+                  FROM (SELECT BAY.VSL_CD
+                             , BAY.VOY_NO AS VOY_NO
+                             , BAY.DIR_CD AS DIR_CD
+                             , BAY.POD AS PORT_CD
+                             , BAY.CNTR_TPSZ_CD AS CNTR_TPSZ_CD
+                             , SUM(BAY.WEIGHT) AS WEIGHT
+                             , COUNT(BAY.CNTR_TPSZ_CD) AS CNT
+                          FROM (SELECT VPS.VSL_CD
+                                     , VPS.SKD_VOY_NO AS VOY_NO
+                                     , VPS.SKD_DIR_CD AS DIR_CD
+                                     , BAY.POD
+                                     , BAY.FE||COM.ATTR_CTNT2 AS CNTR_TPSZ_CD
+                                     , BAY.WEIGHT
+                                  FROM V_PORT_LIST VPS
+                                     , BAY_PLAN BAY
+                                     , JOO_COM_PPT COM
+                                 WHERE 1=1
+                                   AND VPS.TP = 'D'
+                                   AND VPS.ORD > 0
+                                   AND VPS.LAG_VVD = BAY.VSL_CD|| BAY.VOY_NO|| BAY.DIR_CD
+                                   AND VPS.LAG_VPS_PORT_CD = BAY.PORT_CD
+                                   AND VPS.LAG_CLPT_IND_SEQ = BAY.CALL_IND
+                                   AND VPS.VPS_PORT_CD = BAY.POD
+#if (${slan_cd} != '') 
+				                   AND BAY.OPR_CD = @[slan_cd]
+#end
+                                   AND BAY.FE = 'F' --Full
+                                   AND COM.PPT_CD = 'TPSZ MAP'
+                                   AND COM.ATTR_CTNT2 IS NOT NULL
+                                   AND BAY.SZTP = COM.ATTR_CTNT1
+                               UNION ALL
+                                SELECT VPS.VSL_CD
+                                     , VPS.SKD_VOY_NO AS VOY_NO
+                                     , VPS.SKD_DIR_CD AS DIR_CD
+                                     , BAY.POD
+                                     , BAY.FE || COM.ATTR_CTNT3 AS CNTR_TPSZ_CD
+                                     , BAY.WEIGHT
+                                  FROM V_PORT_LIST VPS
+                                     , BAY_PLAN BAY
+                                     , JOO_COM_PPT COM
+                                 WHERE 1=1
+                                   AND VPS.TP = 'D'
+                                   AND VPS.ORD > 0
+                                   AND VPS.LAG_VVD = BAY.VSL_CD|| BAY.VOY_NO|| BAY.DIR_CD
+                                   AND VPS.LAG_VPS_PORT_CD = BAY.PORT_CD
+                                   AND VPS.LAG_CLPT_IND_SEQ = BAY.CALL_IND
+                                   AND VPS.VPS_PORT_CD = BAY.POD
+#if (${slan_cd} != '') 
+				                   AND BAY.OPR_CD = @[slan_cd]
+#end
+                                   AND BAY.FE = 'E' --Empty
+                                   AND COM.PPT_CD = 'TPSZ MAP'
+                                   AND COM.ATTR_CTNT3 IS NOT NULL
+                                   AND BAY.SZTP = COM.ATTR_CTNT1
+                               ) BAY
+                         WHERE 1=1
+                         GROUP BY BAY.VSL_CD
+                             , BAY.VOY_NO
+                             , BAY.DIR_CD
+                             , BAY.POD
+                             , BAY.CNTR_TPSZ_CD) A
+                     , V_SZ_TP S
+                 WHERE A.CNTR_TPSZ_CD = S.CNTR_TPSZ_CD) A
+                 GROUP BY A.VSL_CD
+                     , A.VOY_NO
+                     , A.DIR_CD
+                     , A.PORT_CD
+               ) L
+     , (
+         /*Void*/
+        SELECT A.TYPE
+             , A.VSL_CD
+             , A.VOY_NO
+             , A.DIR_CD
+             , A.PORT_CD
+             , SUM(A.VOID) AS VOID
+          FROM (
+                /*Discharge - Void*/
+                SELECT VPS.TP AS TYPE
+                     , VPS.VSL_CD
+                     , VPS.SKD_VOY_NO AS VOY_NO
+                     , VPS.SKD_DIR_CD AS DIR_CD
+                     , BAY.POD AS PORT_CD
+                     , NVL(BAY.OVH_SLOT,0) + NVL(BAY.OVP_SLOT,0) + NVL(BAY.OVS_SLOT,0) + NVL(BAY.OVF_SLOT,0) + NVL(BAY.OVA_SLOT,0) AS VOID
+                  FROM V_PORT_LIST VPS
+                     , BAY_PLAN BAY
+                 WHERE 1=1
+                   AND VPS.TP = 'D'
+                   AND VPS.ORD > 0
+                   AND VPS.LAG_VVD = BAY.VSL_CD|| BAY.VOY_NO|| BAY.DIR_CD
+                   AND VPS.LAG_VPS_PORT_CD = BAY.PORT_CD
+                   AND VPS.LAG_CLPT_IND_SEQ = BAY.CALL_IND
+                   AND VPS.VPS_PORT_CD = BAY.POD
+                   AND BAY.FE = 'F' --Laden
+                ) A
+         GROUP BY A.TYPE
+             , A.VSL_CD
+             , A.VOY_NO
+             , A.DIR_CD
+             , A.PORT_CD
+         ) V
+ WHERE 1=1
+   AND P.TP = 'D'
+   AND P.ORD > 0 -- 이전항차는 보여줄 필요가 없다. 이미 안에서 구한 부분입니다.
+   AND P.VSL_CD = L.VSL_CD (+)
+   AND P.SKD_VOY_NO = L.VOY_NO (+)
+   AND P.SKD_DIR_CD = L.DIR_CD (+)
+   AND P.VPS_PORT_CD = L.PORT_CD(+)
+   AND P.TP = V.TYPE(+)
+   AND P.VSL_CD = V.VSL_CD (+)
+   AND P.SKD_VOY_NO = V.VOY_NO (+)
+   AND P.SKD_DIR_CD = V.DIR_CD (+)
+   AND P.VPS_PORT_CD = V.PORT_CD(+)
+ ORDER BY P.ORD, P.CLPT_SEQ			]]></sql>
+			<params>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="voy_no" type="12" value="" out="N"/>
+				<param name="dir_cd" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd1" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd2" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd3" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd4" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd5" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd6" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd7" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd8" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd9" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd10" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd11" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd12" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd13" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd14" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd15" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd16" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd17" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd18" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd19" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd20" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd21" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd22" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd23" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd24" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd25" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd26" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd27" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd28" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd29" type="12" value="" out="N"/>
+				<param name="laden_tpsz_cd30" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd1" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd2" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd3" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd4" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd5" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd6" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd7" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd8" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd9" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd10" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd11" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd12" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd13" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd14" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd15" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd16" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd17" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd18" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd19" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd20" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd21" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd22" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd23" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd24" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd25" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd26" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd27" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd28" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd29" type="12" value="" out="N"/>
+				<param name="empty_tpsz_cd30" type="12" value="" out="N"/>
+				<param name="slan_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

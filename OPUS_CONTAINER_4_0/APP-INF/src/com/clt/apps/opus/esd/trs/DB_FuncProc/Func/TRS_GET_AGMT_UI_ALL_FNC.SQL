@@ -1,0 +1,45 @@
+CREATE OR REPLACE FUNCTION TRS_GET_AGMT_UI_ALL_FNC (
+  P_TRSP_TMP_SEQ  IN NUMBER
+, P_SR            IN NUMBER)
+RETURN VARCHAR2
+AUTHID CURRENT_USER
+IS
+/******************************************************************************
+   Name         :   TRS_GET_AGMT_UI_ALL_FNC
+   Purpose      :   Agreement Creation에서 UI자료 ALL TYPE과 상세타입이 같은 ROW에 같이 존재하는지를 체크하는 Function
+   Table        :   TRS_TRSP_AGMT_TMP
+   Ver          :   1.0
+   Date         :   2010.04.66
+   System       :   e-NIS > TRS
+   Author       :   최종혁
+   History      :   
+******************************************************************************/
+R_RETURN VARCHAR2(100);
+V_CNT    NUMBER;
+BEGIN
+SELECT COUNT(*) CNT
+  INTO V_CNT
+  FROM (
+    SELECT 1 CNT
+      FROM TRS_AGMT_TMP
+     WHERE TRSP_TMP_SEQ = P_TRSP_TMP_SEQ
+       AND ROW_NO       = P_SR
+       AND (TRSP_AGMT_EQ_TP_CD = 'AL' OR TRSP_AGMT_EQ_SZ_CD = 'AL')
+       AND DELT_FLG = 'N'
+       AND ROWNUM = 1
+    UNION
+    SELECT 2 CNT
+      FROM TRS_AGMT_TMP
+     WHERE TRSP_TMP_SEQ = P_TRSP_TMP_SEQ
+       AND ROW_NO       = P_SR
+       AND (TRSP_AGMT_EQ_TP_CD <> 'AL' AND TRSP_AGMT_EQ_SZ_CD <> 'AL')
+       AND DELT_FLG = 'N'
+       AND ROWNUM = 1
+);
+IF V_CNT > 1 THEN
+   R_RETURN := ',ALL CHECK';
+END IF;
+    
+RETURN R_RETURN;
+
+END ;

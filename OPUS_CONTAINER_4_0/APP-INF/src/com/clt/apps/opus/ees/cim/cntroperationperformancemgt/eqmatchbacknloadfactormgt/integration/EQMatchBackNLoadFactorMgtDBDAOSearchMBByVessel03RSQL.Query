@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="EQMatchBackNLoadFactorMgtDBDAOSearchMBByVessel03RSQL">
+			<desc><![CDATA[Match-back by Vessel
+2010.09.15 이병훈 [CHM-201005967-01] Match-Back by Vessel의 신규 Trade 및 노선 추가]]></desc>
+			<sql><![CDATA[
+SELECT M3.TRD_CD,
+       M3.SLAN_CD LANE_CD,
+       M3.VSL_CD||M3.SKD_VOY_NO||M3.SKD_DIR_CD VVD,
+       M3.VSL_CD,                  /* i_vsl_cd     */
+       M3.SKD_VOY_NO ,             /* i_skd_voy_no   */
+       M3.SKD_DIR_CD ,             /* i_skd_dir_cd   */
+       M3.VPS_PORT_CD ,            /* i_vps_port_cd  */
+       M3.CLPT_IND_SEQ ,           /* i_clpt_ind_seq */
+       M3.CLPT_SEQ ,               /* i_clpt_seq   */
+       TO_CHAR(M3.VPS_ETD_DT, 'YYYYMMDD') VPS_ETD_DT,  /* i_vps_etd_dt_1 */
+       MAX((SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE TO_CHAR(M3.VPS_ETD_DT, 'YYYYMMDD') BETWEEN WK_ST_DT AND WK_END_DT)) WEEK,          /* atd week     */
+       M3.FROM_RGN ,               /* i_from_rgn   */
+       M3.TO_RGN   ,               /* i_to_rgn     */
+       'In' IO,
+ --< BSA > ______________________________________________________________________________________
+ -- (1). RDR
+       DECODE((SELECT SUM(RA.BSA_SLOT)||','||SUM(RA.BSA_WGT)
+                 FROM RDR_HEADER      RH1,
+                      RDR_ALLOCATION    RA
+                WHERE M3.VSL_CD     = RH1.VSL_CD (+)
+                  AND M3.SKD_VOY_NO = RH1.VOY_NO (+)
+                  AND M3.SKD_DIR_CD = RH1.DIR_CD (+)
+                  AND M3.FROM_RGN   = RH1.REGION (+)
+                  AND RH1.VSL_CD    = RA.VSL_CD  (+)
+                  AND RH1.VOY_NO    = RA.VOY_NO  (+)
+                  AND RH1.DIR_CD    = RA.DIR_CD  (+)
+                  AND RH1.REGION    = RA.REGION  (+)
+                  AND @[company]    = RA.OPR_CD  (+)
+               ), ',' , NVL(MAX(DECODE(O1.BSA_OP_JB_CD,'007',O1.CRR_BSA_CAPA,0)),0)||','||NVL(MAX(DECODE(O2.BSA_OP_JB_CD,'009',O2.CRR_BSA_CAPA,0)),0)
+                      ,(SELECT SUM(RA.BSA_SLOT)||','||SUM(RA.BSA_WGT)
+                          FROM RDR_HEADER      RH1,
+                               RDR_ALLOCATION    RA
+                         WHERE M3.VSL_CD     = RH1.VSL_CD (+)
+                           AND M3.SKD_VOY_NO = RH1.VOY_NO (+)
+                           AND M3.SKD_DIR_CD = RH1.DIR_CD (+)
+                           AND M3.FROM_RGN   = RH1.REGION (+)
+                           AND RH1.VSL_CD    = RA.VSL_CD  (+)
+                           AND RH1.VOY_NO    = RA.VOY_NO  (+)
+                           AND RH1.DIR_CD    = RA.DIR_CD  (+)
+                           AND RH1.REGION    = RA.REGION  (+)
+                           AND @[company]    = RA.OPR_CD  (+)
+                        )
+             )  bsaspace  ,
+-- deadSlot-------------------------------------------------------
+       (SELECT  NVL(SUM(DECODE(RU.TYPE,'A',RU.SLOT_QTY,0))
+               +SUM(DECODE(RU.TYPE,'H',RU.SLOT_QTY,'L',RU.SLOT_QTY,0)),0)  /* deadSlot  */
+          FROM RDR_HEADER      H,
+               RDR_UTILIZE     RU
+         WHERE M3.VSL_CD     = H.VSL_CD  (+)
+           AND M3.SKD_VOY_NO = H.VOY_NO  (+)
+           AND M3.SKD_DIR_CD = H.DIR_CD  (+)
+           AND M3.FROM_RGN   = H.REGION  (+)
+           AND H.VSL_CD      = RU.VSL_CD
+           AND H.VOY_NO      = RU.VOY_NO
+           AND H.DIR_CD      = RU.DIR_CD
+           AND H.REGION      = RU.REGION
+           AND @[company]    = RU.OPR_CD
+       ) deadSlot,
+
+--< 실적 > ______________________________________________________________________________________
+-- (1). BAY PLAN
+       DECODE(SUM(NVL(TO_NUMBER(TRIM(B.WEIGHT)), 0)),0,'','BAY') val01,                            /* dataSource */
+       COUNT(DECODE(FE, 'F', DECODE(SUBSTR(SZTP,2,1), '2', SZTP))) val02,  /* full20Qty */
+       COUNT(DECODE(FE, 'F', DECODE(SUBSTR(SZTP,2,1), '4', SZTP))) val03,  /* full40Qty */
+       COUNT(DECODE(FE, 'F', DECODE(SUBSTR(SZTP,2,1), '5', SZTP))) val04,  /* fullHcQty */
+       COUNT(DECODE(FE, 'F', DECODE(SUBSTR(SZTP,2,1), '7', SZTP))) val05,  /* full45Qty */
+       COUNT(DECODE(FE, 'E', DECODE(SUBSTR(SZTP,2,1), '2', SZTP))) val06,  /* mty20Qty  */
+       COUNT(DECODE(FE, 'E', DECODE(SUBSTR(SZTP,2,1), '4', SZTP))) val07,  /* mty40Qty  */
+       COUNT(DECODE(FE, 'E', DECODE(SUBSTR(SZTP,2,1), '5', SZTP))) val08,  /* mtyHcQty  */
+       COUNT(DECODE(FE, 'E', DECODE(SUBSTR(SZTP,2,1), '7', SZTP))) val09,  /* mty45Qty  */
+       SUM(NVL(TO_NUMBER(TRIM(B.WEIGHT)), 0))  weightTotal  ,
+
+--< Release > ______________________________________________________________________________________
+/* 20100405 Realese Logic 변경 By Y.H.Nam
+       NVL(SUM(RR.SLOT),0)                     releasedteu,
+       NVL(SUM(RR.WEIGHT),0)                   releasedweight
+*/
+/* 20100405 Realese Logic 변경 By Y.H.Nam  */
+       (SELECT NVL(NVL(SUM(RA.RELEASE_SLOT),0) + NVL(SUM(RA.SWAP_SLOT),0),0) ||','||  -- releasedteu
+               NVL(NVL(SUM(RA.RELEASE_WGT), 0) + NVL(SUM(RA.SWAP_WGT), 0),0)          -- releasedweight
+          FROM RDR_HEADER      RH1,
+               RDR_ALLOCATION    RA
+         WHERE M3.VSL_CD     = RH1.VSL_CD  (+)
+           AND M3.SKD_VOY_NO = RH1.VOY_NO  (+)
+           AND M3.SKD_DIR_CD = RH1.DIR_CD  (+)
+           AND M3.FROM_RGN   = RH1.REGION  (+)
+           AND RH1.VSL_CD    = RA.VSL_CD   (+)
+           AND RH1.VOY_NO    = RA.VOY_NO   (+)
+           AND RH1.DIR_CD    = RA.DIR_CD   (+)
+           AND RH1.REGION    = RA.REGION   (+)
+           AND @[company]    = RA.OPR_CD   (+)
+       )  releasedteu
+
+FROM
+    (
+      SELECT VPS1.VSL_CD,
+             VPS1.SKD_VOY_NO,
+             VPS1.SKD_DIR_CD,
+             VPS1.VPS_PORT_CD,
+             VPS1.CLPT_IND_SEQ,
+             VPS1.CLPT_SEQ,
+             VPS1.VPS_ETD_DT,
+             VPS1.SLAN_CD,
+             BSA.TRD_CD,
+             BSA.RLANE_CD,
+             DECODE(SCNT1.CONTI_CD, 'F', 'E', SCNT1.CONTI_CD) FROM_RGN,
+             SUBSTR(MIN(LPAD(VPS2.CLPT_SEQ, 4)||DECODE(SCNT2.CONTI_CD, 'F', 'E', SCNT2.CONTI_CD)), 5, 1) TO_RGN
+        FROM
+             (
+              SELECT  /*+ INDEX_FFS(BSA_VVD_MST XPKBSA_VVD_MST) */
+                     DISTINCT TRD_CD, 
+                     SUBSTR(RLANE_CD,1, 3) LANE_CD,
+                     RLANE_CD RLANE_CD
+                FROM BSA_VVD_MST   -- 108 건
+             ) BSA ,
+             VSK_VSL_PORT_SKD VPS1,
+             MDM_COUNTRY CNT1,
+             MDM_SUBCONTINENT SCNT1,
+             VSK_VSL_PORT_SKD VPS2,
+             MDM_COUNTRY CNT2,
+             MDM_SUBCONTINENT SCNT2
+      WHERE NVL(VPS1.VPS_PORT_CD,   ' ') NOT IN ('PAPAC', 'EGSUZ')
+        AND NVL(VPS1.TURN_PORT_IND_CD,  ' ') NOT IN ('D', 'F', 'V')
+        AND NVL(VPS1.SKD_CNG_STS_CD,  ' ') <> 'S'
+        AND CNT1.CNT_CD       = SUBSTR(VPS1.VPS_PORT_CD, 1, 2)
+        AND CNT1.SCONTI_CD    = SCNT1.SCONTI_CD
+        AND VPS1.SLAN_CD      = @[lane]
+        AND VPS1.VPS_ETD_DT BETWEEN TO_DATE(@[fromdate],  'YYYY-MM-DD') AND TO_DATE(@[todate],'YYYY-MM-DD') + 0.99999
+        AND VPS2.VSL_CD       = VPS1.VSL_CD
+        AND VPS2.SKD_VOY_NO   = VPS1.SKD_VOY_NO
+        AND VPS2.SKD_DIR_CD   = VPS1.SKD_DIR_CD
+        AND VPS2.CLPT_SEQ     > VPS1.CLPT_SEQ
+        AND NVL(VPS2.VPS_PORT_CD,   ' ') NOT IN ('PAPAC', 'EGSUZ')
+        AND NVL(VPS2.SKD_CNG_STS_CD,  ' ') <> 'S'
+        AND CNT2.CNT_CD       = SUBSTR(VPS2.VPS_PORT_CD, 1, 2)
+        AND CNT2.SCONTI_CD    = SCNT2.SCONTI_CD
+        AND DECODE(SCNT1.CONTI_CD, 'F', 'E', SCNT1.CONTI_CD) =@[torgn]
+        AND VPS1.SLAN_CD = BSA.LANE_CD
+#if ( ${lane} == 'ALX' ) -- ALX lane일 경우 EMS trade만 가져올 수 있도록 조건 추가
+        AND BSA.TRD_CD = 'EMS' 
+#end
+
+      GROUP BY VPS1.VSL_CD,
+               VPS1.SKD_VOY_NO,
+               VPS1.SKD_DIR_CD,
+               VPS1.VPS_PORT_CD,
+               VPS1.CLPT_IND_SEQ,
+               VPS1.CLPT_SEQ,
+               VPS1.VPS_ETD_DT,
+               VPS1.SLAN_CD,
+               BSA.TRD_CD,
+               BSA.RLANE_CD,
+               DECODE(SCNT1.CONTI_CD, 'F', 'E', SCNT1.CONTI_CD)
+    ) M3,
+    BAY_PLAN           B,
+    BSA_VVD_OTR_CRR   O1,
+    BSA_VVD_OTR_CRR   O2,
+    RDR_HEADER        RH2/* , 20100405 Realese Logic 변경 By Y.H.Nam  */
+    /*  RDR_SLOT_RELEASE  RR 20100405 Realese Logic 변경 By Y.H.Nam  */
+------------------------------------------------------- 실적  (1). BAY PLAN
+WHERE ( M3.FROM_RGN = @[torgn] AND M3.TO_RGN = @[fromrgn] )
+  AND M3.VSL_CD        = B.VSL_CD        (+)
+  AND M3.SKD_VOY_NO    = B.VOY_NO        (+)
+  AND M3.SKD_DIR_CD    = B.DIR_CD        (+)
+  AND M3.VPS_PORT_CD   = B.PORT_CD       (+)
+  AND M3.CLPT_IND_SEQ  = B.CALL_IND      (+)
+  AND @[company]       = B.OPR_CD        (+)
+  AND 'F'              = B.PLAN_TYPE     (+)
+-------------------------------------------------------  BSA (2). COA
+  AND M3.TRD_CD        = O1.TRD_CD       (+)
+  AND M3.RLANE_CD      = O1.RLANE_CD     (+)
+  AND M3.VSL_CD        = O1.VSL_CD       (+)
+  AND M3.SKD_VOY_NO    = O1.SKD_VOY_NO   (+)
+  AND M3.SKD_DIR_CD    = O1.SKD_DIR_CD   (+)
+  AND '007'            = O1.BSA_OP_JB_CD (+)
+  AND @[company]       = O1.CRR_CD       (+)
+  AND M3.TRD_CD        = O2.TRD_CD       (+)
+  AND M3.RLANE_CD      = O2.RLANE_CD     (+)
+  AND M3.VSL_CD        = O2.VSL_CD       (+)
+  AND M3.SKD_VOY_NO    = O2.SKD_VOY_NO   (+)
+  AND M3.SKD_DIR_CD    = O2.SKD_DIR_CD   (+)
+  AND '009'            = O2.BSA_OP_JB_CD (+)
+  AND @[company]       = O2.CRR_CD       (+)
+-------------------------------------------------------  RLSE
+  AND M3.VSL_CD        = RH2.VSL_CD      (+)
+  AND M3.SKD_VOY_NO    = RH2.VOY_NO      (+)
+  AND M3.SKD_DIR_CD    = RH2.DIR_CD      (+)
+  AND M3.VPS_PORT_CD   = RH2.PORT_CD     (+)
+
+GROUP BY
+    M3.TRD_CD,
+    M3.SLAN_CD ,
+    M3.VSL_CD,                  /* i_vsl_cd     */
+    M3.SKD_VOY_NO ,             /* i_skd_voy_no   */
+    M3.SKD_DIR_CD ,             /* i_skd_dir_cd   */
+    M3.VPS_PORT_CD ,            /* i_vps_port_cd  */
+    M3.CLPT_IND_SEQ ,           /* i_clpt_ind_seq */
+    M3.CLPT_SEQ ,               /* i_clpt_seq   */
+    TO_CHAR(M3.VPS_ETD_DT, 'YYYYMMDD') ,  /* i_vps_etd_dt_1 */
+    M3.FROM_RGN ,               /* i_from_rgn   */
+    M3.TO_RGN			]]></sql>
+			<params>
+				<param name="company" type="12" value="" out="N"/>
+				<param name="lane" type="12" value="" out="N"/>
+				<param name="fromdate" type="12" value="" out="N"/>
+				<param name="todate" type="12" value="" out="N"/>
+				<param name="torgn" type="12" value="" out="N"/>
+				<param name="fromrgn" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

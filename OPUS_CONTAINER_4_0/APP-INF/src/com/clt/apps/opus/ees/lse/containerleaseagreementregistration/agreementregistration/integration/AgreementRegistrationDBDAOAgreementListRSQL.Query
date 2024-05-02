@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AgreementRegistrationDBDAOAgreementListRSQL">
+			<desc><![CDATA[Lease Agreement List Search
+]]></desc>
+			<sql><![CDATA[
+WITH PARAM
+AS (
+    SELECT 
+           LA.AGMT_CTY_CD
+         , LA.AGMT_SEQ
+		, LA.LSE_PAY_TP_CD
+         , LA.LSTM_CD
+         , (SELECT SUBSTR(MC.CNTR_SPEC_NO, 1, 4)
+              FROM MST_CONTAINER MC
+             WHERE MC.AGMT_CTY_CD = LA.AGMT_CTY_CD
+               AND MC.AGMT_SEQ    = LA.AGMT_SEQ
+               AND ROWNUM         = 1) AS YEAR_BUILT
+         , LA.SLB_FLG
+       FROM  LSE_AGREEMENT LA
+   WHERE  1 = 1
+#if ( ${ofc_cd} != '' )
+    AND  LA.OFC_CD        = @[ofc_cd]
+#end
+#if ( ${lse_pay_tp_cd} != 'ALL' )
+    AND  LA.LSE_PAY_TP_CD = @[lse_pay_tp_cd]
+#end
+#if ( ${lstm_cd} != '' )
+       #if ( $lstm_cd_seq.size() > 1 )
+       AND    LA.LSTM_CD IN (
+             #foreach($key IN ${lstm_cd_seq})
+                    #if($velocityCount < $lstm_cd_seq.size())
+                                                                                      '$key',
+                    #else
+                                                                                      '$key'
+                    #end
+             #end
+                                                                                     )
+       #else
+        AND    LA.LSTM_CD = @[lstm_cd]
+       #end
+#end
+#if ( ${vndr_seq} != '' )
+      AND    LA.VNDR_SEQ = @[vndr_seq]
+#end
+     AND LA.LST_EXP_DT        BETWEEN TO_DATE(@[exp_from_dt], 'YYYYMMDD') AND TO_DATE(@[exp_to_dt], 'YYYYMMDD')
+     AND LA.LSTM_CD IN ('OW' , 'LP' , 'OL', 'LT', 'ST', 'OF', 'SI', 'SO', 'MI', 'MO', 'SH')
+)
+SELECT MAX(LA.LSTM_CD) AS LSTM_CD
+     , MAX(NVL(SUBSTR (MV.VNDR_ABBR_NM, 0, 3), ' ')) AS VNDR_ABBR_NM
+     , LA.AGMT_CTY_CD || LPAD (LA.AGMT_SEQ, 6, '0') AS AGMT_NO
+	, LA.LSE_PAY_TP_CD
+     , MAX(LA.REF_NO) AS REF_NO
+     , TO_CHAR (MAX(VER.EFF_DT), 'YYYY-MM-DD') AS EFF_DT
+     , TO_CHAR (MAX(LA.LST_EXP_DT), 'YYYY-MM-DD') AS EXP_DT
+     , MIN((SELECT P.YEAR_BUILT FROM PARAM P WHERE P.AGMT_CTY_CD = LA.AGMT_CTY_CD AND P.AGMT_SEQ = LA.AGMT_SEQ AND ROWNUM = 1)) AS YEAR_BUILT
+     , TO_CHAR (MAX (LA.BLD_UP_DT), 'YYYY-MM-DD') AS EFFECTIVE_DT
+     , TO_CHAR (MAX (ADD_MONTHS (LA.LST_EXP_DT
+                               , (SELECT AR.AGMT_CHG_VAL
+                                    FROM LSE_AGMT_RT AR
+                                   WHERE AR.CNTR_RNTL_CHG_TP_CD = 'PNTV'
+                                     AND LA.AGMT_SEQ = AR.AGMT_SEQ
+                                     AND LA.AGMT_CTY_CD = AR.AGMT_CTY_CD
+                                     AND ROWNUM = 1)))
+              , 'YYYY-MM-DD')
+          AS EXPIRY_DT
+     , MAX (LA.SLB_FLG) AS SLB_FLG
+     , MAX (LA.LSTM_CD) AS LEASE_TERM
+     , MAX (LA.LSE_PAY_TERM_DYS) AS PAYMENT_TERM
+     , MAX (LA.DPC_RTO) AS YEARLY_DEPR
+     , MAX (LA.MAX_DPC_RTO) AS MAX_DEPR
+     , SUBSTR(TYPE_NM, 4, 100) TYPE_NM
+     , SUB.EQ_LOC_TP_CD AS EQ_LOC_TP_CD
+     , SUB.LOC_CD AS LOC_CD
+     , 0 
+#foreach($key IN ${cntr_tpsz_cd_seq})
+       +  SUM(DECODE(SUB.CNTR_TPSZ_CD, '$key', SUB.VAL, 0))
+#end   
+       AS TTL
+#foreach($key IN ${cntr_tpsz_cd_seq})
+#set ($col_name='CNTR'+$velocityCount+'_QTY')
+     , SUM(DECODE(SUB.CNTR_TPSZ_CD, '$key', SUB.VAL, 0)) AS $col_name
+#end
+FROM (
+        SELECT 
+                 AGMT_CTY_CD
+               , AGMT_SEQ
+			  , LSE_PAY_TP_CD
+               , CNTR_TPSZ_CD
+               , DECODE(LVL, 1, '01.Contract QTY', 2, '02.Off-hire QTY', 3, '03.Current QTY', '04.Replacement Value') TYPE_NM
+               , ' ' EQ_LOC_TP_CD
+               , ' ' LOC_CD
+               , SUM(DECODE(LVL, 1, CON_CNT
+                                      , 2, LSO_CNT
+                                      , 3, CURR_CNT
+                                      , 4, REP_CNT
+                                 )
+                      ) VAL
+        FROM (
+                    SELECT
+                               AR.AGMT_CTY_CD
+                             , AR.AGMT_SEQ
+							, P.LSE_PAY_TP_CD
+                             , AR.CNTR_TPSZ_CD
+                             , MIN (CNTR.ONH_DT) AS ONH_DT
+                             , COUNT (LSI.CNTR_STS_EVNT_DT) AS LSI_CNT
+                             , COUNT (LSO.CNTR_STS_EVNT_DT) AS LSO_CNT
+                             ,   COUNT (LSI.CNTR_STS_EVNT_DT)
+                               - COUNT (LSO.CNTR_STS_EVNT_DT)
+                                  AS CURR_CNT
+                             , MAX (AR.N1ST_CHG_AMT) AS REP_CNT
+                             , MAX (AR.AGMT_CHG_VAL) AS CON_CNT
+                          FROM LSE_AGMT_RT AR
+                             , MST_CNTR_STS_HIS LSI
+                             , MST_CNTR_STS_HIS LSO
+                             , MST_CONTAINER CNTR
+                             , PARAM P
+                         WHERE 1 = 1
+                           AND P.AGMT_SEQ    = AR.AGMT_SEQ
+                           AND P.AGMT_CTY_CD = AR.AGMT_CTY_CD
+                           AND AR.CNTR_RNTL_CHG_TP_CD = 'GENV'
+                           AND AR.AGMT_SEQ = CNTR.AGMT_SEQ(+)
+                           AND AR.AGMT_CTY_CD = CNTR.AGMT_CTY_CD(+)
+                           AND AR.CNTR_TPSZ_CD = CNTR.CNTR_TPSZ_CD(+)
+                           AND CNTR.AGMT_SEQ = LSI.AGMT_SEQ(+)
+                           AND CNTR.AGMT_CTY_CD = LSI.AGMT_CTY_CD(+)
+                           AND CNTR.CNTR_NO = LSI.CNTR_NO(+)
+                           AND LSI.CNTR_STS_CD(+) IN ('OWN', 'LSI', 'DII')
+                           AND LSI.CNTR_NO = LSO.CNTR_NO(+)
+                           AND LSI.CNTR_STS_SEQ = LSO.PRNR_STS_SEQ(+)
+                        GROUP BY AR.AGMT_CTY_CD
+                               , AR.AGMT_SEQ
+							, P.LSE_PAY_TP_CD
+                               , AR.CNTR_TPSZ_CD
+                   ) SUB
+             ,( SELECT LEVEL LVL FROM DUAL CONNECT BY LEVEL <= 4 ) LVL 
+        GROUP BY AGMT_CTY_CD
+               , AGMT_SEQ
+			, LSE_PAY_TP_CD
+               , CNTR_TPSZ_CD
+               , DECODE(LVL, 1, '01.Contract QTY', 2, '02.Off-hire QTY', 3, '03.Current QTY', '04.Replacement Value')
+        UNION ALL       
+        SELECT
+                   AR.AGMT_CTY_CD   AS AGMT_CTY_CD
+                 , AR.AGMT_SEQ      AS AGMT_SEQ
+				, P.LSE_PAY_TP_CD AS LSE_PAY_TP_CD
+                 , AR.CNTR_TPSZ_CD    AS CNTR_TPSZ_CD
+                 , '05.Per-Diem'         AS TYPE_NM
+                 , DECODE(P.LSTM_CD, 'LT', COMMCODE_PKG.GET_COMDTL_NAME_FNC ('CD30026', AR.EQ_LOC_TP_CD), 'No.') AS EQ_LOC_TP_CD
+                 , DECODE(P.LSTM_CD, 'LT', AR.LOC_CD, TO_CHAR(AGMT_CHG_VAL))  AS LOC_CD
+                 , MAX(N1ST_CHG_AMT) VAL
+              FROM PARAM P
+                 , LSE_AGMT_RT AR
+             WHERE 1 = 1
+               AND P.AGMT_SEQ    = AR.AGMT_SEQ
+               AND P.AGMT_CTY_CD = AR.AGMT_CTY_CD
+               AND AR.CNTR_RNTL_CHG_TP_CD = 'PDGV'
+            GROUP BY AR.AGMT_CTY_CD
+                   , AR.AGMT_SEQ
+				, P.LSE_PAY_TP_CD
+                   , AR.CNTR_TPSZ_CD
+                   , DECODE(P.LSTM_CD, 'LT', COMMCODE_PKG.GET_COMDTL_NAME_FNC ('CD30026', AR.EQ_LOC_TP_CD), 'No.')
+                   , DECODE(P.LSTM_CD, 'LT', AR.LOC_CD, TO_CHAR(AGMT_CHG_VAL))
+        UNION ALL
+        SELECT
+                   AR.AGMT_CTY_CD   AS AGMT_CTY_CD
+                 , AR.AGMT_SEQ      AS AGMT_SEQ
+				, P.LSE_PAY_TP_CD AS LSE_PAY_TP_CD
+                 , AR.CNTR_TPSZ_CD    AS CNTR_TPSZ_CD
+                 , DECODE(LVL, 1, '06.DPP coverage amt' , '07.DPP lumpsum rate')        AS TYPE_NM
+                 , COMMCODE_PKG.GET_COMDTL_NAME_FNC ('CD30026', AR.EQ_LOC_TP_CD) AS EQ_LOC_TP_CD
+                 , AR.LOC_CD  AS LOC_CD
+                 , MAX(DECODE(LVL, 1, AR.N1ST_CHG_AMT, AR.AGMT_CHG_VAL))
+              FROM PARAM P
+                 , LSE_AGMT_RT AR
+                 , ( SELECT LEVEL LVL FROM DUAL CONNECT BY LEVEL <= 2 ) LVL
+             WHERE 1 = 1
+               AND P.AGMT_SEQ    = AR.AGMT_SEQ
+               AND P.AGMT_CTY_CD = AR.AGMT_CTY_CD
+               AND AR.CNTR_RNTL_CHG_TP_CD = 'DPPV'
+            GROUP BY AR.AGMT_CTY_CD
+                   , AR.AGMT_SEQ
+				, P.LSE_PAY_TP_CD
+                   , AR.CNTR_TPSZ_CD
+                   , DECODE(LVL, 1, '06.DPP coverage amt' , '07.DPP lumpsum rate') 
+                   , COMMCODE_PKG.GET_COMDTL_NAME_FNC ('CD30026', AR.EQ_LOC_TP_CD)
+                   , AR.LOC_CD
+       ) SUB, MDM_VENDOR MV, LSE_AGREEMENT LA, LSE_AGMT_VER VER
+WHERE LA.VNDR_SEQ    = MV.VNDR_SEQ
+AND   SUB.AGMT_CTY_CD = LA.AGMT_CTY_CD
+AND   SUB.AGMT_SEQ    = LA.AGMT_SEQ
+AND   SUB.AGMT_CTY_CD = VER.AGMT_CTY_CD(+)
+AND   SUB.AGMT_SEQ = VER.AGMT_SEQ(+)
+AND   VER.AGMT_VER_SEQ(+) = 1
+#if (${cntr_tpsz_cd} != '')
+AND    SUB.CNTR_TPSZ_CD IN (
+       #foreach($key IN ${cntr_tpsz_cd_seq2})
+             #if($velocityCount < $cntr_tpsz_cd_seq2.size())
+                                                                                      '$key',
+             #else
+                                                                                      '$key'
+             #end
+       #end
+                                                                                     )
+#end 
+GROUP BY 
+       LA.AGMT_CTY_CD || LPAD (LA.AGMT_SEQ, 6, '0')
+     , SUB.TYPE_NM
+	, LA.LSE_PAY_TP_CD
+     , SUB.EQ_LOC_TP_CD
+     , SUB.LOC_CD
+ORDER BY 2
+       , LA.AGMT_CTY_CD || LPAD (LA.AGMT_SEQ, 6, '0')
+       , SUB.TYPE_NM
+       , SUB.EQ_LOC_TP_CD
+       , SUB.LOC_CD			]]></sql>
+			<params>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="lse_pay_tp_cd" type="12" value="" out="N"/>
+				<param name="lstm_cd" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="2" value="" out="N"/>
+				<param name="exp_from_dt" type="12" value="" out="N"/>
+				<param name="exp_to_dt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

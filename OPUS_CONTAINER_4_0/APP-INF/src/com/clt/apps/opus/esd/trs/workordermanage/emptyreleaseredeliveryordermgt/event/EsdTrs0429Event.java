@@ -1,0 +1,97 @@
+/*=========================================================
+ *Copyright(c) 2009 CyberLogitec
+ *@FileName : EesCtm0429Event.java
+ *@FileTitle : History
+ *Open Issues :
+ *Change history :
+ *@LastModifyDate : 2009.08.17
+ *@LastModifier : 김상수
+ *@LastVersion : 1.0
+ * 2009.08.17 김상수
+ * 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esd.trs.workordermanage.emptyreleaseredeliveryordermgt.event;
+
+import com.clt.apps.opus.esd.trs.workordermanage.emptyreleaseredeliveryordermgt.vo.CimCStockVO;
+import com.clt.apps.opus.esd.trs.workordermanage.emptyreleaseredeliveryordermgt.vo.RDFaxMailEAIVO;
+import com.clt.framework.support.layer.event.EventSupport;
+
+/**
+ * EES_CTM_0429 에 대한 PDTO(Data Transfer Object including Parameters)<br>
+ * - EES_CTM_0429HTMLAction에서 작성<br>
+ * - ServiceCommand Layer로 전달하는 PDTO로 사용<br>
+ * 
+ * @author KIM, Sang Soo
+ * @see ESD_TRS_0429HTMLAction 참조
+ * @since J2EE 1.6
+ */
+public class EsdTrs0429Event extends EventSupport {
+
+	private static final long serialVersionUID = 1L;
+
+	private CimCStockVO cimCStockVO = null;
+
+	private CimCStockVO[] cimCStockVOs = null;
+
+	private RDFaxMailEAIVO rdFaxMailEAIVO = null;
+
+	public EsdTrs0429Event() {
+	}
+
+	/**
+	 * 
+	 * @return
+	 */
+	public CimCStockVO getCimCStockVO() {
+		return cimCStockVO;
+	}
+
+	/**
+	 * 
+	 * @param cimCStockVO
+	 */
+	public void setCimCStockVO(CimCStockVO cimCStockVO) {
+		this.cimCStockVO = cimCStockVO;
+	}
+
+	/**
+	 * 
+	 * @return
+	 */
+	public CimCStockVO[] getCimCStockVOS() {
+		CimCStockVO[] tmpVOs = null;
+		if (this.cimCStockVOs != null) {
+			tmpVOs = new CimCStockVO[this.cimCStockVOs.length];
+			System.arraycopy(this.cimCStockVOs, 0, tmpVOs, 0, tmpVOs.length);
+		}
+		return tmpVOs;
+	}
+
+	/**
+	 * 
+	 * @param cimCStockVOs
+	 */
+	public void setCimCStockVOS(CimCStockVO[] cimCStockVOs) {
+		if (cimCStockVOs != null) {
+			CimCStockVO[] tmpVOs = new CimCStockVO[cimCStockVOs.length];
+			System.arraycopy(cimCStockVOs, 0, tmpVOs, 0, tmpVOs.length);
+			this.cimCStockVOs = tmpVOs;
+		}
+	}
+
+	/**
+	 * 
+	 * @return
+	 */
+	public RDFaxMailEAIVO getRDFaxMailEAIVO() {
+		return rdFaxMailEAIVO;
+	}
+
+	/**
+	 * 
+	 * @param rdFaxMailEAIVO
+	 */
+	public void setRDFaxMailEAIVO(RDFaxMailEAIVO rdFaxMailEAIVO) {
+		this.rdFaxMailEAIVO = rdFaxMailEAIVO;
+	}
+}

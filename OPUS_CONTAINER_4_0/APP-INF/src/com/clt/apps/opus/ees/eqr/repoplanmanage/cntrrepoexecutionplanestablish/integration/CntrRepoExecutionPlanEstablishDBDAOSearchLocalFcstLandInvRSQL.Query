@@ -1,0 +1,2750 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CntrRepoExecutionPlanEstablishDBDAOSearchLocalFcstLandInvRSQL">
+			<desc><![CDATA[EES_EQR_0112
+
+
+
+//////////////////////////////////////////////////////////////////////////////////
+//이하 SQL 생성부분이 실제로 트리를 구성한다.
+//XX 가 업무로직을 구현한 SQL : initialStr, outFlowStr, inFlowStr, safetyStr, etcStr
+//YY 가 TREE를 만들기 위한 SQL
+//INFLOW, OUTFLOW 를 구성하기 위해서 동일한 SQL이 3번 반복된다.
+//DB의 NLS_LANGUAGE 가 AMERICA 로 된후 요일을 영문으로 바꿔줘야 한다.
+//////////////////////////////////////////////////////////////////////////////////]]></desc>
+			<sql><![CDATA[
+SELECT	 YY.ECC_CD
+		,YY.PLN_YRWK
+		,DECODE(SUBSTR(YY.ITEM,1,1),
+			'0','('|| (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD') ,'YYYYMMDD')
+					FROM	EQR_WK_PRD
+					WHERE PLN_YR||PLN_WK  = YY.PLN_YRWK) ||')',
+			'6','('|| (SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD') ,'YYYYMMDD')
+					FROM EQR_WK_PRD
+					WHERE PLN_YR||PLN_WK  = YY.PLN_YRWK) ||')',
+			'7',' ',
+			'8',' ',
+			'9',' ',YY.FLOW) FLOW
+		,SUBSTR(YY.ITEM,3) ITEM
+		,'' TOTAL
+		,DECODE(SUBSTR(YY.ITEM,1,1),'3',1,'5',1,0) LVL
+	#foreach( $key in ${arrtpsz}) 
+		,${key}CNTR_QTY
+	#end
+		,REPO_PLN_ID
+FROM	(
+		-- Initial(EQR_INVT_SNAP)
+		SELECT	 PLN_YRWK
+				,ECC_CD
+				,'outflow' AS FLOW
+				,'00Initial' ITEM
+				,'0' LVL
+			#foreach( $key in ${arrtpsz}) 
+				,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+		FROM	(
+				SELECT	 REPO_PLN_ID
+						,PLN_YRWK
+						,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = E.ECC_CD) ECC_CD
+						,CNTR_TPSZ_CD
+						,CNTR_QTY
+						,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+				FROM	(
+						SELECT	@[repo_pln_id] REPO_PLN_ID
+								,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE SNAP_DT BETWEEN WK_ST_DT  AND WK_END_DT) PLN_YRWK
+								,PLN.ECC_CD
+								,CNTR_TPSZ_CD
+								,SUM(CNTR_VOL_QTY) AS CNTR_QTY
+						FROM	EQR_INVT_SNAP PLN
+							#if ( ${type} != '' )
+								,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+							#end
+						WHERE	SNAP_DT = (SELECT WK_ST_DT FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+						#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+							AND	1 = 2
+						#end
+						#if (${type} != '')
+							AND (PLN.ECC_CD = C.ECC_CD)
+						#end
+						#if (${cntr_tpsz_cd} != '')
+							AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+						#end
+						
+						GROUP BY SNAP_DT, PLN.ECC_CD, CNTR_TPSZ_CD
+						) E
+				)
+		GROUP BY  RUMM, REPO_PLN_ID , PLN_YRWK, ECC_CD
+		UNION ALL
+		-- Demand(EQR_OB_FCAST)
+		SELECT	 PLN_YRWK
+				,ECC_CD
+				,'outflow' AS FLOW
+				,'10Demand Vol' ITEM
+				,'0' LVL
+			#foreach( $key in ${arrtpsz}) 
+				,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+		FROM	(
+				SELECT	 REPO_PLN_ID
+						,PLN_YRWK
+						,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+						,CNTR_TPSZ_CD
+						,CNTR_QTY
+						,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+				FROM	(
+						SELECT	 @[repo_pln_id] REPO_PLN_ID
+								,FCAST_YRWK AS PLN_YRWK
+								,FM_ECC_CD AS FM_ECC_CD
+								,CNTR_TPSZ_CD
+								,SUM(CNTR_VOL_QTY) AS CNTR_QTY
+						FROM	EQR_OB_FCAST PLN
+							#if ( ${type} != '' )
+								,(SELECT ecc_cd FROM eqr_ecc_mst WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+							#end
+						WHERE	SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id] 	)
+						#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+							AND	1 = 2
+						#end
+						#if (${type} != '')
+							AND	(PLN.FM_ECC_CD = C.ECC_CD)
+						#end
+							AND	FCAST_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+						#if (${cntr_tpsz_cd} != '')
+							AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+						#end
+						GROUP BY FCAST_YRWK, fm_ecc_cd, CNTR_TPSZ_CD
+						ORDER BY FCAST_YRWK
+						) E
+				)
+		GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+		UNION ALL
+		-- RepoOut : EQR_VSL_LODG_DCHG_PLN, EQR_INLND_TRSP_PLN(FM_ECC_CD)
+		SELECT	 PLN_YRWK
+				,ECC_CD
+				,'outflow' AS FLOW
+				,'20Repo Out' ITEM
+				,'0' LVL
+			#foreach( $key in ${arrtpsz}) 
+				,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+		FROM	(
+				SELECT	 REPO_PLN_ID
+						,PLN_YRWK
+						,ECC_CD
+						,CNTR_TPSZ_CD
+						,SUM(CNTR_QTY)	CNTR_QTY
+				FROM	(
+						SELECT	 REPO_PLN_ID
+								,PLN_YRWK
+								,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+								,CNTR_TPSZ_CD
+								,CNTR_QTY
+								,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+						FROM	(
+								-- EQR_VSL_LODG_DCHG_PLN
+								SELECT	 PLN.REPO_PLN_ID
+										,PLN.PLN_YRWK
+										,PLN.FM_ECC_CD AS FM_ECC_CD
+										,QTY.CNTR_TPSZ_CD
+										,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+								FROM	EQR_VSL_LODG_DCHG_PLN PLN
+										,EQR_VSL_LODG_DCHG_PLN_QTY QTY
+									#if ( ${type} != '' )
+										,(SELECT ecc_cd FROM eqr_ecc_mst WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+									#end
+								WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+									AND PLN.PLN_YRWK	= QTY.PLN_YRWK
+									AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+									AND	PLN.REPO_PLN_ID		= @[repo_pln_id]
+								#if (${item} != '' ) 
+									AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+								#end
+								#if (${lane} != '' ) 
+									AND PLN.VSL_LANE_CD IN ( ${laneText} )
+								#end
+								#if (${vvd} != '' ) 
+									AND PLN.VSL_CD||PLN.SKD_VOY_NO||PLN.SKD_DIR_CD IN ( ${vvdText} )
+								#end
+								#if (${type} != '')
+									AND (PLN.FM_ECC_CD = C.ECC_CD)
+								#end
+									AND TO_CHAR(FM_ETD_DT,'YYYYMMDD')  BETWEEN
+											(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+										AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+								#if (${cntr_tpsz_cd} != '')
+									AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+								#end
+								GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_ECC_CD, QTY.CNTR_TPSZ_CD
+								UNION ALL
+								-- EQR_INLND_TRSP_PLN
+								SELECT	 PLN.REPO_PLN_ID
+										,PLN.PLN_YRWK
+										,PLN.FM_ECC_CD AS FM_ECC_CD
+										,QTY.CNTR_TPSZ_CD
+										,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+								FROM	EQR_INLND_TRSP_PLN PLN
+										,EQR_INLND_TRSP_PLN_QTY QTY
+									#if ( ${type} != '' )
+										,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+									#end
+								WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+									AND PLN.PLN_YRWK	= QTY.PLN_YRWK
+									AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+									AND	PLN.REPO_PLN_ID	= @[repo_pln_id]
+								#if (${item} != '' ) 
+									AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+								#end
+								#if ( (${item} != '' && ${lane} != '' ) || (${item} != '' && ${vvd} != '') ) 
+									AND	1 = 2
+								#end
+								#if (${type} != '')
+									AND (PLN.FM_ECC_CD = C.ECC_CD)
+								#end
+									AND	PLN.FM_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+								#if (${cntr_tpsz_cd} != '')
+									AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+								#end
+								GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_ECC_CD, QTY.CNTR_TPSZ_CD
+								ORDER BY PLN_YRWK DESC
+								) E
+						)
+						GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD, CNTR_TPSZ_CD
+				)
+		GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD
+		UNION ALL
+		-- Excution(RepoOut) : EQR_VSL_LODG_DCHG_EXE_PLN(FM_YD_CD)
+		SELECT	 PLN_YRWK
+				,ECC_CD
+				,'outflow' AS FLOW
+				,'30Execution' ITEM
+				,'1' LVL
+			#foreach( $key in ${arrtpsz}) 
+				,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+		FROM	(
+				SELECT	 REPO_PLN_ID
+						,PLN_YRWK
+						,ECC_CD
+						,CNTR_TPSZ_CD
+						,SUM(CNTR_QTY)	CNTR_QTY
+				FROM	(
+						SELECT	 REPO_PLN_ID
+								,PLN_YRWK
+								,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+								,CNTR_TPSZ_CD
+								,CNTR_QTY
+								,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+						FROM	(
+								-- EQR_VSL_LODG_DCHG_EXE_PLN
+								SELECT	 PLN.REPO_PLN_ID
+										,PLN.PLN_YRWK
+										,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(FM_YD_CD,0,5)) AS FM_ECC_CD
+										,QTY.CNTR_TPSZ_CD
+										,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+								FROM	EQR_VSL_LODG_DCHG_EXE_PLN PLN
+										,EQR_VSL_EXE_PLN_QTY QTY
+									#if ( ${type} != '' )
+										,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND	${type} IN ( ${eccText} ) ) C
+									#end
+								WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+									AND	PLN.PLN_YRWK    = QTY.PLN_YRWK
+									AND PLN.PLN_SEQ    = QTY.PLN_SEQ
+									AND PLN.REF_ID		= QTY.REF_ID
+									AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+								#if (${item} != '' ) 
+									AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+								#end
+								#if (${lane} != '' ) 
+									AND PLN.VSL_LANE_CD IN ( ${laneText} )
+								#end
+								#if (${vvd} != '' ) 
+									AND PLN.VSL_CD||PLN.SKD_VOY_NO||PLN.SKD_DIR_CD IN ( ${vvdText} )
+								#end										
+								#if ( ${type} != '' )
+									AND	(SUBSTR(PLN.FM_YD_CD,0,5) = C.SCC_CD)
+								#end
+									AND TO_CHAR(PLN.FM_ETD_DT,'YYYYMMDD')  BETWEEN
+											(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk] )
+										AND	(SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+								#if ( ${inclExecPlan} == '0' )
+									AND 1 = 2
+								#end
+								#if (${cntr_tpsz_cd} != '')
+									AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+								#end
+								GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_YD_CD, QTY.CNTR_TPSZ_CD
+								UNION ALL
+								-- EQR_INLND_TRSP_EXE_PLN
+								SELECT	 PLN.REPO_PLN_ID
+										,PLN.PLN_YRWK
+										,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(FM_YD_CD,0,5)) AS FM_ECC_CD
+										,QTY.CNTR_TPSZ_CD
+										,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+								FROM	EQR_INLND_TRSP_EXE_PLN PLN
+										,EQR_INLND_TRSP_EXE_PLN_QTY QTY
+									#if ( ${type} != '' )
+										,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND	${type} IN ( ${eccText} ) ) C
+									#end
+								WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+									AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+									AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+									AND PLN.REF_ID		= QTY.REF_ID
+									AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+								#if ( (${item} != '' && ${lane} != '' ) || (${item} != '' && ${vvd} != '') ) 
+									AND	1 = 2
+								#end
+								#if ( ${type} != '' )
+									AND	(SUBSTR(PLN.FM_YD_CD,0,5) = C.SCC_CD)
+								#end
+									AND TO_CHAR(PLN.FM_ETD_DT,'YYYYMMDD')  BETWEEN
+											(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+										AND	(SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])		
+								#if ( ${inclExecPlan} == '0' )
+									AND 1 = 2
+								#end
+								#if (${cntr_tpsz_cd} != '')
+									AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+								#end
+								GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_YD_CD, QTY.CNTR_TPSZ_CD
+								ORDER BY PLN_YRWK DESC
+								) E
+						)
+				GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD, CNTR_TPSZ_CD
+		)
+		GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD 
+		UNION ALL
+		-- Off-Hire : EQR_ONF_HIR_PLN(ONF_HIR_DIV_CD)
+		SELECT	 PLN_YRWK
+				,ECC_CD
+				,'outflow' AS FLOW
+				,'40Off-Hire' ITEM
+				,'0' LVL
+		    #foreach( $key in ${arrtpsz}) 
+				,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY )) ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+		FROM	(
+				SELECT	 REPO_PLN_ID
+						,PLN_YRWK
+						,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+						,CNTR_TPSZ_CD
+						,CNTR_QTY
+						,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+				FROM	(
+						SELECT	 PLN.REPO_PLN_ID
+								,PLN.PLN_YRWK
+								,PLN.ECC_CD AS FM_ECC_CD
+								,QTY.CNTR_TPSZ_CD
+								,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+						FROM	EQR_ONF_HIR_PLN PLN
+								,EQR_ONF_HIR_PLN_QTY QTY
+							#if ( ${type} != '' )
+								,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+							#end
+						WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+							AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+							AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+							AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+							AND	PLN.ONF_HIR_DIV_CD = 'F'
+							-- item  : F(조회조건을 선택시)
+						#if (${itemOffExist} == 'Y')
+							AND 1 = 1
+						#elseif ( ${item} != '' )
+							AND 1 = 2
+						#end
+						#if (${type} != '')
+							AND (PLN.ECC_CD = C.ECC_CD) 
+						#end
+							AND PLN.PLN_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+						#if (${cntr_tpsz_cd} != '')
+							AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+						#end
+						GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.ECC_CD, QTY.CNTR_TPSZ_CD
+						ORDER BY PLN_YRWK DESC
+						) E
+				)
+		GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+		UNION ALL
+		-- 	Excution(Off-Hire) : EQR_ONF_HIR_EXE_PLN(ONF_HIR_DIV_CD, FM_YD_CD)
+		SELECT	 PLN_YRWK
+				,ECC_CD
+				,'outflow' AS FLOW
+				,'50Execution' ITEM
+				,'1' LVL
+			#foreach( $key in ${arrtpsz}) 
+				,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY )) ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+		FROM	(
+				SELECT	 REPO_PLN_ID
+						,PLN_YRWK
+						,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+						,CNTR_TPSZ_CD
+						,CNTR_QTY
+						,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+				FROM	(
+						SELECT	 REPO_PLN_ID
+								,PLN_YRWK
+								,FM_ECC_CD
+								,CNTR_TPSZ_CD
+								,SUM(CNTR_QTY) CNTR_QTY
+						FROM	(
+								SELECT	 PLN.REPO_PLN_ID
+										,PLN.PLN_YRWK
+										,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(FM_YD_CD,0,5)) FM_ECC_CD
+										,QTY.CNTR_TPSZ_CD
+										,SUM(QTY.CNTR_QTY)  CNTR_QTY
+								FROM	EQR_ONF_HIR_EXE_PLN PLN
+										,EQR_ONF_HIR_EXE_PLN_QTY QTY
+									#if ( ${type} != '' )
+										,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND ${type} IN ( ${eccText} ) )C
+									#end
+								WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+									AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+									AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+									AND PLN.REF_ID		= QTY.REF_ID
+									AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+								-- item  : F(조회조건을 선택시)
+								#if (${itemOffExist} == 'Y')
+									AND 1 = 1
+								#elseif ( ${item} != '' )
+									AND 1 = 2
+								#end
+								#if (${type} != '')
+									AND (SUBSTR(PLN.FM_YD_CD,0,5) = C.SCC_CD)
+								#end
+									AND PLN.ONF_HIR_DIV_CD = 'F'
+									AND PLN.PLN_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+								#if ( ${inclExecPlan} == '0' )
+									AND 1 = 2
+								#end
+								#if (${cntr_tpsz_cd} != '')
+									AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+								#end
+								GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_YD_CD, QTY.CNTR_TPSZ_CD
+								ORDER BY PLN_YRWK DESC
+								)
+						GROUP BY REPO_PLN_ID, PLN_YRWK, FM_ECC_CD, CNTR_TPSZ_CD
+					    ) E
+			    )
+		GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+    	UNION ALL
+	    -- 	I/B Generation : EQR_IB_BKG_FCAST(TO_ECC_CD)
+		SELECT	 PLN_YRWK
+				,ECC_CD
+				,'inflow' AS FLOW
+				,'11I/B Generation' ITEM
+				,'0' LVL
+			#foreach( $key in ${arrtpsz}) 
+				,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+        FROM    (
+				SELECT   REPO_PLN_ID
+						,PLN_YRWK
+						,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+						,CNTR_TPSZ_CD, CNTR_QTY
+						,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+				FROM    (
+						SELECT   @[repo_pln_id] REPO_PLN_ID
+								,FCAST_YRWK AS PLN_YRWK
+								,TO_ECC_CD AS TO_ECC_CD
+								,CNTR_TPSZ_CD
+								,SUM(CNTR_VOL_QTY) AS CNTR_QTY
+						FROM    EQR_IB_BKG_FCAST PLN
+							#if ( ${type} != '' )
+								,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+							#end
+						WHERE SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id]	)
+						#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+							AND	1 = 2
+						#end
+						#if ( ${type} != '' )
+							AND (PLN.TO_ECC_CD = C.ECC_CD)
+						#end
+							AND FCAST_YRWK BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+						#if (${cntr_tpsz_cd} != '')
+							AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+						#end
+						GROUP BY FCAST_YRWK, TO_ECC_CD, CNTR_TPSZ_CD
+						ORDER BY FCAST_YRWK DESC
+						) E
+	            -- 20070602  (황영신 수석님 추가 요청 반영)
+				UNION ALL
+				SELECT   REPO_PLN_ID
+						,PLN_YRWK
+						,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+						,CNTR_TPSZ_CD
+						,CNTR_QTY
+						,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+				FROM    (
+						SELECT   @[repo_pln_id] REPO_PLN_ID
+								,fcast_del_yrwk AS PLN_YRWK
+								,TO_ECC_CD AS TO_ECC_CD
+								,CNTR_TPSZ_CD
+								,SUM(CNTR_VOL_QTY) AS CNTR_QTY
+						FROM    EQR_OB_FCAST PLN
+							#if ( ${type} != '' )
+								,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+							#end
+						WHERE   SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id] 	)
+						#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+							AND	1 = 2
+						#end
+						#if ( ${type} != '' )
+							AND (PLN.TO_ECC_CD = C.ECC_CD)
+						#end
+							AND fcast_del_yrwk BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+						#if (${cntr_tpsz_cd} != '')
+							AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+						#end
+						GROUP BY fcast_del_yrwk, TO_ECC_CD, CNTR_TPSZ_CD
+						ORDER BY fcast_del_yrwk DESC
+				) E
+				-- 20070602  (황영신 수석님 추가 요청 반영) 추가 끝
+				)
+		GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+		UNION ALL
+		-- RepoIn : EQR_VSL_LODG_DCHG_PLN, EQR_INLND_TRSP_PLN(TO_ECC_CD)
+		SELECT   PLN_YRWK
+				,ECC_CD
+				,'inflow' AS FLOW
+				,'22Repo In' ITEM
+				,'0' LVL
+			#foreach( $key in ${arrtpsz}) 
+				,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+		FROM    (
+				SELECT	 REPO_PLN_ID
+						,PLN_YRWK
+						,ECC_CD
+						,CNTR_TPSZ_CD
+						,SUM(CNTR_QTY)	CNTR_QTY
+				FROM    (
+						SELECT   REPO_PLN_ID
+								,PLN_YRWK
+								,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+								,CNTR_TPSZ_CD
+								,CNTR_QTY
+								,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+						FROM    (
+								--EQR_VSL_LODG_DCHG_PLN
+								SELECT   PLN.REPO_PLN_ID
+										,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE TO_CHAR(PLN.TO_ETB_DT,'YYYYMMDD') BETWEEN WK_ST_DT  AND WK_END_DT) AS PLN_YRWK
+										,PLN.TO_ECC_CD AS TO_ECC_CD
+										,QTY.CNTR_TPSZ_CD
+										,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+								FROM     EQR_VSL_LODG_DCHG_PLN PLN
+										,EQR_VSL_LODG_DCHG_PLN_QTY QTY
+									#if ( ${type} != '' )
+										,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+									#end
+								WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+									AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+									AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+									AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+								#if (${item} != '' ) 
+									AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+								#end
+								#if (${lane} != '' ) 
+									AND PLN.VSL_LANE_CD IN ( ${laneText} )
+								#end
+								#if (${vvd} != '' ) 
+									AND PLN.VSL_CD||PLN.SKD_VOY_NO||PLN.SKD_DIR_CD IN ( ${vvdText} )
+								#end
+								#if ( ${type} != '' )
+									AND (PLN.TO_ECC_CD = C.ECC_CD)
+								#end
+									AND TO_CHAR(PLN.TO_ETB_DT,'YYYYMMDD')  BETWEEN
+											(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk]  )
+										AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+								#if (${cntr_tpsz_cd} != '')
+									AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+								#end
+								GROUP BY PLN.REPO_PLN_ID, PLN.TO_ETB_DT, PLN.TO_ECC_CD, QTY.CNTR_TPSZ_CD
+								UNION ALL
+								--EQR_INLND_TRSP_PLN
+								SELECT   PLN.REPO_PLN_ID
+										,PLN.TO_YRWK AS PLN_YRWK
+										,PLN.TO_ECC_CD AS TO_ECC_CD
+										,QTY.CNTR_TPSZ_CD
+										,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+								FROM    EQR_INLND_TRSP_PLN PLN
+										,EQR_INLND_TRSP_PLN_QTY QTY
+									#if ( ${type} != '' )
+										,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+									#end
+								WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+									AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+									AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+									AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+								#if (${item} != '' ) 
+									AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+								#end
+								#if ( (${item} != '' && ${lane} != '' ) || (${item} != '' && ${vvd} != '') ) 
+									AND	1 = 2
+								#end
+								#if ( ${type} != '' )
+									AND (PLN.TO_ECC_CD = C.ECC_CD)
+								#end
+									AND PLN.TO_YRWK BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+								#if (${cntr_tpsz_cd} != '')
+									AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+								#end
+								GROUP BY PLN.REPO_PLN_ID, PLN.TO_YRWK, PLN.TO_ECC_CD, QTY.CNTR_TPSZ_CD
+								ORDER BY PLN_YRWK DESC
+								) E 
+						)
+						GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD, CNTR_TPSZ_CD
+				)
+		GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD
+		UNION ALL
+		-- Excution(RepoIn) : EQR_VSL_LODG_DCHG_EXE_PLN(TO_YD_CD)
+		SELECT   PLN_YRWK
+				,ECC_CD
+				,'inflow' AS FLOW
+				,'33Execution' ITEM
+				,'1' LVL
+			#foreach( $key in ${arrtpsz}) 
+				,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+		FROM    (
+				SELECT   REPO_PLN_ID
+						,PLN_YRWK
+						,ECC_CD
+						,CNTR_TPSZ_CD
+						,SUM(CNTR_QTY)	CNTR_QTY
+				FROM    (
+						SELECT   REPO_PLN_ID
+								,PLN_YRWK
+								,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+								,CNTR_TPSZ_CD
+								,CNTR_QTY
+								,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+						FROM    (
+								SELECT   PLN.REPO_PLN_ID
+										,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE TO_CHAR(TO_ETB_DT,'YYYYMMDD') BETWEEN WK_ST_DT  AND WK_END_DT) AS PLN_YRWK
+										,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(TO_YD_CD,0,5)) AS TO_ECC_CD
+										,QTY.CNTR_TPSZ_CD
+										,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+								FROM     EQR_VSL_LODG_DCHG_EXE_PLN PLN
+										,EQR_VSL_EXE_PLN_QTY QTY
+									#if ( ${type} != '' )
+										,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1	AND ${type} IN ( ${eccText}) ) C
+									#end
+								WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+									AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+									AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+									AND PLN.REF_ID		= QTY.REF_ID
+									AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+								#if (${item} != '' ) 
+									AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+								#end
+								#if (${lane} != '' ) 
+									AND PLN.VSL_LANE_CD IN ( ${laneText} )
+								#end
+								#if (${vvd} != '' ) 
+									AND PLN.VSL_CD||PLN.SKD_VOY_NO||PLN.SKD_DIR_CD IN ( ${vvdText} )
+								#end
+								#if (${type} != '' ) 
+									AND (SUBSTR(PLN.TO_YD_CD,0,5) = c.SCC_CD)
+								#end
+									AND TO_CHAR(PLN.TO_ETB_DT,'YYYYMMDD')  BETWEEN
+											(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+										AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+								#if ( ${inclExecPlan} == '0' )
+									AND 1 = 2
+								#end
+								#if (${cntr_tpsz_cd} != '')
+									AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+								#end
+								GROUP BY PLN.REPO_PLN_ID, PLN.TO_ETB_DT, PLN.TO_YD_CD, QTY.CNTR_TPSZ_CD
+								UNION ALL
+								SELECT   PLN.REPO_PLN_ID
+										,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE TO_CHAR(TO_ETA_DT,'YYYYMMDD') BETWEEN WK_ST_DT  AND WK_END_DT) AS PLN_YRWK
+										,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(TO_YD_CD,0,5)) AS TO_ECC_CD
+										,QTY.CNTR_TPSZ_CD
+										,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+								FROM    EQR_INLND_TRSP_EXE_PLN PLN
+										,EQR_INLND_TRSP_EXE_PLN_QTY QTY
+									#if ( ${type} != '' )
+										,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND ${type} IN ( ${eccText} ) ) C
+									#end
+								WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+									AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+									AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+									AND PLN.REF_ID		= QTY.REF_ID
+									AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+								#if (${item} != '' ) 
+									AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+								#end
+								#if ( (${item} != '' && ${lane} != '' ) || (${item} != '' && ${vvd} != '') ) 
+									AND	1 = 2
+								#end
+								#if ( ${type} != '' )
+									AND (SUBSTR(PLN.TO_YD_CD,0,5) = c.SCC_CD)
+								#end 
+									AND TO_CHAR(PLN.TO_ETA_DT,'YYYYMMDD')  BETWEEN
+											(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+										AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+								#if ( ${inclExecPlan} == '0' )
+									AND 1 = 2
+								#end
+								#if (${cntr_tpsz_cd} != '')
+									AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+								#end
+								GROUP BY PLN.REPO_PLN_ID, PLN.TO_ETA_DT, PLN.TO_YD_CD, QTY.CNTR_TPSZ_CD
+								ORDER BY PLN_YRWK DESC
+								) E
+						)
+						GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD, CNTR_TPSZ_CD
+				)
+		GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD
+		UNION ALL
+		-- Off-Hire: EQR_ONF_HIR_PLN(ONF_HIR_DIV_CD)
+		SELECT   PLN_YRWK
+				,ECC_CD
+				,'inflow' AS FLOW
+				,'44On-Hire' ITEM
+				,'0' LVL
+			#foreach( $key in ${arrtpsz}) 
+				,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+		FROM    (
+				SELECT   REPO_PLN_ID
+						,PLN_YRWK
+						,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+						,CNTR_TPSZ_CD, CNTR_QTY
+						,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+				FROM    (
+						SELECT   PLN.REPO_PLN_ID
+								,PLN.PLN_YRWK
+								,PLN.ECC_CD AS FM_ECC_CD
+								,QTY.CNTR_TPSZ_CD
+								,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+						FROM     EQR_ONF_HIR_PLN PLN
+								,EQR_ONF_HIR_PLN_QTY QTY
+							#if ( ${type} != '' )
+								,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+							#end
+						WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+							AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+							AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+							AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+							AND PLN.ONF_HIR_DIV_CD = 'O'
+						--item  : O(조회조건을 선택시)
+						#if (${itemOnExist} == 'Y')
+							AND 1 = 1
+						#elseif ( ${item} != '' )
+							AND 1 = 2
+						#end
+						#if ( ${type} != '' )
+							AND (PLN.ECC_CD = C.ECC_CD)
+						#end
+							AND PLN.PLN_YRWK BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+						#if (${cntr_tpsz_cd} != '')
+							AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+						#end
+						GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.ECC_CD, QTY.CNTR_TPSZ_CD
+						ORDER BY PLN_YRWK DESC
+						) E
+				)
+		GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+		UNION ALL
+		-- Excution(Off-Hire) : EQR_ONF_HIR_EXE_PLN(ONF_HIR_DIV_CD, TO_YD_CD)
+		SELECT   PLN_YRWK
+				,ECC_CD
+				,'inflow' AS FLOW
+				,'55Execution' ITEM
+				,'1' LVL                    
+			#foreach( $key in ${arrtpsz}) 
+				,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+		FROM    (
+				SELECT   REPO_PLN_ID
+						,PLN_YRWK
+						,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+						,CNTR_TPSZ_CD
+						,CNTR_QTY
+						,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+				FROM    (
+						SELECT   REPO_PLN_ID
+								,PLN_YRWK
+								,TO_ECC_CD
+								,CNTR_TPSZ_CD
+								,SUM(CNTR_QTY) CNTR_QTY
+						FROM    (
+								SELECT   PLN.REPO_PLN_ID
+										,PLN.PLN_YRWK
+										,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(TO_YD_CD,0,5)) TO_ECC_CD
+										,QTY.CNTR_TPSZ_CD
+										,SUM(QTY.CNTR_QTY)  CNTR_QTY
+								FROM     EQR_ONF_HIR_EXE_PLN PLN
+										,EQR_ONF_HIR_EXE_PLN_QTY QTY
+									#if ( ${type} != '' )
+										,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND ${type} IN ( ${eccText} ) ) C
+									#end
+								WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+									AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+									AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+									AND PLN.REF_ID		= QTY.REF_ID
+									AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+								--item  : O(조회조건을 선택시)
+								#if (${itemOnExist} == 'Y')
+									AND 1 = 1
+								#elseif ( ${item} != '' )
+									AND 1 = 2
+								#end
+								#if ( ${type} != '' )
+									AND (SUBSTR(PLN.TO_YD_CD,0,5) = c.SCC_CD)
+								#end
+									AND PLN.ONF_HIR_DIV_CD = 'O'
+									AND PLN.PLN_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+								#if ( ${inclExecPlan} == '0' )
+									AND 1 = 2
+								#end
+								#if (${cntr_tpsz_cd} != '')
+									AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+								#end
+								GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.TO_YD_CD, QTY.CNTR_TPSZ_CD
+								ORDER BY PLN_YRWK DESC
+								)
+						GROUP BY REPO_PLN_ID, PLN_YRWK, TO_ECC_CD, CNTR_TPSZ_CD
+						) E
+				)
+		GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+		UNION ALL
+				-- Safety Stock
+		SELECT   TO_CHAR(BB.PLN_YRWK) PLN_YRWK
+				,ECC_CD
+				,'inflow' AS FLOW
+				,'88Safety Stock' ITEM
+				,'0' LVL
+			#foreach( $key in ${arrtpsz})
+				, ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+		FROM    (
+				SELECT   ECC_CD
+						,'inflow' AS FLOW
+						,'88Safety Stock' ITEM
+						,'0' LVL
+					#foreach( $key in ${arrtpsz}) 
+						,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+					#end
+						,REPO_PLN_ID
+				FROM    (
+						SELECT   REPO_PLN_ID
+								,PLN_YRWK
+								,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+								,CNTR_TPSZ_CD
+								,CNTR_QTY
+								,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+						FROM    (
+								SELECT   @[repo_pln_id] REPO_PLN_ID
+										,'' PLN_YRWK
+										,PLN.ECC_CD AS TO_ECC_CD
+										,CNTR_TPSZ_CD
+										,SUM(SFSTK_VOL_QTY) CNTR_QTY
+								FROM    EQR_SCNR_ECC_SFT_STK PLN
+									#if ( ${type} != '' )
+										,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+									#end
+								WHERE   SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id] )
+								#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+									AND	1 = 2
+								#end
+								#if (${type} != '' )
+									AND (PLN.ECC_CD = C.ECC_CD)
+								#end			                        
+								#if (${cntr_tpsz_cd} != '')
+									AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+								#end
+								GROUP BY PLN.ECC_CD, CNTR_TPSZ_CD
+								) E
+						)
+				GROUP BY ECC_CD, REPO_PLN_ID
+				)aa,
+				(
+				SELECT  PLN_YR||PLN_WK AS PLN_YRWK
+				FROM    EQR_WK_PRD
+				WHERE	PLN_YR||PLN_WK	BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+				) bb
+		UNION ALL
+		-- ETC : EQR_ADD_PLN
+		SELECT   PLN_YRWK
+				,ECC_CD
+				,'inflow' AS FLOW
+				,'66+/- ETC' ITEM
+				,'0' LVL
+			#foreach( $key in ${arrtpsz}) 
+				,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+			#end
+				,REPO_PLN_ID
+		FROM    (
+				SELECT   REPO_PLN_ID
+						,PLN_YRWK
+						,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+						,CNTR_TPSZ_CD
+						,CNTR_QTY
+						,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+				FROM    (
+						SELECT   REPO_PLN_ID
+								,PLN_YRWK
+								,PLN.ECC_CD AS FM_ECC_CD
+								,CNTR_TPSZ_CD
+								,SUM(CNTR_QTY) AS CNTR_QTY
+						FROM    EQR_ADD_PLN PLN
+							#if ( ${type} != '' )
+								,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+							#end
+						WHERE   REPO_PLN_ID = @[repo_pln_id]
+						#if ( ${type} != '' )
+							AND (PLN.ECC_CD = c.ECC_CD)
+						#end
+							AND PLN_YRWK BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+						#if (${cntr_tpsz_cd} != '')
+							AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+						#end
+						GROUP BY REPO_PLN_ID, PLN_YRWK, PLN.ECC_CD, CNTR_TPSZ_CD
+						ORDER BY PLN_YRWK DESC
+						) E
+				)
+		GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+		) XX,
+		(
+		SELECT	 PLN_YRWK
+				,ECC_CD
+				,'inflow' FLOW
+				,ITEM
+		FROM	(
+				SELECT	 DISTINCT PLN_YRWK
+						,ECC_CD
+				FROM	(
+						-- Initial(EQR_INVT_SNAP)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'outflow' AS FLOW
+								,'00Initial' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM	(
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = E.ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM	(
+										SELECT	@[repo_pln_id] REPO_PLN_ID
+												,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE SNAP_DT BETWEEN WK_ST_DT  AND WK_END_DT) PLN_YRWK
+												,PLN.ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_VOL_QTY) AS CNTR_QTY
+										FROM	EQR_INVT_SNAP PLN
+											#if ( ${type} != '' )
+												,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE	SNAP_DT = (SELECT WK_ST_DT FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+										#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+											AND	1 = 2
+										#end
+										#if (${type} != '')
+											AND (PLN.ECC_CD = C.ECC_CD)
+										#end
+										#if (${cntr_tpsz_cd} != '')
+											AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										
+										GROUP BY SNAP_DT, PLN.ECC_CD, CNTR_TPSZ_CD
+										) E
+								)
+						GROUP BY  RUMM, REPO_PLN_ID , PLN_YRWK, ECC_CD
+						UNION ALL
+						-- Demand(EQR_OB_FCAST)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'outflow' AS FLOW
+								,'10Demand Vol' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM	(
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM	(
+										SELECT	 @[repo_pln_id] REPO_PLN_ID
+												,FCAST_YRWK AS PLN_YRWK
+												,FM_ECC_CD AS FM_ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_VOL_QTY) AS CNTR_QTY
+										FROM	EQR_OB_FCAST PLN
+											#if ( ${type} != '' )
+												,(SELECT ecc_cd FROM eqr_ecc_mst WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE	SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id] 	)
+										#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+											AND	1 = 2
+										#end
+										#if (${type} != '')
+											AND	(PLN.FM_ECC_CD = C.ECC_CD)
+										#end
+											AND	FCAST_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+										#if (${cntr_tpsz_cd} != '')
+											AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										GROUP BY FCAST_YRWK, fm_ecc_cd, CNTR_TPSZ_CD
+										ORDER BY FCAST_YRWK
+										) E
+								)
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+						UNION ALL
+						-- RepoOut : EQR_VSL_LODG_DCHG_PLN, EQR_INLND_TRSP_PLN(FM_ECC_CD)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'outflow' AS FLOW
+								,'20Repo Out' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM	(
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,ECC_CD
+										,CNTR_TPSZ_CD
+										,SUM(CNTR_QTY)	CNTR_QTY
+								FROM	(
+										SELECT	 REPO_PLN_ID
+												,PLN_YRWK
+												,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+												,CNTR_TPSZ_CD
+												,CNTR_QTY
+												,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+										FROM	(
+												-- EQR_VSL_LODG_DCHG_PLN
+												SELECT	 PLN.REPO_PLN_ID
+														,PLN.PLN_YRWK
+														,PLN.FM_ECC_CD AS FM_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM	EQR_VSL_LODG_DCHG_PLN PLN
+														,EQR_VSL_LODG_DCHG_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT ecc_cd FROM eqr_ecc_mst WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+													#end
+												WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND	PLN.REPO_PLN_ID		= @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if (${lane} != '' ) 
+													AND PLN.VSL_LANE_CD IN ( ${laneText} )
+												#end
+												#if (${vvd} != '' ) 
+													AND PLN.VSL_CD||PLN.SKD_VOY_NO||PLN.SKD_DIR_CD IN ( ${vvdText} )
+												#end
+												#if (${type} != '')
+													AND (PLN.FM_ECC_CD = C.ECC_CD)
+												#end
+													AND TO_CHAR(FM_ETD_DT,'YYYYMMDD')  BETWEEN
+															(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+														AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_ECC_CD, QTY.CNTR_TPSZ_CD
+												UNION ALL
+												-- EQR_INLND_TRSP_PLN
+												SELECT	 PLN.REPO_PLN_ID
+														,PLN.PLN_YRWK
+														,PLN.FM_ECC_CD AS FM_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM	EQR_INLND_TRSP_PLN PLN
+														,EQR_INLND_TRSP_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+													#end
+												WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND	PLN.REPO_PLN_ID	= @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if ( (${item} != '' && ${lane} != '' ) || (${item} != '' && ${vvd} != '') ) 
+													AND	1 = 2
+												#end
+												#if (${type} != '')
+													AND (PLN.FM_ECC_CD = C.ECC_CD)
+												#end
+													AND	PLN.FM_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+												#if (${cntr_tpsz_cd} != '')
+													AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_ECC_CD, QTY.CNTR_TPSZ_CD
+												ORDER BY PLN_YRWK DESC
+												) E
+										)
+										GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD, CNTR_TPSZ_CD
+								)
+						GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD
+						UNION ALL
+						-- Excution(RepoOut) : EQR_VSL_LODG_DCHG_EXE_PLN(FM_YD_CD)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'outflow' AS FLOW
+								,'30Execution' ITEM
+								,'1' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM	(
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,ECC_CD
+										,CNTR_TPSZ_CD
+										,SUM(CNTR_QTY)	CNTR_QTY
+								FROM	(
+										SELECT	 REPO_PLN_ID
+												,PLN_YRWK
+												,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+												,CNTR_TPSZ_CD
+												,CNTR_QTY
+												,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+										FROM	(
+												-- EQR_VSL_LODG_DCHG_EXE_PLN
+												SELECT	 PLN.REPO_PLN_ID
+														,PLN.PLN_YRWK
+														,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(FM_YD_CD,0,5)) AS FM_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM	EQR_VSL_LODG_DCHG_EXE_PLN PLN
+														,EQR_VSL_EXE_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND	${type} IN ( ${eccText} ) ) C
+													#end
+												WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK    = QTY.PLN_YRWK
+													AND PLN.PLN_SEQ    = QTY.PLN_SEQ
+													AND PLN.REF_ID		= QTY.REF_ID
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if (${lane} != '' ) 
+													AND PLN.VSL_LANE_CD IN ( ${laneText} )
+												#end
+												#if (${vvd} != '' ) 
+													AND PLN.VSL_CD||PLN.SKD_VOY_NO||PLN.SKD_DIR_CD IN ( ${vvdText} )
+												#end										
+												#if ( ${type} != '' )
+													AND	(SUBSTR(PLN.FM_YD_CD,0,5) = C.SCC_CD)
+												#end
+													AND TO_CHAR(PLN.FM_ETD_DT,'YYYYMMDD')  BETWEEN
+															(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk] )
+														AND	(SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+												#if ( ${inclExecPlan} == '0' )
+													AND 1 = 2
+												#end
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_YD_CD, QTY.CNTR_TPSZ_CD
+												UNION ALL
+												-- EQR_INLND_TRSP_EXE_PLN
+												SELECT	 PLN.REPO_PLN_ID
+														,PLN.PLN_YRWK
+														,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(FM_YD_CD,0,5)) AS FM_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM	EQR_INLND_TRSP_EXE_PLN PLN
+														,EQR_INLND_TRSP_EXE_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND	${type} IN ( ${eccText} ) ) C
+													#end
+												WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND PLN.REF_ID		= QTY.REF_ID
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												#if ( (${item} != '' && ${lane} != '' ) || (${item} != '' && ${vvd} != '') ) 
+													AND	1 = 2
+												#end
+												#if ( ${type} != '' )
+													AND	(SUBSTR(PLN.FM_YD_CD,0,5) = C.SCC_CD)
+												#end
+													AND TO_CHAR(PLN.FM_ETD_DT,'YYYYMMDD')  BETWEEN
+															(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+														AND	(SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])		
+												#if ( ${inclExecPlan} == '0' )
+													AND 1 = 2
+												#end
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_YD_CD, QTY.CNTR_TPSZ_CD
+												ORDER BY PLN_YRWK DESC
+												) E
+										)
+								GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD, CNTR_TPSZ_CD
+						)
+						GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD 
+						UNION ALL
+						-- Off-Hire : EQR_ONF_HIR_PLN(ONF_HIR_DIV_CD)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'outflow' AS FLOW
+								,'40Off-Hire' ITEM
+								,'0' LVL
+						    #foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY )) ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM	(
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM	(
+										SELECT	 PLN.REPO_PLN_ID
+												,PLN.PLN_YRWK
+												,PLN.ECC_CD AS FM_ECC_CD
+												,QTY.CNTR_TPSZ_CD
+												,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+										FROM	EQR_ONF_HIR_PLN PLN
+												,EQR_ONF_HIR_PLN_QTY QTY
+											#if ( ${type} != '' )
+												,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+											AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+											AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+											AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+											AND	PLN.ONF_HIR_DIV_CD = 'F'
+											-- item  : F(조회조건을 선택시)
+										#if (${itemOffExist} == 'Y')
+											AND 1 = 1
+										#elseif ( ${item} != '' )
+											AND 1 = 2
+										#end
+										#if (${type} != '')
+											AND (PLN.ECC_CD = C.ECC_CD) 
+										#end
+											AND PLN.PLN_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+										#if (${cntr_tpsz_cd} != '')
+											AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.ECC_CD, QTY.CNTR_TPSZ_CD
+										ORDER BY PLN_YRWK DESC
+										) E
+								)
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+						UNION ALL
+						-- 	Excution(Off-Hire) : EQR_ONF_HIR_EXE_PLN(ONF_HIR_DIV_CD, FM_YD_CD)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'outflow' AS FLOW
+								,'50Execution' ITEM
+								,'1' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY )) ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM	(
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM	(
+										SELECT	 REPO_PLN_ID
+												,PLN_YRWK
+												,FM_ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_QTY) CNTR_QTY
+										FROM	(
+												SELECT	 PLN.REPO_PLN_ID
+														,PLN.PLN_YRWK
+														,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(FM_YD_CD,0,5)) FM_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY)  CNTR_QTY
+												FROM	EQR_ONF_HIR_EXE_PLN PLN
+														,EQR_ONF_HIR_EXE_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND ${type} IN ( ${eccText} ) )C
+													#end
+												WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND PLN.REF_ID		= QTY.REF_ID
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												-- item  : F(조회조건을 선택시)
+												#if (${itemOffExist} == 'Y')
+													AND 1 = 1
+												#elseif ( ${item} != '' )
+													AND 1 = 2
+												#end
+												#if (${type} != '')
+													AND (SUBSTR(PLN.FM_YD_CD,0,5) = C.SCC_CD)
+												#end
+													AND PLN.ONF_HIR_DIV_CD = 'F'
+													AND PLN.PLN_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+												#if ( ${inclExecPlan} == '0' )
+													AND 1 = 2
+												#end
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_YD_CD, QTY.CNTR_TPSZ_CD
+												ORDER BY PLN_YRWK DESC
+												)
+										GROUP BY REPO_PLN_ID, PLN_YRWK, FM_ECC_CD, CNTR_TPSZ_CD
+									    ) E
+							    )
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+				    	UNION ALL
+					    -- 	I/B Generation : EQR_IB_BKG_FCAST(TO_ECC_CD)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'11I/B Generation' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+				        FROM    (
+								SELECT   REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD, CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM    (
+										SELECT   @[repo_pln_id] REPO_PLN_ID
+												,FCAST_YRWK AS PLN_YRWK
+												,TO_ECC_CD AS TO_ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_VOL_QTY) AS CNTR_QTY
+										FROM    EQR_IB_BKG_FCAST PLN
+											#if ( ${type} != '' )
+												,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id]	)
+										#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+											AND	1 = 2
+										#end
+										#if ( ${type} != '' )
+											AND (PLN.TO_ECC_CD = C.ECC_CD)
+										#end
+											AND FCAST_YRWK BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+										#if (${cntr_tpsz_cd} != '')
+											AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										GROUP BY FCAST_YRWK, TO_ECC_CD, CNTR_TPSZ_CD
+										ORDER BY FCAST_YRWK DESC
+										) E
+					            -- 20070602  (황영신 수석님 추가 요청 반영)
+								UNION ALL
+								SELECT   REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM    (
+										SELECT   @[repo_pln_id] REPO_PLN_ID
+												,fcast_del_yrwk AS PLN_YRWK
+												,TO_ECC_CD AS TO_ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_VOL_QTY) AS CNTR_QTY
+										FROM    EQR_OB_FCAST PLN
+											#if ( ${type} != '' )
+												,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE   SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id] 	)
+										#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+											AND	1 = 2
+										#end
+										#if ( ${type} != '' )
+											AND (PLN.TO_ECC_CD = C.ECC_CD)
+										#end
+											AND fcast_del_yrwk BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+										#if (${cntr_tpsz_cd} != '')
+											AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										GROUP BY fcast_del_yrwk, TO_ECC_CD, CNTR_TPSZ_CD
+										ORDER BY fcast_del_yrwk DESC
+								) E
+								-- 20070602  (황영신 수석님 추가 요청 반영) 추가 끝
+								)
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+						UNION ALL
+						-- RepoIn : EQR_VSL_LODG_DCHG_PLN, EQR_INLND_TRSP_PLN(TO_ECC_CD)
+						SELECT   PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'22Repo In' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM    (
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,ECC_CD
+										,CNTR_TPSZ_CD
+										,SUM(CNTR_QTY)	CNTR_QTY
+								FROM    (
+										SELECT   REPO_PLN_ID
+												,PLN_YRWK
+												,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+												,CNTR_TPSZ_CD
+												,CNTR_QTY
+												,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+										FROM    (
+												--EQR_VSL_LODG_DCHG_PLN
+												SELECT   PLN.REPO_PLN_ID
+														,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE TO_CHAR(PLN.TO_ETB_DT,'YYYYMMDD') BETWEEN WK_ST_DT  AND WK_END_DT) AS PLN_YRWK
+														,PLN.TO_ECC_CD AS TO_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM     EQR_VSL_LODG_DCHG_PLN PLN
+														,EQR_VSL_LODG_DCHG_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+													#end
+												WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if (${lane} != '' ) 
+													AND PLN.VSL_LANE_CD IN ( ${laneText} )
+												#end
+												#if (${vvd} != '' ) 
+													AND PLN.VSL_CD||PLN.SKD_VOY_NO||PLN.SKD_DIR_CD IN ( ${vvdText} )
+												#end
+												#if ( ${type} != '' )
+													AND (PLN.TO_ECC_CD = C.ECC_CD)
+												#end
+													AND TO_CHAR(PLN.TO_ETB_DT,'YYYYMMDD')  BETWEEN
+															(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk]  )
+														AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+												#if (${cntr_tpsz_cd} != '')
+													AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.TO_ETB_DT, PLN.TO_ECC_CD, QTY.CNTR_TPSZ_CD
+												UNION ALL
+												--EQR_INLND_TRSP_PLN
+												SELECT   PLN.REPO_PLN_ID
+														,PLN.TO_YRWK AS PLN_YRWK
+														,PLN.TO_ECC_CD AS TO_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM    EQR_INLND_TRSP_PLN PLN
+														,EQR_INLND_TRSP_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+													#end
+												WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if ( (${item} != '' && ${lane} != '' ) || (${item} != '' && ${vvd} != '') ) 
+													AND	1 = 2
+												#end
+												#if ( ${type} != '' )
+													AND (PLN.TO_ECC_CD = C.ECC_CD)
+												#end
+													AND PLN.TO_YRWK BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.TO_YRWK, PLN.TO_ECC_CD, QTY.CNTR_TPSZ_CD
+												ORDER BY PLN_YRWK DESC
+												) E 
+										)
+										GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD, CNTR_TPSZ_CD
+								)
+						GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD
+						UNION ALL
+						-- Excution(RepoIn) : EQR_VSL_LODG_DCHG_EXE_PLN(TO_YD_CD)
+						SELECT   PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'33Execution' ITEM
+								,'1' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM    (
+								SELECT   REPO_PLN_ID
+										,PLN_YRWK
+										,ECC_CD
+										,CNTR_TPSZ_CD
+										,SUM(CNTR_QTY)	CNTR_QTY
+								FROM    (
+										SELECT   REPO_PLN_ID
+												,PLN_YRWK
+												,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+												,CNTR_TPSZ_CD
+												,CNTR_QTY
+												,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+										FROM    (
+												SELECT   PLN.REPO_PLN_ID
+														,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE TO_CHAR(TO_ETB_DT,'YYYYMMDD') BETWEEN WK_ST_DT  AND WK_END_DT) AS PLN_YRWK
+														,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(TO_YD_CD,0,5)) AS TO_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM     EQR_VSL_LODG_DCHG_EXE_PLN PLN
+														,EQR_VSL_EXE_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1	AND ${type} IN ( ${eccText}) ) C
+													#end
+												WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND PLN.REF_ID		= QTY.REF_ID
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if (${lane} != '' ) 
+													AND PLN.VSL_LANE_CD IN ( ${laneText} )
+												#end
+												#if (${vvd} != '' ) 
+													AND PLN.VSL_CD||PLN.SKD_VOY_NO||PLN.SKD_DIR_CD IN ( ${vvdText} )
+												#end
+												#if (${type} != '' ) 
+													AND (SUBSTR(PLN.TO_YD_CD,0,5) = c.SCC_CD)
+												#end
+													AND TO_CHAR(PLN.TO_ETB_DT,'YYYYMMDD')  BETWEEN
+															(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+														AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+												#if ( ${inclExecPlan} == '0' )
+													AND 1 = 2
+												#end
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.TO_ETB_DT, PLN.TO_YD_CD, QTY.CNTR_TPSZ_CD
+												UNION ALL
+												SELECT   PLN.REPO_PLN_ID
+														,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE TO_CHAR(TO_ETA_DT,'YYYYMMDD') BETWEEN WK_ST_DT  AND WK_END_DT) AS PLN_YRWK
+														,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(TO_YD_CD,0,5)) AS TO_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM    EQR_INLND_TRSP_EXE_PLN PLN
+														,EQR_INLND_TRSP_EXE_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND ${type} IN ( ${eccText} ) ) C
+													#end
+												WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND PLN.REF_ID		= QTY.REF_ID
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if ( (${item} != '' && ${lane} != '' ) || (${item} != '' && ${vvd} != '') ) 
+													AND	1 = 2
+												#end
+												#if ( ${type} != '' )
+													AND (SUBSTR(PLN.TO_YD_CD,0,5) = c.SCC_CD)
+												#end 
+													AND TO_CHAR(PLN.TO_ETA_DT,'YYYYMMDD')  BETWEEN
+															(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+														AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+												#if ( ${inclExecPlan} == '0' )
+													AND 1 = 2
+												#end
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.TO_ETA_DT, PLN.TO_YD_CD, QTY.CNTR_TPSZ_CD
+												ORDER BY PLN_YRWK DESC
+												) E
+										)
+										GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD, CNTR_TPSZ_CD
+								)
+						GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD
+						UNION ALL
+						-- Off-Hire: EQR_ONF_HIR_PLN(ONF_HIR_DIV_CD)
+						SELECT   PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'44On-Hire' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM    (
+								SELECT   REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD, CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM    (
+										SELECT   PLN.REPO_PLN_ID
+												,PLN.PLN_YRWK
+												,PLN.ECC_CD AS FM_ECC_CD
+												,QTY.CNTR_TPSZ_CD
+												,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+										FROM     EQR_ONF_HIR_PLN PLN
+												,EQR_ONF_HIR_PLN_QTY QTY
+											#if ( ${type} != '' )
+												,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+											AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+											AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+											AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+											AND PLN.ONF_HIR_DIV_CD = 'O'
+										--item  : O(조회조건을 선택시)
+										#if (${itemOnExist} == 'Y')
+											AND 1 = 1
+										#elseif ( ${item} != '' )
+											AND 1 = 2
+										#end
+										#if ( ${type} != '' )
+											AND (PLN.ECC_CD = C.ECC_CD)
+										#end
+											AND PLN.PLN_YRWK BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+										#if (${cntr_tpsz_cd} != '')
+											AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.ECC_CD, QTY.CNTR_TPSZ_CD
+										ORDER BY PLN_YRWK DESC
+										) E
+								)
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+						UNION ALL
+						-- Excution(Off-Hire) : EQR_ONF_HIR_EXE_PLN(ONF_HIR_DIV_CD, TO_YD_CD)
+						SELECT   PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'55Execution' ITEM
+								,'1' LVL                    
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM    (
+								SELECT   REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM    (
+										SELECT   REPO_PLN_ID
+												,PLN_YRWK
+												,TO_ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_QTY) CNTR_QTY
+										FROM    (
+												SELECT   PLN.REPO_PLN_ID
+														,PLN.PLN_YRWK
+														,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(TO_YD_CD,0,5)) TO_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY)  CNTR_QTY
+												FROM     EQR_ONF_HIR_EXE_PLN PLN
+														,EQR_ONF_HIR_EXE_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND ${type} IN ( ${eccText} ) ) C
+													#end
+												WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND PLN.REF_ID		= QTY.REF_ID
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												--item  : O(조회조건을 선택시)
+												#if (${itemOnExist} == 'Y')
+													AND 1 = 1
+												#elseif ( ${item} != '' )
+													AND 1 = 2
+												#end
+												#if ( ${type} != '' )
+													AND (SUBSTR(PLN.TO_YD_CD,0,5) = c.SCC_CD)
+												#end
+													AND PLN.ONF_HIR_DIV_CD = 'O'
+													AND PLN.PLN_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+												#if ( ${inclExecPlan} == '0' )
+													AND 1 = 2
+												#end
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.TO_YD_CD, QTY.CNTR_TPSZ_CD
+												ORDER BY PLN_YRWK DESC
+												)
+										GROUP BY REPO_PLN_ID, PLN_YRWK, TO_ECC_CD, CNTR_TPSZ_CD
+										) E
+								)
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+						UNION ALL
+						-- Safety Stock
+						SELECT   TO_CHAR(BB.PLN_YRWK) PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'88Safety Stock' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz})
+								, ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM    (
+								SELECT   ECC_CD
+										,'inflow' AS FLOW
+										,'88Safety Stock' ITEM
+										,'0' LVL
+									#foreach( $key in ${arrtpsz}) 
+										,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+									#end
+										,REPO_PLN_ID
+								FROM    (
+										SELECT   REPO_PLN_ID
+												,PLN_YRWK
+												,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+												,CNTR_TPSZ_CD
+												,CNTR_QTY
+												,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+										FROM    (
+												SELECT   @[repo_pln_id] REPO_PLN_ID
+														,'' PLN_YRWK
+														,PLN.ECC_CD AS TO_ECC_CD
+														,CNTR_TPSZ_CD
+														,SUM(SFSTK_VOL_QTY) CNTR_QTY
+												FROM    EQR_SCNR_ECC_SFT_STK PLN
+													#if ( ${type} != '' )
+														,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+													#end
+												WHERE   SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id] )
+												#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+													AND	1 = 2
+												#end
+												#if (${type} != '' )
+													AND (PLN.ECC_CD = C.ECC_CD)
+												#end			                        
+												#if (${cntr_tpsz_cd} != '')
+													AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.ECC_CD, CNTR_TPSZ_CD
+												) E
+										)
+								GROUP BY ECC_CD, REPO_PLN_ID
+								)aa,
+								(
+								SELECT  PLN_YR||PLN_WK AS PLN_YRWK
+								FROM    EQR_WK_PRD
+								WHERE	PLN_YR||PLN_WK	BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+								) bb
+						UNION ALL
+						-- ETC : EQR_ADD_PLN
+						SELECT   PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'66+/- ETC' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM    (
+								SELECT   REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM    (
+										SELECT   REPO_PLN_ID
+												,PLN_YRWK
+												,PLN.ECC_CD AS FM_ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_QTY) AS CNTR_QTY
+										FROM    EQR_ADD_PLN PLN
+											#if ( ${type} != '' )
+												,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE   REPO_PLN_ID = @[repo_pln_id]
+										#if ( ${type} != '' )
+											AND (PLN.ECC_CD = c.ECC_CD)
+										#end
+											AND PLN_YRWK BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+										#if (${cntr_tpsz_cd} != '')
+											AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										GROUP BY REPO_PLN_ID, PLN_YRWK, PLN.ECC_CD, CNTR_TPSZ_CD
+										ORDER BY PLN_YRWK DESC
+										) E
+								)
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+						)
+				) X,
+				(
+				SELECT	'11I/B Generation'	item FROM DUAL UNION ALL
+				SELECT	'22Repo In'			item FROM DUAL UNION ALL
+				SELECT	'33Execution'		item FROM DUAL UNION ALL
+				SELECT	'44On-Hire'			item FROM DUAL UNION ALL
+				SELECT	'55Execution'		item FROM DUAL UNION ALL
+				SELECT	'66+/- ETC'			item FROM DUAL UNION ALL
+				SELECT	'77Balance'			item FROM DUAL UNION ALL
+				SELECT	'88Safety Stock'	item FROM DUAL UNION ALL
+				SELECT	'99* Variance'		item FROM DUAL
+				) Y
+		UNION ALL
+		SELECT	 PLN_YRWK
+				,ECC_CD
+				,'outflow' FLOW
+				,ITEM
+		FROM	(
+				SELECT	 DISTINCT PLN_YRWK
+						,ECC_CD
+				FROM	(
+						-- Initial(EQR_INVT_SNAP)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'outflow' AS FLOW
+								,'00Initial' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM	(
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = E.ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM	(
+										SELECT	@[repo_pln_id] REPO_PLN_ID
+												,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE SNAP_DT BETWEEN WK_ST_DT  AND WK_END_DT) PLN_YRWK
+												,PLN.ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_VOL_QTY) AS CNTR_QTY
+										FROM	EQR_INVT_SNAP PLN
+											#if ( ${type} != '' )
+												,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE	SNAP_DT = (SELECT WK_ST_DT FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+										#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+											AND	1 = 2
+										#end
+										#if (${type} != '')
+											AND (PLN.ECC_CD = C.ECC_CD)
+										#end
+										#if (${cntr_tpsz_cd} != '')
+											AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										
+										GROUP BY SNAP_DT, PLN.ECC_CD, CNTR_TPSZ_CD
+										) E
+								)
+						GROUP BY  RUMM, REPO_PLN_ID , PLN_YRWK, ECC_CD
+						UNION ALL
+						-- Demand(EQR_OB_FCAST)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'outflow' AS FLOW
+								,'10Demand Vol' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM	(
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM	(
+										SELECT	 @[repo_pln_id] REPO_PLN_ID
+												,FCAST_YRWK AS PLN_YRWK
+												,FM_ECC_CD AS FM_ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_VOL_QTY) AS CNTR_QTY
+										FROM	EQR_OB_FCAST PLN
+											#if ( ${type} != '' )
+												,(SELECT ecc_cd FROM eqr_ecc_mst WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE	SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id] 	)
+										#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+											AND	1 = 2
+										#end
+										#if (${type} != '')
+											AND	(PLN.FM_ECC_CD = C.ECC_CD)
+										#end
+											AND	FCAST_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+										#if (${cntr_tpsz_cd} != '')
+											AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										GROUP BY FCAST_YRWK, fm_ecc_cd, CNTR_TPSZ_CD
+										ORDER BY FCAST_YRWK
+										) E
+								)
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+						UNION ALL
+						-- RepoOut : EQR_VSL_LODG_DCHG_PLN, EQR_INLND_TRSP_PLN(FM_ECC_CD)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'outflow' AS FLOW
+								,'20Repo Out' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM	(
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,ECC_CD
+										,CNTR_TPSZ_CD
+										,SUM(CNTR_QTY)	CNTR_QTY
+								FROM	(
+										SELECT	 REPO_PLN_ID
+												,PLN_YRWK
+												,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+												,CNTR_TPSZ_CD
+												,CNTR_QTY
+												,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+										FROM	(
+												-- EQR_VSL_LODG_DCHG_PLN
+												SELECT	 PLN.REPO_PLN_ID
+														,PLN.PLN_YRWK
+														,PLN.FM_ECC_CD AS FM_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM	EQR_VSL_LODG_DCHG_PLN PLN
+														,EQR_VSL_LODG_DCHG_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT ecc_cd FROM eqr_ecc_mst WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+													#end
+												WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND	PLN.REPO_PLN_ID		= @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if (${lane} != '' ) 
+													AND PLN.VSL_LANE_CD IN ( ${laneText} )
+												#end
+												#if (${vvd} != '' ) 
+													AND PLN.VSL_CD||PLN.SKD_VOY_NO||PLN.SKD_DIR_CD IN ( ${vvdText} )
+												#end
+												#if (${type} != '')
+													AND (PLN.FM_ECC_CD = C.ECC_CD)
+												#end
+													AND TO_CHAR(FM_ETD_DT,'YYYYMMDD')  BETWEEN
+															(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+														AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_ECC_CD, QTY.CNTR_TPSZ_CD
+												UNION ALL
+												-- EQR_INLND_TRSP_PLN
+												SELECT	 PLN.REPO_PLN_ID
+														,PLN.PLN_YRWK
+														,PLN.FM_ECC_CD AS FM_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM	EQR_INLND_TRSP_PLN PLN
+														,EQR_INLND_TRSP_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+													#end
+												WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND	PLN.REPO_PLN_ID	= @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if ( (${item} != '' && ${lane} != '' ) || (${item} != '' && ${vvd} != '') ) 
+													AND	1 = 2
+												#end
+												#if (${type} != '')
+													AND (PLN.FM_ECC_CD = C.ECC_CD)
+												#end
+													AND	PLN.FM_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+												#if (${cntr_tpsz_cd} != '')
+													AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_ECC_CD, QTY.CNTR_TPSZ_CD
+												ORDER BY PLN_YRWK DESC
+												) E
+										)
+										GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD, CNTR_TPSZ_CD
+								)
+						GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD
+						UNION ALL
+						-- Excution(RepoOut) : EQR_VSL_LODG_DCHG_EXE_PLN(FM_YD_CD)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'outflow' AS FLOW
+								,'30Execution' ITEM
+								,'1' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM	(
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,ECC_CD
+										,CNTR_TPSZ_CD
+										,SUM(CNTR_QTY)	CNTR_QTY
+								FROM	(
+										SELECT	 REPO_PLN_ID
+												,PLN_YRWK
+												,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+												,CNTR_TPSZ_CD
+												,CNTR_QTY
+												,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+										FROM	(
+												-- EQR_VSL_LODG_DCHG_EXE_PLN
+												SELECT	 PLN.REPO_PLN_ID
+														,PLN.PLN_YRWK
+														,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(FM_YD_CD,0,5)) AS FM_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM	EQR_VSL_LODG_DCHG_EXE_PLN PLN
+														,EQR_VSL_EXE_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND	${type} IN ( ${eccText} ) ) C
+													#end
+												WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK    = QTY.PLN_YRWK
+													AND PLN.PLN_SEQ    = QTY.PLN_SEQ
+													AND PLN.REF_ID		= QTY.REF_ID
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if (${lane} != '' ) 
+													AND PLN.VSL_LANE_CD IN ( ${laneText} )
+												#end
+												#if (${vvd} != '' ) 
+													AND PLN.VSL_CD||PLN.SKD_VOY_NO||PLN.SKD_DIR_CD IN ( ${vvdText} )
+												#end										
+												#if ( ${type} != '' )
+													AND	(SUBSTR(PLN.FM_YD_CD,0,5) = C.SCC_CD)
+												#end
+													AND TO_CHAR(PLN.FM_ETD_DT,'YYYYMMDD')  BETWEEN
+															(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk] )
+														AND	(SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+												#if ( ${inclExecPlan} == '0' )
+													AND 1 = 2
+												#end
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_YD_CD, QTY.CNTR_TPSZ_CD
+												UNION ALL
+												-- EQR_INLND_TRSP_EXE_PLN
+												SELECT	 PLN.REPO_PLN_ID
+														,PLN.PLN_YRWK
+														,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(FM_YD_CD,0,5)) AS FM_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM	EQR_INLND_TRSP_EXE_PLN PLN
+														,EQR_INLND_TRSP_EXE_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND	${type} IN ( ${eccText} ) ) C
+													#end
+												WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND PLN.REF_ID		= QTY.REF_ID
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												#if ( (${item} != '' && ${lane} != '' ) || (${item} != '' && ${vvd} != '') ) 
+													AND	1 = 2
+												#end
+												#if ( ${type} != '' )
+													AND	(SUBSTR(PLN.FM_YD_CD,0,5) = C.SCC_CD)
+												#end
+													AND TO_CHAR(PLN.FM_ETD_DT,'YYYYMMDD')  BETWEEN
+															(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+														AND	(SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])		
+												#if ( ${inclExecPlan} == '0' )
+													AND 1 = 2
+												#end
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_YD_CD, QTY.CNTR_TPSZ_CD
+												ORDER BY PLN_YRWK DESC
+												) E
+										)
+								GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD, CNTR_TPSZ_CD
+						)
+						GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD 
+						UNION ALL
+						-- Off-Hire : EQR_ONF_HIR_PLN(ONF_HIR_DIV_CD)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'outflow' AS FLOW
+								,'40Off-Hire' ITEM
+								,'0' LVL
+						    #foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY )) ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM	(
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM	(
+										SELECT	 PLN.REPO_PLN_ID
+												,PLN.PLN_YRWK
+												,PLN.ECC_CD AS FM_ECC_CD
+												,QTY.CNTR_TPSZ_CD
+												,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+										FROM	EQR_ONF_HIR_PLN PLN
+												,EQR_ONF_HIR_PLN_QTY QTY
+											#if ( ${type} != '' )
+												,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+											AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+											AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+											AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+											AND	PLN.ONF_HIR_DIV_CD = 'F'
+											-- item  : F(조회조건을 선택시)
+										#if (${itemOffExist} == 'Y')
+											AND 1 = 1
+										#elseif ( ${item} != '' )
+											AND 1 = 2
+										#end
+										#if (${type} != '')
+											AND (PLN.ECC_CD = C.ECC_CD) 
+										#end
+											AND PLN.PLN_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+										#if (${cntr_tpsz_cd} != '')
+											AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.ECC_CD, QTY.CNTR_TPSZ_CD
+										ORDER BY PLN_YRWK DESC
+										) E
+								)
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+						UNION ALL
+						-- 	Excution(Off-Hire) : EQR_ONF_HIR_EXE_PLN(ONF_HIR_DIV_CD, FM_YD_CD)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'outflow' AS FLOW
+								,'50Execution' ITEM
+								,'1' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY )) ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM	(
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM	(
+										SELECT	 REPO_PLN_ID
+												,PLN_YRWK
+												,FM_ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_QTY) CNTR_QTY
+										FROM	(
+												SELECT	 PLN.REPO_PLN_ID
+														,PLN.PLN_YRWK
+														,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(FM_YD_CD,0,5)) FM_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY)  CNTR_QTY
+												FROM	EQR_ONF_HIR_EXE_PLN PLN
+														,EQR_ONF_HIR_EXE_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND ${type} IN ( ${eccText} ) )C
+													#end
+												WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND PLN.REF_ID		= QTY.REF_ID
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												-- item  : F(조회조건을 선택시)
+												#if (${itemOffExist} == 'Y')
+													AND 1 = 1
+												#elseif ( ${item} != '' )
+													AND 1 = 2
+												#end
+												#if (${type} != '')
+													AND (SUBSTR(PLN.FM_YD_CD,0,5) = C.SCC_CD)
+												#end
+													AND PLN.ONF_HIR_DIV_CD = 'F'
+													AND PLN.PLN_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+												#if ( ${inclExecPlan} == '0' )
+													AND 1 = 2
+												#end
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.FM_YD_CD, QTY.CNTR_TPSZ_CD
+												ORDER BY PLN_YRWK DESC
+												)
+										GROUP BY REPO_PLN_ID, PLN_YRWK, FM_ECC_CD, CNTR_TPSZ_CD
+									    ) E
+							    )
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+				    	UNION ALL
+			    		-- 	I/B Generation : EQR_IB_BKG_FCAST(TO_ECC_CD)
+						SELECT	 PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'11I/B Generation' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+				        FROM    (
+								SELECT   REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD, CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM    (
+										SELECT   @[repo_pln_id] REPO_PLN_ID
+												,FCAST_YRWK AS PLN_YRWK
+												,TO_ECC_CD AS TO_ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_VOL_QTY) AS CNTR_QTY
+										FROM    EQR_IB_BKG_FCAST PLN
+											#if ( ${type} != '' )
+												,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id]	)
+										#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+											AND	1 = 2
+										#end
+										#if ( ${type} != '' )
+											AND (PLN.TO_ECC_CD = C.ECC_CD)
+										#end
+											AND FCAST_YRWK BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+										#if (${cntr_tpsz_cd} != '')
+											AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										GROUP BY FCAST_YRWK, TO_ECC_CD, CNTR_TPSZ_CD
+										ORDER BY FCAST_YRWK DESC
+										) E
+					            -- 20070602  (황영신 수석님 추가 요청 반영)
+								UNION ALL
+								SELECT   REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM    (
+										SELECT   @[repo_pln_id] REPO_PLN_ID
+												,fcast_del_yrwk AS PLN_YRWK
+												,TO_ECC_CD AS TO_ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_VOL_QTY) AS CNTR_QTY
+										FROM    EQR_OB_FCAST PLN
+											#if ( ${type} != '' )
+												,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE   SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id] 	)
+										#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+											AND	1 = 2
+										#end
+										#if ( ${type} != '' )
+											AND (PLN.TO_ECC_CD = C.ECC_CD)
+										#end
+											AND fcast_del_yrwk BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+										#if (${cntr_tpsz_cd} != '')
+											AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										GROUP BY fcast_del_yrwk, TO_ECC_CD, CNTR_TPSZ_CD
+										ORDER BY fcast_del_yrwk DESC
+								) E
+								-- 20070602  (황영신 수석님 추가 요청 반영) 추가 끝
+								)
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+						UNION ALL
+						-- RepoIn : EQR_VSL_LODG_DCHG_PLN, EQR_INLND_TRSP_PLN(TO_ECC_CD)
+						SELECT   PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'22Repo In' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM    (
+								SELECT	 REPO_PLN_ID
+										,PLN_YRWK
+										,ECC_CD
+										,CNTR_TPSZ_CD
+										,SUM(CNTR_QTY)	CNTR_QTY
+								FROM    (
+										SELECT   REPO_PLN_ID
+												,PLN_YRWK
+												,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+												,CNTR_TPSZ_CD
+												,CNTR_QTY
+												,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+										FROM    (
+												--EQR_VSL_LODG_DCHG_PLN
+												SELECT   PLN.REPO_PLN_ID
+														,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE TO_CHAR(PLN.TO_ETB_DT,'YYYYMMDD') BETWEEN WK_ST_DT  AND WK_END_DT) AS PLN_YRWK
+														,PLN.TO_ECC_CD AS TO_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM     EQR_VSL_LODG_DCHG_PLN PLN
+														,EQR_VSL_LODG_DCHG_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+													#end
+												WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if (${lane} != '' ) 
+													AND PLN.VSL_LANE_CD IN ( ${laneText} )
+												#end
+												#if (${vvd} != '' ) 
+													AND PLN.VSL_CD||PLN.SKD_VOY_NO||PLN.SKD_DIR_CD IN ( ${vvdText} )
+												#end
+												#if ( ${type} != '' )
+													AND (PLN.TO_ECC_CD = C.ECC_CD)
+												#end
+													AND TO_CHAR(PLN.TO_ETB_DT,'YYYYMMDD')  BETWEEN
+															(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk]  )
+														AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+												#if (${cntr_tpsz_cd} != '')
+													AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.TO_ETB_DT, PLN.TO_ECC_CD, QTY.CNTR_TPSZ_CD
+												UNION ALL
+												--EQR_INLND_TRSP_PLN
+												SELECT   PLN.REPO_PLN_ID
+														,PLN.TO_YRWK AS PLN_YRWK
+														,PLN.TO_ECC_CD AS TO_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM    EQR_INLND_TRSP_PLN PLN
+														,EQR_INLND_TRSP_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+													#end
+												WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if ( (${item} != '' && ${lane} != '' ) || (${item} != '' && ${vvd} != '') ) 
+													AND	1 = 2
+												#end
+												#if ( ${type} != '' )
+													AND (PLN.TO_ECC_CD = C.ECC_CD)
+												#end
+													AND PLN.TO_YRWK BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.TO_YRWK, PLN.TO_ECC_CD, QTY.CNTR_TPSZ_CD
+												ORDER BY PLN_YRWK DESC
+												) E 
+										)
+										GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD, CNTR_TPSZ_CD
+								)
+						GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD
+						UNION ALL
+						-- Excution(RepoIn) : EQR_VSL_LODG_DCHG_EXE_PLN(TO_YD_CD)
+						SELECT   PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'33Execution' ITEM
+								,'1' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+								#end
+								,REPO_PLN_ID
+						FROM    (
+								SELECT   REPO_PLN_ID
+										,PLN_YRWK
+										,ECC_CD
+										,CNTR_TPSZ_CD
+										,SUM(CNTR_QTY)	CNTR_QTY
+								FROM    (
+										SELECT   REPO_PLN_ID
+												,PLN_YRWK
+												,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+												,CNTR_TPSZ_CD
+												,CNTR_QTY
+												,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+										FROM    (
+												SELECT   PLN.REPO_PLN_ID
+														,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE TO_CHAR(TO_ETB_DT,'YYYYMMDD') BETWEEN WK_ST_DT  AND WK_END_DT) AS PLN_YRWK
+														,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(TO_YD_CD,0,5)) AS TO_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM     EQR_VSL_LODG_DCHG_EXE_PLN PLN
+														,EQR_VSL_EXE_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1	AND ${type} IN ( ${eccText}) ) C
+													#end
+												WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND PLN.REF_ID		= QTY.REF_ID
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if (${lane} != '' ) 
+													AND PLN.VSL_LANE_CD IN ( ${laneText} )
+												#end
+												#if (${vvd} != '' ) 
+													AND PLN.VSL_CD||PLN.SKD_VOY_NO||PLN.SKD_DIR_CD IN ( ${vvdText} )
+												#end
+												#if (${type} != '' ) 
+													AND (SUBSTR(PLN.TO_YD_CD,0,5) = c.SCC_CD)
+												#end
+													AND TO_CHAR(PLN.TO_ETB_DT,'YYYYMMDD')  BETWEEN
+															(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+														AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+												#if ( ${inclExecPlan} == '0' )
+													AND 1 = 2
+												#end
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.TO_ETB_DT, PLN.TO_YD_CD, QTY.CNTR_TPSZ_CD
+												UNION ALL
+												SELECT   PLN.REPO_PLN_ID
+														,(SELECT PLN_YR||PLN_WK FROM EQR_WK_PRD WHERE TO_CHAR(TO_ETA_DT,'YYYYMMDD') BETWEEN WK_ST_DT  AND WK_END_DT) AS PLN_YRWK
+														,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(TO_YD_CD,0,5)) AS TO_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+												FROM    EQR_INLND_TRSP_EXE_PLN PLN
+														,EQR_INLND_TRSP_EXE_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND ${type} IN ( ${eccText} ) ) C
+													#end
+												WHERE	PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND PLN.REF_ID		= QTY.REF_ID
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												#if (${item} != '' ) 
+													AND	PLN.TRSP_MOD_CD IN ( ${itemText} )
+												#end
+												#if ( (${item} != '' && ${lane} != '' ) || (${item} != '' && ${vvd} != '') ) 
+													AND	1 = 2
+												#end
+												#if ( ${type} != '' )
+													AND (SUBSTR(PLN.TO_YD_CD,0,5) = c.SCC_CD)
+												#end 
+													AND TO_CHAR(PLN.TO_ETA_DT,'YYYYMMDD')  BETWEEN
+															(SELECT TO_CHAR(TO_DATE(WK_ST_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[fm_plnyrwk])
+														AND (SELECT TO_CHAR(TO_DATE(WK_END_DT,'YYYYMMDD'),'YYYYMMDD') FROM EQR_WK_PRD WHERE PLN_YR || PLN_WK = @[to_plnyrwk])
+												#if ( ${inclExecPlan} == '0' )
+													AND 1 = 2
+												#end
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.TO_ETA_DT, PLN.TO_YD_CD, QTY.CNTR_TPSZ_CD
+												ORDER BY PLN_YRWK DESC
+												) E
+										)
+										GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD, CNTR_TPSZ_CD
+								)
+						GROUP BY  REPO_PLN_ID, PLN_YRWK, ECC_CD
+						UNION ALL
+						-- Off-Hire: EQR_ONF_HIR_PLN(ONF_HIR_DIV_CD)
+						SELECT   PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'44On-Hire' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM    (
+								SELECT   REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD, CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM    (
+										SELECT   PLN.REPO_PLN_ID
+												,PLN.PLN_YRWK
+												,PLN.ECC_CD AS FM_ECC_CD
+												,QTY.CNTR_TPSZ_CD
+												,SUM(QTY.CNTR_QTY) AS CNTR_QTY
+										FROM     EQR_ONF_HIR_PLN PLN
+												,EQR_ONF_HIR_PLN_QTY QTY
+											#if ( ${type} != '' )
+												,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+											AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+											AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+											AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+											AND PLN.ONF_HIR_DIV_CD = 'O'
+										--item  : O(조회조건을 선택시)
+										#if (${itemOnExist} == 'Y')
+											AND 1 = 1
+										#elseif ( ${item} != '' )
+											AND 1 = 2
+										#end
+										#if ( ${type} != '' )
+											AND (PLN.ECC_CD = C.ECC_CD)
+										#end
+											AND PLN.PLN_YRWK BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+										#if (${cntr_tpsz_cd} != '')
+											AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.ECC_CD, QTY.CNTR_TPSZ_CD
+										ORDER BY PLN_YRWK DESC
+										) E
+								)
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+						UNION ALL
+						-- Excution(Off-Hire) : EQR_ONF_HIR_EXE_PLN(ONF_HIR_DIV_CD, TO_YD_CD)
+						SELECT   PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'55Execution' ITEM
+								,'1' LVL                    
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM    (
+								SELECT   REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM    (
+										SELECT   REPO_PLN_ID
+												,PLN_YRWK
+												,TO_ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_QTY) CNTR_QTY
+										FROM    (
+												SELECT   PLN.REPO_PLN_ID
+														,PLN.PLN_YRWK
+														,(SELECT ECC_CD FROM MDM_EQ_ORZ_CHT WHERE SCC_CD = SUBSTR(TO_YD_CD,0,5)) TO_ECC_CD
+														,QTY.CNTR_TPSZ_CD
+														,SUM(QTY.CNTR_QTY)  CNTR_QTY
+												FROM     EQR_ONF_HIR_EXE_PLN PLN
+														,EQR_ONF_HIR_EXE_PLN_QTY QTY
+													#if ( ${type} != '' )
+														,(SELECT SCC_CD FROM MDM_EQ_ORZ_CHT WHERE 1 = 1 AND ${type} IN ( ${eccText} ) ) C
+													#end
+												WHERE   PLN.REPO_PLN_ID	= QTY.REPO_PLN_ID
+													AND	PLN.PLN_YRWK	= QTY.PLN_YRWK
+													AND PLN.PLN_SEQ		= QTY.PLN_SEQ
+													AND PLN.REF_ID		= QTY.REF_ID
+													AND	PLN.REPO_PLN_ID = @[repo_pln_id]
+												--item  : O(조회조건을 선택시)
+												#if (${itemOnExist} == 'Y')
+													AND 1 = 1
+												#elseif ( ${item} != '' )
+													AND 1 = 2
+												#end
+												#if ( ${type} != '' )
+													AND (SUBSTR(PLN.TO_YD_CD,0,5) = c.SCC_CD)
+												#end
+													AND PLN.ONF_HIR_DIV_CD = 'O'
+													AND PLN.PLN_YRWK BETWEEN @[fm_plnyrwk] AND  @[to_plnyrwk]
+												#if ( ${inclExecPlan} == '0' )
+													AND 1 = 2
+												#end
+												#if (${cntr_tpsz_cd} != '')
+													AND	QTY.CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.REPO_PLN_ID, PLN.PLN_YRWK, PLN.TO_YD_CD, QTY.CNTR_TPSZ_CD
+												ORDER BY PLN_YRWK DESC
+												)
+										GROUP BY REPO_PLN_ID, PLN_YRWK, TO_ECC_CD, CNTR_TPSZ_CD
+										) E
+								)
+						GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+						UNION ALL
+						-- Safety Stock
+						SELECT   TO_CHAR(BB.PLN_YRWK) PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'88Safety Stock' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz})
+								, ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM    (
+								SELECT   ECC_CD
+										,'inflow' AS FLOW
+										,'88Safety Stock' ITEM
+										,'0' LVL
+									#foreach( $key in ${arrtpsz}) 
+										,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+									#end
+										,REPO_PLN_ID
+								FROM    (
+										SELECT   REPO_PLN_ID
+												,PLN_YRWK
+												,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = TO_ECC_CD) ECC_CD
+												,CNTR_TPSZ_CD
+												,CNTR_QTY
+												,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, TO_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+										FROM    (
+												SELECT   @[repo_pln_id] REPO_PLN_ID
+														,'' PLN_YRWK
+														,PLN.ECC_CD AS TO_ECC_CD
+														,CNTR_TPSZ_CD
+														,SUM(SFSTK_VOL_QTY) CNTR_QTY
+												FROM    EQR_SCNR_ECC_SFT_STK PLN
+													#if ( ${type} != '' )
+														,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+													#end
+												WHERE   SCNR_ID = (SELECT SCNR_ID FROM EQR_EQ_REPO_PLN WHERE REPO_PLN_ID = @[repo_pln_id] )
+												#if (${item} != '' || ${lane} != '' || ${vvd} != '') 
+													AND	1 = 2
+												#end
+												#if (${type} != '' )
+													AND (PLN.ECC_CD = C.ECC_CD)
+												#end			                        
+												#if (${cntr_tpsz_cd} != '')
+													AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+												#end
+												GROUP BY PLN.ECC_CD, CNTR_TPSZ_CD
+												) E
+										)
+								GROUP BY ECC_CD, REPO_PLN_ID
+								)aa,
+								(
+								SELECT  PLN_YR||PLN_WK AS PLN_YRWK
+								FROM    EQR_WK_PRD
+								WHERE	PLN_YR||PLN_WK	BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+								) bb
+						UNION ALL
+						-- ETC : EQR_ADD_PLN
+						SELECT   PLN_YRWK
+								,ECC_CD
+								,'inflow' AS FLOW
+								,'66+/- ETC' ITEM
+								,'0' LVL
+							#foreach( $key in ${arrtpsz}) 
+								,SUM(DECODE(CNTR_TPSZ_CD, '$key' , CNTR_QTY ))  ${key}CNTR_QTY
+							#end
+								,REPO_PLN_ID
+						FROM    (
+								SELECT   REPO_PLN_ID
+										,PLN_YRWK
+										,(SELECT ${typeByStr} FROM EQR_ECC_MST WHERE ECC_CD = FM_ECC_CD) ECC_CD
+										,CNTR_TPSZ_CD
+										,CNTR_QTY
+										,ROW_NUMBER() OVER (PARTITION BY PLN_YRWK, FM_ECC_CD , CNTR_TPSZ_CD ORDER BY ROWNUM) RUMM
+								FROM    (
+										SELECT   REPO_PLN_ID
+												,PLN_YRWK
+												,PLN.ECC_CD AS FM_ECC_CD
+												,CNTR_TPSZ_CD
+												,SUM(CNTR_QTY) AS CNTR_QTY
+										FROM    EQR_ADD_PLN PLN
+											#if ( ${type} != '' )
+												,(SELECT ECC_CD FROM EQR_ECC_MST WHERE 1 = 1 AND ${type} IN ( ${eccText}) )C
+											#end
+										WHERE   REPO_PLN_ID = @[repo_pln_id]
+										#if ( ${type} != '' )
+											AND (PLN.ECC_CD = c.ECC_CD)
+										#end
+											AND PLN_YRWK BETWEEN @[fm_plnyrwk] AND @[to_plnyrwk]
+										#if (${cntr_tpsz_cd} != '')
+											AND	CNTR_TPSZ_CD IN ( ${tpszText} )
+										#end
+										GROUP BY REPO_PLN_ID, PLN_YRWK, PLN.ECC_CD, CNTR_TPSZ_CD
+										ORDER BY PLN_YRWK DESC
+										) E
+								)
+								GROUP BY  RUMM ,REPO_PLN_ID , PLN_YRWK, ECC_CD
+						)
+				) X,
+				(
+				SELECT	'00Initial'		item FROM DUAL UNION ALL
+				SELECT	'10Demand Vol'	item FROM DUAL UNION ALL
+				SELECT	'20Repo Out'	item FROM DUAL UNION ALL
+				SELECT	'30Execution'	item FROM DUAL UNION ALL
+				SELECT	'40Off-Hire'	item FROM DUAL UNION ALL
+				SELECT	'50Execution'	item FROM DUAL
+				) Y
+		) YY
+WHERE   XX.PLN_YRWK (+)	= YY.PLN_YRWK
+	AND XX.ECC_CD (+)	= YY.ECC_CD
+	AND XX.FLOW (+)	    = YY.FLOW
+	AND XX.item (+)	    = YY.ITEM
+ORDER BY  ECC_CD, PLN_YRWK,  YY.FLOW  DESC, YY.ITEM			]]></sql>
+			<params>
+				<param name="repo_pln_id" type="12" value="" out="N"/>
+				<param name="fm_plnyrwk" type="12" value="" out="N"/>
+				<param name="to_plnyrwk" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

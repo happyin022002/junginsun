@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LeaseReportDBDAOSubLeaseOutContainerSummaryListRSQL">
+			<desc><![CDATA[Sub Lease 자사장비 및 Mis Use 타사장비의 현황목록을 조회합니다.
+REF_NO 항목 추가]]></desc>
+			<sql><![CDATA[
+WITH TEMP_DROP AS (
+    SELECT  /*+ ORDERED XXXXX*/   
+			B.RCC_CD, B.LCC_CD, B.SCC_CD, B.YD_CD, 
+            SUBSTR(B.LOC_CD,1,2) AS CNTRY_CD, 
+            B.CNTR_NO, B.CNTR_STS_CD, B.CNTR_STS_EVNT_DT, 
+            B.AGMT_CTY_CD, B.AGMT_SEQ, C.VNDR_SEQ,
+            SUBSTR(NVL(D.VNDR_ABBR_NM, D.VNDR_SEQ),0,8) AS VNDR_ABBR_NM,
+            A.LSTM_CD, A.CNTR_TPSZ_CD, 
+            B.CNTR_FULL_FLG, A.ONH_FREE_DYS         
+    FROM    MST_CONTAINER A,
+            MST_CNTR_STS_HIS B, 
+            LSE_AGREEMENT C,
+            MDM_VENDOR D
+    WHERE   A.CNTR_NO = B.CNTR_NO     
+    AND     B.AGMT_CTY_CD = C.AGMT_CTY_CD
+    AND     B.AGMT_SEQ = C.AGMT_SEQ
+    AND     C.VNDR_SEQ = D.VNDR_SEQ
+#if (${lst_sts_flg} == '01')
+    AND     B.CNTR_STS_SEQ = ( SELECT /*+ INDEX_DESC(SUB XAK1MST_CNTR_STS_HIS) */ 
+                                                 SUB.CNTR_STS_SEQ
+                                          FROM MST_CNTR_STS_HIS SUB
+                                         WHERE SUB.CNTR_NO               = A.CNTR_NO                                                                                          
+                                           AND SUB.CNTR_STS_CD           = A.CNTR_STS_CD
+                                           AND SUB.CNTR_LSTM_CNG_FLG     = 'N'
+                                           AND ROWNUM                    = 1)
+#else
+   AND      B.CNTR_LSTM_CNG_FLG = 'N'
+#end  
+#if (${cntr_sts_cd} == '(SB|MU)O' )
+	AND		B.CNTR_STS_CD IN('SBO','MUO')
+#elseif (${cntr_sts_cd} == '(SB|MU)I' )
+	AND		B.CNTR_STS_CD IN('SBI','MUI')
+#elseif (${cntr_sts_cd} != '' ) 
+	AND		B.CNTR_STS_CD = @[cntr_sts_cd]
+#end
+#if (${lstm_soc_tp} == '03')
+	AND     A.LSTM_CD = 'SH'
+#elseif (${lstm_soc_tp} == '02')
+	AND     A.LSTM_CD <> 'SH'
+#end  
+#if (${loc_tp} == '2' && ${loc_cd} != '')
+	AND     B.RCC_CD = @[loc_cd]
+#elseif (${loc_tp} == '3' && ${loc_cd} != '')
+	AND     B.LCC_CD = @[loc_cd]
+#elseif (${loc_tp} == '4' && ${loc_cd} != '')
+	AND     B.SCC_CD = @[loc_cd]
+#elseif (${loc_tp} == '5' && ${loc_cd} != '')
+	AND     SUBSTR(B.LOC_CD,1,2) = @[loc_cd]
+#end
+#if (${str_evnt_dt} != '')
+	AND     B.CNTR_STS_EVNT_DT BETWEEN TO_DATE(@[str_evnt_dt],'YYYYMMDD') 
+    AND     TO_DATE(@[end_evnt_dt],'YYYYMMDD') 
+#end
+#if (${agmt_seq} != '')
+    AND     B.AGMT_CTY_CD = @[agmt_cty_cd]
+    AND     B.AGMT_SEQ = @[agmt_seq]
+#end
+#if (${vndr_seq} != '')
+    AND     C.VNDR_SEQ = @[vndr_seq]
+#end
+#if (${onh_free_dys} != '')
+	AND @[onh_free_dys] <= DECODE(MST_COMMON_PKG.MST_HO_OFC_CHK_FNC(@[usr_ofc_cd])
+ 				,'Y', 
+		TRUNC(NVL((SELECT /*+ INDEX_ASC(SUB XAK1MST_CNTR_STS_HIS) */
+                                            SUB.CNTR_STS_EVNT_DT
+                                   FROM MST_CNTR_STS_HIS SUB
+                                  WHERE B.CNTR_NO                   = SUB.CNTR_NO
+                                     AND SUB.CNTR_STS_CD           = DECODE(B.CNTR_STS_CD, 'SBO', 'SBI', 'MUI')
+                                     AND SUB.CNTR_LSTM_CNG_FLG = 'N'
+                                     AND B.CNTR_STS_EVNT_DT     <= SUB.CNTR_STS_EVNT_DT
+                                      AND ROWNUM          = 1
+                                  ), TRUNC(SYSDATE)) - B.CNTR_STS_EVNT_DT)+1
+ 				,'N','')
+#end
+#if (${cntr_full_flg} != '')
+    AND     B.CNTR_FULL_FLG = @[cntr_full_flg]
+#end
+#if (${lstm_cd} != '')
+    AND     A.LSTM_CD IN (
+	#foreach($key IN ${lstm_cd_seq})
+		#if($velocityCount < $lstm_cd_seq.size())
+			'$key',
+		#else
+			'$key'
+		#end
+	#end
+            )
+#end
+#if (${cntr_tpsz_cd} != '')
+    AND     A.CNTR_TPSZ_CD IN (
+	#foreach($key IN ${cntr_tpsz_cd_seq})
+		#if($velocityCount < $cntr_tpsz_cd_seq.size())
+			'$key',
+		#else
+			'$key'
+		#end
+	#end
+            )
+#end
+#if (${cntr_onh_auth_no} != '' && ${lst_sts_flg} == '01')
+	#if(${cntr_sts_cd} == '(SB|MU)O' || ${cntr_sts_cd} == 'SBO' || ${cntr_sts_cd} == 'MUO')
+		AND    A.CNTR_OFFH_AUTH_NO = @[cntr_onh_auth_no]
+	#else
+		AND    A.CNTR_AUTH_NO = @[cntr_onh_auth_no]
+	#end
+#end 
+#if (${cntr_onh_auth_no} != '' && ${lst_sts_flg} == '02')
+	#if(${cntr_sts_cd} == '(SB|MU)O' || ${cntr_sts_cd} == 'SBO' || ${cntr_sts_cd} == 'MUO')
+		AND    B.CNTR_OFFH_AUTH_NO = @[cntr_onh_auth_no]
+	#else
+		AND    B.CNTR_AUTH_NO = @[cntr_onh_auth_no] 
+	#end
+#end 
+)  
+SELECT  LOC_CD, LSTM_CD, VNDR_ABBR_NM, VNDR_SEQ, TPSZ_TOTAL,
+        TPSZ_DP01, TPSZ_DP02, TPSZ_DP03, TPSZ_DP04, TPSZ_DP05, TPSZ_DP06,
+        TPSZ_DP07, TPSZ_DP08, TPSZ_DP09, TPSZ_DP10, TPSZ_DP11, TPSZ_DP12,
+        TPSZ_DP13, TPSZ_DP14, TPSZ_DP15, TPSZ_DP16, TPSZ_DP17, TPSZ_DP18,
+        TPSZ_DP19, TPSZ_DP20, TPSZ_DP21, TPSZ_DP22, TPSZ_DP23, TPSZ_DP24,
+        TPSZ_DP25, TPSZ_DP26, TPSZ_DP27, TPSZ_DP28, TPSZ_DP29, TPSZ_DP30
+FROM   (
+#if (${total_flg} != 'Y')
+		SELECT  NVL(A.LOC_CD, 'G.Total') AS LOC_CD, 
+				CASE WHEN A.LSTM_CD IS NULL
+                     THEN NVL2(A.LOC_CD, 'Total','')
+                     ELSE A.LSTM_CD
+                END LSTM_CD,
+                CASE WHEN A.VNDR_ABBR_NM IS NULL 
+                     THEN NVL2(A.LSTM_CD, 'S.TTL','')
+                     ELSE A.VNDR_ABBR_NM 
+                END  VNDR_ABBR_NM, A.VNDR_SEQ, A.TPSZ_TOTAL,
+                A.TPSZ_DP01, A.TPSZ_DP02, A.TPSZ_DP03, A.TPSZ_DP04, A.TPSZ_DP05, A.TPSZ_DP06,
+                A.TPSZ_DP07, A.TPSZ_DP08, A.TPSZ_DP09, A.TPSZ_DP10, A.TPSZ_DP11, A.TPSZ_DP12,
+                A.TPSZ_DP13, A.TPSZ_DP14, A.TPSZ_DP15, A.TPSZ_DP16, A.TPSZ_DP17, A.TPSZ_DP18,
+                A.TPSZ_DP19, A.TPSZ_DP20, A.TPSZ_DP21, A.TPSZ_DP22, A.TPSZ_DP23, A.TPSZ_DP24,
+                A.TPSZ_DP25, A.TPSZ_DP26, A.TPSZ_DP27, A.TPSZ_DP28, A.TPSZ_DP29, A.TPSZ_DP30
+        FROM   (SELECT  A.LOC_CD, A.LSTM_CD, A.VNDR_SEQ, A.VNDR_ABBR_NM,
+                        SUM(DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT)) AS TPSZ_TOTAL,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 1 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP01,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 2 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP02,  
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 3 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP03,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 4 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP04,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 5 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP05,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 6 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP06,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 7 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP07,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 8 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP08,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 9 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP09,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =10 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP10,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =11 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP11,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =12 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP12,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =13 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP13,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =14 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP14,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =15 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP15,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =16 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP16,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =17 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP17,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =18 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP18,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =19 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP19,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =20 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP20,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =21 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP21,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =22 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP22,  
+                        SUM(CASE WHEN C.RPT_DP_SEQ =23 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP23,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =24 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP24,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =25 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP25,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =26 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP26,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =27 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP27,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =28 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP28,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =29 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP29,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =30 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP30 
+                FROM   (SELECT  Z.LSTM_CD, Z.VNDR_SEQ, Z.VNDR_ABBR_NM, Z.CNTR_TPSZ_CD,
+	#if (${loc_tp} == '0')
+								Z.RCC_CD AS LOC_CD, 
+	#elseif (${loc_tp} == '1' || ${loc_tp} == '5')
+								Z.CNTRY_CD AS LOC_CD, 
+	#elseif (${loc_tp} == '2')
+								Z.LCC_CD AS LOC_CD, 
+	#elseif (${loc_tp} == '3')
+								Z.SCC_CD AS LOC_CD, 
+	#elseif (${loc_tp} == '4')
+								Z.YD_CD AS LOC_CD, 
+	#end								
+                                COUNT(Z.CNTR_NO) CNTR_CNT
+                        FROM    TEMP_DROP Z
+                        GROUP BY Z.LSTM_CD, Z.VNDR_SEQ, Z.VNDR_ABBR_NM, Z.CNTR_TPSZ_CD, 
+	#if (${loc_tp} == '0')
+								 Z.RCC_CD
+	#elseif (${loc_tp} == '1' || ${loc_tp} == '5')
+								 Z.CNTRY_CD
+	#elseif (${loc_tp} == '2')
+								 Z.LCC_CD
+	#elseif (${loc_tp} == '3')
+								 Z.SCC_CD
+	#elseif (${loc_tp} == '4')
+								 Z.YD_CD
+	#end								
+                        ) A,
+                       (SELECT  CNTR_TPSZ_CD, ROW_NUMBER() OVER(ORDER BY RPT_DP_SEQ) AS RPT_DP_SEQ  
+                        FROM    MDM_CNTR_TP_SZ) C       
+                WHERE   1 = 1
+                GROUP BY ROLLUP(A.LOC_CD, A.LSTM_CD, A.VNDR_SEQ, A.VNDR_ABBR_NM)  
+                ) A        
+        WHERE   (A.VNDR_ABBR_NM IS NOT NULL
+        OR      A.VNDR_SEQ IS NULL
+        OR      A.LSTM_CD IS NULL
+        OR      A.LOC_CD IS NULL)
+#else
+        SELECT  A.LOC_CD, NVL(A.LSTM_CD, 'Total') AS LSTM_CD, 			
+                CASE WHEN A.VNDR_ABBR_NM IS NULL 
+                     THEN NVL2(A.LSTM_CD, 'S.TTL','')
+                     ELSE A.VNDR_ABBR_NM 
+                END  VNDR_ABBR_NM, A.VNDR_SEQ, A.TPSZ_TOTAL,
+                A.TPSZ_DP01, A.TPSZ_DP02, A.TPSZ_DP03, A.TPSZ_DP04, A.TPSZ_DP05, A.TPSZ_DP06,
+                A.TPSZ_DP07, A.TPSZ_DP08, A.TPSZ_DP09, A.TPSZ_DP10, A.TPSZ_DP11, A.TPSZ_DP12,
+                A.TPSZ_DP13, A.TPSZ_DP14, A.TPSZ_DP15, A.TPSZ_DP16, A.TPSZ_DP17, A.TPSZ_DP18,
+                A.TPSZ_DP19, A.TPSZ_DP20, A.TPSZ_DP21, A.TPSZ_DP22, A.TPSZ_DP23, A.TPSZ_DP24,
+                A.TPSZ_DP25, A.TPSZ_DP26, A.TPSZ_DP27, A.TPSZ_DP28, A.TPSZ_DP29, A.TPSZ_DP30
+        FROM   (SELECT  'G.Total' AS LOC_CD, A.LSTM_CD, A.VNDR_SEQ, A.VNDR_ABBR_NM,
+                        SUM(DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT)) AS TPSZ_TOTAL,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 1 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP01,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 2 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP02,  
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 3 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP03,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 4 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP04,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 5 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP05,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 6 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP06,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 7 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP07,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 8 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP08,
+                        SUM(CASE WHEN C.RPT_DP_SEQ = 9 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP09,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =10 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP10,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =11 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP11,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =12 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP12,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =13 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP13,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =14 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP14,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =15 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP15,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =16 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP16,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =17 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP17,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =18 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP18,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =19 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP19,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =20 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP20,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =21 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP21,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =22 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP22,  
+                        SUM(CASE WHEN C.RPT_DP_SEQ =23 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP23,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =24 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP24,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =25 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP25,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =26 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP26,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =27 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP27,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =28 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP28,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =29 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP29,
+                        SUM(CASE WHEN C.RPT_DP_SEQ =30 THEN DECODE(A.CNTR_TPSZ_CD, C.CNTR_TPSZ_CD, A.CNTR_CNT) END) TPSZ_DP30 
+                FROM   (SELECT  Z.LSTM_CD, Z.VNDR_SEQ, Z.VNDR_ABBR_NM, Z.CNTR_TPSZ_CD, COUNT(Z.CNTR_NO) CNTR_CNT
+                        FROM    TEMP_DROP Z
+                        GROUP BY Z.LSTM_CD, Z.VNDR_SEQ, Z.VNDR_ABBR_NM, Z.CNTR_TPSZ_CD
+                        ) A,
+                        (SELECT  CNTR_TPSZ_CD, ROW_NUMBER() OVER(ORDER BY RPT_DP_SEQ) AS RPT_DP_SEQ  
+                        FROM    MDM_CNTR_TP_SZ) C       
+                WHERE   1 = 1
+                GROUP BY ROLLUP(A.LSTM_CD, A.VNDR_SEQ, A.VNDR_ABBR_NM)  
+                ) A        
+        WHERE   (A.VNDR_ABBR_NM IS NOT NULL
+        OR      A.VNDR_SEQ IS NULL
+        OR      A.LSTM_CD IS NULL
+        OR      A.LOC_CD IS NULL)
+        AND     A.LOC_CD IS NOT NULL
+#end	
+        )
+ORDER BY DECODE(LOC_CD, 'G.Total',1,0), LOC_CD, 
+         DECODE(LSTM_CD, 'Total',1,0), LSTM_CD, VNDR_SEQ			]]></sql>
+			<params>
+				<param name="cntr_sts_cd" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="str_evnt_dt" type="12" value="" out="N"/>
+				<param name="end_evnt_dt" type="12" value="" out="N"/>
+				<param name="agmt_cty_cd" type="12" value="" out="N"/>
+				<param name="agmt_seq" type="2" value="" out="N"/>
+				<param name="vndr_seq" type="2" value="" out="N"/>
+				<param name="onh_free_dys" type="2" value="" out="N"/>
+				<param name="usr_ofc_cd" type="12" value="" out="N"/>
+				<param name="cntr_full_flg" type="12" value="" out="N"/>
+				<param name="cntr_onh_auth_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

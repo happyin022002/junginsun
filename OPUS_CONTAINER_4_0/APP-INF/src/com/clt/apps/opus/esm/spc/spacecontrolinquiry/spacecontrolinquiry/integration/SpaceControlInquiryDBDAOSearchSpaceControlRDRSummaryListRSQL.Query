@@ -1,0 +1,407 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SpaceControlInquiryDBDAOSearchSpaceControlRDRSummaryListRSQL">
+			<desc><![CDATA[2010.08.25 최윤성 [CHM-201005492-01] RDR 실적 Summary 기능 개발 - 2010년 시스템 개발 계획
+2010.09.16 이윤정 [CHM-201005916-01] Weekly L/F by Carrier 화면의 조회 결과 값에 따른 색상 변경 
+2010.12.20 이준범 [CHM-201005916-01] 정렬기준 변경
+1) Weekly L/F by POL/POD 와 마찬가지로 Sub Trade / TTL BSA 정렬
+2) Carrier Code 정렬 : HJS/COS/KKL/YML + 나머지 알파벳순
+2011.03.02 이석준 [CHM-201109016-01] 
+                RDR에 BSA정보가 없을시 SPC_BSA_MGMT TABLE에서 BSA 정보를 보여주도록 쿼리 수정
+2011.03.30 이석준[CHM-201109754-01]
+                AE1AE LANE은 EUROUPE으로 되어 있으나 SHAAS가 조회시에 조회될 수 있도록 수정
+2011.07.01 최윤성 [CHM-201111937-01] Space Utilization 화면 보완
+ - Total Weight 항목 추가
+2011.10.05 김종준 [CHM-201113755-01] 
+	-IOC가 ‘O’인 경우에만 조회가 가능토록 되어있으나, WAFIE와 마찬가지로 NBSIM 노선의 경우,
+	  Intra 노선이지만, Ocean 처럼 인식되어 데이터가 조회될 수 있도록 보완 요청
+2011.10.05 김종준 [CHM-201113755-01] 
+	-IOC가 ‘O’인 경우에만 조회가 가능토록 되어있으나, WAFIE와 마찬가지로 NBSIM 노선의 경우,
+	  Intra 노선이지만, Ocean 처럼 인식되어 데이터가 조회될 수 있도록 보완 요청]]></desc>
+			<sql><![CDATA[
+WITH COA_MON_VVD_LV AS(
+SELECT  TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD,COST_YR,COST_MON,NUM,
+        COST_WK,VSL_CD,SKD_VOY_NO,SKD_DIR_CD,VVD,OPR_CD,
+        DECODE(BSA,0,DECODE(B_BSA,0,C_BSA,B_BSA),-- RDR Alloc에 없으면 BSA MGMT 값 적용
+                     DECODE(B_LAST_FLG,1,BSA,-1,B_BSA,0,C_BSA)) BSA, -- RDR Alloc이 있으면 Update Date일자 비교하여 최근것을 적용
+        FULL,EMPTY, WGT
+  FROM ( 
+    SELECT A.TRD_CD,A.SUB_TRD_CD,A.RLANE_CD,A.DIR_CD,A.COST_YR,A.COST_MON,A.NUM,
+           A.COST_WK,A.VSL_CD,A.SKD_VOY_NO,A.SKD_DIR_CD,A.VVD,A.OPR_CD,
+--           DECODE(A.BSA,0,DECODE(NVL(B.BSA_CAPA,0),0,NVL(C.BSA_CAPA,0),NVL(B.BSA_CAPA,0)),A.BSA) BSA,
+           A.BSA,
+           NVL(B.BSA_CAPA,0) B_BSA,
+           NVL(C.BSA_CAPA,0) C_BSA,
+           NVL(B.UPD_DT,TO_DATE('19900101','YYYYMMDD')) B_UPD_DT,
+           NVL(C.UPD_DT,TO_DATE('19900101','YYYYMMDD')) C_UPD_DT,
+           SIGN(NVL(A.UPD_DT,TO_DATE('19900101','YYYYMMDD')) - NVL(B.UPD_DT,TO_DATE('19900101','YYYYMMDD'))) B_LAST_FLG,
+           SIGN(NVL(A.UPD_DT,TO_DATE('19900101','YYYYMMDD')) - NVL(C.UPD_DT,TO_DATE('19900101','YYYYMMDD'))) C_LAST_FLG,   
+           A.FULL,A.EMPTY, A.WGT
+    FROM (
+            SELECT M.TRD_CD    ,
+                   M.SUB_TRD_CD,
+                   M.RLANE_CD  ,
+                   M.DIR_CD    ,
+                   SUBSTR(M.SLS_YRMON, 1, 4) AS COST_YR ,
+                   SUBSTR(M.SLS_YRMON, 5)    AS COST_MON,
+                   P.RNUM NUM  ,
+                   M.COST_WK   ,
+                   M.VSL_CD    ,
+                   M.SKD_VOY_NO,
+                   M.DIR_CD AS SKD_DIR_CD,
+                   M.VSL_CD||M.SKD_VOY_NO||M.DIR_CD AS VVD,
+                   B.OPR_CD,
+                   SUM(B.BSA) AS BSA  ,
+                   SUM(B.FULL) AS FULL ,
+                   SUM(B.EMPTY) AS EMPTY ,
+                   SUM(B.WGT) AS WGT ,
+                   MAX(B.UPD_DT) AS UPD_DT
+              FROM COA_MON_VVD M,
+                   (
+                      SELECT A.VSL_CD,
+                             A.VOY_NO,
+                             A.DIR_CD,
+                             A.OPR_CD,
+                             A.REGION,
+                             NVL(B.BSA_SLOT, 0) AS BSA,
+                             SUM(DECODE(A.TYPE, 'F', A.SLOT_QTY, 0) + DECODE(A.TYPE, 'A', A.SLOT_QTY, 0)) AS FULL,
+                             SUM(DECODE(A.TYPE, 'E', A.SLOT_QTY, 0)) AS EMPTY,
+                             SUM(DECODE(A.TYPE, 'F', A.WEIGHT, 'A', A.WEIGHT, 'E', A.WEIGHT, 0)) AS WGT,
+                             MAX(B.UPDATE_TIME) UPD_DT
+                        FROM RDR_UTILIZE    A,
+                             RDR_ALLOCATION B
+                       WHERE A.VSL_CD = B.VSL_CD (+)
+                         AND A.VOY_NO = B.VOY_NO (+)
+                         AND A.DIR_CD = B.DIR_CD (+)
+                         AND A.OPR_CD = B.OPR_CD (+)
+                         AND A.REGION = B.REGION (+)
+        
+        #if (${rhq} == 'A')
+                         AND A.REGION IN ('A', 'D','E')
+        #else
+        	#if (${rhq} == 'M')
+                         AND A.REGION IN ('M', 'S')
+        	#else
+                         AND A.REGION = @[rhq]
+        	#end
+        #end
+                    GROUP BY A.VSL_CD,
+                             A.VOY_NO,
+                             A.DIR_CD,
+                             A.OPR_CD,
+                             A.REGION,
+                             NVL(B.BSA_SLOT, 0)
+                   ) B,
+                   (
+                      SELECT /*+ INDEX (P, XPKCOA_WK_PRD)*/
+                             P.COST_YR||P.COST_WK AS COST_YRWK,
+                             ROWNUM               AS RNUM
+                        FROM COA_WK_PRD P
+                       WHERE P.COST_YR||P.COST_WK >= @[year]||@[week]
+                         AND ROWNUM               <= @[duration]
+                   ) P
+             WHERE SUBSTR(M.SLS_YRMON, 1, 4)||M.COST_WK = P.COST_YRWK
+               AND (M.DELT_FLG IS NULL OR M.DELT_FLG = 'N')
+               
+        #if (${trade} != '')
+               AND M.TRD_CD     = @[trade]
+        #end
+        
+        #if (${subtrade} != '')
+               AND M.SUB_TRD_CD     = @[subtrade]
+        #end
+        
+        #if (${bound} != '')
+               AND M.DIR_CD     = @[bound]
+        #end
+        
+        #if (${operator} != '')
+               AND B.OPR_CD     = @[operator]
+        #end
+        
+        #if (${rlane_cd} != '')
+               AND M.RLANE_CD   = @[rlane_cd]
+        #end
+        
+               AND DECODE(M.RLANE_CD, 'WAFIE', 'O', 'NBSIM', 'O', M.IOC_CD)     = 'O'
+               AND M.VSL_CD     = B.VSL_CD 
+               AND M.SKD_VOY_NO = B.VOY_NO 
+               AND M.DIR_CD     = B.DIR_CD 
+        #if (${rhq} == 'A')
+               AND B.REGION IN ('A', 'D',DECODE(M.RLANE_CD||M.DIR_CD,'AE1AEW','E','D'))
+        #end
+        #if (${rhq} =='E')
+			   AND B.REGION = DECODE(M.RLANE_CD,'AE1AE',DECODE(M.DIR_CD,'E','E','XXX'),'E')
+        #end
+          GROUP BY M.TRD_CD    ,
+                   M.SUB_TRD_CD,
+                   M.RLANE_CD  ,
+                   M.DIR_CD    ,
+                   SUBSTR(M.SLS_YRMON, 1, 4) ,
+                   SUBSTR(M.SLS_YRMON, 5)    ,
+                   P.RNUM  ,
+                   M.COST_WK   ,
+                   M.VSL_CD    ,
+                   M.SKD_VOY_NO,
+                   M.DIR_CD,
+                   M.VSL_CD||M.SKD_VOY_NO||M.DIR_CD ,
+                   B.OPR_CD
+               ) A,
+      (
+        select TRD_CD,SUB_TRD_CD,VSL_CD,SKD_VOY_NO,SKD_DIR_CD,CRR_CD,
+               BSA_CAPA,UPD_DT
+          from SPC_BSA_MGMT
+         WHERE 1=1    
+        #if (${trade} != '')
+               AND TRD_CD     = @[trade]
+        #end
+        
+        #if (${subtrade} != '')
+               AND SUB_TRD_CD     = @[subtrade]
+        #end
+        
+        #if (${bound} != '')
+               AND SKD_DIR_CD     = @[bound]
+        #end
+        
+        #if (${operator} != '')
+               AND CRR_CD     = @[operator]
+        #end           
+      ) B,
+      (
+        select DISTINCT TRD_CD,SUB_TRD_CD,VSL_CD,SKD_DIR_CD,CRR_CD,
+               FIRST_VALUE(BSA_CAPA) OVER(PARTITION BY TRD_CD,SUB_TRD_CD,VSL_CD,CRR_CD,SKD_DIR_CD ORDER BY BSA_SEQ DESC) BSA_CAPA,
+               FIRST_VALUE(UPD_DT) OVER(PARTITION BY TRD_CD,SUB_TRD_CD,VSL_CD,CRR_CD,SKD_DIR_CD ORDER BY BSA_SEQ DESC) UPD_DT
+          from SPC_BSA_MGMT
+          WHERE 1=1  
+        #if (${trade} != '')
+               AND TRD_CD     = @[trade]
+        #end
+        
+        #if (${subtrade} != '')
+               AND SUB_TRD_CD     = @[subtrade]
+        #end
+        
+        #if (${bound} != '')
+               AND SKD_DIR_CD     = @[bound]
+        #end
+        
+        #if (${operator} != '')
+               AND CRR_CD     = @[operator]
+        #end              
+      ) C   
+     WHERE A.TRD_CD       = B.TRD_CD(+)
+       AND A.SUB_TRD_CD   = B.SUB_TRD_CD(+)
+       AND A.VSL_CD       = B.VSL_CD(+)
+       AND A.SKD_VOY_NO   = B.SKD_VOY_NO(+)
+       AND A.SKD_DIR_CD   = B.SKD_DIR_CD(+)
+       AND A.OPR_CD       = B.CRR_CD(+)
+       AND A.TRD_CD       = C.TRD_CD(+)
+       AND A.SUB_TRD_CD   = C.SUB_TRD_CD(+)
+       AND A.VSL_CD       = C.VSL_CD(+)
+       AND A.SKD_DIR_CD   = C.SKD_DIR_CD(+)   
+       AND A.OPR_CD       = C.CRR_CD(+)      
+))
+, BASE_DATA AS (
+    SELECT TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           COST_YR   ,
+           COST_MON  ,
+           NUM       ,
+           COST_WK   ,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           VVD       , 
+           CASE WHEN B.CPY_NO = '0' THEN 'VVD'
+                                    ELSE 'ITEM'
+            END AS OPR_CD,
+           0 AS BSA  ,
+           0 AS FULL ,
+           0 AS EMPTY,
+           0 AS WGT
+      FROM COA_MON_VVD_LV A,
+           (
+              SELECT CPY_NO
+                FROM COM_CPY_NO
+                WHERE CPY_NO < 2
+           ) B
+  GROUP BY TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           COST_YR   ,
+           COST_MON  ,
+           NUM       ,
+           COST_WK   ,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           VVD       ,
+           CPY_NO
+  UNION ALL
+    SELECT TRD_CD    ,
+           SUB_TRD_CD,
+           RLANE_CD  ,
+           DIR_CD    ,
+           COST_YR   ,
+           COST_MON  ,
+           NUM       ,
+           COST_WK   ,
+           VSL_CD    ,
+           SKD_VOY_NO,
+           SKD_DIR_CD,
+           VVD       ,
+           OPR_CD    ,
+           BSA       ,
+           FULL      ,
+           EMPTY     ,
+           WGT
+      FROM COA_MON_VVD_LV
+)
+, BASE_DATA2 AS (
+    SELECT 1 AS BSA_AVG ,
+           Z1.TRD_CD    ,
+           Z1.SUB_TRD_CD,
+           Z1.RLANE_CD  ,
+           Z1.DIR_CD    ,
+           Z1.OPR_CD    ,
+
+#set($primate = 'new_dur')
+#if(${duration} == '1')
+	#set($new_dur = ['1'])
+#elseif(${duration} == '2')
+	#set($new_dur = ['1','2'])
+#elseif(${duration} == '3')
+	#set($new_dur = ['1','2','3'])
+#elseif(${duration} == '4')
+	#set($new_dur = ['1','2','3','4'])
+#elseif(${duration} == '5')
+	#set($new_dur = ['1','2','3','4','5'])
+#elseif(${duration} == '6')
+	#set($new_dur = ['1','2','3','4','5','6'])
+#elseif(${duration} == '7')
+	#set($new_dur = ['1','2','3','4','5','6','7'])
+#elseif(${duration} == '8')
+	#set($new_dur = ['1','2','3','4','5','6','7','8'])
+#elseif(${duration} == '9')
+	#set($new_dur = ['1','2','3','4','5','6','7','8','9'])
+#elseif(${duration} == '10')
+	#set($new_dur = ['1','2','3','4','5','6','7','8','9','10'])
+#elseif(${duration} == '11')
+	#set($new_dur = ['1','2','3','4','5','6','7','8','9','10','11'])
+#elseif(${duration} == '12')
+	#set($new_dur = ['1','2','3','4','5','6','7','8','9','10','11','12'])
+#elseif(${duration} == '13')
+	#set($new_dur = ['1','2','3','4','5','6','7','8','9','10','11','12','13'])
+#elseif(${duration} == '14')
+	#set($new_dur = ['1','2','3','4','5','6','7','8','9','10','11','12','13','14'])
+#elseif(${duration} == '15')
+	#set($new_dur = ['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15'])
+#end
+
+#foreach( $key in $new_dur )
+           MIN(DECODE(Z1.NUM, ${key}, Z1.VVD))              AS MIN_VVD$key,
+           MAX(DECODE(Z1.NUM, ${key}, Z1.VVD))              AS MAX_VVD$key,
+           SUM(DECODE(Z1.NUM, ${key}, NVL(Z1.BSA  , 0), 0)) AS BSA$key    ,
+           SUM(DECODE(Z1.NUM, ${key}, NVL(Z1.FULL , 0), 0)) AS FULL$key   ,
+           SUM(DECODE(Z1.NUM, ${key}, NVL(Z1.EMPTY, 0), 0)) AS EMPTY$key  ,
+           SUM(DECODE(Z1.NUM, ${key}, NVL(Z1.WGT  , 0), 0)) AS WGT$key    ,
+
+#end
+
+           ''
+      FROM BASE_DATA Z1
+  GROUP BY Z1.TRD_CD    ,
+           Z1.SUB_TRD_CD,
+           Z1.RLANE_CD  ,
+           Z1.DIR_CD    ,
+           Z1.OPR_CD
+  ORDER BY Z1.TRD_CD    ,
+           Z1.SUB_TRD_CD,
+           Z1.RLANE_CD  ,
+           Z1.DIR_CD    ,
+           Z1.OPR_CD
+)
+  SELECT Z3.TRD_CD    ,
+         Z3.SUB_TRD_CD,
+         Z3.RLANE_CD  ,
+         Z3.DIR_CD    ,
+         Z3.OPR_CD    ,
+
+#foreach( $key in $new_dur )
+         Z3.VVD$key    ,
+         Z3.BSA$key    ,
+         Z3.FULL$key   ,
+         Z3.EMPTY$key  ,
+         Z3.TTL_WGT$key,
+         Z3.TTL_LOAD$key,
+         ROUND(DECODE(Z3.BSA$key, 0, 0, DECODE(Z3.FULL$key    , 0, 0, Z3.FULL$key     * 100 / Z3.BSA$key)), 1) || '%' AS FULL_LF$key,
+         ROUND(DECODE(Z3.BSA$key, 0, 0, DECODE(Z3.TTL_LOAD$key, 0, 0, Z3.TTL_LOAD$key * 100 / Z3.BSA$key)), 1) || '%' AS TTL_LF$key ,
+
+#end
+
+         '' AS T
+    FROM (
+            SELECT NVL(Z2.TRD_CD    , 'TOTAL') AS TRD_CD    ,
+                   NVL(Z2.SUB_TRD_CD, 'TOTAL') AS SUB_TRD_CD,
+                   NVL(Z2.RLANE_CD  , 'TOTAL') AS RLANE_CD  ,
+                   NVL(Z2.DIR_CD    , 'TOTAL') AS DIR_CD    ,
+                   NVL(Z2.OPR_CD    , 'TOTAL') AS OPR_CD    ,
+                   
+                   -- Add @2010.12.15
+                   NVL(( SELECT SUM(L.BSA) / COUNT(DISTINCT L.VVD) AS BSA
+                           FROM COA_MON_VVD_LV L
+                          WHERE L.SUB_TRD_CD = Z2.SUB_TRD_CD
+                            AND L.RLANE_CD   = Z2.RLANE_CD
+                            AND L.DIR_CD     = Z2.DIR_CD), 0) AS BSA_AVG,
+                   -- Add End @2010.12.15
+                   
+#foreach( $key in $new_dur )
+                   MAX(DECODE((NVL(Z2.MIN_VVD$key, ' ')), (NVL(Z2.MAX_VVD$key, ' ')), Z2.MIN_VVD$key, Z2.MAX_VVD$key || '/' || Z2.MIN_VVD$key)) AS VVD${key},
+                   SUM(Z2.BSA$key)   AS BSA$key  ,
+                   SUM(Z2.FULL$key)  AS FULL$key ,
+                   SUM(Z2.EMPTY$key) AS EMPTY$key,
+                   SUM(Z2.FULL$key + Z2.EMPTY$key) AS TTL_LOAD$key,
+                   SUM(Z2.WGT$key)   AS TTL_WGT$key,
+
+#end
+                   ''
+              FROM BASE_DATA2 Z2
+          GROUP BY Z2.TRD_CD,
+#if (${rlane_cd} != '')
+                Z2.SUB_TRD_CD, Z2.RLANE_CD, Z2.DIR_CD, CUBE(Z2.OPR_CD)
+#else
+				CUBE(Z2.SUB_TRD_CD, Z2.RLANE_CD, Z2.DIR_CD, Z2.OPR_CD)
+#end
+            HAVING     (NOT (SUB_TRD_CD IS NULL     AND RLANE_CD IS NOT NULL))
+                   AND (NOT (SUB_TRD_CD IS NOT NULL AND RLANE_CD IS NOT NULL AND DIR_CD IS NULL))
+                   AND (NOT (SUB_TRD_CD IS NULL     AND RLANE_CD IS NULL     AND DIR_CD IS NOT NULL AND OPR_CD IS NOT NULL))
+                   AND (NOT (SUB_TRD_CD IS NOT NULL AND RLANE_CD IS NULL     AND DIR_CD IS NOT NULL AND OPR_CD IS NOT NULL))
+         ) Z3
+         
+-- @2010.12.15 Sub Trade 정렬 방식 변경
+ORDER BY DECODE(SUB_TRD_CD, 'TOTAL', '1', SUB_TRD_CD) DESC, BSA_AVG DESC,
+         DECODE(RLANE_CD, 'TOTAL', 'ZZZZZ', RLANE_CD),
+--         DECODE(DIR_CD, 'TOTAL', '00000', DIR_CD), --2010.09.16 이윤정 [CHM-201005916-01] Weekly L/F by Carrier 화면의 조회 결과 값에 따른 정렬 변경
+		 DECODE(DIR_CD, 'TOTAL', decode(OPR_CD,'TOTAL','ZZZZZ','00000'), DIR_CD),
+		 
+-- @2010.12.15 Carrier 정렬 변경
+         DECODE(OPR_CD, 'VVD', '00000', 'ITEM', '00001', COM_ConstantMgr_PKG.COM_getCompanyCode_FNC, '00002', 'COS', '00003', 'KKL', '00004', 'YML', '00005', 'UAC', '00006', 'TOTAL', 'ZZZZZ', OPR_CD)			]]></sql>
+			<params>
+				<param name="rhq" type="12" value="" out="N"/>
+				<param name="year" type="12" value="" out="N"/>
+				<param name="week" type="12" value="" out="N"/>
+				<param name="duration" type="12" value="" out="N"/>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="subtrade" type="12" value="" out="N"/>
+				<param name="bound" type="12" value="" out="N"/>
+				<param name="operator" type="12" value="" out="N"/>
+				<param name="rlane_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

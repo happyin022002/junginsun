@@ -1,0 +1,440 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="OwnDangerousCargoApprovalDBDAOPreRestrictionSegregationVORSQL">
+			<desc><![CDATA[Pre Checking Report 화면의 Segregation Validation 목록을 가져온다.]]></desc>
+			<sql><![CDATA[
+##------------------------------------------------------------------------------------
+##설명
+##1. UN_NO_TBL          : 컨테이너별 Un No. 의 임시 테이블을 생성한다.
+##2. UN_NO_SEGR_TBL     : 1번에 대하여 Limited/Excepted Qty 예외가 아닌 Un No. 별 Segration 목록을 임시 테이블로 생성한다.
+##3. UN_NO_SEGR_GRP_TBL : 1번에 대하여 Limited/Excepted Qty 예외가 아닌 Group 별 Segration 목록을 임시 테이블로 생성한다.
+##4. CLSS1_SEGR_TBL     : Class1 에 대한 Segration 목록을 임시 테이블로 생성한다.
+##5. SEGR_GRP_NOS_TBL   : Un No. 에 대한 Segration Group Number 목록을 임시 테이블로 생성한다.
+##6. <Main Query>       : (1) + (2) + (3) + (4)
+##                        (1)2번을 기준으로 한 1번과의 Class 비교 Segration 에서 Class1 기준을 상위 적용한 목록을 생성한다. 
+##                           단, Special Provisions for Segregation에 속한 UN끼리의 혼적은 가능하도록 허용한다.
+##                        (2)3번을 기준으로 한 1번과의 Croup 비교 Segration 목록을 생성한다.
+##                           단, Special Provisions for Segregation에 속한 UN끼리의 혼적은 가능하도록 허용한다.
+##                        (3)1번에서 Un No. Holding 되고 있는 목록을 생성한다.
+##                        (4)1번에서 Limited/Excepted Qty에 대한 예외처리된 목록을 생성한다.
+##7. <Note>             : 위의 Query를  Container 갯수만큼 수행하여 출력한다.
+##------------------------------------------------------------------------------------
+
+WITH UN_NO_TBL AS (
+     SELECT T.SPCL_CNTR_SEQ
+          , T.SPCL_CGO_SEQ
+          , T.IMDG_UN_NO
+          , T.IMDG_UN_NO_SEQ
+          , DECODE(NVL(UN.SEGR_AS_FOR_IMDG_CLSS_CD,''),'',T.IMDG_CLSS_CD,UN.SEGR_AS_FOR_IMDG_CLSS_CD) IMDG_CLSS_CD
+          ---- ::2014-07-23:: ----, UN.IMDG_UN_NO_HLD_FLG
+		  , NVL(UN.IMDG_UN_NO_HLD_FLG,'N') IMDG_UN_NO_HLD_FLG
+          , UN.IMDG_COMP_GRP_CD   
+          , CASE WHEN T.LQ_CHK = 'Y' THEN
+                                          CASE WHEN NVL(UN.IMDG_LMT_QTY,0) = 0 THEN 'LY'
+                                               ELSE 'LX'
+                                          END
+                 WHEN T.EQ_CHK = 'Y' THEN
+                                          CASE WHEN NVL(UN.IMDG_EXPT_QTY_CD,'E0') = 'E0' THEN 'EY'
+                                               ELSE 'LX'
+                                          END
+                 ELSE 'N'
+            END AS LEQ_CHK   
+          , UN.IMDG_TBL_NO    
+       FROM (
+#foreach(${obj} in ${opt_obj})
+     #if($velocityCount > ${start_num} && $velocityCount <= ${end_num})
+             SELECT '$obj.getSpclCntrSeq()'    AS SPCL_CNTR_SEQ
+                  , '$obj.getSpclCgoSeq()'     AS SPCL_CGO_SEQ
+                  , '$obj.getImdgUnNo()'       AS IMDG_UN_NO
+                  , '$obj.getImdgUnNoSeq()'    AS IMDG_UN_NO_SEQ
+                  , '$obj.getImdgClssCd()'     AS IMDG_CLSS_CD
+                  , '$obj.getImdgLmtQtyFlg()'  AS LQ_CHK
+                  , '$obj.getImdgExptQtyFlg()' AS EQ_CHK
+               FROM DUAL
+          #if($velocityCount < ${end_num} && $velocityCount < ${obj_size})
+             UNION ALL
+          #end
+     #end
+#end
+			------ <STARTING> ---------------------------------------------------
+			--::2015-09-01:by TOP:Adding Checking Logic for Subsdiary Risk(s)::--
+
+			UNION ALL
+
+			SELECT  	XX.SPCL_CNTR_SEQ
+					,	XX.SPCL_CGO_SEQ
+					,	XX.IMDG_UN_NO
+					,	XX.IMDG_UN_NO_SEQ
+					,	SR.IMDG_SUBS_RSK_LBL_CD
+					,	'N'							AS LQ_CHK
+					,	'N'							AS EQ_CHK
+			FROM		(
+
+#foreach(${obj} in ${opt_obj})
+     #if($velocityCount > ${start_num} && $velocityCount <= ${end_num})
+						SELECT		'$obj.getSpclCntrSeq()'    AS SPCL_CNTR_SEQ
+								,	'$obj.getSpclCgoSeq()'     AS SPCL_CGO_SEQ
+								,	'$obj.getImdgUnNo()'       AS IMDG_UN_NO
+								,	'$obj.getImdgUnNoSeq()'    AS IMDG_UN_NO_SEQ
+								,	'$obj.getImdgClssCd()'     AS IMDG_CLSS_CD
+								,	'$obj.getImdgLmtQtyFlg()'  AS LQ_CHK
+								,	'$obj.getImdgExptQtyFlg()' AS EQ_CHK
+						FROM		DUAL
+          #if($velocityCount < ${end_num} && $velocityCount < ${obj_size})
+						UNION ALL
+          #end
+     #end
+#end
+						) XX
+					,	SCG_IMDG_SUBS_RSK_LBL  		SR
+			WHERE 		XX.IMDG_UN_NO     			= SR.IMDG_UN_NO     
+			AND			XX.IMDG_UN_NO_SEQ 			= SR.IMDG_UN_NO_SEQ
+
+			--::2015-09-01:by TOP:Adding Checking Logic for Subsdiary Risk(s)::--
+			------ <FINISHED> ---------------------------------------------------
+
+           ) T, SCG_IMDG_UN_NO 		UN
+      WHERE T.IMDG_UN_NO     		= UN.IMDG_UN_NO
+        AND T.IMDG_UN_NO_SEQ 		= UN.IMDG_UN_NO_SEQ
+)
+,
+UN_NO_SEGR_TBL AS (
+     SELECT B.SPCL_CNTR_SEQ                     AS SPCL_CNTR_SEQ
+          , B.SPCL_CGO_SEQ                      AS SPCL_CGO_SEQ
+          , B.IMDG_UN_NO                        AS IMDG_UN_NO
+          , B.IMDG_UN_NO_SEQ                    AS IMDG_UN_NO_SEQ
+          , B.IMDG_CLSS_CD                      AS IMDG_CLSS_CD1
+          , C.IMDG_CLSS_CD                      AS IMDG_CLSS_CD2
+          , B.IMDG_UN_NO_HLD_FLG                AS IMDG_UN_NO_HLD_FLG
+          , B.IMDG_COMP_GRP_CD                  AS IMDG_COMP_GRP_CD
+          , (D.IMDG_SEGR_TP_CD||C.IMDG_SEGR_CD) AS IMDG_SEGR_CD
+          , D.IMDG_SEGR_DESC                    AS IMDG_SEGR_DESC
+          , B.IMDG_TBL_NO                       AS IMDG_TBL_NO
+       FROM UN_NO_TBL           B
+          , SCG_IMDG_UN_NO_SEGR C
+          , SCG_IMDG_SEGR_SYM   D
+      WHERE B.IMDG_UN_NO_HLD_FLG = 'N'
+        AND B.LEQ_CHK            = 'N'
+        AND B.IMDG_UN_NO         = C.IMDG_UN_NO
+        AND B.IMDG_UN_NO_SEQ     = C.IMDG_UN_NO_SEQ     
+        AND C.IMDG_SEGR_CD       = D.IMDG_SEGR_CD
+        AND NVL(D.DELT_FLG,'N')  = 'N' 
+        AND D.IMDG_SEGR_TP_CD    = 'C'       
+)
+,
+UN_NO_SEGR_GRP_TBL AS (
+     SELECT E.SPCL_CNTR_SEQ  
+          , E.SPCL_CGO_SEQ   
+          , E.IMDG_UN_NO
+          , E.IMDG_UN_NO_SEQ
+          , E.IMDG_CLSS_CD
+          , E.IMDG_UN_NO_HLD_FLG
+          , F.IMDG_SEGR_GRP_NO
+          , ('G'||F.IMDG_SEGR_GRP_STWG_TP_CD) AS IMDG_SEGR_GRP_STWG_TP_CD
+          , E.IMDG_TBL_NO
+       FROM UN_NO_TBL               E
+          , SCG_IMDG_UN_NO_SEGR_GRP F
+      WHERE E.IMDG_UN_NO_HLD_FLG = 'N'
+        AND E.LEQ_CHK            = 'N'
+        AND E.IMDG_UN_NO         = F.IMDG_UN_NO
+        AND E.IMDG_UN_NO_SEQ     = F.IMDG_UN_NO_SEQ
+)
+,
+CLSS1_SEGR_TBL AS (
+     SELECT CGS.ROW_IMDG_COMP_GRP_CD
+          , CGS.COL_IMDG_COMP_GRP_CD
+          , ('P'||CGS.IMDG_SEGR_CD) AS IMDG_SEGR_CD
+          , CGS.IMDG_SEGR_NTC_NO 
+          , (SELECT MSG.ERR_MSG FROM COM_ERR_MSG MSG WHERE MSG.ERR_MSG_CD = 'SCG00005') IMDG_SEGR_DESC
+       FROM SCG_IMDG_COMP_GRP_SEGR CGS 
+      WHERE NOT EXISTS (
+            SELECT 'X'
+              FROM SCG_IMDG_SEGR_SYM SYM
+             WHERE SYM.IMDG_SEGR_CD      = CGS.IMDG_SEGR_NTC_NO
+               AND NVL(SYM.DELT_FLG,'N') = 'N'
+               AND SYM.IMDG_SEGR_TP_CD   = 'P'
+      ) 
+)
+,
+SEGR_GRP_NOS_TBL AS (
+     SELECT SG.IMDG_UN_NO
+          , SUBSTR(XMLAGG(XMLELEMENT(X, '/' || IMDG_SEGR_GRP_NO) ORDER BY IMDG_SEGR_GRP_NO).EXTRACT('//text()'), 2) IMDG_SEGR_GRP_NOS
+       FROM SCG_IMDG_SEGR_GRP_DTL SG
+      WHERE EXISTS (
+                   SELECT 'Y'
+                     FROM UN_NO_TBL G
+                    WHERE G.IMDG_UN_NO = SG.IMDG_UN_NO
+                   )
+         OR EXISTS (
+                   SELECT 'Y'
+                     FROM UN_NO_SEGR_GRP_TBL H
+                    WHERE H.IMDG_UN_NO = SG.IMDG_UN_NO
+                   )
+      GROUP BY SG.IMDG_UN_NO
+)
+,
+SEGR_GRP_NO_TBL AS (
+     SELECT SG.IMDG_UN_NO
+          , IMDG_SEGR_GRP_NO||'' IMDG_SEGR_GRP_NO
+       FROM SCG_IMDG_SEGR_GRP_DTL SG
+      WHERE EXISTS (
+                   SELECT 'Y'
+                     FROM UN_NO_TBL G
+                    WHERE G.IMDG_UN_NO = SG.IMDG_UN_NO
+                   )
+         OR EXISTS (
+                   SELECT 'Y'
+                     FROM UN_NO_SEGR_GRP_TBL H
+                    WHERE H.IMDG_UN_NO = SG.IMDG_UN_NO
+                   )
+)
+SELECT 	DISTINCT
+		T.SPCL_CNTR_SEQ1
+     , 	T.SPCL_CGO_SEQ1
+     , 	T.IMDG_UN_NO1
+     , 	T.IMDG_UN_NO_SEQ1
+     , 	T.IMDG_SEGR_GRP_NO1
+     , 	T.CONFLICT_DESC
+     , 	T.SPCL_CNTR_SEQ2
+     , 	T.SPCL_CGO_SEQ2
+     , 	T.IMDG_UN_NO2
+     , 	T.IMDG_UN_NO_SEQ2
+     , 	T.IMDG_SEGR_GRP_NO2
+  FROM 
+  (
+    SELECT TST.SPCL_CNTR_SEQ1
+         , TST.SPCL_CGO_SEQ1
+         , TST.IMDG_UN_NO1
+         , TST.IMDG_UN_NO_SEQ1
+         , '' AS IMDG_SEGR_GRP_NO1
+         , TST.IMDG_UN_NO_HLD_FLG1
+         , DECODE(TST.IMDG_SEGR_CD,'C*',CL1.IMDG_SEGR_CD,TST.IMDG_SEGR_CD)    AS IMDG_SEGR_CD
+         , DECODE(TST.IMDG_SEGR_CD,'C*',CL1.IMDG_SEGR_DESC,TST.CONFLICT_DESC) AS CONFLICT_DESC
+         , TST.SPCL_CNTR_SEQ2
+         , TST.SPCL_CGO_SEQ2
+         , TST.IMDG_UN_NO2
+         , TST.IMDG_UN_NO_SEQ2
+         , '' AS IMDG_SEGR_GRP_NO2
+         , TST.IMDG_UN_NO_HLD_FLG2
+      FROM 
+         (
+          SELECT UNS.SPCL_CNTR_SEQ      AS SPCL_CNTR_SEQ1                       
+               , UNS.SPCL_CGO_SEQ       AS SPCL_CGO_SEQ1                      
+               , UNS.IMDG_UN_NO         AS IMDG_UN_NO1
+               , UNS.IMDG_UN_NO_SEQ     AS IMDG_UN_NO_SEQ1
+               , UNS.IMDG_COMP_GRP_CD   AS IMDG_SEGR_GRP_NO1
+               , UNS.IMDG_UN_NO_HLD_FLG AS IMDG_UN_NO_HLD_FLG1
+               , UNS.IMDG_SEGR_CD       AS IMDG_SEGR_CD
+               , UNS.IMDG_SEGR_DESC     AS CONFLICT_DESC
+               , UNT.SPCL_CNTR_SEQ      AS SPCL_CNTR_SEQ2                      
+               , UNT.SPCL_CGO_SEQ       AS SPCL_CGO_SEQ2                  
+               , UNT.IMDG_UN_NO         AS IMDG_UN_NO2
+               , UNT.IMDG_UN_NO_SEQ     AS IMDG_UN_NO_SEQ2
+               , UNT.IMDG_COMP_GRP_CD   AS IMDG_SEGR_GRP_NO2
+               , UNT.IMDG_UN_NO_HLD_FLG AS IMDG_UN_NO_HLD_FLG2
+            FROM UN_NO_SEGR_TBL 		UNS
+               , UN_NO_TBL      		UNT
+           WHERE UNS.IMDG_CLSS_CD2      = UNT.IMDG_CLSS_CD
+             AND UNT.IMDG_UN_NO_HLD_FLG = 'N'
+             AND UNT.LEQ_CHK            = 'N'
+             AND (
+                 UNS.IMDG_UN_NO     <> UNT.IMDG_UN_NO
+              OR UNS.IMDG_UN_NO_SEQ <> UNT.IMDG_UN_NO_SEQ
+              OR UNS.IMDG_CLSS_CD1  <> UNT.IMDG_CLSS_CD
+             )
+             AND ((UNS.IMDG_TBL_NO <> UNT.IMDG_TBL_NO) OR UNS.IMDG_TBL_NO IS NULL)
+         ) TST
+         , CLSS1_SEGR_TBL CL1
+     WHERE TST.IMDG_SEGR_GRP_NO1 = CL1.ROW_IMDG_COMP_GRP_CD(+)
+       AND TST.IMDG_SEGR_GRP_NO2 = CL1.COL_IMDG_COMP_GRP_CD(+)
+
+    UNION ALL
+
+    --==================================================================================================   
+    SELECT   UNT.SPCL_CNTR_SEQ              AS SPCL_CNTR_SEQ1                 
+           , UNT.SPCL_CGO_SEQ               AS SPCL_CGO_SEQ1                 
+           , UNT.IMDG_UN_NO                 AS IMDG_UN_NO1
+           , UNT.IMDG_UN_NO_SEQ             AS IMDG_UN_NO_SEQ1
+           , '' --SG1.IMDG_SEGR_GRP_NOS         AS IMDG_SEGR_GRP_NO1 
+           , UNT.IMDG_UN_NO_HLD_FLG         AS IMDG_UN_NO_HLD_FLG1
+           , YY.IMDG_SEGR_GRP_STWG_TP_CD   	AS IMDG_SEGR_CD
+           , CASE YY.IMDG_SEGR_GRP_STWG_TP_CD WHEN '1' THEN 'Away from Class'
+                                              WHEN '2' THEN 'Separated from class'
+                                              WHEN '3' THEN 'Separated by compartment or hold from Class'
+                                              WHEN '4' THEN 'Separated longitudinally from Class'
+                                              ELSE 'N/A'
+                                                
+             END ||' '|| YY.IMDG_CLSS_CD    AS CONFLICT_DESC
+           , UNT2.SPCL_CNTR_SEQ             AS SPCL_CNTR_SEQ2                 
+           , UNT2.SPCL_CGO_SEQ              AS SPCL_CGO_SEQ2                 
+           , UNT2.IMDG_UN_NO                AS IMDG_UN_NO2
+           , UNT2.IMDG_UN_NO_SEQ            AS IMDG_UN_NO_SEQ2
+           , '' --SG2.IMDG_SEGR_GRP_NOS         AS IMDG_SEGR_GRP_NO2
+           , '' --XX.IMDG_UN_NO_HLD_FLG         	AS IMDG_UN_NO_HLD_FLG2   
+    
+    FROM     UN_NO_TBL                     	UNT
+		   , UN_NO_TBL                     	UNT2
+           , SCG_IMDG_UN_NO_CLSS_CD        	YY
+    WHERE    1 = 1
+	AND		 UNT.IMDG_CLSS_CD				= YY.IMDG_CLSS_CD
+	AND		 UNT.IMDG_UN_NO                 = YY.IMDG_UN_NO
+    AND      UNT.IMDG_UN_NO_SEQ             = YY.IMDG_UN_NO_SEQ
+
+    AND      YY.IMDG_CLSS_CD                = UNT2.IMDG_CLSS_CD
+	AND		 UNT.IMDG_UN_NO                 <> UNT2.IMDG_UN_NO
+    AND      UNT.IMDG_UN_NO_SEQ             <> UNT2.IMDG_UN_NO_SEQ
+
+	AND	     UNT.SPCL_CNTR_SEQ				= UNT2.SPCL_CNTR_SEQ
+    --==================================================================================================  
+
+    UNION ALL
+
+    SELECT UGT.SPCL_CNTR_SEQ             	AS SPCL_CNTR_SEQ1                 
+         , UGT.SPCL_CGO_SEQ              	AS SPCL_CGO_SEQ1                 
+         , UGT.IMDG_UN_NO                	AS IMDG_UN_NO1
+         , UGT.IMDG_UN_NO_SEQ            	AS IMDG_UN_NO_SEQ1
+         , SG1.IMDG_SEGR_GRP_NOS         	AS IMDG_SEGR_GRP_NO1 
+         , UGT.IMDG_UN_NO_HLD_FLG        	AS IMDG_UN_NO_HLD_FLG1
+         , UGT.IMDG_SEGR_GRP_STWG_TP_CD  	AS IMDG_SEGR_CD
+         , DECODE(UGT.IMDG_SEGR_GRP_STWG_TP_CD, 'G1', 'Away from Segregation Group '||UGT.IMDG_SEGR_GRP_NO, 'G2', 'Separated from Segregation Group '||UGT.IMDG_SEGR_GRP_NO, 'N/A') AS CONFLICT_DESC
+         , UNT.SPCL_CNTR_SEQ             	AS SPCL_CNTR_SEQ2                 
+         , UNT.SPCL_CGO_SEQ              	AS SPCL_CGO_SEQ2                 
+         , UNT.IMDG_UN_NO                	AS IMDG_UN_NO2
+         , UNT.IMDG_UN_NO_SEQ            	AS IMDG_UN_NO_SEQ2
+         , SG2.IMDG_SEGR_GRP_NOS         	AS IMDG_SEGR_GRP_NO2
+         , UNT.IMDG_UN_NO_HLD_FLG        	AS IMDG_UN_NO_HLD_FLG2
+
+      FROM UN_NO_SEGR_GRP_TBL    			UGT
+         --:2016-01-27:--, SCG_IMDG_SEGR_GRP_DTL 			ISG
+
+         , (
+			#foreach(${obj} in ${opt_obj})
+     			#if($velocityCount > ${start_num} && $velocityCount <= ${end_num})
+             
+			SELECT		TO_NUMBER('$obj.getImdgSegrGrpNo()')	AS IMDG_SEGR_GRP_NO 
+					,	'$obj.getImdgUnNo()'     				AS IMDG_UN_NO  
+			FROM 		DUAL
+          
+				#if($velocityCount < ${end_num} && $velocityCount < ${obj_size})
+				UNION
+          		#end
+     		
+				#end
+			#end
+
+			UNION
+
+			SELECT    	GRP.IMDG_SEGR_GRP_NO
+					,  	GRP.IMDG_UN_NO
+            FROM      	SCG_IMDG_SEGR_GRP_DTL GRP
+           )								ISG
+
+         , UN_NO_TBL             			UNT
+         , SEGR_GRP_NOS_TBL      			SG1
+         , SEGR_GRP_NOS_TBL      			SG2
+     WHERE UGT.IMDG_SEGR_GRP_NO 			= ISG.IMDG_SEGR_GRP_NO
+       AND ISG.IMDG_UN_NO       			= UNT.IMDG_UN_NO
+       AND UNT.IMDG_UN_NO_HLD_FLG 			= 'N'
+       AND UNT.LEQ_CHK            			= 'N'
+       AND (
+           UGT.IMDG_UN_NO      				<> UNT.IMDG_UN_NO
+        OR UGT.IMDG_UN_NO_SEQ  				<> UNT.IMDG_UN_NO_SEQ
+        OR UGT.IMDG_CLSS_CD    				<> UNT.IMDG_CLSS_CD
+           )
+       AND ((UGT.IMDG_TBL_NO 				<> UNT.IMDG_TBL_NO) OR UGT.IMDG_TBL_NO IS NULL)
+       AND UGT.IMDG_UN_NO       			= SG1.IMDG_UN_NO	(+)
+       AND UNT.IMDG_UN_NO       			= SG2.IMDG_UN_NO	(+)
+
+---- : commented by 2016-01-26 : ----
+----    UNION ALL
+----    SELECT
+----           UNT1.SPCL_CNTR_SEQ             AS SPCL_CNTR_SEQ1                 
+----         , UNT1.SPCL_CGO_SEQ              AS SPCL_CGO_SEQ1                 
+----         , UNT1.IMDG_UN_NO                AS IMDG_UN_NO1
+----         , UNT1.IMDG_UN_NO_SEQ            AS IMDG_UN_NO_SEQ1
+----         , SG1.IMDG_SEGR_GRP_NO||''       AS IMDG_SEGR_GRP_NO1 
+----         , '1'                            AS IMDG_UN_NO_HLD_FLG1
+----         , 'X'                            AS IMDG_SEGR_CD
+----         , 'Segregation Group ' || SG1.IMDG_SEGR_GRP_NO || ' (' || GRP.IMDG_SEGR_GRP_NM || ')'   AS CONFLICT_DESC
+----         , UNT2.SPCL_CNTR_SEQ             AS SPCL_CNTR_SEQ2                 
+----         , UNT2.SPCL_CGO_SEQ              AS SPCL_CGO_SEQ2                 
+----         , UNT2.IMDG_UN_NO                AS IMDG_UN_NO2
+----         , UNT2.IMDG_UN_NO_SEQ            AS IMDG_UN_NO_SEQ2
+----         , SG2.IMDG_SEGR_GRP_NO||''       AS IMDG_SEGR_GRP_NO2
+----         , '3'                            AS IMDG_UN_NO_HLD_FLG2
+----      FROM SEGR_GRP_NO_TBL   SG1
+----         , SEGR_GRP_NO_TBL   SG2
+----         , UN_NO_TBL          UNT1
+----         , UN_NO_TBL          UNT2
+----         , SCG_IMDG_SEGR_GRP  GRP
+----     WHERE  SG1.IMDG_UN_NO = UNT1.IMDG_UN_NO
+----       AND UNT2.IMDG_UN_NO <> UNT1.IMDG_UN_NO
+----       AND SG2.IMDG_UN_NO <> SG1.IMDG_UN_NO
+----       AND SG1.IMDG_SEGR_GRP_NO = GRP.IMDG_SEGR_GRP_NO
+
+
+    UNION ALL
+
+    SELECT UNT.SPCL_CNTR_SEQ             AS SPCL_CNTR_SEQ1                 
+         , UNT.SPCL_CGO_SEQ              AS SPCL_CGO_SEQ1                 
+         , UNT.IMDG_UN_NO                AS IMDG_UN_NO1
+         , UNT.IMDG_UN_NO_SEQ            AS IMDG_UN_NO_SEQ1
+         , ''                            AS IMDG_SEGR_GRP_NO1 
+         , UNT.IMDG_UN_NO_HLD_FLG        AS IMDG_UN_NO_HLD_FLG1
+         , 'HD'                          AS IMDG_SEGR_CD
+         , (
+           SELECT MSG.ERR_MSG
+             FROM COM_ERR_MSG MSG
+            WHERE MSG.ERR_MSG_CD = 'SCG00004'
+              AND MSG.LANG_TP_CD = 'ENG'
+           )                             AS CONFLICT_DESC
+         , ''                            AS SPCL_CNTR_SEQ2                 
+         , ''                            AS SPCL_CGO_SEQ2                 
+         , ''                            AS IMDG_UN_NO2
+         , ''                            AS IMDG_UN_NO_SEQ2
+         , ''                            AS IMDG_SEGR_GRP_NO2
+         , ''                            AS IMDG_UN_NO_HLD_FLG2
+      FROM UN_NO_TBL             UNT
+     WHERE UNT.IMDG_UN_NO_HLD_FLG = 'Y'
+
+    UNION ALL
+
+    SELECT UNT.SPCL_CNTR_SEQ             AS SPCL_CNTR_SEQ1                 
+         , UNT.SPCL_CGO_SEQ              AS SPCL_CGO_SEQ1                 
+         , UNT.IMDG_UN_NO                AS IMDG_UN_NO1
+         , UNT.IMDG_UN_NO_SEQ            AS IMDG_UN_NO_SEQ1
+         , ''                            AS IMDG_SEGR_GRP_NO1 
+         , UNT.IMDG_UN_NO_HLD_FLG        AS IMDG_UN_NO_HLD_FLG1
+         , 'CK'                          AS IMDG_SEGR_CD
+         , (
+           SELECT MSG.ERR_MSG
+             FROM COM_ERR_MSG MSG
+            WHERE MSG.ERR_MSG_CD = DECODE(UNT.LEQ_CHK,'LY','SCG50016','EY','SCG50019','SCG50016')
+              AND MSG.LANG_TP_CD = 'ENG'
+           )                             AS CONFLICT_DESC
+         , ''                            AS SPCL_CNTR_SEQ2                 
+         , ''                            AS SPCL_CGO_SEQ2
+         , ''                            AS IMDG_UN_NO2
+         , ''                            AS IMDG_UN_NO_SEQ2
+         , ''                            AS IMDG_SEGR_GRP_NO2
+         , ''                            AS IMDG_UN_NO_HLD_FLG2
+      FROM UN_NO_TBL             UNT
+     WHERE UNT.LEQ_CHK = 'LY' OR UNT.LEQ_CHK = 'EY'
+  ) T
+  WHERE NVL(T.IMDG_SEGR_CD,'PX') != 'PX' 
+    AND T.IMDG_SEGR_CD != 'CX'
+
+	AND		NOT (T.IMDG_UN_NO1	= T.IMDG_UN_NO2 AND T.IMDG_UN_NO_SEQ1 = T.IMDG_UN_NO_SEQ2)
+
+ ORDER BY
+      		TO_NUMBER(T.SPCL_CNTR_SEQ1)
+    	, 	TO_NUMBER(T.SPCL_CGO_SEQ1)
+    	, 	T.IMDG_UN_NO1
+    	, 	T.IMDG_UN_NO_SEQ1
+    	, 	T.IMDG_SEGR_GRP_NO1			]]></sql>
+			<params>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AccrualBatchExecuteResultDBDAOSearchAccrualBatchResultOfficeListRSQL">
+			<desc><![CDATA[ Office 별 결산 결과 조회]]></desc>
+			<sql><![CDATA[
+SELECT REV_YRMON, RHQ_CD,
+#if (${f_report} == '2') 
+CTRL_OFC_CD, SUB_OFC_CD,
+#end
+MN_COST_TP_NM,  SUB_COST_TP_NM,
+COA_COST_SRC_CD, ACCT_CD,
+N1ST_NOD_CD, N2ND_NOD_CD, N3RD_NOD_CD, N4TH_NOD_CD,
+CNTR_QTY , ESTM_COST_AMT, ACT_COST_AMT, ACCL_COST_AMT,
+CONFIRMED_COST_AMT,DIFF_COST_AMT
+FROM (
+-- (1) Full
+#if (${f_cost_type_f} == '1') 
+SELECT	/*+ PARALLEL( A 4 )  */
+		A.REV_YRMON REV_YRMON, B.RHQ_CD RHQ_CD,
+		--Control Office
+		#if (${f_report} == '2') 
+		B.OFC_CD CTRL_OFC_CD, A.CTRL_OFC_CD SUB_OFC_CD,
+		#end
+		C.COST_MN_TP MN_COST_TP_NM,  C.SUB_COST_TP_NM SUB_COST_TP_NM,
+		A.COA_COST_SRC_CD COA_COST_SRC_CD, A.ACCT_CD ACCT_CD,
+		A.N1ST_NOD_CD N1ST_NOD_CD, A.N2ND_NOD_CD N2ND_NOD_CD, NVL(A.N3RD_NOD_CD,' ') N3RD_NOD_CD, NVL(A.N4TH_NOD_CD , ' ') N4TH_NOD_CD,
+		SUM(A.CNTR_QTY) CNTR_QTY , SUM(A.ESTM_COST_AMT) ESTM_COST_AMT, SUM(A.ACT_COST_AMT) ACT_COST_AMT, SUM(A.ACCL_COST_AMT) ACCL_COST_AMT,
+		SUM(A.ACT_COST_AMT + A.ACCL_COST_AMT) CONFIRMED_COST_AMT, SUM(A.ACT_COST_AMT + A.ACCL_COST_AMT - A.ESTM_COST_AMT)  DIFF_COST_AMT
+FROM	LEA_ACCL_DTL A ,
+		(SELECT	DECODE(Y.MN_COST_TP_CD, 'TM', 'Terminal', 'TR', 'Transport', 'MT', 'Mty Reposition ', 'ETC' ) COST_MN_TP,
+				Y.MN_COST_TP_CD , X.SUB_COST_TP_CD, Y.SUB_COST_TP_NM , X.COA_COST_SRC_CD
+		FROM	LEA_LGS_COST X, LEA_SUB_COST_TP Y
+		WHERE	X.SUB_COST_TP_CD = Y.SUB_COST_TP_CD
+		AND		X.DELT_FLG = 'N'
+		AND		Y.DELT_FLG = 'N'
+		AND		Y.SUB_COST_TP_CD NOT IN ('TMDC','TRDC','TRMT','TMMT'))  C ,
+		(SELECT	DISTINCT OFC_CD SUB_OFC_CD , OFC_N5TH_LVL_CD OFC_CD, OFC_N3RD_LVL_CD RHQ_CD
+                         ,OFC_APLY_FM_YRMON, OFC_APLY_TO_YRMON
+		FROM	COA_OFC_LVL
+		WHERE	OFC_N3RD_LVL_CD = @[f_rhq_cd]
+		AND		OFC_N5TH_LVL_CD = DECODE(@[f_ctrl_ofc_cd], null, OFC_N5TH_LVL_CD, @[f_ctrl_ofc_cd])) B 
+WHERE	A.REV_YRMON = REPLACE(@[rev_yrmon], '-')
+AND     A.REV_YRMON  BETWEEN B.OFC_APLY_FM_YRMON AND B.OFC_APLY_TO_YRMON           /*월별관리*/        
+AND		A.DELT_FLG = 'N'
+AND		A.BKG_STS_CD IN ('F', 'W')
+AND		NOT(A.ESTM_COST_AMT = 0 AND NVL(A.ACT_COST_AMT, 0) = 0)
+AND		A.COA_COST_SRC_CD = C.COA_COST_SRC_CD
+AND		A.CTRL_OFC_CD  = B.SUB_OFC_CD
+GROUP BY	A.REV_YRMON, B.RHQ_CD ,
+			#if (${f_report} == '2') 
+			B.OFC_CD, A.CTRL_OFC_CD,
+			#end
+			C.COST_MN_TP, C.SUB_COST_TP_NM , 
+			A.COA_COST_SRC_CD, A.ACCT_CD,
+			A.N1ST_NOD_CD, A.N2ND_NOD_CD, NVL(A.N3RD_NOD_CD,' ') , NVL(A.N4TH_NOD_CD , ' ')
+#end -- Full
+
+-- (2) Empty, Volume Incentive
+#if (${f_cost_type_m} == '1' || ${f_cost_type_v} == '1')
+	#if (${f_cost_type_f} == '1')
+	UNION ALL
+	#end
+SELECT	/*+ ORDERED USE_HASH(M) INDEX (M XAK4LEA_ACT_COST_IF)  */
+		M.REV_YRMON REV_YRMON, B.RHQ_CD RHQ_CD ,
+		--Control Office
+		#if (${f_report} == '2') 
+		B.OFC_CD CTRL_OFC_CD,  SUBSTR(M.CSR_NO, 4, 5) SUB_OFC_CD ,
+		#end
+		C.COST_MN_TP  MN_COST_TP_NM , C.SUB_COST_TP_NM  SUB_COST_TP_NM ,
+		M.COA_COST_SRC_CD COA_COST_SRC_CD , M.ACCT_CD ACCT_CD,
+		M.N1ST_NOD_CD N1ST_NOD_CD , M.N2ND_NOD_CD N2ND_NOD_CD, NVL(M.N3RD_NOD_CD, '')  N3RD_NOD_CD , NVL(M.N4TH_NOD_CD ,'')  N4TH_NOD_CD ,
+		COUNT(M.CNTR_NO) CNTR_QTY , SUM(M.USD_COST_AMT) ESTM_COST_AMT, SUM(M.USD_COST_AMT) ACT_COST_AMT , 0  ACCL_COST_AMT,
+		SUM(M.USD_COST_AMT) CONFIRMED_COST_AMT , 0  DIFF_COST_AMT
+FROM	LEA_ACT_COST_IF M ,
+		(SELECT	DECODE(Y.MN_COST_TP_CD, 'TM', 'Terminal', 'TR', 'Transport', 'MT', 'Mty Reposition ', 'ETC' ) COST_MN_TP,
+				X.SUB_COST_TP_CD SUB_COST_TP_CD, Y.SUB_COST_TP_NM , X.COA_COST_SRC_CD , X.ACCT_CD,  X.ACCL_AUTO_CD
+		FROM	(SELECT	DISTINCT SUB_COST_TP_CD , COA_COST_SRC_CD , ACCT_CD ACCT_CD , ACCL_AUTO_CD
+				FROM	LEA_LGS_COST
+				WHERE	DELT_FLG = 'N' ) X  , LEA_SUB_COST_TP Y
+		WHERE	X.SUB_COST_TP_CD = Y.SUB_COST_TP_CD
+		AND 	Y.DELT_FLG = 'N') C ,
+		(SELECT	DISTINCT OFC_CD SUB_OFC_CD , OFC_N5TH_LVL_CD OFC_CD, OFC_N3RD_LVL_CD RHQ_CD
+                         ,OFC_APLY_FM_YRMON, OFC_APLY_TO_YRMON
+		FROM	COA_OFC_LVL
+		WHERE	OFC_N3RD_LVL_CD  = @[f_rhq_cd]
+		AND		OFC_N5TH_LVL_CD   = DECODE(@[f_ctrl_ofc_cd], null, OFC_N5TH_LVL_CD, @[f_ctrl_ofc_cd])) B
+WHERE	M.REV_YRMON = REPLACE(@[rev_yrmon], '-')
+AND     M.REV_YRMON  BETWEEN B.OFC_APLY_FM_YRMON AND B.OFC_APLY_TO_YRMON           /*월별관리*/
+AND		M.COA_COST_SRC_CD = C.COA_COST_SRC_CD
+AND		M.ACCT_CD = C.ACCT_CD
+AND		SUBSTR(M.CSR_NO, 4, 5)  = B.SUB_OFC_CD
+
+#if		(${f_cost_type_m} == '1' && ${f_cost_type_v} == '1') 
+AND		(C.SUB_COST_TP_CD IN ('TRMT','TMMT') OR C.SUB_COST_TP_CD IN ('TMDC','TRDC'))
+#elseif (${f_cost_type_m} == '1' && ${f_cost_type_v} != '1')
+AND		(C.SUB_COST_TP_CD IN ('TRMT','TMMT'))
+#elseif (${f_cost_type_m} != '1' && ${f_cost_type_v} == '1')
+AND 	(C.SUB_COST_TP_CD IN ('TMDC','TRDC'))
+#end
+
+GROUP BY	M.REV_YRMON, B.RHQ_CD ,
+			--Control Office
+			#if (${f_report} == '2') 
+			B.OFC_CD, SUBSTR(M.CSR_NO, 4, 5) ,
+			#end
+			C.COST_MN_TP , C.SUB_COST_TP_NM , M.COA_COST_SRC_CD, M.ACCT_CD,
+			M.N1ST_NOD_CD, M.N2ND_NOD_CD, NVL(M.N3RD_NOD_CD, '') , NVL(M.N4TH_NOD_CD ,'')
+#end -- Empty, Volume Incentive
+)			]]></sql>
+			<params>
+				<param name="f_rhq_cd" type="12" value="" out="N"/>
+				<param name="f_ctrl_ofc_cd" type="12" value="" out="N"/>
+				<param name="rev_yrmon" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

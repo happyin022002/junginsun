@@ -1,0 +1,175 @@
+/*=========================================================
+*Copyright(c) 2015 CyberLogitec
+*@FileName : AgreementImportDBDAODeleteCorrScgAgmtRSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2015.03.19
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2015.03.19 
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esd.trs.agreementmanage.agreementmanage.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class AgreementImportDBDAODeleteCorrScgAgmtRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * AGMT SURCHARGE RATE 삭제 데이타 조회
+	  * </pre>
+	  */
+	public AgreementImportDBDAODeleteCorrScgAgmtRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("fm_trsp_agmt_rt_tp_ser_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("trsp_tmp_seq",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.clt.apps.opus.esd.trs.agreementmanage.agreementmanage.integration").append("\n"); 
+		query.append("FileName : AgreementImportDBDAODeleteCorrScgAgmtRSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT TRSP_AGMT_OFC_CTY_CD" ).append("\n"); 
+		query.append("      ,TRSP_AGMT_SEQ" ).append("\n"); 
+		query.append("      ,@[fm_trsp_agmt_rt_tp_ser_no] AS TRSP_AGMT_RT_TP_SER_NO" ).append("\n"); 
+		query.append("      ,(" ).append("\n"); 
+		query.append("        SELECT TRSP_AGMT_SCG_NOD_SEQ" ).append("\n"); 
+		query.append("          FROM TRS_AGMT_RT_TP A" ).append("\n"); 
+		query.append("              ,TRS_AGMT_SCG_NOD   B" ).append("\n"); 
+		query.append("         WHERE A.TRSP_AGMT_OFC_CTY_CD          = B.TRSP_AGMT_OFC_CTY_CD" ).append("\n"); 
+		query.append("           AND A.TRSP_AGMT_SEQ                 = B.TRSP_AGMT_SEQ" ).append("\n"); 
+		query.append("           AND A.TRSP_AGMT_RT_TP_SER_NO        = B.TRSP_AGMT_RT_TP_SER_NO" ).append("\n"); 
+		query.append("           AND A.TRSP_AGMT_OFC_CTY_CD          = X.TRSP_AGMT_OFC_CTY_CD" ).append("\n"); 
+		query.append("           AND A.TRSP_AGMT_SEQ                 = X.TRSP_AGMT_SEQ" ).append("\n"); 
+		query.append("           AND A.TRSP_AGMT_RT_TP_CD            = X.TRSP_AGMT_RT_TP_CD" ).append("\n"); 
+		query.append("           AND A.TRSP_COST_MOD_CD              = X.TRSP_COST_MOD_CD" ).append("\n"); 
+		query.append("           AND A.AGMT_TRSP_TP_CD               = X.AGMT_TRSP_TP_CD" ).append("\n"); 
+		query.append("           AND NVL(A.TRSP_BND_CD, 'N')         = NVL(X.TRSP_BND_CD, 'N')" ).append("\n"); 
+		query.append("           AND A.CGO_TP_CD                     = X.CGO_TP_CD" ).append("\n"); 
+		query.append("           AND NVL(A.SPCL_CGO_CNTR_TP_CD, 'N') = NVL(X.SPCL_CGO_CNTR_TP_CD, 'N')" ).append("\n"); 
+		query.append("           AND A.CUST_NOMI_TRKR_FLG            = X.CUST_NOMI_TRKR_FLG" ).append("\n"); 
+		query.append("           AND A.CUST_CNT_CD                   = X.CUST_CNT_CD" ).append("\n"); 
+		query.append("           AND A.CUST_SEQ                      = X.CUST_SEQ" ).append("\n"); 
+		query.append("           AND A.CMDT_GRP_CD                   = X.CMDT_GRP_CD" ).append("\n"); 
+		query.append("           AND A.RAIL_SVC_TP_CD                = X.RAIL_SVC_TP_CD" ).append("\n"); 
+		query.append("           AND B.TRSP_SCG_CD                   = X.TRSP_SCG_CD" ).append("\n"); 
+		query.append("           AND B.AGMT_ROUT_ALL_FLG             = X.AGMT_ROUT_ALL_FLG" ).append("\n"); 
+		query.append("           AND B.FM_NOD_CD                     = X.FM_NOD_CD" ).append("\n"); 
+		query.append("           AND B.VIA_NOD_CD                    = X.VIA_NOD_CD" ).append("\n"); 
+		query.append("           AND B.DOR_NOD_CD                    = X.DOR_NOD_CD" ).append("\n"); 
+		query.append("           AND B.TO_NOD_CD                     = X.TO_NOD_CD" ).append("\n"); 
+		query.append("           AND ROWNUM = 1" ).append("\n"); 
+		query.append("       ) TRSP_AGMT_SCG_NOD_SEQ" ).append("\n"); 
+		query.append("      ,(" ).append("\n"); 
+		query.append("        SELECT E.TRSP_AGMT_SCG_RT_SEQ" ).append("\n"); 
+		query.append("          FROM TRS_AGMT_HDR   A" ).append("\n"); 
+		query.append("              ,TRS_AGMT_RT_TP C" ).append("\n"); 
+		query.append("              ,TRS_AGMT_SCG_NOD   D" ).append("\n"); 
+		query.append("              ,TRS_AGMT_SCG_RT E" ).append("\n"); 
+		query.append("         WHERE A.TRSP_AGMT_OFC_CTY_CD          = C.TRSP_AGMT_OFC_CTY_CD" ).append("\n"); 
+		query.append("           AND A.TRSP_AGMT_SEQ                 = C.TRSP_AGMT_SEQ" ).append("\n"); 
+		query.append("           AND C.TRSP_AGMT_OFC_CTY_CD          = D.TRSP_AGMT_OFC_CTY_CD" ).append("\n"); 
+		query.append("           AND C.TRSP_AGMT_SEQ                 = D.TRSP_AGMT_SEQ" ).append("\n"); 
+		query.append("           AND C.TRSP_AGMT_RT_TP_SER_NO        = D.TRSP_AGMT_RT_TP_SER_NO" ).append("\n"); 
+		query.append("           AND D.TRSP_AGMT_OFC_CTY_CD          = E.TRSP_AGMT_OFC_CTY_CD" ).append("\n"); 
+		query.append("           AND D.TRSP_AGMT_SEQ                 = E.TRSP_AGMT_SEQ" ).append("\n"); 
+		query.append("           AND D.TRSP_AGMT_RT_TP_SER_NO        = E.TRSP_AGMT_RT_TP_SER_NO" ).append("\n"); 
+		query.append("           AND D.TRSP_AGMT_SCG_NOD_SEQ         = E.TRSP_AGMT_SCG_NOD_SEQ" ).append("\n"); 
+		query.append("           AND C.TRSP_AGMT_OFC_CTY_CD          = X.TRSP_AGMT_OFC_CTY_CD" ).append("\n"); 
+		query.append("           AND C.TRSP_AGMT_SEQ                 = X.TRSP_AGMT_SEQ" ).append("\n"); 
+		query.append("           AND C.TRSP_AGMT_RT_TP_CD            = X.TRSP_AGMT_RT_TP_CD" ).append("\n"); 
+		query.append("           AND C.TRSP_COST_MOD_CD              = X.TRSP_COST_MOD_CD" ).append("\n"); 
+		query.append("           AND C.AGMT_TRSP_TP_CD               = X.AGMT_TRSP_TP_CD" ).append("\n"); 
+		query.append("           AND NVL(C.TRSP_BND_CD, 'N')         = NVL(X.TRSP_BND_CD, 'N')" ).append("\n"); 
+		query.append("           AND C.CGO_TP_CD                     = X.CGO_TP_CD" ).append("\n"); 
+		query.append("           AND C.SPCL_CGO_CNTR_TP_CD           = X.SPCL_CGO_CNTR_TP_CD" ).append("\n"); 
+		query.append("           AND NVL(C.SPCL_CGO_CNTR_TP_CD, 'N') = NVL(X.SPCL_CGO_CNTR_TP_CD, 'N')" ).append("\n"); 
+		query.append("           AND C.CUST_NOMI_TRKR_FLG            = X.CUST_NOMI_TRKR_FLG" ).append("\n"); 
+		query.append("           AND C.CUST_CNT_CD                   = X.CUST_CNT_CD" ).append("\n"); 
+		query.append("           AND C.CUST_SEQ                      = X.CUST_SEQ" ).append("\n"); 
+		query.append("           AND C.CMDT_GRP_CD                   = X.CMDT_GRP_CD" ).append("\n"); 
+		query.append("           AND C.RAIL_SVC_TP_CD                = X.RAIL_SVC_TP_CD" ).append("\n"); 
+		query.append("           AND D.FM_NOD_CD                     = X.FM_NOD_CD" ).append("\n"); 
+		query.append("           AND D.VIA_NOD_CD                    = X.VIA_NOD_CD" ).append("\n"); 
+		query.append("           AND D.DOR_NOD_CD                    = X.DOR_NOD_CD" ).append("\n"); 
+		query.append("           AND D.TO_NOD_CD                     = X.TO_NOD_CD" ).append("\n"); 
+		query.append("           AND D.TRSP_SCG_CD                   = X.TRSP_SCG_CD" ).append("\n"); 
+		query.append("           AND D.AGMT_ROUT_ALL_FLG             = X.AGMT_ROUT_ALL_FLG" ).append("\n"); 
+		query.append("           AND E.TRSP_AGMT_EQ_TP_SZ_CD         = X.TRSP_AGMT_EQ_TP_CD||X.TRSP_AGMT_EQ_SZ_CD" ).append("\n"); 
+		query.append("           AND E.EQ_KND_CD                     = X.EQ_KND_CD" ).append("\n"); 
+		query.append("           AND ROWNUM = 1" ).append("\n"); 
+		query.append("       ) TRSP_AGMT_SCG_RT_SEQ" ).append("\n"); 
+		query.append("  FROM TRS_AGMT_TMP X" ).append("\n"); 
+		query.append(" WHERE TRSP_TMP_SEQ = @[trsp_tmp_seq]" ).append("\n"); 
+		query.append("   AND ROW_NO IS NOT NULL" ).append("\n"); 
+		query.append("   AND RT_UPD_STS_CD = 'U'" ).append("\n"); 
+		query.append(" GROUP BY TRSP_AGMT_OFC_CTY_CD" ).append("\n"); 
+		query.append("         ,TRSP_AGMT_SEQ" ).append("\n"); 
+		query.append("         ,TRSP_AGMT_RT_TP_CD" ).append("\n"); 
+		query.append("         ,TRSP_COST_MOD_CD" ).append("\n"); 
+		query.append("         ,AGMT_TRSP_TP_CD" ).append("\n"); 
+		query.append("         ,TRSP_BND_CD" ).append("\n"); 
+		query.append("         ,CGO_TP_CD" ).append("\n"); 
+		query.append("         ,SPCL_CGO_CNTR_TP_CD" ).append("\n"); 
+		query.append("         ,CUST_NOMI_TRKR_FLG" ).append("\n"); 
+		query.append("         ,CUST_CNT_CD" ).append("\n"); 
+		query.append("         ,CUST_SEQ" ).append("\n"); 
+		query.append("         ,CMDT_GRP_CD" ).append("\n"); 
+		query.append("         ,RAIL_SVC_TP_CD" ).append("\n"); 
+		query.append("         ,TRSP_SCG_CD" ).append("\n"); 
+		query.append("         ,AGMT_ROUT_ALL_FLG" ).append("\n"); 
+		query.append("         ,FM_NOD_CD" ).append("\n"); 
+		query.append("         ,VIA_NOD_CD" ).append("\n"); 
+		query.append("         ,DOR_NOD_CD" ).append("\n"); 
+		query.append("         ,TO_NOD_CD" ).append("\n"); 
+		query.append("         ,TRSP_AGMT_EQ_TP_CD" ).append("\n"); 
+		query.append("         ,TRSP_AGMT_EQ_SZ_CD" ).append("\n"); 
+		query.append("         ,EQ_KND_CD" ).append("\n"); 
+
+	}
+}

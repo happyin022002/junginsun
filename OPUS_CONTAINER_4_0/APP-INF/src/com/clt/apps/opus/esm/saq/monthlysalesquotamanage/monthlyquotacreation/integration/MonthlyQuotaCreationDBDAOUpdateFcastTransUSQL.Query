@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="MonthlyQuotaCreationDBDAOUpdateFcastTransUSQL">
+			<desc><![CDATA[Guideline L/f, CM 수정분을 Fcast_Trans 테이블에 반영한다.]]></desc>
+			<sql><![CDATA[
+/*
+1) ADJUSTED 수송량 : supply * guideline L/F
+2) 점소별 수송량 : 수송량 계획 물량 * 점소별 점유율
+3) Initial CM 생성 : BASE 수송량 * 기존 RPB - 조정된 CPB
+3-1) INITIAL CMPB = INITIAL CM / BASE 수송량
+4) Guideline CM총액을 기존 Initial CM 총액 비율로 나누어 점소별 CM guideline 생성
+5) Rev Gap 계산 : Guideline CM - (Initial CMPB * ADJUSTED 수송량)
+6) RPB Factor 계산 : Rev Gap / 점소별 신규 수송량
+7) New RPB 생성 : 기존 RPB + RPB Factor
+8) New GM = 새로운 수송량 * 새로운 RPB - CPB 하게되면 총액이 cm guideline과 일치
+*/
+MERGE INTO SAQ_MON_FCAST_TRNS A 
+USING
+    (SELECT MQTA_MDL_VER_NO 
+         , BSE_MON 
+         , TRD_CD 
+         , SUB_TRD_CD 
+         , RLANE_CD 
+         , DIR_CD 
+         , CTRT_OFC_CD 
+         , SLS_OFC_CD 
+         , CM_UC_AMT 
+         , ROUND(NEW_LOD_QTY * TEU_RATIO) AS LOD_QTY /* 수송량 계획 물량 * 점소별 점유율 : 점소별 수송량 */ 
+         , ORG_GRS_RPB_REV 
+         , CASE WHEN NEW_LOD_QTY * TEU_RATIO > 0 
+                  THEN ROUND(ORG_GRS_RPB_REV + ( ((GLINE_CM_AMT * CM_RATIO) - (INIT_CM*NEW_LOD_QTY/OLD_LOD_QTY)) / (NEW_LOD_QTY * TEU_RATIO) ) ) 
+                  ELSE ORG_GRS_RPB_REV END GRS_RPB_REV /* 기존 RPB + ( (Guideline CM - (Initial CMPB*ADJUSTED 수송량)) / 점소별 신규 수송량) : New RPB */ 
+         , SLS_FCAST_NO 
+         , OLD_LOD_QTY 
+      FROM 
+           (SELECT MQTA_MDL_VER_NO 
+                , BSE_MON 
+                , TRD_CD 
+                , SUB_TRD_CD 
+                , RLANE_CD 
+                , DIR_CD 
+                , CTRT_OFC_CD 
+                , SLS_OFC_CD 
+                , MAX(SPL_AMT) * MAX(LDF_RTO) / 100 AS NEW_LOD_QTY /* SUPPLY * L/F : 수송량 계획 */ 
+                , MAX(OLD_LOD_QTY) AS OLD_LOD_QTY /* Base 수송량 */ 
+                , RATIO_TO_REPORT(SUM(LOD_QTY)) OVER (PARTITION BY BSE_MON, TRD_CD, SUB_TRD_CD, DIR_CD ) AS TEU_RATIO 
+                , RATIO_TO_REPORT(SUM((ORG_GRS_RPB_REV - CM_UC_AMT) * LOD_QTY)) OVER (PARTITION BY BSE_MON, TRD_CD, SUB_TRD_CD, DIR_CD ) AS CM_RATIO 
+                , SUM((ORG_GRS_RPB_REV - CM_UC_AMT) * LOD_QTY) AS INIT_CM /* Initial CM = (Base RPB - Adjust CPB) * Base 수송량 */ 
+                , MAX(GLINE_CM_AMT) AS GLINE_CM_AMT 
+                , MAX(ORG_GRS_RPB_REV) AS ORG_GRS_RPB_REV 
+                , MAX(CM_UC_AMT) AS CM_UC_AMT 
+                , SLS_FCAST_NO 
+             FROM 
+                  (SELECT T2.MQTA_MDL_VER_NO 
+                       , T1.BSE_MON 
+                       , T1.TRD_CD 
+                       , T1.SUB_TRD_CD 
+                       , T1.RLANE_CD 
+                       , T1.DIR_CD 
+                       , T2.CTRT_OFC_CD 
+                       , T2.SLS_OFC_CD 
+                       , T2.LOD_QTY 
+                       , T2.GRS_RPB_REV AS ORG_GRS_RPB_REV
+                       , T3.SPL_AMT 
+                       , T3.LDF_RTO 
+                       , T2.CM_UC_AMT 
+                       , T3.GLINE_CM_AMT 
+                       , SUM(T2.LOD_QTY) OVER (PARTITION BY T1.BSE_MON, T1.TRD_CD, T1.SUB_TRD_CD, T1.DIR_CD ) AS OLD_LOD_QTY 
+                       , T2.SLS_FCAST_NO 
+                    FROM SAQ_MON_TGT_VVD T1 
+                       , SAQ_MON_FCAST_TRNS T2 
+                       , SAQ_MON_INIT_GLINE T3 
+                   WHERE 1=1 
+                         AND T1.BSE_YR = SUBSTR(TO_CHAR(T2.ST_DT, 'YYYYMMDD'), 1, 4) 
+                         AND T1.BSE_MON = SUBSTR(TO_CHAR(T2.ST_DT, 'YYYYMMDD'), 5, 2) 
+						 AND T1.FNL_BSA_CAPA > 0
+                         AND T1.TRD_CD = T2.TRD_CD 
+                         AND T1.SUB_TRD_CD = T2.SUB_TRD_CD 
+                         AND T1.RLANE_CD = T2.RLANE_CD 
+                         AND T1.DIR_CD = T2.DIR_CD 
+                         AND T1.BSE_YR = T3.BSE_YR 
+                         AND T1.BSE_MON = T3.BSE_MON 
+                         AND T1.TRD_CD = T3.TRD_CD 
+                         AND T1.SUB_TRD_CD = T3.SUB_TRD_CD 
+                         AND T2.MQTA_MDL_VER_NO = T3.MQTA_MDL_VER_NO 
+                         AND T1.DIR_CD = T3.DIR_CD 
+                         AND T2.MQTA_MDL_VER_NO = @[mqta_mdl_ver_no]
+                         AND T1.DELT_FLG = 'N' 
+                         AND T1.TGT_VVD_STS_CD = 'N' 
+                         AND T2.FCAST_TRNS_STS_CD = 'N' 
+                  ) 
+            GROUP BY MQTA_MDL_VER_NO 
+                , BSE_MON 
+                , TRD_CD 
+                , SUB_TRD_CD 
+                , RLANE_CD 
+                , DIR_CD 
+                , CTRT_OFC_CD 
+                , SLS_OFC_CD 
+                , SLS_FCAST_NO 
+           )  
+    ) B 
+ON (B.MQTA_MDL_VER_NO = A.MQTA_MDL_VER_NO 
+      AND B.BSE_MON = SUBSTR(TO_CHAR(A.ST_DT, 'YYYYMMDD'), 5, 2) 
+      AND B.TRD_CD = A.TRD_CD 
+      AND B.SUB_TRD_CD = A.SUB_TRD_CD 
+      AND B.RLANE_CD = A.RLANE_CD 
+      AND B.DIR_CD = A.DIR_CD 
+      AND B.CTRT_OFC_CD = A.CTRT_OFC_CD 
+      AND B.SLS_OFC_CD = A.SLS_OFC_CD 
+      AND B.SLS_FCAST_NO = A.SLS_FCAST_NO
+     ) 
+WHEN MATCHED THEN 
+       UPDATE 
+              SET A.APLY_LOD_QTY = B.LOD_QTY 
+            , A.MDL_ALOC_QTY = B.LOD_QTY 
+            , A.APLY_GRS_RPB_REV = B.GRS_RPB_REV 
+            , A.APLY_CM_UC_AMT = B.CM_UC_AMT 
+            , UPD_USR_ID = @[user_id] 
+            , UPD_DT = SYSDATE			]]></sql>
+			<params>
+				<param name="mqta_mdl_ver_no" type="12" value="" out="N"/>
+				<param name="user_id" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

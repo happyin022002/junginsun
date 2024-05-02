@@ -1,0 +1,75 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : EesMnr0139Event.java
+*@FileTitle : Damage Flagging/Unflagging Pop Up
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.05.19
+*@LastModifier : 박명신
+*@LastVersion : 1.0
+* 2009.05.19 박명신
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.ees.mnr.operationmanage.eqflagmgt.event;
+
+import com.clt.apps.opus.ees.mnr.mnrcommon.generalcodecheckmgt.vo.CustomMnrDatVrfyVO;
+import com.clt.apps.opus.ees.mnr.operationmanage.eqflagmgt.vo.VerifyEQFlagFileListINVO;
+import com.clt.framework.support.layer.event.EventSupport;
+ 
+/**
+ * EES_MNR_0139 에 대한 PDTO(Data Transfer Object including Parameters)<br>
+ * -  EES_MNR_0139HTMLAction에서 작성<br>
+ * - ServiceCommand Layer로 전달하는 PDTO로 사용<br>
+ *
+ * @author park myoung sin
+ * @see EES_MNR_0139HTMLAction 참조
+ * @since J2EE 1.4
+ */
+   
+public class EesMnr0139Event extends EventSupport {
+
+	private static final long serialVersionUID = 1L;
+	
+	/** Table Value Object 조회 조건 및 단건 처리  */
+	private CustomMnrDatVrfyVO customMnrDatVrfyVO = null;
+	 
+	/** Table Value Object Multi Data 처리 */
+	private CustomMnrDatVrfyVO[] customMnrDatVrfyVOs = null;
+	 
+	/** Table Value Object 조회 조건*/ 
+	private VerifyEQFlagFileListINVO eQFlagMgtINVO = null;
+    
+	public EesMnr0139Event(){}
+	
+	public VerifyEQFlagFileListINVO getEQFlagMgtINVO() {
+		return eQFlagMgtINVO;
+	}
+
+	public void setEQFlagMgtINVO(VerifyEQFlagFileListINVO flagMgtINVO) {
+		eQFlagMgtINVO = flagMgtINVO;
+	}
+
+	public void setCustomMnrDatVrfyVO(CustomMnrDatVrfyVO CustomMnrDatVrfyVO){
+		this. customMnrDatVrfyVO = CustomMnrDatVrfyVO;
+	} 
+
+	public void setCustomMnrDatVrfyVOS(CustomMnrDatVrfyVO[] CustomMnrDatVrfyVOs){
+		if(CustomMnrDatVrfyVOs != null){
+			CustomMnrDatVrfyVO[] tmpVOs = java.util.Arrays.copyOf(CustomMnrDatVrfyVOs, CustomMnrDatVrfyVOs.length);
+			this.customMnrDatVrfyVOs = tmpVOs;
+		}
+	} 
+
+	public CustomMnrDatVrfyVO getCustomMnrDatVrfyVO(){
+		return customMnrDatVrfyVO;
+	}
+
+	public CustomMnrDatVrfyVO[] getCustomMnrDatVrfyVOS(){
+		CustomMnrDatVrfyVO[] rtnVOs = null;
+		if (this.customMnrDatVrfyVOs != null) {
+			rtnVOs = java.util.Arrays.copyOf(customMnrDatVrfyVOs, customMnrDatVrfyVOs.length);
+		}
+		return rtnVOs;
+	}
+
+}

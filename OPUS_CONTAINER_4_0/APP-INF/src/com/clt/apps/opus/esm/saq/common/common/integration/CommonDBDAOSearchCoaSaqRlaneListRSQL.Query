@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CommonDBDAOSearchCoaSaqRlaneListRSQL">
+			<desc><![CDATA[COA_MON_VVD, SAQ_MON_CFM_TGT_VVD의 Rlane List 조회 ]]></desc>
+			<sql><![CDATA[
+WITH  COA_MON_VVD_V AS (
+              SELECT V.TRD_CD    , V.RLANE_CD            , V.VSL_CD   ,
+                     V.SKD_VOY_NO, V.DIR_CD              , V.SLS_YRMON,
+                     V.COST_WK   , V.SUB_TRD_CD          , V.IOC_CD   ,
+                     V.VVD_SEQ   , V.LST_LODG_PORT_ETD_DT
+                FROM COA_MON_VVD V
+               WHERE V.SLS_YRMON BETWEEN (@[bse_yr]||DECODE(@[bse_qtr_cd], '1Q', '01', '2Q', '04', '3Q', '07', '4Q', '10'))
+                                     AND (@[bse_yr]||DECODE(@[bse_qtr_cd], '1Q', '03', '2Q', '06', '3Q', '09', '4Q', '12'))
+                 AND V.TRD_CD = @[trd_cd]
+                 AND V.DIR_CD = @[dir_cd]
+                 AND V.RLANE_CD <> 'RBCCO'
+
+
+                 AND (V.DELT_FLG IS NULL OR V.DELT_FLG = 'N')    ),
+      EXCEPT_VVD AS (
+              SELECT CHKQTR_VVD.TRD_CD, CHKQTR_VVD.DIR_CD, CHKQTR_VVD.VSL_CD, CHKQTR_VVD.SKD_VOY_NO, CHKQTR_VVD.SKD_DIR_CD
+                FROM (                    -- 현분기에 없는 VVD
+                       SELECT TRD_CD, DIR_CD, VSL_CD, SKD_VOY_NO, DIR_CD AS SKD_DIR_CD
+                         FROM COA_MON_VVD_V
+                        MINUS
+                       SELECT TRD_CD, DIR_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD
+                         FROM SAQ_MON_CFM_TGT_VVD
+                        WHERE 1=1
+                          AND MQTA_RLSE_VER_NO = @[mqta_rlse_ver_no]
+                          AND TRD_CD           = @[trd_cd]
+                          AND DIR_CD           = @[dir_cd]
+
+
+                     ) CHKQTR_VVD,
+                     (                    -- 이전 분기 VVD
+                       SELECT TRD_CD, DIR_CD, VSL_CD, SKD_VOY_NO, SKD_DIR_CD
+                         FROM SAQ_MON_CFM_TGT_VVD
+                        WHERE 1=1
+                          AND MQTA_RLSE_VER_NO = ( SELECT MQTA_RLSE_VER_NO
+                                                     FROM SAQ_MON_QTA_RLSE
+                                                    WHERE 1=1
+                                                      AND BSE_YR     = DECODE(@[bse_qtr_cd], '1Q', @[bse_yr] -1, @[bse_yr])
+                                                      AND BSE_QTR_CD = DECODE(@[bse_qtr_cd], '1Q', '4Q',
+                                                                                 '2Q', '1Q',
+                                                                                 '3Q', '2Q',
+                                                                                 '4Q', '3Q' )
+                                                      AND QTA_RLSE_STS_CD    = 'R'                )
+                          AND TRD_CD           = @[trd_cd]
+                          AND DIR_CD           = @[dir_cd]
+
+
+                     ) PREQTR_VVD
+               WHERE 1=1
+               AND   CHKQTR_VVD.TRD_CD     = PREQTR_VVD.TRD_CD
+               AND   CHKQTR_VVD.DIR_CD     = PREQTR_VVD.DIR_CD
+               AND   CHKQTR_VVD.VSL_CD     = PREQTR_VVD.VSL_CD
+               AND   CHKQTR_VVD.SKD_VOY_NO = PREQTR_VVD.SKD_VOY_NO
+               AND   CHKQTR_VVD.SKD_DIR_CD = PREQTR_VVD.SKD_DIR_CD  )
+    SELECT  DISTINCT A.RLANE_CD AS TEXT
+           ,A.RLANE_CD AS CODE
+     FROM (
+             SELECT  DISTINCT
+                     SUB_TRD_CD
+                    ,RLANE_CD
+               FROM  SAQ_MON_CFM_TGT_VVD
+              WHERE  1 = 1
+                AND  MQTA_RLSE_VER_NO    = @[mqta_rlse_ver_no]
+                AND  TRD_CD              = @[trd_cd]
+                AND  DIR_CD              = @[dir_cd]
+                AND  RLANE_CD            <> 'RBCCO'
+             UNION ALL
+             SELECT DISTINCT
+                    V.SUB_TRD_CD,
+                    V.RLANE_CD
+               FROM COA_MON_VVD_V   V ,
+                    BSA_VVD_MST M
+              WHERE V.TRD_CD     = M.TRD_CD(+)
+                AND V.RLANE_CD   = M.RLANE_CD(+)
+                AND V.VSL_CD     = M.VSL_CD(+)
+                AND V.SKD_VOY_NO = M.SKD_VOY_NO(+)
+                AND V.DIR_CD     = M.SKD_DIR_CD(+)
+                AND NOT EXISTS ( SELECT VSL_CD, SKD_VOY_NO, DIR_CD
+                                   FROM EXCEPT_VVD
+                                  WHERE 1=1
+                                  AND   TRD_CD     = V.TRD_CD
+                                  AND   DIR_CD     = V.DIR_CD
+                                  AND   VSL_CD     = V.VSL_CD
+                                  AND   SKD_VOY_NO = V.SKD_VOY_NO
+                                  AND   SKD_DIR_CD = V.DIR_CD
+                                 UNION
+                                 SELECT VSL_CD, SKD_VOY_NO, DIR_CD
+                                   FROM SAQ_MON_TGT_VVD
+                                  WHERE 1=1
+                                  AND   BSE_YR     = @[bse_yr]
+                                  AND   BSE_QTR_CD = @[bse_qtr_cd]
+                                  AND   TRD_CD     = V.TRD_CD
+                                  AND   DIR_CD     = V.DIR_CD
+                                  AND   VSL_CD     = V.VSL_CD
+                                  AND   SKD_VOY_NO = V.SKD_VOY_NO
+                                  AND   SKD_DIR_CD = V.DIR_CD
+                                  AND   DELT_FLG   = 'Y'             )            ) a
+ ORDER BY A.RLANE_CD			]]></sql>
+			<params>
+				<param name="bse_yr" type="12" value="" out="N"/>
+				<param name="bse_qtr_cd" type="12" value="" out="N"/>
+				<param name="trd_cd" type="12" value="" out="N"/>
+				<param name="dir_cd" type="12" value="" out="N"/>
+				<param name="mqta_rlse_ver_no" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SCReportDBDAORsltSearchSCRateSearchBulletListRSQL">
+			<desc><![CDATA[rate search commodity group and actual customer]]></desc>
+			<sql><![CDATA[
+WITH
+CH AS
+(
+SELECT	CH.PROP_NO			 ,
+		CH.AMDT_SEQ			 ,
+		CH.SVC_SCP_CD		 ,
+		CH.GEN_SPCL_RT_TP_CD ,
+		CH.CMDT_HDR_SEQ
+FROM	PRI_SP_SCP_MN			SS ,
+		PRI_SP_SCP_RT_CMDT_HDR	CH
+WHERE	CH.PROP_NO		= SS.PROP_NO
+AND		CH.AMDT_SEQ		= SS.AMDT_SEQ
+AND		CH.SVC_SCP_CD	= SS.SVC_SCP_CD
+AND		SS.PROP_NO		=	( SELECT PROP_NO FROM PRI_SP_HDR WHERE SC_NO = @[sc_no] )
+AND		SS.AMDT_SEQ    	<=	(
+							SELECT	MAX(A.AMDT_SEQ)		-- 최신 AMDT_SEQ 이전의 모든 AMDT_SEQ 를 대상으로 함 
+							FROM		PRI_SP_MN	A
+							WHERE		A.PROP_NO	  = CH.PROP_NO
+							AND			A.PROP_STS_CD = 'F'
+							)
+AND		SS.SVC_SCP_CD		 = @[svc_scp_cd]
+AND		CH.GEN_SPCL_RT_TP_CD = @[gen_spcl_rt_tp_cd]
+#if (${exp_dt} != '') 
+AND		SS.EFF_DT <= TO_DATE(@[exp_dt], 'YYYY-MM-DD')	-- Effective Date(To)-- 이 부분은 UI_PRI_0060 번 에서 사용된다.  UI_PRI_0108_02 에서는 INPUT 없음
+#end
+#if (${eff_dt} != '') 
+AND		SS.EXP_DT >= TO_DATE(@[eff_dt], 'YYYY-MM-DD')	-- Effective Date(From)-- 이 부분은 UI_PRI_0060 번 에서 사용된다.  UI_PRI_0108_02 에서는 INPUT 없음
+#end
+) ,
+BU AS
+(
+SELECT	CH.PROP_NO			 ,
+		CH.AMDT_SEQ			 ,
+		CH.SVC_SCP_CD		 ,
+		CH.GEN_SPCL_RT_TP_CD ,
+		CH.CMDT_HDR_SEQ		 ,
+		RC.CMDT_NM			 ,
+		RC.PRC_CMDT_DEF_CD	 ,
+		NVL(REPLACE(AC.ACT_CUST_NM, '^|^', ' / '), 'N/A')	ACT_CUST_NM	,
+		NVL(AC.ACT_CUST_CD, 'N/A')	ACT_CUST_CD
+FROM	CH		,
+		(
+		SELECT	PROP_NO				,
+				AMDT_SEQ			,
+				SVC_SCP_CD			,
+				GEN_SPCL_RT_TP_CD	,
+				CMDT_HDR_SEQ		,
+				LTRIM(SYS_CONNECT_BY_PATH(CMDT_NM,' / '),' / ') CMDT_NM	,
+				LTRIM(SYS_CONNECT_BY_PATH(PRC_CMDT_DEF_CD,' / '),' / ') PRC_CMDT_DEF_CD
+		FROM	(
+				SELECT	/*+ ORDERED */
+						CH.PROP_NO				,
+						CH.AMDT_SEQ				,
+						CH.SVC_SCP_CD			,
+						CH.GEN_SPCL_RT_TP_CD	,
+						CH.CMDT_HDR_SEQ			,
+						ROW_NUMBER() OVER ( PARTITION BY CH.PROP_NO, CH.AMDT_SEQ, CH.SVC_SCP_CD, CH.GEN_SPCL_RT_TP_CD, CH.CMDT_HDR_SEQ ORDER BY RC.CMDT_SEQ ) ROW_NUMBER	,
+						COUNT(1) OVER ( PARTITION BY CH.PROP_NO, CH.AMDT_SEQ, CH.SVC_SCP_CD, CH.GEN_SPCL_RT_TP_CD, CH.CMDT_HDR_SEQ ) CNT	,
+						RC.PRC_CMDT_DEF_CD		,
+						DECODE(RC.PRC_CMDT_TP_CD, 'C', MC.CMDT_NM, 'G', GC.PRC_GRP_CMDT_DESC) CMDT_NM
+				FROM	CH						,
+						PRI_SP_SCP_RT_CMDT	RC	,
+						MDM_COMMODITY		MC	,
+						PRI_SP_SCP_GRP_CMDT	GC
+				WHERE	MC.CMDT_CD(+)		  = RC.PRC_CMDT_DEF_CD
+				AND		GC.PROP_NO(+)		  = RC.PROP_NO
+				AND		GC.AMDT_SEQ(+)		  = RC.AMDT_SEQ
+				AND		GC.SVC_SCP_CD(+)	  = RC.SVC_SCP_CD
+				AND		GC.PRC_GRP_CMDT_CD(+) = RC.PRC_CMDT_DEF_CD
+				AND		RC.PROP_NO			  = CH.PROP_NO
+				AND		RC.AMDT_SEQ			  = CH.AMDT_SEQ
+				AND		RC.SVC_SCP_CD		  = CH.SVC_SCP_CD
+				AND		RC.GEN_SPCL_RT_TP_CD  = CH.GEN_SPCL_RT_TP_CD
+				AND		RC.CMDT_HDR_SEQ		  = CH.CMDT_HDR_SEQ
+				)
+		WHERE	LEVEL	              = CNT
+				START WITH ROW_NUMBER = 1
+				CONNECT BY
+						PROP_NO 		  = PRIOR PROP_NO
+				AND		AMDT_SEQ	      = PRIOR AMDT_SEQ
+				AND		SVC_SCP_CD		  = PRIOR SVC_SCP_CD
+				AND		GEN_SPCL_RT_TP_CD = PRIOR GEN_SPCL_RT_TP_CD
+				AND		CMDT_HDR_SEQ	  = PRIOR CMDT_HDR_SEQ
+				AND		ROW_NUMBER		  = PRIOR ROW_NUMBER + 1
+				)	RC	,
+				(
+				SELECT	PROP_NO			  ,
+						AMDT_SEQ		  ,
+						SVC_SCP_CD		  ,
+						GEN_SPCL_RT_TP_CD ,
+						CMDT_HDR_SEQ	  ,
+						ACT_CUST_CD		  ,
+						LTRIM(SYS_CONNECT_BY_PATH(ACT_CUST_NM,'^|^'),'^|^') ACT_CUST_NM
+				FROM	(
+						 SELECT	/*+ ORDERED */
+						 		CH.PROP_NO			 ,
+						 		CH.AMDT_SEQ			 ,
+						 		CH.SVC_SCP_CD		 ,
+						 		CH.GEN_SPCL_RT_TP_CD ,
+						 		CH.CMDT_HDR_SEQ		 ,
+						 		ROW_NUMBER() OVER ( PARTITION BY CH.PROP_NO, CH.AMDT_SEQ, CH.SVC_SCP_CD, CH.GEN_SPCL_RT_TP_CD, CH.CMDT_HDR_SEQ ORDER BY AC.ACT_CUST_SEQ ) ROW_NUMBER	,
+						 		COUNT(1) OVER ( PARTITION BY CH.PROP_NO, CH.AMDT_SEQ, CH.SVC_SCP_CD, CH.GEN_SPCL_RT_TP_CD, CH.CMDT_HDR_SEQ ) CNT	,
+						 		AC.CUST_CNT_CD||LPAD(AC.CUST_SEQ, 6, '0') ACT_CUST_CD	,
+						 		MC.CUST_LGL_ENG_NM	ACT_CUST_NM
+						 FROM	CH						   ,
+						 		PRI_SP_SCP_RT_ACT_CUST	AC ,
+						 		MDM_CUSTOMER			MC
+						 WHERE	MC.CUST_CNT_CD(+)	 = AC.CUST_CNT_CD
+						 AND	MC.CUST_SEQ(+)		 = AC.CUST_SEQ
+                         AND    MC.CNTR_DIV_FLG      = 'Y'
+						 AND	AC.PROP_NO			 = CH.PROP_NO
+						 AND	AC.AMDT_SEQ			 = CH.AMDT_SEQ
+						 AND	AC.SVC_SCP_CD		 = CH.SVC_SCP_CD
+						 AND	AC.GEN_SPCL_RT_TP_CD = CH.GEN_SPCL_RT_TP_CD
+						 AND	AC.CMDT_HDR_SEQ		 = CH.CMDT_HDR_SEQ
+				        )
+				WHERE LEVEL	  = CNT
+				START WITH ROW_NUMBER = 1
+				CONNECT BY
+						PROP_NO 		  = PRIOR PROP_NO
+				AND		AMDT_SEQ		  = PRIOR AMDT_SEQ
+				AND		SVC_SCP_CD		  = PRIOR SVC_SCP_CD
+				AND		GEN_SPCL_RT_TP_CD = PRIOR GEN_SPCL_RT_TP_CD
+				AND		CMDT_HDR_SEQ	  = PRIOR CMDT_HDR_SEQ
+				AND		ROW_NUMBER		  = PRIOR ROW_NUMBER + 1
+				)	AC
+WHERE	RC.PROP_NO(+)			= CH.PROP_NO
+AND		RC.AMDT_SEQ(+)			= CH.AMDT_SEQ
+AND		RC.SVC_SCP_CD(+)		= CH.SVC_SCP_CD
+AND		RC.GEN_SPCL_RT_TP_CD(+)	= CH.GEN_SPCL_RT_TP_CD
+AND		RC.CMDT_HDR_SEQ(+)		= CH.CMDT_HDR_SEQ
+AND		AC.PROP_NO(+)			= CH.PROP_NO
+AND		AC.AMDT_SEQ(+)			= CH.AMDT_SEQ
+AND		AC.SVC_SCP_CD(+)		= CH.SVC_SCP_CD
+AND		AC.GEN_SPCL_RT_TP_CD(+)	= CH.GEN_SPCL_RT_TP_CD
+AND		AC.CMDT_HDR_SEQ(+)		= CH.CMDT_HDR_SEQ				
+)
+SELECT	CMDT_HDR_SEQ ,
+		CMDT_NM		 ,
+		ACT_CUST_NM  ,
+	    '' AS SC_NO  , -- param
+		SVC_SCP_CD	 , -- param
+        GEN_SPCL_RT_TP_CD, -- param
+        '' AS EFF_DT     , -- param
+        '' AS EXP_DT
+FROM	BU	A
+WHERE	NOT EXISTS	(
+					SELECT	'X'
+					FROM	BU	B
+					WHERE	B.PROP_NO			= A.PROP_NO
+					AND		B.AMDT_SEQ			> A.AMDT_SEQ
+					AND		B.SVC_SCP_CD		= A.SVC_SCP_CD
+					AND		B.GEN_SPCL_RT_TP_CD	= A.GEN_SPCL_RT_TP_CD
+					AND		B.PRC_CMDT_DEF_CD	= A.PRC_CMDT_DEF_CD
+					AND		B.ACT_CUST_CD		= A.ACT_CUST_CD
+					)
+ORDER BY
+		AMDT_SEQ DESC ,
+		CMDT_HDR_SEQ			]]></sql>
+			<params>
+				<param name="sc_no" type="12" value="" out="N"/>
+				<param name="svc_scp_cd" type="12" value="" out="N"/>
+				<param name="gen_spcl_rt_tp_cd" type="12" value="" out="N"/>
+				<param name="exp_dt" type="12" value="" out="N"/>
+				<param name="eff_dt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

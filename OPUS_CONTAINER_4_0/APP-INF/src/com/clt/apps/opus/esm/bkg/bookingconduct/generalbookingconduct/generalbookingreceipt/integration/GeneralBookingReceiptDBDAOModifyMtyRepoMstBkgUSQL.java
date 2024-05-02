@@ -1,0 +1,90 @@
+/*=========================================================
+*Copyright(c) 2015 CyberLogitec
+*@FileName : GeneralBookingReceiptDBDAOModifyMtyRepoMstBkgUSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2015.01.27
+*@LastModifier : 이주현
+*@LastVersion : 1.0
+* 2015.01.27 이주현
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.bkg.bookingconduct.generalbookingconduct.generalbookingreceipt.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author LEE JU HYUN
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class GeneralBookingReceiptDBDAOModifyMtyRepoMstBkgUSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * 원본 Booking Split Flag 셋팅
+	  * </pre>
+	  */
+	public GeneralBookingReceiptDBDAOModifyMtyRepoMstBkgUSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("usr_id",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("bkg_no",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.clt.apps.opus.esm.bkg.bookingconduct.generalbookingconduct.generalbookingreceipt.integration").append("\n"); 
+		query.append("FileName : GeneralBookingReceiptDBDAOModifyMtyRepoMstBkgUSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("UPDATE bkg_booking" ).append("\n"); 
+		query.append("SET 	split_flg = 'Y'" ).append("\n"); 
+		query.append("	, split_dt = SYSDATE" ).append("\n"); 
+		query.append("	, pod_cd       = DECODE('YYYYY', 'XXXXX', pod_cd, pod_cd) -- MT BKG SPLIT 처리시 XXXXX로 처리하는 것 막음" ).append("\n"); 
+		query.append("	, pod_nod_cd   = DECODE('YYYYYYY','XXXXXXX', POD_NOD_CD, POD_NOD_CD) -- MT BKG SPLIT 처리시 XXXXX로 처리하는 것 막음" ).append("\n"); 
+		query.append("	, del_cd       = DECODE('YYYYY','XXXXX', del_cd, del_cd) -- MT BKG SPLIT 처리시 XXXXX로 처리하는 것 막음" ).append("\n"); 
+		query.append("	, del_nod_cd   = DECODE('YYYYYYY','XXXXXXX', del_nod_cd, del_nod_cd) -- MT BKG SPLIT 처리시 XXXXX로 처리하는 것 막음" ).append("\n"); 
+		query.append("	, pst_rly_port_cd = ''" ).append("\n"); 
+		query.append("	, UPD_USR_ID = @[usr_id]" ).append("\n"); 
+		query.append("    , UPD_DT = SYSDATE" ).append("\n"); 
+		query.append("wHERE bkg_no = @[bkg_no]" ).append("\n"); 
+
+	}
+}

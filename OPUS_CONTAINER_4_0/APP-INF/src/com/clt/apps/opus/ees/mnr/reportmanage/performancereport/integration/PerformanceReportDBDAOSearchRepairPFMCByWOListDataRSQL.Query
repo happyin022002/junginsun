@@ -1,0 +1,333 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PerformanceReportDBDAOSearchRepairPFMCByWOListDataRSQL">
+			<desc><![CDATA[SearchRepairPFMCByWOListData]]></desc>
+			<sql><![CDATA[
+SELECT SUMA.RHQ
+	   ,(SELECT B.CNT_NM FROM MDM_LOCATION A,MDM_COUNTRY B,MDM_ORGANIZATION C
+	   WHERE A.CNT_CD = B.CNT_CD
+	   AND  A.LOC_CD = C.LOC_CD
+	   AND  C.OFC_CD = SUMA.COST_OFC_CD
+	   AND  ROWNUM = 1) AS CNT_NM
+       ,SUMA.COST_OFC_CD
+       ,SUMA.VNDR_SEQ
+	   ,SUMA.VNDR_SEQ_NM
+	   ,SUMA.MNR_WO_TP_NM
+	   ,DECODE(SUMA.ACCT_CD,'511591','Other',
+	    SUBSTR(SUMA.COST_CD_NM
+               ,INSTR(SUMA.COST_CD_NM,'|*SPLIT*|')+9
+               ,LENGTH(SUMA.COST_CD_NM)-(INSTR(SUMA.COST_CD_NM,'|*SPLIT*|')+8)
+              )) AS COST_NM
+	   ,DECODE(SUMA.ACCT_CD,'511591','Other repair charge(511591)',
+	    (SELECT MGC.MNR_CD_DP_DESC 
+	     FROM MNR_GEN_CD MGC 
+		 WHERE MGC.PRNT_CD_ID= SUBSTR(SUMA.COST_CD_NM
+                                      ,1
+                                      ,INSTR(SUMA.COST_CD_NM,'|*SPLIT*|')-1
+                                      )
+		   AND MGC.MNR_CD_ID=SUMA.COST_DTL_CD
+		)) COST_DTL_NM
+	   ,SUMA.EQ_TPSZ_CD
+       ,SUMA.ACCT_CD
+	   ,SUMA.MNR_HNGR_BAR_TP_NM
+	   ,SUMA.SPR_PRT_UT_TP_NM
+	   ,SUMA.SPR_PRT_NO
+	   ,SUMA.VSL_VVD
+	   ,SUMA.SPR_PRT_SPL_YD_CD
+	   ,DECODE(SUMA.MNR_HNGR_BAR_TP_NM,NULL,SUMA.QTY,0) AS QTY
+	   ,DECODE(SUMA.MNR_HNGR_BAR_TP_NM,NULL,0,SUMA.HQTY) AS HQTY
+       ,SUMA.CURR_CD
+	   ,SUMA.AMT
+	   ,SUMA.AVG_AMT 
+FROM
+(
+   SELECT
+#if (${report_period_type} == 'EI')
+        MNR_COMMON_PKG.MNR_GET_RHQ_OFC_FNC(MPRH.COST_OFC_CD) RHQ --RHQ 
+       ,MPRH.COST_OFC_CD -- Office 
+       ,MPRH.VNDR_SEQ
+       ,(SELECT MV.VNDR_LGL_ENG_NM FROM MDM_VENDOR MV WHERE MV.VNDR_SEQ = MPRH.VNDR_SEQ AND ROWNUM =1) AS VNDR_SEQ_NM --S/P 
+       ,(SELECT MGC.MNR_CD_DP_DESC FROM MNR_GEN_CD MGC WHERE MGC.PRNT_CD_ID='CD00020' AND MGC.MNR_CD_ID= 'EST' AND ROWNUM = 1) AS MNR_WO_TP_NM --Cost type 
+       ,MAX((SELECT
+            MGC.MNR_CD_ID || '|*SPLIT*|' || MGC.MNR_CD_DP_DESC 
+             FROM MNR_GEN_CD MGC
+             WHERE NVL(MGC.MNR_ORD_TP_CD,'0') = DECODE(MOH.MNR_WO_TP_CD,'SPL','TS','EXT','QT','EST','LB','0')
+               AND MGC.DELT_FLG = 'N'
+		       AND MGC.PRNT_CD_ID = DECODE(MOH.MNR_WO_TP_CD,'RFS','CD00037',MOH.EQ_KND_CD ||'G')
+		       AND MGC.MNR_CD_ID = DECODE(MOH.MNR_WO_TP_CD,'RFS',MOH.SPR_PRT_SPL_TP_CD,MOD.COST_CD)
+	       )) COST_CD_NM --Cost Type Nm
+	   ,MOD.COST_DTL_CD 
+	   ,MPRH.EQ_TPSZ_CD
+	   ,(SELECT  MGC.MNR_CD_DP_DESC 
+	     FROM MNR_GEN_CD MGC 
+		 WHERE MGC.PRNT_CD_ID='CD00022' 
+		   AND MNR_CD_ID=MOD.MNR_HNGR_BAR_TP_CD
+		) AS MNR_HNGR_BAR_TP_NM
+	   ,(SELECT  MGC.MNR_CD_DP_DESC 
+	     FROM MNR_GEN_CD MGC 
+		 WHERE MGC.PRNT_CD_ID='CD00009' 
+		   AND MNR_CD_ID=MOD.SPR_PRT_UT_TP_NM
+		) AS SPR_PRT_UT_TP_NM
+	   ,MOD.SPR_PRT_NO
+       ,MOD.ACCT_CD
+	   ,MOH.VSL_CD || MOH.SKD_VOY_NO || MOH.SKD_DIR_CD AS VSL_VVD
+	   ,MOH.SPR_PRT_SPL_YD_CD
+	   ,SUM(DECODE(MOD.RPR_QTY,0,1,NVL(MOD.RPR_QTY,1))) QTY
+	   ,DECODE(MOH.MNR_WO_TP_CD,'EXT',SUM(MOD.RPR_QTY),0) HQTY
+       ,DECODE(@[curr_cd], 'Y', 'USD', MPRH.CURR_CD) CURR_CD
+	   ,SUM(MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC(TO_CHAR(MPRH.CRE_DT, 'YYYYMM'), MPRH.CURR_CD, DECODE(@[curr_cd], 'Y', 'USD', MPRH.CURR_CD), MPRH.MNR_WRK_AMT)) AMT
+	   ,ROUND(SUM(MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC(TO_CHAR(MPRH.CRE_DT, 'YYYYMM'), MPRH.CURR_CD, DECODE(@[curr_cd], 'Y', 'USD', MPRH.CURR_CD), MPRH.MNR_WRK_AMT)) / SUM(DECODE(MOD.RPR_QTY,0,1,NVL(MOD.RPR_QTY,1))),2) AVG_AMT
+#elseif(${report_period_type} == 'WI')
+		MNR_COMMON_PKG.MNR_GET_RHQ_OFC_FNC(MOH.COST_OFC_CD) RHQ --RHQ 
+       ,MOH.COST_OFC_CD -- Office 
+       ,MOH.VNDR_SEQ
+       ,(SELECT MV.VNDR_LGL_ENG_NM FROM MDM_VENDOR MV WHERE MV.VNDR_SEQ = MOH.VNDR_SEQ  AND ROWNUM =1) AS VNDR_SEQ_NM --S/P 
+       ,(SELECT MGC.MNR_CD_DP_DESC FROM MNR_GEN_CD MGC WHERE MGC.PRNT_CD_ID='CD00020' AND MGC.MNR_CD_ID=MOH.MNR_WO_TP_CD) AS MNR_WO_TP_NM --Cost type 
+       ,MAX((SELECT
+            MGC.MNR_CD_ID || '|*SPLIT*|' || MGC.MNR_CD_DP_DESC
+             FROM MNR_GEN_CD MGC
+             WHERE NVL(MGC.MNR_ORD_TP_CD,'0') = DECODE(MOH.MNR_WO_TP_CD,'SPL','TS','EXT','QT','EST','LB','0')
+               AND MGC.DELT_FLG = 'N'
+		       AND MGC.PRNT_CD_ID = DECODE(MOH.MNR_WO_TP_CD,'RFS','CD00037',MOH.EQ_KND_CD ||'G')
+		       AND MGC.MNR_CD_ID = DECODE(MOH.MNR_WO_TP_CD,'RFS',MOH.SPR_PRT_SPL_TP_CD,MOD.COST_CD)
+	       )) COST_CD_NM --Cost Type Nm
+	   ,MOD.COST_DTL_CD 
+	   ,MOD.EQ_TPSZ_CD
+	   ,(SELECT  MGC.MNR_CD_DP_DESC 
+	     FROM MNR_GEN_CD MGC 
+		 WHERE MGC.PRNT_CD_ID='CD00022' 
+		   AND MNR_CD_ID=MOD.MNR_HNGR_BAR_TP_CD
+		) AS MNR_HNGR_BAR_TP_NM
+	   ,(SELECT  MGC.MNR_CD_DP_DESC 
+	     FROM MNR_GEN_CD MGC 
+		 WHERE MGC.PRNT_CD_ID='CD00009' 
+		   AND MNR_CD_ID=MOD.SPR_PRT_UT_TP_NM
+		) AS SPR_PRT_UT_TP_NM
+	   ,MOD.SPR_PRT_NO
+       ,MOD.ACCT_CD
+	   ,MOH.VSL_CD || MOH.SKD_VOY_NO || MOH.SKD_DIR_CD AS VSL_VVD
+	   ,MOH.SPR_PRT_SPL_YD_CD	 
+	   ,SUM(DECODE(MOD.RPR_QTY,0,1,NVL(MOD.RPR_QTY,1))) QTY
+	   ,DECODE(MOH.MNR_WO_TP_CD,'EXT',SUM(MOD.RPR_QTY),0) HQTY
+       ,DECODE(@[curr_cd], 'Y', 'USD', MOH.CURR_CD) CURR_CD
+	   ,SUM(MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC(TO_CHAR(MOH.CRE_DT, 'YYYYMM'), MOH.CURR_CD, DECODE(@[curr_cd], 'Y', 'USD', MOH.CURR_CD), MOD.COST_AMT)) AMT
+	   ,ROUND(SUM(MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC(TO_CHAR(MOH.CRE_DT, 'YYYYMM'), MOH.CURR_CD, DECODE(@[curr_cd], 'Y', 'USD', MOH.CURR_CD), MOD.COST_AMT)) / SUM(DECODE(MOD.RPR_QTY,0,1,NVL(MOD.RPR_QTY,1))),2) AVG_AMT
+#else 
+        MNR_COMMON_PKG.MNR_GET_RHQ_OFC_FNC(MPIW.ISS_OFC_CD) RHQ --RHQ 
+       ,MPIW.ISS_OFC_CD AS COST_OFC_CD -- Office 
+       ,MPIW.MNR_PRNR_SEQ AS VNDR_SEQ
+       ,(SELECT MV.VNDR_LGL_ENG_NM FROM MDM_VENDOR MV WHERE MV.VNDR_SEQ = MPIW.MNR_PRNR_SEQ  AND ROWNUM =1) AS VNDR_SEQ_NM --S/P 
+       ,(SELECT MGC.MNR_CD_DP_DESC FROM MNR_GEN_CD MGC WHERE MGC.PRNT_CD_ID='CD00020' AND MGC.MNR_CD_ID=MOH.MNR_WO_TP_CD) AS MNR_WO_TP_NM --Cost type 
+       ,MAX((SELECT
+            MGC.MNR_CD_ID || '|*SPLIT*|' || MGC.MNR_CD_DP_DESC 
+             FROM MNR_GEN_CD MGC
+             WHERE NVL(MGC.MNR_ORD_TP_CD,'0') = DECODE(MOH.MNR_WO_TP_CD,'SPL','TS','EXT','QT','EST','LB','0')
+               AND MGC.DELT_FLG = 'N'
+		       AND MGC.PRNT_CD_ID = DECODE(MOH.MNR_WO_TP_CD,'RFS','CD00037',MOH.EQ_KND_CD ||'G')
+		       AND MGC.MNR_CD_ID = DECODE(MOH.MNR_WO_TP_CD,'RFS',MOH.SPR_PRT_SPL_TP_CD,MOD.COST_CD)
+	       )) COST_CD_NM --Cost Type Nm
+	   ,MOD.COST_DTL_CD 
+	   ,MOD.EQ_TPSZ_CD
+	   ,(SELECT  MGC.MNR_CD_DP_DESC 
+	     FROM MNR_GEN_CD MGC 
+		 WHERE MGC.PRNT_CD_ID='CD00022' 
+		   AND MNR_CD_ID=MOD.MNR_HNGR_BAR_TP_CD
+		) AS MNR_HNGR_BAR_TP_NM
+	   ,(SELECT  MGC.MNR_CD_DP_DESC 
+	     FROM MNR_GEN_CD MGC 
+		 WHERE MGC.PRNT_CD_ID='CD00009' 
+		   AND MNR_CD_ID=MOD.SPR_PRT_UT_TP_NM
+		) AS SPR_PRT_UT_TP_NM
+	   ,MOD.SPR_PRT_NO
+       ,MOD.ACCT_CD
+	   ,MOH.VSL_CD || MOH.SKD_VOY_NO || MOH.SKD_DIR_CD AS VSL_VVD
+	   ,MOH.SPR_PRT_SPL_YD_CD
+	   ,SUM(DECODE(MOD.RPR_QTY,0,1,NVL(MOD.RPR_QTY,1))) QTY
+	   ,DECODE(MOH.MNR_WO_TP_CD,'EXT',SUM(MOD.RPR_QTY),0) HQTY
+       ,DECODE(@[curr_cd], 'Y', 'USD', MPIW.CURR_CD) CURR_CD
+	   ,SUM(MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC(TO_CHAR(MPIW.CRE_DT, 'YYYYMM'), MPIW.CURR_CD, DECODE(@[curr_cd], 'Y', 'USD', MPIW.CURR_CD), NVL(MOD.INV_AMT,0))) AMT
+	   ,ROUND(SUM(MNR_COMMON_PKG.MNR_CAL_CURR_RATE_FNC(TO_CHAR(MPIW.CRE_DT, 'YYYYMM'), MPIW.CURR_CD, DECODE(@[curr_cd], 'Y', 'USD', MPIW.CURR_CD), NVL(MOD.INV_AMT,0))) / SUM(DECODE(MOD.RPR_QTY,0,1,NVL(MOD.RPR_QTY,1))),2) AVG_AMT
+#end
+#if (${report_period_type} == 'EI')
+FROM MNR_RPR_RQST_HDR MPRH, MNR_ORD_DTL MOD, MNR_ORD_HDR MOH
+  WHERE MPRH.RPR_RQST_LST_VER_FLG = 'Y'
+   AND   MPRH.MNR_ORD_OFC_CTY_CD = MOH.MNR_ORD_OFC_CTY_CD
+   AND   MPRH.MNR_ORD_SEQ        = MOH.MNR_ORD_SEQ
+   AND   MOH.MNR_ORD_OFC_CTY_CD = MOD.MNR_ORD_OFC_CTY_CD
+   AND   MOH.MNR_ORD_SEQ        = MOD.MNR_ORD_SEQ
+   AND   MPRH.RPR_STS_CD <> 'HD'
+   AND   MPRH.CRE_DT BETWEEN  TO_DATE(@[fm_dt], 'YYYY-MM-DD') AND TO_DATE(@[to_dt], 'YYYY-MM-DD') + 0.99999
+#end
+#if (${report_period_type} == 'WI')
+FROM MNR_ORD_HDR MOH,MNR_ORD_DTL MOD
+WHERE MOH.MNR_ORD_OFC_CTY_CD = MOD.MNR_ORD_OFC_CTY_CD
+  AND MOH.MNR_ORD_SEQ		 = MOD.MNR_ORD_SEQ
+  AND MOH.CRE_DT BETWEEN  TO_DATE(@[fm_dt], 'YYYY-MM-DD') AND TO_DATE(@[to_dt], 'YYYY-MM-DD') + 0.99999
+#end
+#if (${report_period_type} == 'II') 
+FROM MNR_ORD_HDR MOH,MNR_ORD_DTL MOD,MNR_PAY_INV_WRK MPIW
+WHERE MOH.MNR_ORD_OFC_CTY_CD = MOD.MNR_ORD_OFC_CTY_CD
+  AND MOH.MNR_ORD_SEQ		 = MOD.MNR_ORD_SEQ
+  AND MOD.PAY_INV_SEQ      	 = MPIW.PAY_INV_SEQ
+  AND MPIW.CRE_DT BETWEEN  TO_DATE(@[fm_dt], 'YYYY-MM-DD') AND TO_DATE(@[to_dt], 'YYYY-MM-DD') + 0.99999
+#end
+  AND MOD.ACCT_CD <> '512125'
+#if (${report_period_type} != 'II')
+  AND MOD.ACCT_CD <> '511591'
+#end
+
+#if (${eq_type} != 'A')
+	#if (${report_period_type} == 'EI')
+		AND MPRH.EQ_KND_CD  = @[eq_type]
+	#else
+		AND MOH.EQ_KND_CD  = @[eq_type]
+	#end
+#end
+#if (${tp_sz_cd} != '')
+	#if (${report_period_type} == 'EI')
+	AND	MPRH.EQ_TPSZ_CD IN (
+		#foreach ($user_tpszCds IN ${tpszCds})
+			#if($velocityCount < $tpszCds.size())
+				'$user_tpszCds',
+			#else
+				'$user_tpszCds'
+			#end	
+		#end			  
+	)
+    #else
+	AND	MOD.EQ_TPSZ_CD IN (
+		#foreach ($user_tpszCds IN ${tpszCds})
+			#if($velocityCount < $tpszCds.size())
+				'$user_tpszCds',
+			#else
+				'$user_tpszCds'
+			#end	
+		#end			  
+	)
+    #end
+#end
+#if (${rhq} != 'A' && ${rhq} != '') 
+	#if (${report_period_type} == 'EI')
+		AND MNR_COMMON_PKG.MNR_GET_RHQ_OFC_FNC(MPRH.COST_OFC_CD) = @[rhq]
+	#elseif (${report_period_type} == 'WI')
+		AND MNR_COMMON_PKG.MNR_GET_RHQ_OFC_FNC(MOH.COST_OFC_CD)  = @[rhq]
+	#else 
+		AND MNR_COMMON_PKG.MNR_GET_RHQ_OFC_FNC(MPIW.ISS_OFC_CD)  = @[rhq]
+	#end
+#end
+#if (${country} != 'A' && ${country} != '')
+	#if (${report_period_type} == 'EI')
+		AND MPRH.COST_OFC_CD IN
+		(
+			SELECT A.OFC_CD
+  				FROM MDM_ORGANIZATION A
+ 				WHERE 1 = 1
+   				AND A.LOC_CD IN (SELECT LOC_CD FROM MDM_LOCATION WHERE CNT_CD = @[country])	
+				#if (${rhq} != 'A' && ${rhq} != '') 
+    			AND A.AR_HD_QTR_OFC_CD = @[rhq] 
+				#end
+		)	
+	#elseif (${report_period_type} == 'WI')
+		AND MOH.COST_OFC_CD IN
+		(
+			SELECT A.OFC_CD
+  				FROM MDM_ORGANIZATION A
+ 				WHERE 1 = 1
+   				AND A.LOC_CD IN (SELECT LOC_CD FROM MDM_LOCATION WHERE CNT_CD = @[country])	
+				#if (${rhq} != 'A' && ${rhq} != '') 
+    			AND A.AR_HD_QTR_OFC_CD = @[rhq] 
+				#end
+		)
+	#else	
+		AND MPIW.ISS_OFC_CD IN
+		(
+			SELECT A.OFC_CD
+  				FROM MDM_ORGANIZATION A
+ 				WHERE 1 = 1
+   				AND A.LOC_CD IN (SELECT LOC_CD FROM MDM_LOCATION WHERE CNT_CD = @[country])	
+				#if (${rhq} != 'A' && ${rhq} != '') 
+    			AND A.AR_HD_QTR_OFC_CD = @[rhq] 
+				#end
+		)
+	#end
+#end
+#if (${ofc_cd} != 'A' && ${ofc_cd} != '')
+	#if (${report_period_type} == 'EI')
+		AND	MPRH.COST_OFC_CD IN (
+			#foreach ($user_ofcCds IN ${ofcCds})
+				#if($velocityCount < $ofcCds.size())
+				'$user_ofcCds',
+				#else
+				'$user_ofcCds'
+				#end	
+			#end			  
+		)
+	#elseif (${report_period_type} == 'WI')
+		AND	MOH.COST_OFC_CD IN (
+			#foreach ($user_ofcCds IN ${ofcCds})
+				#if($velocityCount < $ofcCds.size())
+				'$user_ofcCds',
+				#else
+				'$user_ofcCds'
+				#end	
+			#end			  
+		)
+	#else
+		AND	MPIW.ISS_OFC_CD IN (
+			#foreach ($user_ofcCds IN ${ofcCds})
+				#if($velocityCount < $ofcCds.size())
+				'$user_ofcCds',
+				#else
+				'$user_ofcCds'
+				#end	
+			#end			  
+		)
+	#end
+#end
+#if (${vndr_seq} != '') 
+	#if (${report_period_type} == 'EI')
+		AND MPRH.VNDR_SEQ    = TO_NUMBER(@[vndr_seq])
+	#elseif (${report_period_type} == 'WI')
+		AND MOH.VNDR_SEQ     = TO_NUMBER(@[vndr_seq])
+	#else
+		AND MPIW.MNR_PRNR_SEQ = TO_NUMBER(@[vndr_seq])
+	#end
+#end
+
+#if (${mnr_wo_tp_cd} != '')
+	AND	MOH.MNR_WO_TP_CD IN (
+		#foreach ($user_wotpCds IN ${wotpCds})
+			#if($velocityCount < $wotpCds.size())
+				'$user_wotpCds',
+			#else
+				'$user_wotpCds'
+			#end	
+		#end			  
+	)
+#end
+	
+#if (${report_period_type} == 'EI')
+GROUP BY MPRH.COST_OFC_CD, MPRH.VNDR_SEQ, MOH.MNR_WO_TP_CD,MOH.COST_CD ,MOD.COST_DTL_CD,MPRH.EQ_TPSZ_CD,MOD.MNR_HNGR_BAR_TP_CD,MOD.SPR_PRT_UT_TP_NM
+, MOD.SPR_PRT_NO, MOH.SPR_PRT_SPL_YD_CD, MOH.VSL_CD || MOH.SKD_VOY_NO || MOH.SKD_DIR_CD, MPRH.CURR_CD,MOD.ACCT_CD
+#elseif (${report_period_type} == 'WI') 
+GROUP BY MOH.COST_OFC_CD, MOH.VNDR_SEQ, MOH.MNR_WO_TP_CD,MOH.COST_CD ,MOD.COST_DTL_CD,MOD.EQ_TPSZ_CD,MOD.MNR_HNGR_BAR_TP_CD,MOD.SPR_PRT_UT_TP_NM
+, MOD.SPR_PRT_NO, MOH.SPR_PRT_SPL_YD_CD, MOH.VSL_CD || MOH.SKD_VOY_NO || MOH.SKD_DIR_CD, MOH.CURR_CD,MOD.ACCT_CD
+#else
+GROUP BY MPIW.ISS_OFC_CD, MPIW.MNR_PRNR_SEQ, MOH.MNR_WO_TP_CD,MOH.COST_CD ,MOD.COST_DTL_CD,MOD.EQ_TPSZ_CD,MOD.MNR_HNGR_BAR_TP_CD,MOD.SPR_PRT_UT_TP_NM
+, MOD.SPR_PRT_NO, MOH.SPR_PRT_SPL_YD_CD, MOH.VSL_CD || MOH.SKD_VOY_NO || MOH.SKD_DIR_CD, MPIW.CURR_CD,MOD.ACCT_CD
+#end
+)  SUMA
+ORDER BY SUMA.MNR_WO_TP_NM,SUMA.COST_OFC_CD			]]></sql>
+			<params>
+				<param name="curr_cd" type="12" value="" out="N"/>
+				<param name="fm_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+				<param name="eq_type" type="12" value="" out="N"/>
+				<param name="rhq" type="12" value="" out="N"/>
+				<param name="country" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

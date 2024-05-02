@@ -1,0 +1,1215 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="JointOperationAccrualCreationDBDAOEstmActRsltCreRSQL">
+			<desc><![CDATA[Create용 저장
+JOO [2015.07.21]Virtual Add Calling 처리. VSK_VSL_PORT_SKD.NVL(VT_ADD_CALL_FLG, 'N') = 'N']]></desc>
+			<sql><![CDATA[
+WITH V_JOO_FINC_MTX AS (
+    SELECT FM.RE_DIVR_CD
+         , FM.JO_STL_ITM_CD
+         , CR.JO_CRR_CD
+         , CR.RLANE_CD
+         , CR.VNDR_SEQ
+         , CR.CUST_CNT_CD
+         , CR.CUST_SEQ
+         , FM.LOCL_CURR_CD
+         , ST.JO_STL_ITM_NM
+         , ST.JO_MNL_CRE_FLG
+         , ST.ORD_SEQ
+         , AC.JO_ESTM_ACCT_CD AS ACCT_CD
+      FROM JOO_CARRIER CR
+         , JOO_FINC_MTX FM
+         , JOO_STL_ITM ST
+         , JOO_STL_ITM_ACCT AC
+     WHERE 1=1
+       AND CR.DELT_FLG      = 'N'
+       AND CR.JO_CRR_CD     = FM.JO_CRR_CD
+       AND CR.RLANE_CD      = FM.RLANE_CD
+       AND FM.RE_DIVR_CD    = AC.RE_DIVR_CD
+       AND FM.JO_STL_ITM_CD = AC.JO_STL_ITM_CD
+       AND AC.JO_STL_ITM_CD = ST.JO_STL_ITM_CD
+#if (${jo_crr_cd}!='')
+       AND CR.JO_CRR_CD     = @[jo_crr_cd]     /* Condition Carrier */
+#end
+#if (${trd_cd}!='')
+       AND CR.TRD_CD        = @[trd_cd]        /* Condition Trade */
+#end
+#if (${rlane_cd}!='')
+       AND CR.RLANE_CD      = @[rlane_cd]   /* Condition Lane */
+#end
+#if (${re_divr_cd}!='')
+       AND FM.RE_DIVR_CD    = @[re_divr_cd]        /* Condition ALL, Revenue : R , Expense : E */
+#end
+#if (${jo_stl_itm_cds} != '' && ${jo_stl_itm_cds} != 'ALL')
+       /* Condition Items */
+       AND FM.JO_STL_ITM_CD IN ( #foreach($key IN ${jo_stl_itm_cds})#if($velocityCount < $jo_stl_itm_cds.size()) '$key', #else '$key' #end #end)
+#end
+     ORDER BY CR.JO_CRR_CD
+            , CR.RLANE_CD
+            , FM.RE_DIVR_CD
+            , ST.ORD_SEQ
+    )
+--SELECT * FROM  V_JOO_FINC_MTX;
+    , V_GL_ESTM_REV_VVD_RDC AS (
+        /* Revenue : NYK 선박, Expense : NYK 외의 선박 , ALL : Revenue + Expense */
+        SELECT GL.*
+          FROM (
+                SELECT 'R' AS RE_DIVR_CD
+                     , A.EXE_YRMON
+                     , A.REV_YRMON
+                     , A.VSL_CD
+                     , A.SKD_VOY_NO
+                     , A.SKD_DIR_CD
+                     , A.REV_DIR_CD
+                     , A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD||A.REV_DIR_CD AS REV_VVD
+                     , A.ESTM_VVD_TP_CD
+                     , A.VVD_TP
+                     , A.ESTM_VVD_HDR_ID
+                     , A.RLANE_CD
+                     , A.ESTM_IOC_DIV_CD
+                     , (SELECT TO_CHAR(MIN(VPS.VPS_ETA_DT),'YYYYMMDD')
+                          FROM VSK_VSL_PORT_SKD VPS
+                         WHERE 1=1
+                           AND A.VSL_CD       = VPS.VSL_CD
+                           AND A.SKD_VOY_NO   = VPS.SKD_VOY_NO
+                           AND A.SKD_DIR_CD   = VPS.SKD_DIR_CD
+                           AND (VPS.TURN_PORT_IND_CD IS NULL    OR VPS.TURN_PORT_IND_CD NOT IN ('D', 'V', 'F'))
+                           AND (VPS.SKD_CNG_STS_CD IS NULL      OR VPS.SKD_CNG_STS_CD != 'S')
+                           AND NVL(VPS.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 ADD*/
+                       ) AS ACT_DT
+                  FROM (SELECT EXE_YRMON
+                             , REV_YRMON
+                             , VSL_CD
+                             , SKD_VOY_NO
+                             , SKD_DIR_CD
+                             , REV_DIR_CD
+                             , ESTM_VVD_TP_CD
+                             , VVD_TP
+                             , ESTM_VVD_HDR_ID
+                             , RLANE_CD
+                             , ESTM_IOC_DIV_CD
+                             , ROW_NUMBER() OVER (PARTITION BY VSL_CD,SKD_VOY_NO,SKD_DIR_CD,REV_DIR_CD,RLANE_CD ORDER BY VVD_TP) VVD_CNT
+                          FROM (SELECT /*+ ORDERED */
+                                       REPLACE(@[exe_yrmon],'-','') AS EXE_YRMON --EXE_YRMON
+                                     , GL.REV_YRMON
+                                     , GL.VSL_CD
+                                     , GL.SKD_VOY_NO
+                                     , GL.SKD_DIR_CD
+                                     , GL.REV_DIR_CD
+                                     , GL.ESTM_VVD_TP_CD
+                                     , GL.ESTM_IOC_DIV_CD
+                                     , GL.ESTM_VVD_HDR_ID
+                                     , GL.RLANE_CD
+                                     , DECODE(GL.ESTM_VVD_TP_CD,'RV','1','BV','2','PV','3') VVD_TP
+                                     , ROW_NUMBER() OVER (PARTITION BY GL.VSL_CD,GL.SKD_VOY_NO,GL.SKD_DIR_CD,GL.REV_DIR_CD,GL.RLANE_CD ORDER BY GL.EXE_YRMON DESC, GL.REV_YRMON DESC) IO_CNT
+                                  FROM GL_ESTM_REV_VVD GL
+                                 WHERE 1=1
+                                   AND GL.REV_YRMON BETWEEN TO_CHAR(TO_DATE(REPLACE(@[rev_yrmon_fr],'-',''),'YYYYMM'),'YYYYMM') AND REPLACE(@[rev_yrmon_to],'-','')
+#if (${vvd}!='')
+                                   AND GL.VSL_CD||GL.SKD_VOY_NO||GL.SKD_DIR_CD||GL.REV_DIR_CD LIKE @[vvd]||'%' /* condition VVD */
+#end
+                                   AND EXISTS (SELECT 'Y'
+                                                 FROM MDM_VSL_CNTR MVC
+                                                WHERE MVC.DELT_FLG  = 'N'
+                                                 AND MVC.VSL_CD     = GL.VSL_CD
+                                                 --AND MVC.CRR_CD = COM_CONSTANTMGR_PKG.COM_GETCOMPANYCODE_FNC /*OWN 의 선박.*/
+                                               )
+                               )
+                         WHERE 1=1
+                           AND IO_CNT = 1 ) A
+                 WHERE A.VVD_CNT = 1
+                 UNION ALL
+                SELECT 'E' AS RE_DIVR_CD
+                     , A.EXE_YRMON
+                     , A.REV_YRMON
+                     , A.VSL_CD
+                     , A.SKD_VOY_NO
+                     , A.SKD_DIR_CD
+                     , A.REV_DIR_CD
+                     , A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD||A.REV_DIR_CD AS REV_VVD
+                     , A.ESTM_VVD_TP_CD
+                     , A.VVD_TP
+                     , A.ESTM_VVD_HDR_ID
+                     , A.RLANE_CD
+                     , A.ESTM_IOC_DIV_CD
+                     , (SELECT TO_CHAR(MIN(VPS.VPS_ETA_DT),'YYYYMMDD')
+                          FROM VSK_VSL_PORT_SKD VPS
+                         WHERE 1=1
+                           AND A.VSL_CD       = VPS.VSL_CD
+                           AND A.SKD_VOY_NO   = VPS.SKD_VOY_NO
+                           AND A.SKD_DIR_CD   = VPS.SKD_DIR_CD
+                           AND (VPS.TURN_PORT_IND_CD IS NULL    OR VPS.TURN_PORT_IND_CD NOT IN ('D', 'V', 'F'))
+                           AND (VPS.SKD_CNG_STS_CD IS NULL      OR VPS.SKD_CNG_STS_CD != 'S')
+                           AND NVL(VPS.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 ADD*/
+                       ) AS ACT_DT
+                  FROM (SELECT EXE_YRMON
+                             , REV_YRMON
+                             , VSL_CD
+                             , SKD_VOY_NO
+                             , SKD_DIR_CD
+                             , REV_DIR_CD
+                             , ESTM_VVD_TP_CD
+                             , VVD_TP
+                             , ESTM_VVD_HDR_ID
+                             , RLANE_CD
+                             , ESTM_IOC_DIV_CD
+                             , ROW_NUMBER() OVER (PARTITION BY VSL_CD,SKD_VOY_NO,SKD_DIR_CD,REV_DIR_CD,RLANE_CD ORDER BY VVD_TP) VVD_CNT
+                          FROM (SELECT /*+ ORDERED */
+                                       REPLACE(@[exe_yrmon],'-','') AS EXE_YRMON --EXE_YRMON
+                                     , GL.REV_YRMON
+                                     , GL.VSL_CD
+                                     , GL.SKD_VOY_NO
+                                     , GL.SKD_DIR_CD
+                                     , GL.REV_DIR_CD
+                                     , GL.ESTM_VVD_TP_CD
+                                     , GL.ESTM_IOC_DIV_CD
+                                     , GL.ESTM_VVD_HDR_ID
+                                     , GL.RLANE_CD
+                                     , DECODE(GL.ESTM_VVD_TP_CD,'RV','1','BV','2','PV','3') VVD_TP
+                                     , ROW_NUMBER() OVER (PARTITION BY GL.VSL_CD,GL.SKD_VOY_NO,GL.SKD_DIR_CD,GL.REV_DIR_CD,GL.RLANE_CD ORDER BY GL.EXE_YRMON DESC, GL.REV_YRMON DESC) IO_CNT
+                                  FROM GL_ESTM_REV_VVD GL
+                                 WHERE 1=1
+                                   AND GL.REV_YRMON BETWEEN TO_CHAR(TO_DATE(REPLACE(@[rev_yrmon_fr],'-',''),'YYYYMM'),'YYYYMM') AND REPLACE(@[rev_yrmon_to],'-','')
+#if (${vvd}!='')
+                                   AND GL.VSL_CD||GL.SKD_VOY_NO||GL.SKD_DIR_CD||GL.REV_DIR_CD LIKE @[vvd]||'%' /* condition VVD */
+#end
+                                   AND EXISTS (SELECT 'Y'
+                                                 FROM MDM_VSL_CNTR MVC
+                                                WHERE MVC.DELT_FLG  = 'N'
+                                                  AND MVC.VSL_CD    = GL.VSL_CD
+                                                  --AND MVC.CRR_CD <> COM_CONSTANTMGR_PKG.COM_GETCOMPANYCODE_FNC /*OWN외의 선박.*/
+                                               )
+                               )
+                         WHERE 1=1
+                           AND IO_CNT = 1 ) A
+                 WHERE A.VVD_CNT = 1
+               ) GL
+         WHERE GL.ACT_DT IS NOT NULL
+         ORDER BY
+               GL.RE_DIVR_CD DESC
+             , GL.REV_VVD
+             , GL.RLANE_CD
+             , GL.REV_YRMON
+      )
+--SELECT * FROM  V_GL_ESTM_REV_VVD_RDC;
+
+    , V_GL_ESTM_REV_VVD AS (
+        -- Carrier, Item을 AR_MST_REV_VVD 와 조인하여 기초 Data를 만든다.
+        SELECT GL.EXE_YRMON
+             , GL.REV_YRMON
+             , GL.VSL_CD
+             , GL.SKD_VOY_NO
+             , GL.SKD_DIR_CD
+             , GL.REV_DIR_CD
+             , GL.REV_VVD
+             , GL.ESTM_VVD_TP_CD
+             , GL.VVD_TP
+             , GL.ESTM_VVD_HDR_ID
+             , GL.RLANE_CD
+             , GL.ESTM_IOC_DIV_CD
+             , GL.ACT_DT
+             , CR.JO_CRR_CD
+             , CR.RE_DIVR_CD
+             , CR.JO_STL_ITM_CD
+             , CR.LOCL_CURR_CD
+             , CR.JO_MNL_CRE_FLG
+             , CR.ORD_SEQ
+             , CR.ACCT_CD
+             , CR.VNDR_SEQ
+             , CR.CUST_CNT_CD
+             , CR.CUST_SEQ
+          FROM V_GL_ESTM_REV_VVD_RDC    GL
+             , V_JOO_FINC_MTX           CR
+         WHERE 1=1
+           AND GL.RLANE_CD      = CR.RLANE_CD
+           AND GL.RE_DIVR_CD    = CR.RE_DIVR_CD    /* 조건 추가 : Revenue, Expense, ALL 의 대상 추가.*/
+         ORDER BY
+               CR.JO_CRR_CD
+             , GL.RE_DIVR_CD DESC
+             , CR.ORD_SEQ
+             , GL.REV_VVD
+             , GL.RLANE_CD
+             , GL.REV_YRMON
+        )
+--SELECT * FROM V_GL_ESTM_REV_VVD;
+
+     , V_PORT_SKD_ETA AS (
+        /* PORT SKD 의 ETA로 Start, End Date를 조회 한다.: S/H, OPR 화면에서 조건에 맞추어서 진행 한다. */
+        SELECT *
+          FROM (SELECT A.VSL_CD
+                     , A.SKD_VOY_NO
+                     , A.SKD_DIR_CD
+                     , A.SLAN_CD
+                     , A.ACT_DT
+                     , TO_CHAR(MIN(VPS_ETA_DT),'YYYYMMDDHH24MISS')      AS ST_DT
+                     , TO_CHAR(MAX(NEXT_PORT_ETA),'YYYYMMDDHH24MISS')   AS END_DT
+                     , A.EXE_YRMON
+                     , A.REV_YRMON
+                     , A.REV_DIR_CD
+                     , A.RLANE_CD
+                     , A.ESTM_IOC_DIV_CD
+                     , A.ESTM_VVD_HDR_ID
+                     , A.VVD_TP
+                     , A.ESTM_VVD_TP_CD
+                     , A.JO_CRR_CD
+                     , A.RE_DIVR_CD
+                     , A.JO_STL_ITM_CD
+                     , A.ORD_SEQ
+                  FROM (SELECT /*+ ORDERED USE_HASH(VSL MVL VPS) */
+                               VPS.VSL_CD
+                             , VPS.SKD_VOY_NO
+                             , VPS.SKD_DIR_CD
+                             , VPS.VPS_PORT_CD
+                             , VPS.CLPT_SEQ
+                             , VPS.CLPT_IND_SEQ
+                             , VPS.VPS_ETA_DT
+                             , VPS.VPS_ETD_DT
+                             , VSL.VSL_SLAN_CD AS SLAN_CD
+                             , NVL((SELECT S1.VPS_ETA_DT
+                                      FROM VSK_VSL_PORT_SKD S1
+                                     WHERE S1.VSL_CD        = VPS.VSL_CD
+                                       AND S1.SKD_VOY_NO    = VPS.SKD_VOY_NO
+                                       AND S1.SKD_DIR_CD    = VPS.SKD_DIR_CD
+                                       AND S1.CLPT_SEQ      = ( SELECT MIN(CLPT_SEQ)
+                                                                  FROM VSK_VSL_PORT_SKD
+                                                                 WHERE VSL_CD       = VPS.VSL_CD
+                                                                   AND SKD_VOY_NO   = VPS.SKD_VOY_NO
+                                                                   AND SKD_DIR_CD   = VPS.SKD_DIR_CD
+                                                                   AND CLPT_SEQ     > VPS.CLPT_SEQ
+                                                                   AND (SKD_CNG_STS_CD IS NULL OR SKD_CNG_STS_CD != 'S') )
+                                       AND ROWNUM = 1 ),VPS.VPS_ETD_DT) AS NEXT_PORT_ETA
+                             , VGL.EXE_YRMON
+                             , VGL.REV_YRMON
+                             , VGL.REV_DIR_CD
+                             , VGL.RLANE_CD
+                             , VGL.ESTM_IOC_DIV_CD
+                             , VGL.ESTM_VVD_HDR_ID
+                             , VGL.VVD_TP
+                             , VGL.ESTM_VVD_TP_CD
+                             , VGL.JO_CRR_CD
+                             , VGL.RE_DIVR_CD
+                             , VGL.JO_STL_ITM_CD
+                             , VGL.ORD_SEQ
+                             , VGL.ACT_DT
+                          FROM VSK_VSL_SKD          VSL
+                             , MDM_VSL_CNTR         MVL
+                             , VSK_VSL_PORT_SKD     VPS
+                             , MDM_VSL_SVC_LANE_DIR MVS
+                             , V_GL_ESTM_REV_VVD    VGL
+                         WHERE 1=1
+                           AND VSL.VSL_CD       = VGL.VSL_CD
+                           AND VSL.SKD_VOY_NO   = VGL.SKD_VOY_NO
+                           AND VSL.SKD_DIR_CD   = VGL.SKD_DIR_CD
+                           AND VSL.VSL_SLAN_CD  = SUBSTR(VGL.RLANE_CD, 1,3)
+                           --AND VGL.JO_MNL_CRE_FLG = 'N' /* 전체 Item 날짜 계산을 가져온다. */
+                           AND VSL.VSL_CD       = MVL.VSL_CD
+                           AND VSL.VSL_CD       = VPS.VSL_CD
+                           AND VSL.SKD_VOY_NO   = VPS.SKD_VOY_NO
+                           AND VSL.SKD_DIR_CD   = VPS.SKD_DIR_CD
+                           AND (VPS.TURN_PORT_IND_CD IS NULL    OR VPS.TURN_PORT_IND_CD NOT IN ('D', 'V', 'F'))
+                           AND (VPS.SKD_CNG_STS_CD IS NULL      OR VPS.SKD_CNG_STS_CD != 'S')
+                           AND NVL(VPS.VT_ADD_CALL_FLG, 'N') = 'N' /*2015.07.21 Add*/
+                           AND VSL.VSL_SLAN_CD  = MVS.VSL_SLAN_CD
+                           AND VSL.SKD_DIR_CD   = MVS.VSL_SLAN_DIR_CD
+                         ORDER BY VPS.VPS_ETA_DT
+                             , MVS.VSL_SLAN_DIR_SEQ
+                             , VPS.CLPT_SEQ
+                       ) A
+                 GROUP BY A.VSL_CD
+                     , A.SKD_VOY_NO
+                     , A.SKD_DIR_CD
+                     , A.SLAN_CD
+                     , A.ACT_DT
+                     , A.EXE_YRMON
+                     , A.REV_YRMON
+                     , A.REV_DIR_CD
+                     , A.RLANE_CD
+                     , A.JO_CRR_CD
+                     , A.RE_DIVR_CD
+                     , A.JO_STL_ITM_CD
+                     , A.ORD_SEQ
+                     , A.ESTM_IOC_DIV_CD
+                     , A.ESTM_VVD_HDR_ID
+                     , A.VVD_TP
+                     , A.ESTM_VVD_TP_CD
+               )
+         ORDER BY ST_DT, END_DT
+    )
+--SELECT * FROM V_PORT_SKD_ETA;
+
+  , V_GL_STANDARD_DATA AS (
+        /* V_AR_MST_REV_VVD 별 From - To 기간을 월별로 나누어 주는 쿼리입니다. VVD 별 전체에서 최소월 ~ 최대월을 구한뒤에 조인하는 부분입닏.*/
+        SELECT A.VSL_CD
+             , A.SKD_VOY_NO
+             , A.SKD_DIR_CD
+             , A.ACT_DT
+             , A.ST_DT
+             , A.END_DT
+             , A.MIN_YMDHMS
+             , A.MAX_YMDHMS
+             , A.SAIL_DYS
+             , A.ESTM_YRMON
+             , CASE WHEN A.ESTM_YRMON = A.MAX_ESTM_YRMON THEN (A.SAIL_DYS - A.SUM_ESTM_DYS) + A.ESTM_DYS
+                    ELSE A.ESTM_DYS
+               END ESTM_DYS
+             , A.EXE_YRMON
+             , A.REV_YRMON
+             , A.REV_DIR_CD
+             , A.RLANE_CD
+             , A.ESTM_IOC_DIV_CD
+             , A.ESTM_VVD_HDR_ID
+             , A.VVD_TP
+             , A.ESTM_VVD_TP_CD
+             , A.JO_CRR_CD
+             , A.RE_DIVR_CD
+             , A.JO_STL_ITM_CD
+             , A.ORD_SEQ
+             , A.MAX_ESTM_YRMON
+             , A.SUM_ESTM_DYS
+             , (A.SAIL_DYS - A.SUM_ESTM_DYS) AS CHK_DIFF_DYS
+          FROM (
+                SELECT A.VSL_CD
+                     , A.SKD_VOY_NO
+                     , A.SKD_DIR_CD
+                     , A.ACT_DT
+                     , A.ST_DT
+                     , A.END_DT
+                     , A.MIN_YMDHMS
+                     , A.MAX_YMDHMS
+                     , ROUND((TO_DATE(A.END_DT,'YYYYMMDDHH24MISS')    - TO_DATE(A.ST_DT,'YYYYMMDDHH24MISS')),5) AS SAIL_DYS
+                     , A.ESTM_YRMON
+                     , ROUND((TO_DATE(A.MAX_YMDHMS,'YYYYMMDDHH24MISS') - TO_DATE(A.MIN_YMDHMS,'YYYYMMDDHH24MISS')),5) AS ESTM_DYS
+                     , A.EXE_YRMON
+                     , A.REV_YRMON
+                     , A.REV_DIR_CD
+                     , A.RLANE_CD
+                     , A.ESTM_IOC_DIV_CD
+                     , A.ESTM_VVD_HDR_ID
+                     , A.VVD_TP
+                     , A.ESTM_VVD_TP_CD
+                     , A.JO_CRR_CD
+                     , A.RE_DIVR_CD
+                     , A.JO_STL_ITM_CD
+                     , A.ORD_SEQ
+                     , MAX(A.ESTM_YRMON) OVER (PARTITION BY A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.REV_DIR_CD, A.RLANE_CD, A.EXE_YRMON, A.REV_YRMON, A.JO_CRR_CD, A.RE_DIVR_CD, A.JO_STL_ITM_CD) AS MAX_ESTM_YRMON
+                     , SUM(ROUND((TO_DATE(A.MAX_YMDHMS,'YYYYMMDDHH24MISS') - TO_DATE(A.MIN_YMDHMS,'YYYYMMDDHH24MISS')),5))
+                           OVER (PARTITION BY A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.REV_DIR_CD, A.RLANE_CD, A.EXE_YRMON, A.REV_YRMON, A.JO_CRR_CD, A.RE_DIVR_CD, A.JO_STL_ITM_CD) AS SUM_ESTM_DYS
+                  FROM (SELECT A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.ACT_DT
+                             , A.ST_DT
+                             , A.END_DT
+                             , A.DATES AS ESTM_YRMON
+                             , CASE WHEN SUBSTR(A.ST_DT, 1,6) = A.DATES THEN A.DATES||SUBSTR(A.ST_DT,7)
+                                    ELSE A.DATES||'01000000'
+                               END AS MIN_YMDHMS
+                             , CASE WHEN SUBSTR(A.END_DT, 1,6) = A.DATES THEN A.DATES||SUBSTR(A.END_DT,7)
+                                    ELSE TO_CHAR(LAST_DAY(TO_DATE(A.DATES,'YYYYMM')) + 1,'YYYYMMDD') ||'000000'
+                               END AS MAX_YMDHMS
+                             , A.EXE_YRMON
+                             , A.REV_YRMON
+                             , A.REV_DIR_CD
+                             , A.RLANE_CD
+                             , A.ESTM_IOC_DIV_CD
+                             , A.ESTM_VVD_HDR_ID
+                             , A.VVD_TP
+                             , A.ESTM_VVD_TP_CD
+                             , A.JO_CRR_CD
+                             , A.RE_DIVR_CD
+                             , A.JO_STL_ITM_CD
+                             , A.ORD_SEQ
+                          FROM (SELECT A.VSL_CD
+                                     , A.SKD_VOY_NO
+                                     , A.SKD_DIR_CD
+                                     , A.ACT_DT
+                                     , A.ST_DT
+                                     , A.END_DT
+                                     , B.DATES
+                                     , A.EXE_YRMON
+                                     , A.REV_YRMON
+                                     , A.REV_DIR_CD
+                                     , A.RLANE_CD
+                                     , A.ESTM_IOC_DIV_CD
+                                     , A.ESTM_VVD_HDR_ID
+                                     , A.VVD_TP
+                                     , A.ESTM_VVD_TP_CD
+                                     , A.JO_CRR_CD
+                                     , A.RE_DIVR_CD
+                                     , A.JO_STL_ITM_CD
+                                     , A.ORD_SEQ
+                                  FROM V_PORT_SKD_ETA A
+                                     , (SELECT TO_CHAR(ADD_MONTHS(TO_DATE(A.MIN_YM,'YYYYMM'),LEVEL-1),'YYYYMM') AS DATES
+                                          FROM (SELECT MIN(SUBSTR(A.ST_DT,1,6)) MIN_YM
+                                                     , MAX(SUBSTR(A.END_DT,1,6)) MAX_YM
+                                                  FROM V_PORT_SKD_ETA A
+                                                ) A
+                                         CONNECT BY LEVEL <= MONTHS_BETWEEN(ADD_MONTHS(TO_DATE(A.MAX_YM,'YYYYMM'), 1), TO_DATE(A.MIN_YM, 'YYYYMM'))
+                                       ) B
+                                 WHERE B.DATES BETWEEN SUBSTR(A.ST_DT,1,6) AND SUBSTR(A.END_DT,1,6)
+                                ) A
+                          ) A
+                  WHERE 1=1
+                    --AND TO_DATE(A.ESTM_YRMON,'YYYYMM') <= TO_DATE(REPLACE([exe_yrmon],'-',''),'YYYYMM') /*Working Month 이후는 구할 필요가 없음. 2016.07.06 주석처리.*/
+                    --AND A.VSL_CD|| A.SKD_VOY_NO|| A.SKD_DIR_CD = 'MKFA0001W'
+           ) A
+    )
+--SELECT * FROM V_GL_STANDARD_DATA;
+
+  , V_VVD_ESTM_BSA_SH_OPR AS (
+        /* S/H, OPR Item.*/
+        SELECT GL.EXE_YRMON
+             , GL.REV_YRMON
+             , GL.JO_CRR_CD
+             , GL.RLANE_CD
+             , GL.RE_DIVR_CD
+             , GL.VSL_CD
+             , GL.SKD_VOY_NO
+             , GL.SKD_DIR_CD
+             , GL.REV_DIR_CD
+             , GL.ESTM_VVD_TP_CD
+             , GL.ACCT_CD
+             , GL.ACT_DT
+             , GL.JO_STL_ITM_CD
+             , EA.JO_STL_JB_CD
+             , EA.BSA_QTY
+             , EA.BSA_SLT_PRC
+             , EA.ESTM_AMT
+             , EA.ACT_AMT
+             , EA.ACCL_AMT
+             , EA.ACCL_AMT_CORR_FLG
+             , EA.ST_DT
+             , EA.END_DT
+             , EA.SAIL_DYS
+             , EA.ESTM_YRMON
+             , EA.ESTM_DYS
+             , EA.NOW_ESTM_AMT
+             , EA.ORG_ESTM_AMT
+             , EA.NOW_ACT_AMT
+             , EA.ORG_ACT_AMT
+          FROM V_GL_ESTM_REV_VVD GL
+             , (
+                SELECT EXE_YRMON
+                     , REV_YRMON
+                     , JO_CRR_CD
+                     , RLANE_CD
+                     , VSL_CD
+                     , SKD_VOY_NO
+                     , SKD_DIR_CD
+                     , REV_DIR_CD
+                     , RE_DIVR_CD
+                     , JO_STL_ITM_CD
+                     , JO_STL_JB_CD
+                     , BSA_QTY
+                     , BSA_SLT_PRC
+                     , CASE WHEN SUBSTR(END_DT,1,6) = ESTM_YRMON AND ORG_ESTM_AMT != NOW_ESTM_AMT THEN ROUND(ESTM_AMT + (ORG_ESTM_AMT - NOW_ESTM_AMT), 2)
+                            ELSE ESTM_AMT
+                       END ESTM_AMT
+                     , CASE WHEN SUBSTR(END_DT,1,6) = ESTM_YRMON AND ORG_ACT_AMT != NOW_ACT_AMT THEN ROUND(ACT_AMT + (ORG_ACT_AMT - NOW_ACT_AMT), 2)
+                            ELSE ACT_AMT
+                       END ACT_AMT
+                     , ACCL_AMT
+                     , ACCL_AMT_CORR_FLG
+                     , ST_DT
+                     , END_DT
+                     , SAIL_DYS
+                     , ESTM_YRMON
+                     , ESTM_DYS
+                     , VVD
+                     , CASE WHEN JO_STL_ITM_CD = 'OPR' THEN SUM(ESTM_AMT) OVER (PARTITION BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG, ESTM_YRMON)
+                            ELSE SUM(ESTM_AMT) OVER (PARTITION BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG)
+                       END AS NOW_ESTM_AMT
+                     , ORG_ESTM_AMT
+                     , SUM(ACT_AMT) OVER (PARTITION BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG, ESTM_YRMON) AS NOW_ACT_AMT
+                     , ORG_ACT_AMT
+                  FROM (
+                        SELECT /*+ ORDERED */
+                               X.EXE_YRMON
+                             , X.REV_YRMON
+                             , X.JO_CRR_CD
+                             , X.VVD
+                             , X.VSL_CD
+                             , X.SKD_VOY_NO
+                             , X.SKD_DIR_CD
+                             , X.REV_DIR_CD
+                             , X.RLANE_CD
+                             , X.RE_DIVR_CD
+                             , X.JO_STL_JB_CD
+                             , X.BSA_QTY
+                             , X.BSA_SLT_PRC
+                             , X.ESTM_AMT
+                             , X.ACT_AMT
+                             , NVL(X.ESTM_AMT,0) - NVL(X.ACT_AMT,0) AS ACCL_AMT
+                             , X.ACCL_AMT_CORR_FLG /*Include Port to Port Basic Settle Estmate Flag*/
+                             , X.JO_STL_ITM_CD
+                             , X.ESTM_YRMON
+                             , X.ST_DT
+                             , X.END_DT
+                             , X.SAIL_DYS
+                             , X.ESTM_DYS
+                             , X.ORG_ESTM_AMT
+                             , X.ORG_ACT_AMT
+                             , CASE WHEN X.JO_STL_ITM_CD = 'OPR' THEN
+                                         SUM(X.ESTM_AMT) OVER (PARTITION BY X.EXE_YRMON, X.REV_YRMON, X.JO_CRR_CD, X.RLANE_CD, X.VVD, X.JO_STL_ITM_CD, X.JO_STL_JB_CD, X.ACCL_AMT_CORR_FLG, X.ESTM_YRMON)
+                                    ELSE SUM(X.ESTM_AMT) OVER (PARTITION BY X.EXE_YRMON, X.REV_YRMON, X.JO_CRR_CD, X.RLANE_CD, X.VVD, X.JO_STL_ITM_CD, X.JO_STL_JB_CD, X.ACCL_AMT_CORR_FLG)
+                               END AS NOW_ESTM_AMT
+                             , SUM(X.ACT_AMT)  OVER (PARTITION BY X.EXE_YRMON, X.REV_YRMON, X.JO_CRR_CD, X.RLANE_CD, X.VVD, X.JO_STL_ITM_CD, X.JO_STL_JB_CD, X.ACCL_AMT_CORR_FLG, X.ESTM_YRMON) AS NOW_ACT_AMT
+                          FROM (
+                                /* S/H, OPR BSA에서 데이타를 가져온다.*/
+                                SELECT A.JO_STL_ITM_CD
+                                     , A.EXE_YRMON
+                                     , A.REV_YRMON
+                                     , A.JO_CRR_CD
+                                     , A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD||A.REV_DIR_CD AS VVD
+                                     , A.VSL_CD
+                                     , A.SKD_VOY_NO
+                                     , A.SKD_DIR_CD
+                                     , A.REV_DIR_CD
+                                     , A.RLANE_CD
+                                     , A.RE_DIVR_CD
+                                     , A.JO_STL_JB_CD
+                                     , A.BSA_QTY
+                                     , A.BSA_SLT_PRC
+                                     , A.ESTM_YRMON
+                                     , A.ST_DT
+                                     , A.END_DT
+                                     , A.SAIL_DYS
+                                     , A.ESTM_DYS
+                                     , CASE WHEN A.JO_STL_ITM_CD = 'OPR' THEN ROUND(NVL(SUM(A.ESTM_AMT), 0) * NVL(A.ESTM_DYS, 0), 2)
+                                            ELSE ROUND(NVL(SUM(A.ESTM_AMT), 0) * ( A.ESTM_DYS / A.SAIL_DYS ), 2)
+                                       END AS ESTM_AMT
+                                     , CASE WHEN A.JO_STL_ITM_CD = 'S/H' OR A.JO_STL_ITM_CD = 'OPR' THEN ROUND(NVL(SUM(A.ACT_AMT) , 0), 2)
+                                            ELSE ROUND(NVL(SUM(A.ACT_AMT), 0) * ( A.ESTM_DYS / A.SAIL_DYS ), 2)
+                                       END AS ACT_AMT
+                                     , ROUND(NVL(SUM(A.ESTM_AMT)    , 0), 2) AS ORG_ESTM_AMT
+                                     , ROUND(NVL(SUM(A.ACT_AMT)     , 0), 2) AS ORG_ACT_AMT
+                                     , 'N' AS ACCL_AMT_CORR_FLG
+                                 FROM (
+                                        SELECT /*+ ORDERED USE_HASH(A C D B) FULL(D) */
+                                               A.EXE_YRMON
+                                             , A.REV_YRMON
+                                             , A.JO_CRR_CD
+                                             , A.VSL_CD
+                                             , A.SKD_VOY_NO
+                                             , A.SKD_DIR_CD
+                                             , A.REV_DIR_CD
+                                             , A.RLANE_CD
+                                             , A.RE_DIVR_CD
+                                             , A.JO_STL_ITM_CD
+                                             , A.JO_STL_JB_CD
+                                             , A.BSA_QTY
+                                             , A.BSA_SLT_PRC
+                                             , A.ESTM_YRMON
+                                             , A.ST_DT
+                                             , A.END_DT
+                                             , A.SAIL_DYS
+                                             , A.ESTM_DYS
+                                             , NVL(A.BSA_QTY,0) * NVL(A.BSA_SLT_PRC, 0) AS ESTM_AMT
+                                             , A.ACT_AMT
+                                          FROM (
+                                                SELECT /*+ ORDERED USE_HASH(A C D B) FULL(D) */
+                                                       A.EXE_YRMON
+                                                     , A.REV_YRMON
+                                                     , A.JO_CRR_CD
+                                                     , A.VSL_CD
+                                                     , A.SKD_VOY_NO
+                                                     , A.SKD_DIR_CD
+                                                     , A.REV_DIR_CD
+                                                     , A.RLANE_CD
+                                                     , A.RE_DIVR_CD
+                                                     , A.JO_STL_ITM_CD
+                                                     , C.JO_STL_JB_CD
+                                                     , NVL(C.BSA_QTY,0) AS BSA_QTY
+                                                     , CASE WHEN A.JO_STL_ITM_CD = 'OPR' THEN NVL((
+                                                                                               SELECT MAX(STL.BSA_SLT_PRC)
+                                                                                                 FROM JOO_STL_TGT STL
+                                                                                                WHERE 1=1
+                                                                                                  AND STL.VSL_CD        = A.VSL_CD
+                                                                                                  AND STL.SKD_VOY_NO    = A.SKD_VOY_NO
+                                                                                                  AND STL.SKD_DIR_CD    = A.SKD_DIR_CD
+                                                                                                  AND STL.REV_DIR_CD    = A.REV_DIR_CD
+                                                                                                  AND STL.RLANE_CD      = A.RLANE_CD
+                                                                                                  AND STL.JO_CRR_CD     = A.JO_CRR_CD
+                                                                                                  AND STL.JO_STL_ITM_CD = A.JO_STL_ITM_CD
+                                                                                                  AND STL.ESTM_YRMON    = A.ESTM_YRMON
+                                                                                                  AND STL.RE_DIVR_CD    = A.RE_DIVR_CD
+                                                                                                  --AND STL.JO_STL_JB_CD = C.JO_STL_JB_CD
+                                                                                              ), 0)
+                                                            ELSE NVL(C.BSA_SLT_PRC, 0)
+                                                       END BSA_SLT_PRC
+                                                     , A.ESTM_YRMON
+                                                     , A.ST_DT
+                                                     , A.END_DT
+                                                     , A.SAIL_DYS
+                                                     , A.ESTM_DYS
+                                                     , NVL(DECODE(A.JO_STL_ITM_CD, 'OPR', C.OP_ESTM_AMT, C.ESTM_AMT),0) AS ESTM_AMT /*2016.07.13 위에서 새로 ESTM_AMT를 구하므로 의미 없음.*/
+                                                     --, ROUND(PSO_CONV_CURR_USD_FNC(C.LOCL_CURR_CD, NVL(C.STL_LOCL_AMT,0), A.REV_YRMON,1),3) AS ACT_AMT
+                                                     , NVL((SELECT SUM(ROUND(PSO_CONV_CURR_USD_FNC(INV.LOCL_CURR_CD, NVL(DTL.ACT_AMT,0), SUBSTR(STL.ACT_DT,1,6),1),2))
+                                                              FROM JOO_STL_TGT STL
+                                                                 , JOO_INV_DTL DTL
+                                                                 , JOO_INVOICE INV
+                                                                 , JOO_CSR     CSR
+                                                             WHERE 1=1
+                                                               AND STL.VSL_CD        = A.VSL_CD
+                                                               AND STL.SKD_VOY_NO    = A.SKD_VOY_NO
+                                                               AND STL.SKD_DIR_CD    = A.SKD_DIR_CD
+                                                               AND STL.REV_DIR_CD    = A.REV_DIR_CD
+                                                               AND STL.REV_YRMON     = A.REV_YRMON
+                                                               AND STL.JO_CRR_CD     = A.JO_CRR_CD
+                                                               AND STL.RLANE_CD      = A.RLANE_CD
+                                                               AND STL.JO_STL_ITM_CD = A.JO_STL_ITM_CD
+                                                               AND STL.JO_STL_JB_CD  = C.JO_STL_JB_CD
+                                                               AND STL.RE_DIVR_CD    = A.RE_DIVR_CD
+                                                               AND STL.ESTM_YRMON    = A.ESTM_YRMON
+                                                               AND STL.VSL_CD        = DTL.VSL_CD
+                                                               AND STL.SKD_VOY_NO    = DTL.SKD_VOY_NO
+                                                               AND STL.SKD_DIR_CD    = DTL.SKD_DIR_CD
+                                                               AND STL.REV_DIR_CD    = DTL.REV_DIR_CD
+                                                               AND STL.REV_YRMON     = DTL.REV_YRMON
+                                                               AND STL.STL_VVD_SEQ   = DTL.STL_VVD_SEQ
+                                                               AND DTL.ACCT_YRMON    = INV.ACCT_YRMON
+                                                               AND DTL.JO_CRR_CD     = INV.JO_CRR_CD
+                                                               AND DTL.INV_NO        = INV.INV_NO
+                                                               AND DTL.RE_DIVR_CD    = INV.RE_DIVR_CD
+                                                               AND INV.RVS_CMB_FLG   = 'N'
+                                                               AND INV.RJCT_CMB_FLG  = 'N'
+                                                               AND INV.SLP_TP_CD     = CSR.SLP_TP_CD
+                                                               AND INV.SLP_FUNC_CD   = CSR.SLP_FUNC_CD
+                                                               AND INV.SLP_OFC_CD    = CSR.SLP_OFC_CD
+                                                               AND INV.SLP_ISS_DT    = CSR.SLP_ISS_DT
+                                                               AND INV.SLP_SER_NO    = CSR.SLP_SER_NO
+                                                               AND CSR.APRO_FLG      = 'Y'
+                                                       ), 0) AS ACT_AMT
+                                                  FROM V_GL_STANDARD_DATA A
+                                                     , (
+                                                        SELECT /*+ ORDERED USE_HASH(A B C) */
+                                                               DISTINCT
+                                                               A.COST_YRMON         AS REV_YRMON
+                                                             , A.VSL_CD             AS VSL_CD
+                                                             , A.SKD_VOY_NO         AS SKD_VOY_NO
+                                                             , A.DIR_CD             AS SKD_DIR_CD
+                                                             , A.RLANE_CD           AS RLANE_CD
+                                                             , C.CRR_CD             AS JO_CRR_CD
+                                                             , CASE WHEN C.BSA_OP_JB_CD IN ('000','001') THEN '101'
+                                                                    WHEN C.BSA_OP_JB_CD IN ('002','003') THEN '102'
+                                                                    WHEN C.BSA_OP_JB_CD IN ('004','005') THEN '103'
+                                                               END                  AS JO_STL_JB_CD
+                                                             , CASE WHEN C.BSA_OP_JB_CD IN ('001','002','004') THEN 'R'
+                                                                    WHEN C.BSA_OP_JB_CD IN ('000','003','005') THEN 'E'
+                                                               END                  AS RE_DIVR_CD
+                                                             , C.SLT_PRC_CAPA       AS BSA_SLT_PRC
+                                                             , C.OP_SLT_PRC_CAPA    AS OP_BSA_SLT_PRC
+                                                             , C.CRR_BSA_CAPA       AS BSA_QTY
+                                                             , C.CRR_PERF_AMT       AS ESTM_AMT
+                                                             , C.OP_CRR_PERF_AMT    AS OP_ESTM_AMT
+                                                          FROM COA_MON_VVD A
+                                                             , BSA_VVD_MST B
+                                                             , BSA_VVD_CRR_PERF C
+                                                         WHERE A.VSL_CD     = B.VSL_CD
+                                                           AND A.SKD_VOY_NO = B.SKD_VOY_NO
+                                                           AND A.DIR_CD     = B.SKD_DIR_CD
+                                                           AND A.TRD_CD     = B.TRD_CD
+                                                           AND A.RLANE_CD   = B.RLANE_CD
+                                                           AND A.VSL_CD     = C.VSL_CD
+                                                           AND A.SKD_VOY_NO = C.SKD_VOY_NO
+                                                           AND A.DIR_CD     = C.SKD_DIR_CD
+                                                           AND A.TRD_CD     = C.TRD_CD
+                                                           AND A.RLANE_CD   = C.RLANE_CD
+                                                           AND A.COST_YRMON BETWEEN TO_CHAR(TO_DATE(REPLACE(@[rev_yrmon_fr],'-',''),'YYYYMM'),'YYYYMM') AND REPLACE(@[rev_yrmon_to],'-','') /*화면에서 넘어온 Actual Rev. Month*/
+        #if (${re_divr_cd}=='R')
+                                                           AND C.BSA_OP_JB_CD IN ('001','002','004')
+        #elseif (${re_divr_cd}=='E')
+                                                           AND C.BSA_OP_JB_CD IN ('000','003','005')
+        #else
+                                                           AND C.BSA_OP_JB_CD IN ('000','001','002','003','004','005')
+        #end
+        #if (${jo_crr_cd}!='')
+                                                           AND C.CRR_CD     = @[jo_crr_cd]
+        #end
+        #if (${trd_cd}!='')
+                                                           AND A.TRD_CD     = @[trd_cd]
+        #end
+        #if (${rlane_cd}!='')
+                                                           AND A.RLANE_CD   = @[rlane_cd]
+        #end
+
+                                                           AND C.CRR_CD     <> COM_CONSTANTMGR_PKG.COM_getCompanyCode_FNC
+                                                           AND A.DELT_FLG   = 'N'
+                                                            /*-- 2010.01.20 TEU, PRICE중 하나라도 0이 아니면 나와야 한다.*/
+                                                           AND NOT (NVL(C.CRR_BSA_CAPA,0) = 0 AND NVL(C.SLT_PRC_CAPA,0) = 0)
+                                                        ) C
+                                                 WHERE 1=1
+        #if (${proc_jb_flg} != '' || ${proc_jb_flg} == 'Y')
+                                                   /*Based On Agreement Checked Condition*/
+                                                   AND A.VSL_CD     = C.VSL_CD
+                                                   AND A.SKD_VOY_NO = C.SKD_VOY_NO
+                                                   AND A.SKD_DIR_CD = C.SKD_DIR_CD
+                                                   AND A.JO_CRR_CD  = C.JO_CRR_CD
+                                                   AND A.RLANE_CD   = C.RLANE_CD
+                                                   AND A.RE_DIVR_CD = C.RE_DIVR_CD
+        #else
+                                                   /*Based On Agreement Unchecked Condition*/
+                                                   AND A.VSL_CD     = C.VSL_CD       (+)
+                                                   AND A.SKD_VOY_NO = C.SKD_VOY_NO   (+)
+                                                   AND A.SKD_DIR_CD = C.SKD_DIR_CD   (+)
+                                                   AND A.JO_CRR_CD  = C.JO_CRR_CD    (+)
+                                                   AND A.RLANE_CD   = C.RLANE_CD     (+)
+                                                   AND A.RE_DIVR_CD = C.RE_DIVR_CD   (+)
+        #end
+                                               ) A
+                                       ) A
+                                 GROUP BY A.JO_STL_ITM_CD
+                                     , A.EXE_YRMON
+                                     , A.REV_YRMON
+                                     , A.JO_CRR_CD
+                                     , A.VSL_CD
+                                     , A.SKD_VOY_NO
+                                     , A.SKD_DIR_CD
+                                     , A.REV_DIR_CD
+                                     , A.RLANE_CD
+                                     , A.RE_DIVR_CD
+                                     , A.JO_STL_JB_CD
+                                     , A.BSA_QTY
+                                     , A.BSA_SLT_PRC
+                                     , A.ESTM_YRMON
+                                     , A.ST_DT
+                                     , A.END_DT
+                                     , A.SAIL_DYS
+                                     , A.ESTM_DYS
+                               ) X
+                         WHERE 1=1
+                       )
+                 ORDER BY RE_DIVR_CD DESC
+                     , REV_YRMON
+                     , JO_CRR_CD
+                     , RLANE_CD
+                     , VVD
+                     , JO_STL_ITM_CD
+                     , JO_STL_JB_CD
+                     , ACCL_AMT_CORR_FLG
+                     , ESTM_YRMON
+              ) EA
+         WHERE 1=1
+           AND GL.REV_YRMON         = EA.REV_YRMON
+           AND GL.JO_CRR_CD         = EA.JO_CRR_CD
+           AND GL.RLANE_CD          = EA.RLANE_CD
+           AND GL.JO_STL_ITM_CD     = EA.JO_STL_ITM_CD
+           AND GL.RE_DIVR_CD        = EA.RE_DIVR_CD
+           AND GL.VSL_CD            = EA.VSL_CD
+           AND GL.SKD_VOY_NO        = EA.SKD_VOY_NO
+           AND GL.SKD_DIR_CD        = EA.SKD_DIR_CD
+           AND GL.REV_DIR_CD        = EA.REV_DIR_CD
+           AND GL.JO_MNL_CRE_FLG    = 'N' /* S/H, OPR Item 만 날짜 계산을 가져온다. */
+
+  )
+--SELECT * FROM V_VVD_ESTM_BSA_SH_OPR;
+
+  , V_VVD_ESTM_BSA_OTH AS (
+        /* S/H, OPR외의 Item.*/
+        SELECT GL.EXE_YRMON
+             , GL.REV_YRMON
+             , GL.JO_CRR_CD
+             , GL.RLANE_CD
+             , GL.RE_DIVR_CD
+             , GL.VSL_CD
+             , GL.SKD_VOY_NO
+             , GL.SKD_DIR_CD
+             , GL.REV_DIR_CD
+             , GL.ESTM_VVD_TP_CD
+             , GL.ACCT_CD
+             , GL.ACT_DT
+             , GL.JO_STL_ITM_CD
+             , EA.JO_STL_JB_CD
+             , EA.BSA_QTY
+             , EA.BSA_SLT_PRC
+             , EA.ESTM_AMT
+             , EA.ACT_AMT
+             , EA.ACCL_AMT
+             , EA.ACCL_AMT_CORR_FLG
+             , EA.ST_DT
+             , EA.END_DT
+             , EA.SAIL_DYS
+             , EA.ESTM_YRMON
+             , EA.ESTM_DYS
+             , EA.NOW_ESTM_AMT
+             , EA.ORG_ESTM_AMT
+             , EA.NOW_ACT_AMT
+             , EA.ORG_ACT_AMT
+          FROM V_GL_ESTM_REV_VVD GL
+             , (
+                SELECT EXE_YRMON
+                     , REV_YRMON
+                     , JO_CRR_CD
+                     , RLANE_CD
+                     , VSL_CD
+                     , SKD_VOY_NO
+                     , SKD_DIR_CD
+                     , REV_DIR_CD
+                     , RE_DIVR_CD
+                     , JO_STL_ITM_CD
+                     , JO_STL_JB_CD
+                     , BSA_QTY
+                     , BSA_SLT_PRC
+                     , CASE WHEN SUBSTR(END_DT,1,6) = ESTM_YRMON AND ORG_ESTM_AMT != NOW_ESTM_AMT THEN ROUND(ESTM_AMT + (ORG_ESTM_AMT - NOW_ESTM_AMT), 2)
+                            ELSE ESTM_AMT
+                       END ESTM_AMT
+                     , CASE WHEN SUBSTR(END_DT,1,6) = ESTM_YRMON AND ORG_ACT_AMT != NOW_ACT_AMT THEN ROUND(ACT_AMT + (ORG_ACT_AMT - NOW_ACT_AMT), 2)
+                            ELSE ACT_AMT
+                       END ACT_AMT
+                     , ACCL_AMT
+                     , ACCL_AMT_CORR_FLG
+                     , ST_DT
+                     , END_DT
+                     , SAIL_DYS
+                     , ESTM_YRMON
+                     , ESTM_DYS
+                     , VVD
+                     , SUM(ESTM_AMT) OVER (PARTITION BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG
+                                               ORDER BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG) AS NOW_ESTM_AMT
+                     , ORG_ESTM_AMT
+                     , SUM(ACT_AMT) OVER (PARTITION BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG
+                                              ORDER BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG) AS NOW_ACT_AMT
+                     , ORG_ACT_AMT
+                  FROM (
+                        SELECT /*+ ORDERED */
+                               X.EXE_YRMON
+                             , X.REV_YRMON
+                             , X.JO_CRR_CD
+                             , X.VVD
+                             , X.VSL_CD
+                             , X.SKD_VOY_NO
+                             , X.SKD_DIR_CD
+                             , X.REV_DIR_CD
+                             , X.RLANE_CD
+                             , X.RE_DIVR_CD
+                             , X.JO_STL_JB_CD
+                             , X.BSA_QTY
+                             , X.BSA_SLT_PRC
+                             , X.ESTM_AMT
+                             , X.ACT_AMT
+                             , NVL(X.ESTM_AMT,0) - NVL(X.ACT_AMT,0) AS ACCL_AMT
+                             , X.ACCL_AMT_CORR_FLG /*Include Port to Port Basic Settle Estmate Flag*/
+                             , X.JO_STL_ITM_CD
+                             , X.ESTM_YRMON
+                             , X.ST_DT
+                             , X.END_DT
+                             , X.SAIL_DYS
+                             , X.ESTM_DYS
+                             , X.ORG_ESTM_AMT
+                             , X.ORG_ACT_AMT
+                             , SUM(X.ESTM_AMT) OVER (PARTITION BY X.EXE_YRMON, X.REV_YRMON, X.JO_CRR_CD, X.RLANE_CD, X.VVD, X.JO_STL_ITM_CD, X.JO_STL_JB_CD, X.ACCL_AMT_CORR_FLG
+                                                         ORDER BY X.EXE_YRMON, X.REV_YRMON, X.JO_CRR_CD, X.RLANE_CD, X.VVD, X.JO_STL_ITM_CD, X.JO_STL_JB_CD, X.ACCL_AMT_CORR_FLG) AS NOW_ESTM_AMT
+                             , SUM(X.ACT_AMT)  OVER (PARTITION BY X.EXE_YRMON, X.REV_YRMON, X.JO_CRR_CD, X.RLANE_CD, X.VVD, X.JO_STL_ITM_CD, X.JO_STL_JB_CD, X.ACCL_AMT_CORR_FLG
+                                                         ORDER BY X.EXE_YRMON, X.REV_YRMON, X.JO_CRR_CD, X.RLANE_CD, X.VVD, X.JO_STL_ITM_CD, X.JO_STL_JB_CD, X.ACCL_AMT_CORR_FLG) AS NOW_ACT_AMT
+                          FROM (
+                                /* S/H, OPR 외의 Item 은 실적에서 데이타를 가져온다.*/
+                                SELECT A.JO_STL_ITM_CD
+                                     , A.EXE_YRMON
+                                     , A.REV_YRMON
+                                     , A.JO_CRR_CD
+                                     , A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD||A.REV_DIR_CD AS VVD
+                                     , A.VSL_CD
+                                     , A.SKD_VOY_NO
+                                     , A.SKD_DIR_CD
+                                     , A.REV_DIR_CD
+                                     , A.RLANE_CD
+                                     , A.RE_DIVR_CD
+                                     , A.JO_STL_JB_CD
+                                     , A.BSA_QTY
+                                     , A.BSA_SLT_PRC
+                                     , A.ESTM_YRMON
+                                     , A.ST_DT
+                                     , A.END_DT
+                                     , A.SAIL_DYS
+                                     , A.ESTM_DYS
+                                     , ROUND(NVL(SUM(A.ESTM_AMT)    , 0) * ( A.ESTM_DYS / A.SAIL_DYS ), 2) AS ESTM_AMT
+                                     , ROUND(NVL(SUM(A.ACT_AMT)     , 0) * ( A.ESTM_DYS / A.SAIL_DYS ), 2) AS ACT_AMT
+                                     , ROUND(NVL(SUM(A.ESTM_AMT)    , 0), 2) AS ORG_ESTM_AMT
+                                     , ROUND(NVL(SUM(A.ACT_AMT)     , 0), 2) AS ORG_ACT_AMT
+                                     , 'N' AS ACCL_AMT_CORR_FLG
+                                 FROM (
+                                        SELECT /*+ ORDERED USE_HASH(A C D B) FULL(D) */
+                                               A.EXE_YRMON
+                                             , A.REV_YRMON
+                                             , A.JO_CRR_CD
+                                             , A.VSL_CD
+                                             , A.SKD_VOY_NO
+                                             , A.SKD_DIR_CD
+                                             , A.REV_DIR_CD
+                                             , A.RLANE_CD
+                                             , A.RE_DIVR_CD
+                                             , A.JO_STL_ITM_CD
+                                             , C.JO_STL_JB_CD
+                                             , C.BSA_QTY
+                                             , C.BSA_SLT_PRC
+                                             , A.ESTM_YRMON
+                                             , A.ST_DT
+                                             , A.END_DT
+                                             , A.SAIL_DYS
+                                             , A.ESTM_DYS
+                                             , C.ESTM_AMT
+                                             , ROUND(PSO_CONV_CURR_USD_FNC(C.LOCL_CURR_CD, NVL(C.STL_LOCL_AMT,0), SUBSTR(C.ACT_DT,1,6),1),2) AS ACT_AMT
+                                          FROM V_GL_STANDARD_DATA A
+                                             , (
+                                                SELECT /*+ ORDERED USE_HASH(D C B F G) FULL(C) */
+                                                       D.JO_CRR_CD
+                                                     , D.RLANE_CD
+                                                     , D.RE_DIVR_CD
+                                                     , D.VSL_CD
+                                                     , D.SKD_VOY_NO
+                                                     , D.SKD_DIR_CD
+                                                     , D.REV_DIR_CD
+                                                     , D.LOCL_CURR_CD
+                                                     , 0 AS BSA_SLT_PRC
+                                                     , 0 AS BSA_QTY
+                                                     , 0 AS ESTM_AMT
+                                                     , SUM(C.ACT_AMT) AS STL_LOCL_AMT
+                                                     , D.JO_STL_ITM_CD
+                                                     , D.JO_STL_JB_CD
+                                                     , D.ACT_DT
+                                                  FROM JOO_STL_TGT D
+                                                     , JOO_INV_DTL C
+                                                     , JOO_INVOICE B
+                                                     , JOO_CSR P
+                                                     , V_JOO_FINC_MTX V
+                                                 WHERE B.RVS_CMB_FLG    = 'N'
+                                                   AND B.RJCT_CMB_FLG   = 'N'
+                                                   AND B.ACCT_YRMON     = C.ACCT_YRMON
+                                                   AND B.JO_CRR_CD      = C.JO_CRR_CD
+                                                   AND B.INV_NO         = C.INV_NO
+                                                   AND B.RE_DIVR_CD     = C.RE_DIVR_CD
+                                                   AND C.VSL_CD         = D.VSL_CD
+                                                   AND C.SKD_VOY_NO     = D.SKD_VOY_NO
+                                                   AND C.SKD_DIR_CD     = D.SKD_DIR_CD
+                                                   AND C.REV_DIR_CD     = D.REV_DIR_CD
+                                                   AND C.REV_YRMON      = D.REV_YRMON
+                                                   AND C.STL_VVD_SEQ    = D.STL_VVD_SEQ
+#if (${re_divr_cd} !='')
+                                                   AND D.RE_DIVR_CD     = @[re_divr_cd]
+#end
+#if (${jo_crr_cd}!='')
+                                                   AND D.JO_CRR_CD      = @[jo_crr_cd]
+#end
+#if (${trd_cd}!='')
+                                                   /* Condition Trade */
+                                                   AND EXISTS   (   SELECT 'X'
+                                                                      FROM JOO_CARRIER CRR
+                                                                     WHERE 1=1
+                                                                       AND CRR.DELT_FLG         = 'N'
+                                                                       AND CRR.JO_CRR_CD        = D.JO_CRR_CD
+                                                                       AND CRR.RLANE_CD         = D.RLANE_CD
+                                                                       AND CRR.TRD_CD           = @[trd_cd]
+                                                                 )
+#end
+#if (${rlane_cd}!='')
+                                                   AND D.RLANE_CD       = @[rlane_cd]
+#end
+                                                   AND D.JO_CRR_CD      = V.JO_CRR_CD
+                                                   AND D.RLANE_CD       = V.RLANE_CD
+                                                   AND D.RE_DIVR_CD     = V.RE_DIVR_CD
+                                                   AND D.JO_STL_ITM_CD  = V.JO_STL_ITM_CD
+                                                   AND V.JO_MNL_CRE_FLG = 'Y'
+                                                   AND B.SLP_TP_CD      = P.SLP_TP_CD
+                                                   AND B.SLP_FUNC_CD    = P.SLP_FUNC_CD
+                                                   AND B.SLP_OFC_CD     = P.SLP_OFC_CD
+                                                   AND B.SLP_ISS_DT     = P.SLP_ISS_DT
+                                                   AND B.SLP_SER_NO     = P.SLP_SER_NO
+                                                   AND P.APRO_FLG       = 'Y'
+                                                 GROUP BY D.JO_CRR_CD
+                                                     , D.RLANE_CD
+                                                     , D.RE_DIVR_CD
+                                                     , D.VSL_CD
+                                                     , D.SKD_VOY_NO
+                                                     , D.SKD_DIR_CD
+                                                     , D.REV_DIR_CD
+                                                     , D.LOCL_CURR_CD
+                                                     , D.JO_STL_ITM_CD
+                                                     , D.JO_STL_JB_CD
+                                                     , D.ACT_DT
+                                                ) C
+                                         WHERE A.VSL_CD         = C.VSL_CD
+                                           AND A.SKD_VOY_NO     = C.SKD_VOY_NO
+                                           AND A.SKD_DIR_CD     = C.SKD_DIR_CD
+                                           AND A.REV_DIR_CD     = C.REV_DIR_CD
+                                           AND A.JO_STL_ITM_CD  = C.JO_STL_ITM_CD
+                                           AND A.JO_CRR_CD      = C.JO_CRR_CD
+                                           AND A.RLANE_CD       = C.RLANE_CD
+                                           AND A.RE_DIVR_CD     = C.RE_DIVR_CD
+                                        ) A
+                                 GROUP BY A.JO_STL_ITM_CD
+                                     , A.EXE_YRMON
+                                     , A.REV_YRMON
+                                     , A.JO_CRR_CD
+                                     , A.VSL_CD
+                                     , A.SKD_VOY_NO
+                                     , A.SKD_DIR_CD
+                                     , A.REV_DIR_CD
+                                     , A.RLANE_CD
+                                     , A.RE_DIVR_CD
+                                     , A.JO_STL_JB_CD
+                                     , A.BSA_QTY
+                                     , A.BSA_SLT_PRC
+                                     , A.ESTM_YRMON
+                                     , A.ST_DT
+                                     , A.END_DT
+                                     , A.SAIL_DYS
+                                     , A.ESTM_DYS
+
+                               ) X
+                         WHERE 1=1
+                       )
+                 ORDER BY RE_DIVR_CD DESC
+                     , REV_YRMON
+                     , JO_CRR_CD
+                     , RLANE_CD
+                     , VVD
+                     , JO_STL_ITM_CD
+                     , JO_STL_JB_CD
+                     , ACCL_AMT_CORR_FLG
+                     , ESTM_YRMON
+              ) EA
+         WHERE 1=1
+           AND GL.REV_YRMON         = EA.REV_YRMON
+           AND GL.JO_CRR_CD         = EA.JO_CRR_CD
+           AND GL.RLANE_CD          = EA.RLANE_CD
+           AND GL.JO_STL_ITM_CD     = EA.JO_STL_ITM_CD
+           AND GL.RE_DIVR_CD        = EA.RE_DIVR_CD
+           AND GL.VSL_CD            = EA.VSL_CD
+           AND GL.SKD_VOY_NO        = EA.SKD_VOY_NO
+           AND GL.SKD_DIR_CD        = EA.SKD_DIR_CD
+           AND GL.REV_DIR_CD        = EA.REV_DIR_CD
+           AND GL.JO_MNL_CRE_FLG    = 'Y' /* S/H, OPR외의 Item 만 날짜 계산을 가져온다. */
+  )
+--SELECT * FROM V_VVD_ESTM_BSA_OTH;
+
+SELECT EXE_YRMON
+     , REV_YRMON
+     , JO_CRR_CD
+     , RLANE_CD
+     , VSL_CD
+     , SKD_VOY_NO
+     , SKD_DIR_CD
+     , REV_DIR_CD
+     , ESTM_VVD_TP_CD
+     , ACCT_CD
+     , ESTM_ACT_SEQ
+     , NVL(JO_STL_JB_CD, '101') AS JO_STL_JB_CD
+     , BSA_QTY
+     , BSA_SLT_PRC
+     , ROUND(ESTM_AMT, 2) AS ESTM_AMT
+     , ROUND(ACT_AMT, 2) AS ACT_AMT
+     , ROUND((ESTM_AMT - ACT_AMT ), 2) AS ACCL_AMT
+     , SYS_SRC_ID
+     , LOC_CD
+     , JO_IOC_DIV_CD
+     , ESTM_VVD_HDR_ID
+     , JO_CNTR_DIV_CTNT
+     , CNTR_BLK_DIV_CD
+     , ACCL_AMT_CORR_FLG
+     , ACT_DT
+     , ST_DT
+     , END_DT
+     , SAIL_DYS
+     , ESTM_YRMON
+     , ESTM_DYS
+     , JO_STL_ITM_CD
+     , CUST_CNT_CD||CUST_SEQ AS VNDR_CUST_SEQ
+     , CUST_CNT_CD
+     , CUST_SEQ
+     , VVD
+     , JO_STL_JB_NM
+     , CASE WHEN JO_STL_ITM_CD = 'OPR' THEN
+                 SUM(ESTM_AMT) OVER (PARTITION BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, ACCT_CD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG, ESTM_YRMON
+                                         ORDER BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, ACCT_CD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG, ESTM_YRMON)
+            ELSE SUM(ESTM_AMT) OVER (PARTITION BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, ACCT_CD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG
+                                         ORDER BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, ACCT_CD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG)
+       END AS NOW_ESTM_AMT
+     , ORG_ESTM_AMT
+     , SUM(ACT_AMT) OVER (PARTITION BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, ACCT_CD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG
+                              ORDER BY EXE_YRMON, REV_YRMON, JO_CRR_CD, RLANE_CD, VVD, ACCT_CD, JO_STL_ITM_CD, JO_STL_JB_CD, ACCL_AMT_CORR_FLG) AS NOW_ACT_AMT
+     , ORG_ACT_AMT
+     , @[usr_id] AS CRE_USR_ID
+  FROM (
+    SELECT GL.EXE_YRMON
+         , GL.REV_YRMON
+         , GL.JO_CRR_CD
+         , GL.RLANE_CD
+         , GL.VSL_CD
+         , GL.SKD_VOY_NO
+         , GL.SKD_DIR_CD
+         , GL.REV_DIR_CD
+         , GL.ESTM_VVD_TP_CD
+         , GL.ACCT_CD
+         , VB.JO_STL_JB_CD
+         , VB.BSA_QTY
+         , VB.BSA_SLT_PRC
+         , VB.ESTM_AMT
+         , VB.ACT_AMT
+         , VB.ACCL_AMT
+         , 'JOO' AS SYS_SRC_ID
+         , (SELECT LOC_CD FROM   MDM_ORGANIZATION WHERE OFC_CD = @[ofc_cd] AND ROWNUM = 1) AS LOC_CD
+         , GL.ESTM_IOC_DIV_CD AS JO_IOC_DIV_CD
+         , GL.ESTM_VVD_HDR_ID
+         , 'CNTR'   AS JO_CNTR_DIV_CTNT
+         , 'C'      AS CNTR_BLK_DIV_CD
+         , VB.ACCL_AMT_CORR_FLG
+         , GL.ACT_DT
+         , VB.ST_DT
+         , VB.END_DT
+         , VB.SAIL_DYS
+         , VB.ESTM_YRMON
+         , VB.ESTM_DYS
+         , GL.JO_STL_ITM_CD
+         , DECODE(GL.RE_DIVR_CD,'R', GL.CUST_CNT_CD , '') AS CUST_CNT_CD
+         , DECODE(GL.RE_DIVR_CD,'R', GL.CUST_SEQ    , GL.VNDR_SEQ) AS CUST_SEQ
+         , GL.REV_VVD AS VVD
+         , (SELECT A.INTG_CD_VAL_DP_DESC FROM COM_INTG_CD_DTL A WHERE A.INTG_CD_ID = 'CD01866' AND A.INTG_CD_VAL_CTNT = VB.JO_STL_JB_CD AND ROWNUM = 1) AS JO_STL_JB_NM
+         , VB.NOW_ESTM_AMT
+         , VB.ORG_ESTM_AMT
+         , VB.NOW_ACT_AMT
+         , VB.ORG_ACT_AMT
+         , ROW_NUMBER() OVER (PARTITION BY GL.EXE_YRMON, GL.REV_YRMON, GL.JO_CRR_CD, GL.RLANE_CD, GL.REV_VVD, GL.ACCT_CD
+                                  ORDER BY GL.EXE_YRMON, GL.REV_YRMON, GL.JO_CRR_CD, GL.RLANE_CD, GL.REV_VVD, GL.ACCT_CD, GL.JO_STL_ITM_CD, VB.JO_STL_JB_CD, VB.ACCL_AMT_CORR_FLG, VB.ESTM_YRMON) AS ESTM_ACT_SEQ
+      FROM V_GL_ESTM_REV_VVD GL
+         , (
+            SELECT * FROM V_VVD_ESTM_BSA_SH_OPR
+            UNION ALL
+            SELECT * FROM V_VVD_ESTM_BSA_OTH
+            ) VB
+     WHERE 1=1
+       AND GL.VSL_CD            = VB.VSL_CD
+       AND GL.SKD_VOY_NO        = VB.SKD_VOY_NO
+       AND GL.SKD_DIR_CD        = VB.SKD_DIR_CD
+       AND GL.REV_DIR_CD        = VB.REV_DIR_CD
+       AND GL.RLANE_CD          = VB.RLANE_CD
+       AND GL.REV_YRMON         = VB.REV_YRMON
+       AND GL.JO_CRR_CD         = VB.JO_CRR_CD
+       AND GL.RE_DIVR_CD        = VB.RE_DIVR_CD
+       AND GL.JO_STL_ITM_CD     = VB.JO_STL_ITM_CD
+       ) A
+ORDER BY ACCT_CD
+ , REV_YRMON
+ , JO_CRR_CD
+ , RLANE_CD
+ , VVD
+ , JO_STL_ITM_CD
+ , NVL(JO_STL_JB_CD, '101')
+ , ACCL_AMT_CORR_FLG
+ , ESTM_YRMON
+ , ESTM_ACT_SEQ			]]></sql>
+			<params>
+				<param name="jo_crr_cd" type="12" value="" out="N"/>
+				<param name="trd_cd" type="12" value="" out="N"/>
+				<param name="rlane_cd" type="12" value="" out="N"/>
+				<param name="re_divr_cd" type="12" value="" out="N"/>
+				<param name="exe_yrmon" type="12" value="200911" out="N"/>
+				<param name="rev_yrmon_fr" type="12" value="200901" out="N"/>
+				<param name="rev_yrmon_to" type="12" value="200912" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,917 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SpacecontrolinquiryDBDAOSearchWeeklyLfByPolPodListRSQL">
+			<desc><![CDATA[]]></desc>
+			<sql><![CDATA[
+WITH LV_BASE_QTY AS (
+SELECT TRD_CD,SUB_TRD_CD,RLANE_CD,POL,POD,OPR_CD,
+       COST_YR,NUM,COST_WK,VVD,DIR_CD,
+       DECODE(CHK_NUM,1, 
+                        DECODE(BSA,0,DECODE(B_BSA,0,C_BSA,B_BSA),-- RDR Alloc에 없으면 BSA MGMT 값 적용
+                                     DECODE(B_LAST_FLG,1,BSA,-1,B_BSA,0,C_BSA)) -- RDR Alloc이 있으면 Update Date일자 비교하여 최근것을 적용
+                       ,0) BSA, -- 첫번째 pol/pod에만 BSA 적용, check Num이 1만
+      FULL_FLG,POLPOD_FLG,TEU,WGT
+       
+ FROM (     
+    SELECT A.TRD_CD,A.SUB_TRD_CD,A.RLANE_CD,A.POL,A.POD,A.OPR_CD,
+           A.COST_YR,A.NUM,A.COST_WK,A.VVD,A.DIR_CD,
+           A.CHK_NUM,
+           A.BSA,
+           NVL(B.BSA_CAPA,0) B_BSA,
+           NVL(C.BSA_CAPA,0) C_BSA,
+           NVL(B.UPD_DT,TO_DATE('19900101','YYYYMMDD')) B_UPD_DT,
+           NVL(C.UPD_DT,TO_DATE('19900101','YYYYMMDD')) C_UPD_DT,
+           SIGN(NVL(A.UPD_DT,TO_DATE('19900101','YYYYMMDD')) - NVL(B.UPD_DT,TO_DATE('19900101','YYYYMMDD'))) B_LAST_FLG,
+           SIGN(NVL(A.UPD_DT,TO_DATE('19900101','YYYYMMDD')) - NVL(C.UPD_DT,TO_DATE('19900101','YYYYMMDD'))) C_LAST_FLG,                           
+           A.FULL_FLG,A.POLPOD_FLG,A.TEU,A.WGT
+      FROM (
+           SELECT
+             V.TRD_CD
+            ,V.SUB_TRD_CD
+            ,V.RLANE_CD 
+            ,S.POL
+            ,S.POD_ISO POD
+            ,DECODE(S.OPR_CD,COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,S.OPR_CD,'COS','COS','KKL','KKL','YML','YML','OTH') OPR_CD
+            ,S.OPR_CD ORG_OPR_CD
+            ,SUBSTR(V.SLS_YRMON, 1, 4) AS COST_YR
+            ,P.RNUM NUM
+            ,V.COST_WK
+            ,S.VSL_CD||S.VOY_NO||S.DIR_CD AS VVD
+            ,S.DIR_CD
+            ,NVL(B.BASIC_SLOT,0) BSA
+            --POL/POD중 첫번재 VVD에만 값을 붙이기 위한 CHECK FLAG
+            ,ROW_NUMBER() OVER (PARTITION BY TRD_CD,SUB_TRD_CD,RLANE_CD,S.OPR_CD,S.VSL_CD||S.VOY_NO||S.DIR_CD ORDER BY S.VSL_CD||S.VOY_NO||S.DIR_CD) CHK_NUM 
+        	,@[full_flg] full_flg	--volocity param 설정용
+        	,@[polpod_flg] polpod_flg	--volocity param 설정용
+            #if (${full_flg} == 'S' || ${full_flg} == '')
+        	    ,DECODE(S.CNTR_TYPE, 'F', SUM(DECODE(S.CNTR_SIZE, '2', S.QTY, 0)) +
+        	                              SUM(DECODE(S.CNTR_SIZE, '3', S.QTY, 0)) +
+        	                              SUM(DECODE(S.CNTR_SIZE, '4', S.QTY, 0)) * 2 +
+        	                              SUM(DECODE(S.CNTR_SIZE, 'H', S.QTY, 0)) * 2 +
+        	                              SUM(DECODE(S.CNTR_SIZE, 'L', S.QTY, 0)) * 2 , 0)
+        		+
+        	    DECODE(S.CNTR_TYPE, 'E', SUM(DECODE(S.CNTR_SIZE, '2', S.QTY, 0)) +
+        	                              SUM(DECODE(S.CNTR_SIZE, '3', S.QTY, 0)) +
+        	                              SUM(DECODE(S.CNTR_SIZE, '4', S.QTY, 0)) * 2 +
+        	                              SUM(DECODE(S.CNTR_SIZE, 'H', S.QTY, 0)) * 2 +
+        	                              SUM(DECODE(S.CNTR_SIZE, 'L', S.QTY, 0)) * 2 , 0)  AS TEU
+        	    ,SUM(DECODE(S.CNTR_TYPE, 'F', S.WEIGHT, 'E', S.WEIGHT, 0)) AS WGT     
+        
+        	#else
+        	    ,DECODE(S.CNTR_TYPE, 'F', SUM(DECODE(S.CNTR_SIZE, '2', S.QTY, 0)) +
+        	                              SUM(DECODE(S.CNTR_SIZE, '3', S.QTY, 0)) +
+        	                              SUM(DECODE(S.CNTR_SIZE, '4', S.QTY, 0)) * 2 +
+        	                              SUM(DECODE(S.CNTR_SIZE, 'H', S.QTY, 0)) * 2 +
+        	                              SUM(DECODE(S.CNTR_SIZE, 'L', S.QTY, 0)) * 2 , 0)  AS TEU
+        	    ,SUM(DECODE(S.CNTR_TYPE, 'F', S.WEIGHT, 0)) AS WGT     
+        	#end
+            ,MAX(B.UPD_DT) UPD_DT                          
+          FROM  RDR_HEADER     H
+               ,RDR_SUMMARY    S
+               ,(SELECT  M.VSL_CD,
+                         M.VOY_NO,
+                         M.DIR_CD,
+                         M.REGION,
+                         M.OPR_CD        AS OPR_CD,
+                        SUM(M.BSA_SLOT) AS BASIC_SLOT,
+                        MAX(M.UPDATE_TIME) UPD_DT
+                   FROM  RDR_ALLOCATION M
+                  WHERE  1 = 1
+        		   #if (${vvd} == '')
+        		       #if (${rhq} == 'A')
+        		           AND M.REGION IN ('A', 'D', 'E')
+           		       #else 
+        		   	       #if (${rhq} == 'M')
+        		   		       AND M.REGION IN ('M', 'S')
+        		   	       #else
+        		   		       AND M.REGION = @[rhq]
+        		   	       #end
+        		       #end
+        		  #end
+                   
+             GROUP BY M.VSL_CD, M.VOY_NO, M.DIR_CD, M.REGION, M.OPR_CD
+                ) B
+               ,COA_MON_VVD    V
+               ,(
+                SELECT  /*+ INDEX (P XPKCOA_WK_PRD)*/
+                        P.COST_YR||P.COST_WK AS COST_YRWK,
+                        ROWNUM               AS RNUM
+                  FROM  COA_WK_PRD P
+                 WHERE  P.COST_YR||P.COST_WK >= @[year]||@[week]
+                   AND  ROWNUM               <= @[duration]
+                ) P
+          WHERE  1 = 1
+            AND  SUBSTR(V.SLS_YRMON, 1, 4)||V.COST_WK = P.COST_YRWK
+            AND V.DIR_CD     LIKE NULL || '%'
+            AND V.SUB_TRD_CD LIKE NULL || '%'
+            AND  H.VSL_CD = S.VSL_CD
+            AND  H.VOY_NO = S.VOY_NO
+            AND  H.DIR_CD = S.DIR_CD
+            AND  H.REGION = S.REGION
+            AND  H.VSL_CD = V.VSL_CD
+            AND  H.VOY_NO = V.SKD_VOY_NO
+            AND  H.DIR_CD = V.DIR_CD
+            AND  S.VSL_CD = B.VSL_CD(+)
+            AND  S.VOY_NO = B.VOY_NO(+)
+            AND  S.DIR_CD = B.DIR_CD(+)
+            AND  S.REGION = B.REGION(+)
+            AND  S.OPR_CD = B.OPR_CD(+)
+            AND  S.CNTR_SIZE IN ('2',  '3',  '4',  'H',  'L' )
+            AND (V.DELT_FLG IS NULL OR V.DELT_FLG = 'N')
+        	AND  DECODE(V.RLANE_CD, 'WAFIE', 'O', 'NBSIM', 'O', V.IOC_CD)   = 'O'
+        	#if (${vvd} != '') 
+        	    AND S.VSL_CD||S.VOY_NO||S.DIR_CD=@[vvd]
+        	#else
+        	    AND V.TRD_CD= @[trade]
+        		#if (${subtrade} != '') 
+        			AND V.SUB_TRD_CD LIKE @[subtrade] || '%'
+        		#end
+        		#if (${rlane_cd} != '') 
+        	   	    AND V.RLANE_CD=@[rlane_cd]
+        		#end
+        		#if (${pol_cd} != '') 
+        			#if (${polpod_flg} == 'POL')
+        		    	AND S.POL=@[pol_cd]
+        			#else
+        		    	AND S.POD_ISO=@[pol_cd]
+        			#end
+        		#end
+        		#if (${rhq} == 'A')
+        			AND H.REGION IN ('A', 'D',DECODE(V.RLANE_CD||V.DIR_CD,'AE1AEW','E','D'))
+        		#else
+        			#if (${rhq} == 'M')
+        				AND H.REGION IN ('M', 'S')
+        			#elseif (${rhq} =='E')
+                        AND H.REGION = DECODE(V.RLANE_CD,'AE1AE',DECODE(V.DIR_CD,'E','E','XXX'),'E')
+                    #else
+        				AND H.REGION = @[rhq]
+        			#end
+        		#end
+        		#if (${bound} != '') 
+        			AND V.DIR_CD     LIKE @[bound] || '%'
+        		#end
+        	#end
+        
+            GROUP BY
+        	     V.SLS_YRMON
+        	    ,V.COST_WK
+        	    ,V.TRD_CD
+        	    ,V.SUB_TRD_CD
+        	    ,V.RLANE_CD
+        	    ,S.CNTR_TYPE
+        	    ,S.VSL_CD||S.VOY_NO||S.DIR_CD
+        	    ,S.DIR_CD
+        	    ,S.POL
+        	    ,S.OPR_CD
+        	    ,S.POD_ISO
+        	    ,B.BASIC_SLOT
+        	    ,RNUM
+        ) A,
+        (
+        SELECT TRD_CD,SUB_TRD_CD,VSL_CD,SKD_VOY_NO,SKD_DIR_CD,CRR_CD,
+               BSA_CAPA,UPD_DT
+          FROM SPC_BSA_MGMT
+         WHERE 1=1
+            #if (${trade} != '')
+                   AND TRD_CD     = @[trade]
+            #end      
+        	#if (${subtrade} != '') 
+        			AND SUB_TRD_CD LIKE @[subtrade] || '%'
+        	#end            
+            #if (${bound} != '')
+                   AND SKD_DIR_CD     = @[bound]
+            #end          
+        ) B,
+        (
+        SELECT DISTINCT TRD_CD,SUB_TRD_CD,VSL_CD,SKD_DIR_CD,CRR_CD,
+               FIRST_VALUE(BSA_CAPA) OVER(PARTITION BY TRD_CD,SUB_TRD_CD,VSL_CD,CRR_CD,SKD_DIR_CD ORDER BY BSA_SEQ DESC) BSA_CAPA,
+			   FIRST_VALUE(UPD_DT) OVER(PARTITION BY TRD_CD,SUB_TRD_CD,VSL_CD,CRR_CD,SKD_DIR_CD ORDER BY BSA_SEQ DESC) UPD_DT
+          FROM SPC_BSA_MGMT
+         WHERE 1=1
+            #if (${trade} != '')
+                   AND TRD_CD     = @[trade]
+            #end      
+        	#if (${subtrade} != '') 
+        			AND SUB_TRD_CD LIKE @[subtrade] || '%'
+        	#end            
+            #if (${bound} != '')
+                   AND SKD_DIR_CD     = @[bound]
+            #end         
+        ) C             
+     WHERE A.TRD_CD        	= B.TRD_CD(+)
+       AND A.SUB_TRD_CD    	= B.SUB_TRD_CD(+)
+       AND SUBSTR(A.VVD,1,4)= B.VSL_CD(+)
+       AND SUBSTR(A.VVD,5,4)= B.SKD_VOY_NO(+)
+       AND A.DIR_CD       	= B.SKD_DIR_CD(+)
+       AND A.ORG_OPR_CD     = B.CRR_CD(+)
+       AND A.TRD_CD         = C.TRD_CD(+)
+       AND A.SUB_TRD_CD    	= C.SUB_TRD_CD(+)
+       AND SUBSTR(A.VVD,1,4)= C.VSL_CD(+)
+       AND A.DIR_CD      	= C.SKD_DIR_CD(+)   
+       AND A.ORG_OPR_CD     = C.CRR_CD(+)
+ )
+ ORDER BY
+         COST_WK
+        ,TRD_CD
+        ,SUB_TRD_CD
+        ,RLANE_CD
+        ,POL
+        ,OPR_CD
+        ,POD
+)
+, LV_VVD_INFO AS
+(
+-- 주차별 VVD 정보
+	SELECT TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD,COST_WK,SUM(BSA) BSA,NUM,
+       	   MAX(DECODE(GRP_SEQ,1,VVD))||MAX(DECODE(GRP_SEQ,2,'/'||VVD))||MAX(DECODE(GRP_SEQ,3,'/'||VVD))||MAX(DECODE(GRP_SEQ,4,'/'||VVD)) VVD
+
+	  FROM (
+    		SELECT  TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD,COST_WK,NUM,
+           			VVD,
+           			SUM(BSA) BSA
+           			,ROW_NUMBER() OVER(PARTITION BY TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD,COST_WK ORDER BY TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD,COST_WK) GRP_SEQ
+    		  FROM LV_BASE_QTY
+    		 GROUP BY TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD,COST_WK ,VVD ,NUM
+		   )
+	 GROUP BY TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD,COST_WK,NUM
+)
+,
+LV_QTY_FORM AS
+(
+-- QTY,BSA 정보 기본 FORM 완성
+SELECT DECODE(GRP_ID,'00001',1,'00000',2,'01101',1,'01100',2,'11101',1,'11100',2) LVL,
+       100+ROWNUM*5 SEQ,
+       COUNT(*) OVER(PARTITION BY KB, GRP_ID, TRD_CD, SUB_TRD_CD, RLANE_CD) CNT,
+	   A.*
+FROM (
+    SELECT 
+    	   #if (${polpod_flg} == 'POL')
+    	       KB,GROUPING(SUB_TRD_CD)||GROUPING(RLANE_CD)||GROUPING(DIR_CD)||GROUPING(POL)||GROUPING(POD) GRP_ID,
+    	   #else
+    	   	   KB,GROUPING(SUB_TRD_CD)||GROUPING(RLANE_CD)||GROUPING(DIR_CD)||GROUPING(POD)||GROUPING(POL) GRP_ID,
+    	   #end
+           TRD_CD,
+           SUB_TRD_CD,
+           RLANE_CD,
+		   DIR_CD,
+           #if (${polpod_flg} == 'POL')
+           	   POL,
+           	   POD,
+           #else
+           	   POD,
+           	   POL,
+           #end
+           (
+           SELECT SUM(BSA) FROM LV_BASE_QTY B
+            WHERE A.TRD_CD=B.TRD_CD
+            AND   A.SUB_TRD_CD=B.SUB_TRD_CD
+            AND   A.RLANE_CD=B.RLANE_CD
+            AND   A.DIR_CD=B.DIR_CD
+           ) BSA,
+           -- 1주차 합계
+           SUM(DECODE(NUM||OPR_CD,'1'||COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,DECODE(KB,1,TEU,BSA),0)) WK1_COM_QTY,
+           SUM(DECODE(NUM||OPR_CD,'1'||COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,DECODE(KB,1,WGT,BSA),0)) WK1_COM_WGT,
+           SUM(DECODE(NUM||OPR_CD,'1COS',DECODE(KB,1,TEU,BSA),0)) WK1_COS_QTY,
+           SUM(DECODE(NUM||OPR_CD,'1COS',DECODE(KB,1,WGT,BSA),0)) WK1_COS_WGT,
+           SUM(DECODE(NUM||OPR_CD,'1KKL',DECODE(KB,1,TEU,BSA),0)) WK1_KKL_QTY,
+           SUM(DECODE(NUM||OPR_CD,'1KKL',DECODE(KB,1,WGT,BSA),0)) WK1_KKL_WGT,
+           SUM(DECODE(NUM||OPR_CD,'1YML',DECODE(KB,1,TEU,BSA),0)) WK1_YML_QTY,
+           SUM(DECODE(NUM||OPR_CD,'1YML',DECODE(KB,1,WGT,BSA),0)) WK1_YML_WGT,
+           SUM(DECODE(NUM||OPR_CD,'1OTH',DECODE(KB,1,TEU,BSA),0)) WK1_OTH_QTY,
+           SUM(DECODE(NUM||OPR_CD,'1OTH',DECODE(KB,1,WGT,BSA),0)) WK1_OTH_WGT,
+           SUM(DECODE(NUM,         '1',  DECODE(KB,1,TEU,BSA),0)) WK1_POL_QTY,
+           SUM(DECODE(NUM,         '1',  DECODE(KB,1,WGT,BSA),0)) WK1_POL_WGT,
+           -- 2주차 합계
+           SUM(DECODE(NUM||OPR_CD,'2'||COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,DECODE(KB,1,TEU,BSA),0)) WK2_COM_QTY,
+           SUM(DECODE(NUM||OPR_CD,'2'||COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,DECODE(KB,1,WGT,BSA),0)) WK2_COM_WGT,
+           SUM(DECODE(NUM||OPR_CD,'2COS',DECODE(KB,1,TEU,BSA),0)) WK2_COS_QTY,
+           SUM(DECODE(NUM||OPR_CD,'2COS',DECODE(KB,1,WGT,BSA),0)) WK2_COS_WGT,
+           SUM(DECODE(NUM||OPR_CD,'2KKL',DECODE(KB,1,TEU,BSA),0)) WK2_KKL_QTY,
+           SUM(DECODE(NUM||OPR_CD,'2KKL',DECODE(KB,1,WGT,BSA),0)) WK2_KKL_WGT,
+           SUM(DECODE(NUM||OPR_CD,'2YML',DECODE(KB,1,TEU,BSA),0)) WK2_YML_QTY,
+           SUM(DECODE(NUM||OPR_CD,'2YML',DECODE(KB,1,WGT,BSA),0)) WK2_YML_WGT,
+           SUM(DECODE(NUM||OPR_CD,'2OTH',DECODE(KB,1,TEU,BSA),0)) WK2_OTH_QTY,
+           SUM(DECODE(NUM||OPR_CD,'2OTH',DECODE(KB,1,WGT,BSA),0)) WK2_OTH_WGT,
+           SUM(DECODE(NUM,         '2',  DECODE(KB,1,TEU,0),0))   WK2_POL_QTY,
+           SUM(DECODE(NUM,         '2',  DECODE(KB,1,WGT,BSA),0)) WK2_POL_WGT,
+           -- 3주차 합계
+           SUM(DECODE(NUM||OPR_CD,'3'||COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,DECODE(KB,1,TEU,BSA),0)) WK3_COM_QTY,
+           SUM(DECODE(NUM||OPR_CD,'3'||COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,DECODE(KB,1,WGT,BSA),0)) WK3_COM_WGT,
+           SUM(DECODE(NUM||OPR_CD,'3COS',DECODE(KB,1,TEU,BSA),0)) WK3_COS_QTY,
+           SUM(DECODE(NUM||OPR_CD,'3COS',DECODE(KB,1,WGT,BSA),0)) WK3_COS_WGT,
+           SUM(DECODE(NUM||OPR_CD,'3KKL',DECODE(KB,1,TEU,BSA),0)) WK3_KKL_QTY,
+           SUM(DECODE(NUM||OPR_CD,'3KKL',DECODE(KB,1,WGT,BSA),0)) WK3_KKL_WGT,
+           SUM(DECODE(NUM||OPR_CD,'3YML',DECODE(KB,1,TEU,BSA),0)) WK3_YML_QTY,
+           SUM(DECODE(NUM||OPR_CD,'3YML',DECODE(KB,1,WGT,BSA),0)) WK3_YML_WGT,
+           SUM(DECODE(NUM||OPR_CD,'3OTH',DECODE(KB,1,TEU,BSA),0)) WK3_OTH_QTY,
+           SUM(DECODE(NUM||OPR_CD,'3OTH',DECODE(KB,1,WGT,BSA),0)) WK3_OTH_WGT,
+           SUM(DECODE(NUM,         '3',  DECODE(KB,1,TEU,BSA),0)) WK3_POL_QTY,
+           SUM(DECODE(NUM,         '3',  DECODE(KB,1,WGT,BSA),0)) WK3_POL_WGT,
+           -- 4주차 합계
+           SUM(DECODE(NUM||OPR_CD,'4'||COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,DECODE(KB,1,TEU,BSA),0)) WK4_COM_QTY,
+           SUM(DECODE(NUM||OPR_CD,'4'||COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,DECODE(KB,1,WGT,BSA),0)) WK4_COM_WGT,
+           SUM(DECODE(NUM||OPR_CD,'4COS',DECODE(KB,1,TEU,BSA),0)) WK4_COS_QTY,
+           SUM(DECODE(NUM||OPR_CD,'4COS',DECODE(KB,1,WGT,BSA),0)) WK4_COS_WGT,
+           SUM(DECODE(NUM||OPR_CD,'4KKL',DECODE(KB,1,TEU,BSA),0)) WK4_KKL_QTY,
+           SUM(DECODE(NUM||OPR_CD,'4KKL',DECODE(KB,1,WGT,BSA),0)) WK4_KKL_WGT,
+           SUM(DECODE(NUM||OPR_CD,'4YML',DECODE(KB,1,TEU,BSA),0)) WK4_YML_QTY,
+           SUM(DECODE(NUM||OPR_CD,'4YML',DECODE(KB,1,WGT,BSA),0)) WK4_YML_WGT,
+           SUM(DECODE(NUM||OPR_CD,'4OTH',DECODE(KB,1,TEU,BSA),0)) WK4_OTH_QTY,
+           SUM(DECODE(NUM||OPR_CD,'4OTH',DECODE(KB,1,WGT,BSA),0)) WK4_OTH_WGT,
+           SUM(DECODE(NUM,         '4',  DECODE(KB,1,TEU,BSA),0)) WK4_POL_QTY,
+           SUM(DECODE(NUM,         '4',  DECODE(KB,1,WGT,BSA),0)) WK4_POL_WGT,
+           -- 5주차 합계
+           SUM(DECODE(NUM||OPR_CD,'5'||COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,DECODE(KB,1,TEU,BSA),0)) WK5_COM_QTY,
+           SUM(DECODE(NUM||OPR_CD,'5'||COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,DECODE(KB,1,WGT,BSA),0)) WK5_COM_WGT,
+           SUM(DECODE(NUM||OPR_CD,'5COS',DECODE(KB,1,TEU,BSA),0)) WK5_COS_QTY,
+           SUM(DECODE(NUM||OPR_CD,'5COS',DECODE(KB,1,WGT,BSA),0)) WK5_COS_WGT,
+           SUM(DECODE(NUM||OPR_CD,'5KKL',DECODE(KB,1,TEU,BSA),0)) WK5_KKL_QTY,
+           SUM(DECODE(NUM||OPR_CD,'5KKL',DECODE(KB,1,WGT,BSA),0)) WK5_KKL_WGT,
+           SUM(DECODE(NUM||OPR_CD,'5YML',DECODE(KB,1,TEU,BSA),0)) WK5_YML_QTY,
+           SUM(DECODE(NUM||OPR_CD,'5YML',DECODE(KB,1,WGT,BSA),0)) WK5_YML_WGT,
+           SUM(DECODE(NUM||OPR_CD,'5OTH',DECODE(KB,1,TEU,BSA),0)) WK5_OTH_QTY,
+           SUM(DECODE(NUM||OPR_CD,'5OTH',DECODE(KB,1,WGT,BSA),0)) WK5_OTH_WGT,
+           SUM(DECODE(NUM,         '5',  DECODE(KB,1,TEU,BSA),0)) WK5_POL_QTY,
+           SUM(DECODE(NUM,         '5',  DECODE(KB,1,WGT,BSA),0)) WK5_POL_WGT,
+           -- 주차 합계
+           SUM(DECODE(OPR_CD,COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,DECODE(KB,1,TEU,BSA),0))       GTL_COM_QTY,
+           SUM(DECODE(OPR_CD,COM_ConstantMgr_PKG.COM_getCompanyCode_FNC,DECODE(KB,1,WGT,BSA),0))       GTL_COM_WGT,
+           SUM(DECODE(OPR_CD,'COS',DECODE(KB,1,TEU,BSA),0))       GTL_COS_QTY,
+           SUM(DECODE(OPR_CD,'COS',DECODE(KB,1,WGT,BSA),0))       GTL_COS_WGT,
+           SUM(DECODE(OPR_CD,'KKL',DECODE(KB,1,TEU,BSA),0))       GTL_KKL_QTY,
+           SUM(DECODE(OPR_CD,'KKL',DECODE(KB,1,WGT,BSA),0))       GTL_KKL_WGT,
+           SUM(DECODE(OPR_CD,'YML',DECODE(KB,1,TEU,BSA),0))       GTL_YML_QTY,
+           SUM(DECODE(OPR_CD,'YML',DECODE(KB,1,WGT,BSA),0))       GTL_YML_WGT,
+           SUM(DECODE(OPR_CD,'OTH',DECODE(KB,1,TEU,BSA),0))       GTL_OTH_QTY,
+           SUM(DECODE(OPR_CD,'OTH',DECODE(KB,1,WGT,BSA),0))       GTL_OTH_WGT,
+           SUM(DECODE(KB,1,TEU,BSA))                              GTL_POL_QTY,
+           SUM(DECODE(KB,1,WGT,BSA))                              GTL_POL_WGT
+    FROM LV_BASE_QTY A, (SELECT LEVEL AS KB FROM DUAL CONNECT BY LEVEL<=2) B
+
+    GROUP BY GROUPING SETS(
+    					   #if (${polpod_flg} == 'POL')
+	                           (KB,TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD,POL),    --00001
+	                           (KB,TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD,POL,POD),--00000
+	                           (KB,TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD),        --00011
+	
+	                           (KB,TRD_CD,SUB_TRD_CD,POL),              --01101
+	                           (KB,TRD_CD,SUB_TRD_CD,POL,POD),          --01100
+	                           (KB,TRD_CD,SUB_TRD_CD),                  --01111
+	
+	                           (KB,TRD_CD,POL),                         --11101
+	                           (KB,TRD_CD,POL,POD),                     --11100
+	                           (KB,TRD_CD)                              --11111
+	                       #else
+	                           (KB,TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD,POD),    --00001
+	                           (KB,TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD,POD,POL),--00000
+	                           (KB,TRD_CD,SUB_TRD_CD,RLANE_CD,DIR_CD),        --00011
+	
+	                           (KB,TRD_CD,SUB_TRD_CD,POD),              --01101
+	                           (KB,TRD_CD,SUB_TRD_CD,POD,POL),          --01100
+	                           (KB,TRD_CD,SUB_TRD_CD),                  --01111
+	
+	                           (KB,TRD_CD,POD),                         --11101
+	                           (KB,TRD_CD,POD,POL),                     --11100
+	                           (KB,TRD_CD)                              --11111
+	                       #end
+
+                          )
+
+    ORDER BY TRD_CD
+            ,DECODE(A.SUB_TRD_CD,NULL,'1',A.SUB_TRD_CD) DESC
+            ,RLANE_CD
+            #if (${polpod_flg} == 'POL')
+            	,POL
+            	,NVL(POD,'AAAAA')
+			#else
+	            ,POD
+	            ,NVL(POL,'AAAAA')
+			#end
+			,KB
+			
+    ) A
+    WHERE ((KB = 1) OR -- QTY 합
+           (KB =2 AND GRP_ID IN('00011','01111','11111')) -- BSA 합 중 필요 LEVEL만 선택
+          )
+)
+, LV_TOTAL_QTY AS
+(
+
+-- LANE 별 VVD 정보
+SELECT 9 LVL,NEW_SEQ AS SEQ,GRP_ID,TRD_CD,
+--       SUB_TRD_CD,RLANE_CD,
+	   SUB_TRD_CD,
+	   DIR_CD,
+       SUB_TRD_CD||'/ '||SUBSTR(RLANE_CD,1,3) SUB_RLANE_CD,
+       #if (${polpod_flg} == 'POL')
+       	   '' AS POL,
+       	   '' AS POD,
+       #else
+       	   '' AS POD,
+       	   '' AS POL,
+       #end
+	   BSA,
+       VVD1 AS WK1_COM_QTY,
+       VVD1 AS WK1_COM_WGT,
+       VVD1 AS WK1_COS_QTY,
+       VVD1 AS WK1_COS_WGT,
+       VVD1 AS WK1_KKL_QTY,
+       VVD1 AS WK1_KKL_WGT,
+       VVD1 AS WK1_YML_QTY,
+       VVD1 AS WK1_YML_WGT,
+       VVD1 AS WK1_OTH_QTY,
+       VVD1 AS WK1_OTH_WGT,
+       VVD1 AS WK1_POL_QTY,
+       VVD1 AS WK1_POL_WGT,
+       
+       VVD2 AS WK2_COM_QTY,
+       VVD2 AS WK2_COM_WGT,
+       VVD2 AS WK2_COS_QTY,
+       VVD2 AS WK2_COS_WGT,
+       VVD2 AS WK2_KKL_QTY,
+       VVD2 AS WK2_KKL_WGT,
+       VVD2 AS WK2_YML_QTY,
+       VVD2 AS WK2_YML_WGT,
+       VVD2 AS WK2_OTH_QTY,
+       VVD2 AS WK2_OTH_WGT,
+       VVD2 AS WK2_POL_QTY,
+       VVD2 AS WK2_POL_WGT,
+       
+       VVD3 AS WK3_COM_QTY,
+       VVD3 AS WK3_COM_WGT,
+       VVD3 AS WK3_COS_QTY,
+       VVD3 AS WK3_COS_WGT,
+       VVD3 AS WK3_KKL_QTY,
+       VVD3 AS WK3_KKL_WGT,
+       VVD3 AS WK3_YML_QTY,
+       VVD3 AS WK3_YML_WGT,
+       VVD3 AS WK3_OTH_QTY,
+       VVD3 AS WK3_OTH_WGT,
+       VVD3 AS WK3_POL_QTY,
+       VVD3 AS WK3_POL_WGT,
+       
+       VVD4 AS WK4_COM_QTY,
+       VVD4 AS WK4_COM_WGT,
+       VVD4 AS WK4_COS_QTY,
+       VVD4 AS WK4_COS_WGT,
+       VVD4 AS WK4_KKL_QTY,
+       VVD4 AS WK4_KKL_WGT,
+       VVD4 AS WK4_YML_QTY,
+       VVD4 AS WK4_YML_WGT,
+       VVD4 AS WK4_OTH_QTY,
+       VVD4 AS WK4_OTH_WGT,
+       VVD4 AS WK4_POL_QTY,
+       VVD4 AS WK4_POL_WGT,
+       
+       VVD5 AS WK5_COM_QTY,
+       VVD5 AS WK5_COM_WGT,
+       VVD5 AS WK5_COS_QTY,
+       VVD5 AS WK5_COS_WGT,
+       VVD5 AS WK5_KKL_QTY,
+       VVD5 AS WK5_KKL_WGT,
+       VVD5 AS WK5_YML_QTY,
+       VVD5 AS WK5_YML_WGT,
+       VVD5 AS WK5_OTH_QTY,
+       VVD5 AS WK5_OTH_WGT,
+       VVD5 AS WK5_POL_QTY,
+       VVD5 AS WK5_POL_WGT,
+
+       '' AS GTL_COM_QTY,
+       '' AS GTL_COM_WGT,
+       '' AS GTL_COS_QTY,
+       '' AS GTL_COS_WGT,
+       '' AS GTL_KKL_QTY,
+       '' AS GTL_KKL_WGT,
+       '' AS GTL_YML_QTY,
+       '' AS GTL_YML_WGT,
+       '' AS GTL_OTH_QTY,
+       '' AS GTL_OTH_WGT,
+       '' AS GTL_POL_QTY,
+       '' AS GTL_POL_WGT
+FROM (
+    SELECT A.SEQ-1 NEW_SEQ,
+           (SELECT B.VVD
+            FROM LV_VVD_INFO B
+            WHERE A.TRD_CD=B.TRD_CD
+            AND   A.SUB_TRD_CD=B.SUB_TRD_CD
+            AND   A.RLANE_CD=B.RLANE_CD
+		    AND	  A.DIR_CD=B.DIR_CD
+            AND   B.NUM=1
+            ) VVD1,
+           (SELECT B.VVD
+            FROM LV_VVD_INFO B
+            WHERE A.TRD_CD=B.TRD_CD
+            AND   A.SUB_TRD_CD=B.SUB_TRD_CD
+            AND   A.RLANE_CD=B.RLANE_CD
+		    AND	  A.DIR_CD=B.DIR_CD
+            AND   B.NUM=2
+            ) VVD2,
+           (SELECT B.VVD
+            FROM LV_VVD_INFO B
+            WHERE A.TRD_CD=B.TRD_CD
+            AND   A.SUB_TRD_CD=B.SUB_TRD_CD
+            AND   A.RLANE_CD=B.RLANE_CD
+		    AND	  A.DIR_CD=B.DIR_CD
+            AND   B.NUM=3
+            ) VVD3,
+           (SELECT B.VVD
+            FROM LV_VVD_INFO B
+            WHERE A.TRD_CD=B.TRD_CD
+            AND   A.SUB_TRD_CD=B.SUB_TRD_CD
+            AND   A.RLANE_CD=B.RLANE_CD
+		    AND	  A.DIR_CD=B.DIR_CD
+            AND   B.NUM=4
+            ) VVD4,
+           (SELECT B.VVD
+            FROM LV_VVD_INFO B
+            WHERE A.TRD_CD=B.TRD_CD
+            AND   A.SUB_TRD_CD=B.SUB_TRD_CD
+            AND   A.RLANE_CD=B.RLANE_CD
+		    AND	  A.DIR_CD=B.DIR_CD
+            AND   B.NUM=5
+            ) VVD5,
+            A.*
+    FROM LV_QTY_FORM A
+    WHERE  A.SEQ IN  (SELECT MIN(B.SEQ)
+                      FROM   LV_QTY_FORM B
+                      WHERE  B.GRP_ID='00001'
+                      GROUP BY B.RLANE_CD,B.DIR_CD)
+    
+    )
+UNION ALL
+-- QTY & BSA 정보 편집
+SELECT 
+	 LVL
+	,SEQ
+	,GRP_ID,TRD_CD
+	,SUB_TRD_CD
+	,DIR_CD
+    ,SUB_TRD_CD||DECODE(RLANE_CD,NULL,'','/ '||SUBSTR(RLANE_CD,1,3)) SUB_RLANE_CD
+    ,NVL(DECODE(KB||GRP_ID,'100011','TTL LOAD',
+                      '101111','TTL LOAD',
+                      '111111','TTL LOAD',
+                      '200011','BSA',
+                      '201111','BSA',
+                      '211111','BSA',
+                      #if (${polpod_flg} == 'POL')
+                      	   POL),'-') POL
+                      #else
+                      	   POD),'-') POD
+                      #end
+    ,NVL(DECODE(KB||GRP_ID,'100011','TTL LOAD',
+                      '101111','TTL LOAD',
+                      '111111','TTL LOAD',
+                      '200011','BSA',
+                      '201111','BSA',
+                      '211111','BSA',
+                      #if (${polpod_flg} == 'POL')
+	                      POD),'+') POD
+                      #else
+                      	  POL),'+') POL
+                      #end
+	                  
+	,BSA
+    ,TO_CHAR(WK1_COM_QTY,'999,990')    WK1_COM_QTY
+    ,TO_CHAR(WK1_COM_WGT,'999,990')    WK1_COM_WGT
+    ,TO_CHAR(WK1_COS_QTY,'999,990')    WK1_COS_QTY
+    ,TO_CHAR(WK1_COS_WGT,'999,990')    WK1_COS_WGT
+    ,TO_CHAR(WK1_KKL_QTY,'999,990')    WK1_KKL_QTY
+    ,TO_CHAR(WK1_KKL_WGT,'999,990')    WK1_KKL_WGT
+    ,TO_CHAR(WK1_YML_QTY,'999,990')    WK1_YML_QTY
+    ,TO_CHAR(WK1_YML_WGT,'999,990')    WK1_YML_WGT
+    ,TO_CHAR(WK1_OTH_QTY,'999,990')    WK1_OTH_QTY
+    ,TO_CHAR(WK1_OTH_WGT,'999,990')    WK1_OTH_WGT
+    ,TO_CHAR(WK1_POL_QTY,'999,990')    WK1_POL_QTY
+    ,TO_CHAR(WK1_POL_WGT,'999,990')    WK1_POL_WGT
+    
+    ,TO_CHAR(WK2_COM_QTY,'999,990')    WK2_COM_QTY
+    ,TO_CHAR(WK2_COM_WGT,'999,990')    WK2_COM_WGT
+    ,TO_CHAR(WK2_COS_QTY,'999,990')    WK2_COS_QTY
+    ,TO_CHAR(WK2_COS_WGT,'999,990')    WK2_COS_WGT
+    ,TO_CHAR(WK2_KKL_QTY,'999,990')    WK2_KKL_QTY
+    ,TO_CHAR(WK2_KKL_WGT,'999,990')    WK2_KKL_WGT
+    ,TO_CHAR(WK2_YML_QTY,'999,990')    WK2_YML_QTY
+    ,TO_CHAR(WK2_YML_WGT,'999,990')    WK2_YML_WGT
+    ,TO_CHAR(WK2_OTH_QTY,'999,990')    WK2_OTH_QTY
+    ,TO_CHAR(WK2_OTH_WGT,'999,990')    WK2_OTH_WGT
+    ,TO_CHAR(WK2_POL_QTY,'999,990')    WK2_POL_QTY
+    ,TO_CHAR(WK2_POL_WGT,'999,990')    WK2_POL_WGT
+    
+    ,TO_CHAR(WK3_COM_QTY,'999,990')    WK3_COM_QTY
+    ,TO_CHAR(WK3_COM_WGT,'999,990')    WK3_COM_WGT
+    ,TO_CHAR(WK3_COS_QTY,'999,990')    WK3_COS_QTY
+    ,TO_CHAR(WK3_COS_WGT,'999,990')    WK3_COS_WGT
+    ,TO_CHAR(WK3_KKL_QTY,'999,990')    WK3_KKL_QTY
+    ,TO_CHAR(WK3_KKL_WGT,'999,990')    WK3_KKL_WGT
+    ,TO_CHAR(WK3_YML_QTY,'999,990')    WK3_YML_QTY
+    ,TO_CHAR(WK3_YML_WGT,'999,990')    WK3_YML_WGT
+    ,TO_CHAR(WK3_OTH_QTY,'999,990')    WK3_OTH_QTY
+    ,TO_CHAR(WK3_OTH_WGT,'999,990')    WK3_OTH_WGT
+    ,TO_CHAR(WK3_POL_QTY,'999,990')    WK3_POL_QTY
+    ,TO_CHAR(WK3_POL_WGT,'999,990')    WK3_POL_WGT
+    
+    ,TO_CHAR(WK4_COM_QTY,'999,990')    WK4_COM_QTY
+    ,TO_CHAR(WK4_COM_WGT,'999,990')    WK4_COM_WGT
+    ,TO_CHAR(WK4_COS_QTY,'999,990')    WK4_COS_QTY
+    ,TO_CHAR(WK4_COS_WGT,'999,990')    WK4_COS_WGT
+    ,TO_CHAR(WK4_KKL_QTY,'999,990')    WK4_KKL_QTY
+    ,TO_CHAR(WK4_KKL_WGT,'999,990')    WK4_KKL_WGT
+    ,TO_CHAR(WK4_YML_QTY,'999,990')    WK4_YML_QTY
+    ,TO_CHAR(WK4_YML_WGT,'999,990')    WK4_YML_WGT
+    ,TO_CHAR(WK4_OTH_QTY,'999,990')    WK4_OTH_QTY
+    ,TO_CHAR(WK4_OTH_WGT,'999,990')    WK4_OTH_WGT
+    ,TO_CHAR(WK4_POL_QTY,'999,990')    WK4_POL_QTY
+    ,TO_CHAR(WK4_POL_WGT,'999,990')    WK4_POL_WGT
+    
+    ,TO_CHAR(WK5_COM_QTY,'999,990')    WK5_COM_QTY
+    ,TO_CHAR(WK5_COM_WGT,'999,990')    WK5_COM_WGT
+    ,TO_CHAR(WK5_COS_QTY,'999,990')    WK5_COS_QTY
+    ,TO_CHAR(WK5_COS_WGT,'999,990')    WK5_COS_WGT
+    ,TO_CHAR(WK5_KKL_QTY,'999,990')    WK5_KKL_QTY
+    ,TO_CHAR(WK5_KKL_WGT,'999,990')    WK5_KKL_WGT
+    ,TO_CHAR(WK5_YML_QTY,'999,990')    WK5_YML_QTY
+    ,TO_CHAR(WK5_YML_WGT,'999,990')    WK5_YML_WGT
+    ,TO_CHAR(WK5_OTH_QTY,'999,990')    WK5_OTH_QTY
+    ,TO_CHAR(WK5_OTH_WGT,'999,990')    WK5_OTH_WGT
+    ,TO_CHAR(WK5_POL_QTY,'999,990')    WK5_POL_QTY
+    ,TO_CHAR(WK5_POL_WGT,'999,990')    WK5_POL_WGT
+    
+    ,TO_CHAR(GTL_COM_QTY,'999,990')    GTL_COM_QTY
+    ,TO_CHAR(GTL_COM_WGT,'999,990')    GTL_COM_WGT
+    ,TO_CHAR(GTL_COS_QTY,'999,990')    GTL_COS_QTY
+    ,TO_CHAR(GTL_COS_WGT,'999,990')    GTL_COS_WGT
+    ,TO_CHAR(GTL_KKL_QTY,'999,990')    GTL_KKL_QTY
+    ,TO_CHAR(GTL_KKL_WGT,'999,990')    GTL_KKL_WGT
+    ,TO_CHAR(GTL_YML_QTY,'999,990')    GTL_YML_QTY
+    ,TO_CHAR(GTL_YML_WGT,'999,990')    GTL_YML_WGT
+    ,TO_CHAR(GTL_OTH_QTY,'999,990')    GTL_OTH_QTY
+    ,TO_CHAR(GTL_OTH_WGT,'999,990')    GTL_OTH_WGT
+    ,TO_CHAR(GTL_POL_QTY,'999,990')    GTL_POL_QTY
+    ,TO_CHAR(GTL_POL_WGT,'999,990')    GTL_POL_WGT
+FROM LV_QTY_FORM A
+UNION ALL
+-- L/F 계산
+SELECT 
+    A.LVL
+    ,B.SEQ+6 SEQ
+	,A.GRP_ID
+	,A.TRD_CD
+	,A.SUB_TRD_CD
+	,A.DIR_CD
+    ,A.SUB_TRD_CD||DECODE(A.RLANE_CD,NULL,'','/ '||SUBSTR(A.RLANE_CD,1,3)) SUB_RLANE_CD
+    #if (${polpod_flg} == 'POL')
+	    ,'L/F' POL
+	    ,'L/F' POD
+	#else
+	    ,'L/F' POD
+	    ,'L/F' POL
+	#end
+	,A.BSA
+    ,TO_CHAR(DECODE(B.WK1_COM_QTY,0,0,A.WK1_COM_QTY/B.WK1_COM_QTY*100),'9,990.0')||'%'   WK1_COM_QTY
+    ,'' WK1_COM_WGT
+    ,TO_CHAR(DECODE(B.WK1_COS_QTY,0,0,A.WK1_COS_QTY/B.WK1_COS_QTY*100),'9,990.0')||'%'   WK1_COS_QTY
+    ,'' WK1_COS_WGT
+    ,TO_CHAR(DECODE(B.WK1_KKL_QTY,0,0,A.WK1_KKL_QTY/B.WK1_KKL_QTY*100),'9,990.0')||'%'   WK1_KKL_QTY
+    ,'' WK1_KKL_WGT
+    ,TO_CHAR(DECODE(B.WK1_YML_QTY,0,0,A.WK1_YML_QTY/B.WK1_YML_QTY*100),'9,990.0')||'%'   WK1_YML_QTY
+    ,'' WK1_YML_WGT
+    ,TO_CHAR(DECODE(B.WK1_OTH_QTY,0,0,A.WK1_OTH_QTY/B.WK1_OTH_QTY*100),'9,990.0')||'%'   WK1_OTH_QTY
+    ,'' WK1_OTH_WGT
+    ,TO_CHAR(DECODE(B.WK1_POL_QTY,0,0,A.WK1_POL_QTY/B.WK1_POL_QTY*100),'9,990.0')||'%'   WK1_POL_QTY
+    ,'' WK1_POL_WGT
+                                                                       
+    ,TO_CHAR(DECODE(B.WK2_COM_QTY,0,0,A.WK2_COM_QTY/B.WK2_COM_QTY*100),'9,990.0')||'%'   WK2_COM_QTY
+    ,'' WK2_COM_WGT
+    ,TO_CHAR(DECODE(B.WK2_COS_QTY,0,0,A.WK2_COS_QTY/B.WK2_COS_QTY*100),'9,990.0')||'%'   WK2_COS_QTY
+    ,'' WK2_COS_WGT
+    ,TO_CHAR(DECODE(B.WK2_KKL_QTY,0,0,A.WK2_KKL_QTY/B.WK2_KKL_QTY*100),'9,990.0')||'%'   WK2_KKL_QTY
+    ,'' WK2_KKL_WGT
+    ,TO_CHAR(DECODE(B.WK2_YML_QTY,0,0,A.WK2_YML_QTY/B.WK2_YML_QTY*100),'9,990.0')||'%'   WK2_YML_QTY
+    ,'' WK2_YML_WGT
+    ,TO_CHAR(DECODE(B.WK2_OTH_QTY,0,0,A.WK2_OTH_QTY/B.WK2_OTH_QTY*100),'9,990.0')||'%'   WK2_OTH_QTY
+    ,'' WK2_OTH_WGT
+    ,TO_CHAR(DECODE(B.WK2_POL_QTY,0,0,A.WK2_POL_QTY/B.WK2_POL_QTY*100),'9,990.0')||'%'   WK2_POL_QTY
+    ,'' WK2_POL_WGT
+    
+    ,TO_CHAR(DECODE(B.WK3_COM_QTY,0,0,A.WK3_COM_QTY/B.WK3_COM_QTY*100),'9,990.0')||'%'   WK3_COM_QTY
+    ,'' WK3_COM_WGT
+    ,TO_CHAR(DECODE(B.WK3_COS_QTY,0,0,A.WK3_COS_QTY/B.WK3_COS_QTY*100),'9,990.0')||'%'   WK3_COS_QTY
+    ,'' WK3_COS_WGT
+    ,TO_CHAR(DECODE(B.WK3_KKL_QTY,0,0,A.WK3_KKL_QTY/B.WK3_KKL_QTY*100),'9,990.0')||'%'   WK3_KKL_QTY
+    ,'' WK3_KKL_WGT
+    ,TO_CHAR(DECODE(B.WK3_YML_QTY,0,0,A.WK3_YML_QTY/B.WK3_YML_QTY*100),'9,990.0')||'%'   WK3_YML_QTY
+    ,'' WK3_YML_WGT
+    ,TO_CHAR(DECODE(B.WK3_OTH_QTY,0,0,A.WK3_OTH_QTY/B.WK3_OTH_QTY*100),'9,990.0')||'%'   WK3_OTH_QTY
+    ,'' WK3_OTH_WGT
+    ,TO_CHAR(DECODE(B.WK3_POL_QTY,0,0,A.WK3_POL_QTY/B.WK3_POL_QTY*100),'9,990.0')||'%'   WK3_POL_QTY
+    ,'' WK3_POL_WGT
+    
+    ,TO_CHAR(DECODE(B.WK4_COM_QTY,0,0,A.WK4_COM_QTY/B.WK4_COM_QTY*100),'9,990.0')||'%'   WK4_COM_QTY
+    ,'' WK4_COM_WGT
+    ,TO_CHAR(DECODE(B.WK4_COS_QTY,0,0,A.WK4_COS_QTY/B.WK4_COS_QTY*100),'9,990.0')||'%'   WK4_COS_QTY
+    ,'' WK4_COS_WGT
+    ,TO_CHAR(DECODE(B.WK4_KKL_QTY,0,0,A.WK4_KKL_QTY/B.WK4_KKL_QTY*100),'9,990.0')||'%'   WK4_KKL_QTY
+    ,'' WK4_KKL_WGT
+    ,TO_CHAR(DECODE(B.WK4_YML_QTY,0,0,A.WK4_YML_QTY/B.WK4_YML_QTY*100),'9,990.0')||'%'   WK4_YML_QTY
+    ,'' WK4_YML_WGT
+    ,TO_CHAR(DECODE(B.WK4_OTH_QTY,0,0,A.WK4_OTH_QTY/B.WK4_OTH_QTY*100),'9,990.0')||'%'   WK4_OTH_QTY
+    ,'' WK4_OTH_WGT
+    ,TO_CHAR(DECODE(B.WK4_POL_QTY,0,0,A.WK4_POL_QTY/B.WK4_POL_QTY*100),'9,990.0')||'%'   WK4_POL_QTY
+    ,'' WK4_POL_WGT
+    
+    ,TO_CHAR(DECODE(B.WK5_COM_QTY,0,0,A.WK5_COM_QTY/B.WK5_COM_QTY*100),'9,990.0')||'%'   WK5_COM_QTY
+    ,'' WK5_COM_WGT
+    ,TO_CHAR(DECODE(B.WK5_COS_QTY,0,0,A.WK5_COS_QTY/B.WK5_COS_QTY*100),'9,990.0')||'%'   WK5_COS_QTY
+    ,'' WK5_COS_WGT
+    ,TO_CHAR(DECODE(B.WK5_KKL_QTY,0,0,A.WK5_KKL_QTY/B.WK5_KKL_QTY*100),'9,990.0')||'%'   WK5_KKL_QTY
+    ,'' WK5_KKL_WGT
+    ,TO_CHAR(DECODE(B.WK5_YML_QTY,0,0,A.WK5_YML_QTY/B.WK5_YML_QTY*100),'9,990.0')||'%'   WK5_YML_QTY
+    ,'' WK5_YML_WGT
+    ,TO_CHAR(DECODE(B.WK5_OTH_QTY,0,0,A.WK5_OTH_QTY/B.WK5_OTH_QTY*100),'9,990.0')||'%'   WK5_OTH_QTY
+    ,'' WK5_OTH_WGT
+    ,TO_CHAR(DECODE(B.WK5_POL_QTY,0,0,A.WK5_POL_QTY/B.WK5_POL_QTY*100),'9,990.0')||'%'   WK5_POL_QTY
+    ,'' WK5_POL_WGT
+                                                                   
+    ,TO_CHAR(DECODE(B.GTL_COM_QTY,0,0,A.GTL_COM_QTY/B.GTL_COM_QTY*100),'9,990.0')||'%'   GTL_COM_QTY
+    ,'' GTL_COM_WGT
+    ,TO_CHAR(DECODE(B.GTL_COS_QTY,0,0,A.GTL_COS_QTY/B.GTL_COS_QTY*100),'9,990.0')||'%'   GTL_COS_QTY
+    ,'' GTL_COS_WGT
+    ,TO_CHAR(DECODE(B.GTL_KKL_QTY,0,0,A.GTL_KKL_QTY/B.GTL_KKL_QTY*100),'9,990.0')||'%'   GTL_KKL_QTY
+    ,'' GTL_KKL_WGT
+    ,TO_CHAR(DECODE(B.GTL_YML_QTY,0,0,A.GTL_YML_QTY/B.GTL_YML_QTY*100),'9,990.0')||'%'   GTL_YML_QTY
+    ,'' GTL_YML_WGT
+    ,TO_CHAR(DECODE(B.GTL_OTH_QTY,0,0,A.GTL_OTH_QTY/B.GTL_OTH_QTY*100),'9,990.0')||'%'   GTL_OTH_QTY
+    ,'' GTL_POL_WGT
+    ,TO_CHAR(DECODE(B.GTL_POL_QTY,0,0,A.GTL_POL_QTY/B.GTL_POL_QTY*100),'9,990.0')||'%'   GTL_POL_QTY
+    ,'' GTL_POL_WGT
+FROM LV_QTY_FORM A, LV_QTY_FORM B
+WHERE (A.KB||A.GRP_ID) IN('100011','101111','111111') -- QTY
+AND   (B.KB||B.GRP_ID) IN('200011','201111','211111') -- BSA
+AND   B.SEQ = A.SEQ + (5 * B.CNT)
+ORDER BY SEQ
+
+)
+
+
+
+SELECT
+	 A.LVL LVL0
+    ,DECODE(A.LVL,1,1,2,2,0) LVL
+    ,A.SEQ+1 SEQ
+	,A.GRP_ID
+	,A.TRD_CD
+	,A.SUB_TRD_CD
+	,A.DIR_CD
+	#if (${vvd} != '') 
+	    ,NVL(A.SUB_RLANE_CD,'-')	-- 6
+	#else 
+		#if (${subtrade} != '' && ${rlane_cd} == '' && ${pol_cd} == '') 
+		    ,NVL(DECODE(A.GRP_ID,'01100',A.SUB_RLANE_CD||' TTL', '01101',A.SUB_RLANE_CD||' TTL','01111',A.SUB_RLANE_CD||' TTL',    A.SUB_RLANE_CD),'-')	--1
+		#elseif (${subtrade} != '' && ${rlane_cd} != '' && ${pol_cd} == '') 
+			,NVL(A.SUB_RLANE_CD,'-')	--2
+		#elseif ( ${subtrade} == '' && ${rlane_cd} == '' && ${pol_cd} != '' ) 
+			,NVL(DECODE(A.GRP_ID,'11101',A.TRD_CD||' TTL',A.SUB_RLANE_CD),A.TRD_CD||' TTL')	--3
+		#elseif ( ${subtrade} != '' && ${rlane_cd} == '' && ${pol_cd} != '' ) 
+			--,NVL(DECODE(A.GRP_ID,'0101',A.SUB_RLANE_CD||' TTL',A.SUB_RLANE_CD),'')	--4
+			,NVL(DECODE(A.GRP_ID,'01100',A.SUB_TRD_CD||' TTL','01101',A.SUB_TRD_CD||' TTL',A.SUB_RLANE_CD),A.TRD_CD||' TTL')	--4
+		#elseif ( ${subtrade} != ''  && ${rlane_cd} != '' && ${pol_cd} != '') 
+			,NVL(A.SUB_RLANE_CD,'-')	--5
+		#else 
+			,CASE WHEN A.GRP_ID LIKE '01%' THEN 
+			    A.SUB_RLANE_CD||' TTL' 
+             WHEN A.GRP_ID LIKE '11%' THEN 
+			    A.TRD_CD||' TTL' 				    
+			 ELSE 
+			    A.SUB_RLANE_CD
+			 END 
+		#end
+	#end SUB_RLANE_CD
+    #if (${polpod_flg} == 'POL')
+    	,NVL(A.POL,'-') POL
+    	,DECODE(A.LVL,NULL,'',A.POD) POD
+    #else
+	    ,NVL(A.POD,'-')  POD
+    	,DECODE(A.LVL,NULL,'',A.POL) POL
+    #end
+	,NVL(A.BSA,0) BSA
+	,TRIM(A.WK1_COM_QTY) WK1_COM_QTY
+    ,TRIM(A.WK1_COM_WGT) WK1_COM_WGT
+    ,TRIM(A.WK1_COS_QTY) WK1_COS_QTY
+    ,TRIM(A.WK1_COS_WGT) WK1_COS_WGT
+    ,TRIM(A.WK1_KKL_QTY) WK1_KKL_QTY
+    ,TRIM(A.WK1_KKL_WGT) WK1_KKL_WGT
+    ,TRIM(A.WK1_YML_QTY) WK1_YML_QTY
+    ,TRIM(A.WK1_YML_WGT) WK1_YML_WGT
+    ,TRIM(A.WK1_OTH_QTY) WK1_OTH_QTY
+    ,TRIM(A.WK1_OTH_WGT) WK1_OTH_WGT
+    ,TRIM(A.WK1_POL_QTY) WK1_POL_QTY
+    ,TRIM(A.WK1_POL_WGT) WK1_POL_WGT
+    
+    ,TRIM(A.WK2_COM_QTY) WK2_COM_QTY
+    ,TRIM(A.WK2_COM_WGT) WK2_COM_WGT
+    ,TRIM(A.WK2_COS_QTY) WK2_COS_QTY
+    ,TRIM(A.WK2_COS_WGT) WK2_COS_WGT
+    ,TRIM(A.WK2_KKL_QTY) WK2_KKL_QTY
+    ,TRIM(A.WK2_KKL_WGT) WK2_KKL_WGT
+    ,TRIM(A.WK2_YML_QTY) WK2_YML_QTY
+    ,TRIM(A.WK2_YML_WGT) WK2_YML_WGT
+    ,TRIM(A.WK2_OTH_QTY) WK2_OTH_QTY
+    ,TRIM(A.WK2_OTH_WGT) WK2_OTH_WGT
+    ,TRIM(A.WK2_POL_QTY) WK2_POL_QTY
+    ,TRIM(A.WK2_POL_WGT) WK2_POL_WGT
+    
+    ,TRIM(A.WK3_COM_QTY) WK3_COM_QTY
+    ,TRIM(A.WK3_COM_WGT) WK3_COM_WGT
+    ,TRIM(A.WK3_COS_QTY) WK3_COS_QTY
+    ,TRIM(A.WK3_COS_WGT) WK3_COS_WGT
+    ,TRIM(A.WK3_KKL_QTY) WK3_KKL_QTY
+    ,TRIM(A.WK3_KKL_WGT) WK3_KKL_WGT
+    ,TRIM(A.WK3_YML_QTY) WK3_YML_QTY
+    ,TRIM(A.WK3_YML_WGT) WK3_YML_WGT
+    ,TRIM(A.WK3_OTH_QTY) WK3_OTH_QTY
+    ,TRIM(A.WK3_OTH_WGT) WK3_OTH_WGT
+    ,TRIM(A.WK3_POL_QTY) WK3_POL_QTY
+    ,TRIM(A.WK3_POL_WGT) WK3_POL_WGT
+    
+    ,TRIM(A.WK4_COM_QTY) WK4_COM_QTY
+    ,TRIM(A.WK4_COM_WGT) WK4_COM_WGT
+    ,TRIM(A.WK4_COS_QTY) WK4_COS_QTY
+    ,TRIM(A.WK4_COS_WGT) WK4_COS_WGT
+    ,TRIM(A.WK4_KKL_QTY) WK4_KKL_QTY
+    ,TRIM(A.WK4_KKL_WGT) WK4_KKL_WGT
+    ,TRIM(A.WK4_YML_QTY) WK4_YML_QTY
+    ,TRIM(A.WK4_YML_WGT) WK4_YML_WGT
+    ,TRIM(A.WK4_OTH_QTY) WK4_OTH_QTY
+    ,TRIM(A.WK4_OTH_WGT) WK4_OTH_WGT
+    ,TRIM(A.WK4_POL_QTY) WK4_POL_QTY
+    ,TRIM(A.WK4_POL_WGT) WK4_POL_WGT
+    
+    ,TRIM(A.WK5_COM_QTY) WK5_COM_QTY
+    ,TRIM(A.WK5_COM_WGT) WK5_COM_WGT
+    ,TRIM(A.WK5_COS_QTY) WK5_COS_QTY
+    ,TRIM(A.WK5_COS_WGT) WK5_COS_WGT
+    ,TRIM(A.WK5_KKL_QTY) WK5_KKL_QTY
+    ,TRIM(A.WK5_KKL_WGT) WK5_KKL_WGT
+    ,TRIM(A.WK5_YML_QTY) WK5_YML_QTY
+    ,TRIM(A.WK5_YML_WGT) WK5_YML_WGT
+    ,TRIM(A.WK5_OTH_QTY) WK5_OTH_QTY
+    ,TRIM(A.WK5_OTH_WGT) WK5_OTH_WGT
+    ,TRIM(A.WK5_POL_QTY) WK5_POL_QTY
+    ,TRIM(A.WK5_POL_WGT) WK5_POL_WGT
+
+    ,TRIM(A.GTL_COM_QTY) GTL_COM_QTY
+    ,TRIM(A.GTL_COM_WGT) GTL_COM_WGT
+    ,TRIM(A.GTL_COS_QTY) GTL_COS_QTY
+    ,TRIM(A.GTL_COS_WGT) GTL_COS_WGT
+    ,TRIM(A.GTL_KKL_QTY) GTL_KKL_QTY
+    ,TRIM(A.GTL_KKL_WGT) GTL_KKL_WGT
+    ,TRIM(A.GTL_YML_QTY) GTL_YML_QTY
+    ,TRIM(A.GTL_YML_WGT) GTL_YML_WGT
+    ,TRIM(A.GTL_OTH_QTY) GTL_OTH_QTY
+    ,TRIM(A.GTL_OTH_WGT) GTL_OTH_WGT
+    ,TRIM(A.GTL_POL_QTY) GTL_POL_QTY
+    ,TRIM(A.GTL_POL_WGT) GTL_POL_WGT
+FROM LV_TOTAL_QTY A
+WHERE 1=1
+#if (${vvd} != '') 
+    AND A.GRP_ID LIKE '00%'	-- 6
+#else
+	#if (${subtrade} != '' && ${rlane_cd} == '' && ${pol_cd} == '') 
+	    AND A.GRP_ID LIKE '00%' OR A.GRP_ID LIKE '01%'	-- 1
+	#elseif (${subtrade} != '' && ${rlane_cd} != '' && ${pol_cd} == '') 
+		AND A.GRP_ID LIKE '00%'    -- 2
+	#elseif ( ${subtrade} == '' && ${rlane_cd} == '' && ${pol_cd} != '' ) 
+		--AND A.GRP_ID LIKE '11%'	-- 3
+		AND A.GRP_ID NOT IN ('00011','01111','11111')
+	#elseif ( ${subtrade} != '' && ${rlane_cd} == '' && ${pol_cd} != '' ) 
+		--AND A.GRP_ID LIKE '01%'	-- 4
+		--AND A.LVL IN (1,2)
+		AND A.GRP_ID NOT IN ('00011','01111','11111')
+	#elseif ( ${subtrade} != ''  && ${rlane_cd} != '' && ${pol_cd} != '') 
+		AND A.GRP_ID LIKE '00%'	-- 5
+		AND A.GRP_ID NOT IN ('00011','01111','11111')
+	#end
+#end
+ORDER BY TRD_CD
+        ,DECODE(A.SUB_TRD_CD,NULL,'1',A.SUB_TRD_CD) DESC
+        ,DECODE(A.BSA,NULL,0,A.BSA) DESC
+        ,SUB_RLANE_CD
+        ,SEQ			]]></sql>
+			<params>
+				<param name="full_flg" type="12" value="" out="N"/>
+				<param name="polpod_flg" type="12" value="" out="N"/>
+				<param name="rhq" type="12" value="" out="N"/>
+				<param name="year" type="12" value="" out="N"/>
+				<param name="week" type="12" value="" out="N"/>
+				<param name="duration" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="subtrade" type="12" value="" out="N"/>
+				<param name="rlane_cd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="bound" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

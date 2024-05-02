@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="BudgetPortChargeMgtDBDAOsearchSumRptByPeriodInvRSQL">
+			<desc><![CDATA[Search Invoice Summary 
+[2015.04.23] 000002, PSO > '000001', 'COM'
+[2015.07.21]Virtual Add Calling 처리. VSK_VSL_PORT_SKD.NVL(VT_ADD_CALL_FLG, 'N') = 'N'
+[2015.09.09]IN 일대 VOY_NO, DIR_CD 를 다시 돌려서 조회하는 로직 추가.]]></desc>
+			<sql><![CDATA[
+WITH V_STATUS AS (
+    SELECT STATUS_CD
+         , STATUS_NM
+         , STATUS_SEQ
+      FROM (SELECT INTG_CD_VAL_CTNT AS STATUS_CD
+                 , INTG_CD_VAL_DP_DESC AS STATUS_NM
+                 , INTG_CD_VAL_DP_SEQ AS STATUS_SEQ
+              FROM COM_INTG_CD_DTL
+             WHERE INTG_CD_ID='CD02355'
+           )
+     ORDER BY STATUS_SEQ
+)
+--SELECT * FROM V_STATUS;
+SELECT M.*
+  FROM (SELECT M.VSKD_PORT_RHQ_CD
+             , M.INV_OFC_CD AS SLS_OFC_CD
+             , M.ISS_CTY_CD
+             , M.SO_SEQ
+             , SUBSTR(M.YD_CD, 1, 5) AS PORT_CD
+             , M.YD_CD
+             , NVL(M.VSL_SLAN_CD, ( SELECT SLAN_CD
+                                      FROM AR_MST_REV_VVD V
+                                     WHERE V.VSL_CD     = M.VSL_CD
+                                       AND V.SKD_VOY_NO = M.SKD_VOY_NO
+                                       AND V.SKD_DIR_CD = M.SKD_DIR_CD
+                                       AND ROWNUM = 1 )) AS VSL_SLAN_CD
+             , M.VSL_CD||M.SKD_VOY_NO||M.SKD_DIR_CD AS VVD
+             , C.ACCT_CD
+             , C.ACCT_ENG_NM
+             , M.LGS_COST_CD AS COST_CD
+             , C.LGS_COST_FULL_NM AS COST_NM
+             , M.VNDR_SEQ
+             , (SELECT V.VNDR_LGL_ENG_NM
+                  FROM MDM_VENDOR V
+                 WHERE V.VNDR_SEQ = M.VNDR_SEQ
+                   AND NVL(V.DELT_FLG,'N') = 'N' ) AS VNDR_LGL_ENG_NM
+             , M.CURR_CD
+             , LOCL_AMT AS LOCL_AMT
+             , USD_AMT AS USD_AMT
+             --, LISTAGG (M.DIFF_RMK, ',') WITHIN GROUP (ORDER BY M.DIFF_RMK) AS DIFF_RMK
+             , M.DIFF_RMK
+             , MC.CNTR_VSL_CLSS_CAPA AS VSL_CLSS
+             , M.INV_NO
+             --, M.STATUS
+             , (SELECT STATUS_NM
+                  FROM V_STATUS V
+                 WHERE V.STATUS_CD = M.STATUS
+               ) AS STATUS
+             , M.CSR_NO
+             , M.IO
+             , M.CALC_AMT
+             , M.ADJ_AMT
+             , M.XPR_DESC
+             , M.FOML_DESC
+             , M.RLANE_CD
+             , M.REV_VVD
+             , M.CRE_USR_ID
+             , TO_CHAR(M.CRE_DT,'YYYY-MM-DD') AS CRE_DT
+             , M.UPD_USR_ID
+             , TO_CHAR(M.UPD_DT,'YYYY-MM-DD') AS UPD_DT
+             , CASE WHEN M.IO = 'IN' AND M.LOCL_AMT = 0 AND M.USD_AMT = 0 THEN 'N'
+                    ELSE 'Y'
+               END CHK_DATA
+             , M.CLPT_IND_SEQ
+             , M.ACT_DT
+             , TO_CHAR(M.PAY_DUE_DT,'YYYY-MM-DD') AS PAY_DUE_DT
+             , TO_CHAR(TO_DATE(M.PAY_DT,'YYYY-MM-DD'),'YYYY-MM-DD') AS PAY_DT
+          FROM (SELECT M.ISS_CTY_CD
+                     , M.SO_SEQ
+                     , M.VNDR_SEQ
+                     , M.YD_CD
+                     , M.CURR_CD
+                     , D.VSL_CD
+                     , DECODE(D.VT_VVD_FLG,'Y',SUBSTR(D.TURN_VVD_CD,5,4), D.SKD_VOY_NO) AS SKD_VOY_NO
+                     , DECODE(D.VT_VVD_FLG,'Y',SUBSTR(D.TURN_VVD_CD,9,1), D.SKD_DIR_CD) AS SKD_DIR_CD
+                     #if ( ${date_type} == 'VVD')
+                     , S.SLAN_CD AS VSL_SLAN_CD
+                     #else
+                     , (SELECT S.VSL_SLAN_CD
+                          FROM VSK_VSL_SKD S
+                         WHERE 1=1
+                           AND S.VSl_CD                 = D.VSL_CD
+                           AND S.SKD_VOY_NO             = D.SKD_VOY_NO
+                           AND S.SKD_DIR_CD             = D.SKD_DIR_CD
+                        ) AS VSL_SLAN_CD
+                     #end
+                     , D.LGS_COST_CD
+                     , D.ORG_SO_DTL_SEQ
+                     , NVL(SUM(LOCL_AMT)    OVER(PARTITION BY D.ISS_CTY_CD, D.SO_SEQ, D.SO_DTL_SEQ), M.INV_LOCL_AMT ) AS LOCL_AMT --TL USD Amount
+                     , NVL(SUM(USD_AMT)     OVER(PARTITION BY D.ISS_CTY_CD, D.SO_SEQ, D.SO_DTL_SEQ), M.TTL_USD_AMT  ) AS USD_AMT
+                     , DIFF_RMK
+                     , (CASE WHEN D.ORG_SO_DTL_SEQ = D.SO_DTL_SEQ THEN 1
+                             WHEN D.SO_DTL_SEQ IS NULL THEN 1
+                             ELSE 0
+                        END) AS RNK
+                     , NVL(LOC.VOP_PORT_CTRL_OFC_CD, LOC.SLS_OFC_CD) AS INV_OFC_CD
+                     , (SELECT DISTINCT OFC_CD
+                          FROM MDM_ORGANIZATION
+                         WHERE 1=1
+                           AND OFC_KND_CD = '2'
+                           AND PRNT_OFC_CD = (  SELECT OFC_CD
+                                                  FROM TABLE ( COM_OfficeCodeMgr_PKG.COM_getOfficeCodeList_FNC('000001', 'COM'))
+                                                 WHERE ROWNUM = 1)
+                         START WITH OFC_CD = LOC.SLS_OFC_CD
+                       CONNECT BY PRIOR PRNT_OFC_CD = OFC_CD
+                       ) AS VSKD_PORT_RHQ_CD
+                     , M.INV_NO
+                     , DECODE(AP.CSR_NO, NULL, DECODE( M.PSO_CHG_STS_CD, 'A', 'C', 'S'), AP.INV_STS_CD) AS STATUS
+                     , AP.CSR_NO
+                     , NVL(D.CRE_USR_ID , M.CRE_USR_ID  ) AS CRE_USR_ID
+                     , NVL(D.CRE_DT     , M.CRE_DT      ) AS CRE_DT
+                     , NVL(D.UPD_USR_ID , M.UPD_USR_ID  ) AS UPD_USR_ID
+                     , NVL(D.UPD_DT     , M.UPD_DT      ) AS UPD_DT
+                     , DECODE(D.IO_BND_CD, 'I', 'IN', 'O', 'OUT', '') AS IO
+                     , NVL(SUM(D.CALC_AMT)  OVER(PARTITION BY D.ISS_CTY_CD, D.SO_SEQ, D.SO_DTL_SEQ), 0) AS CALC_AMT --Tariff Cost
+                     , NVL(SUM(D.ADJ_AMT)   OVER(PARTITION BY D.ISS_CTY_CD, D.SO_SEQ, D.SO_DTL_SEQ), 0) AS ADJ_AMT --Adjustment Amount
+                     , D.XPR_DESC
+                     , D.FOML_DESC
+                     , D.VSL_CD || D.SKD_VOY_NO || D.SKD_DIR_CD||D.REV_DIR_CD AS REV_VVD
+                     --, NVL(GEV.CORR_VSL_CD, D.VSL_CD) || NVL(GEV.CORR_SKD_VOY_NO, D.SKD_VOY_NO)||NVL(GEV.CORR_SKD_DIR_CD, D.SKD_DIR_CD)||NVL(GEV.CORR_REV_DIR_CD, D.REV_DIR_CD) AS REV_VVD
+                     , D.RLANE_CD
+                     , D.CLPT_IND_SEQ
+                     , (SELECT TO_CHAR(VPS.VPS_ETD_DT , 'YYYYMMDD')
+                          FROM VSK_VSL_PORT_SKD VPS
+                         WHERE 1=1
+                           AND VPS.VSL_CD       = D.VSL_CD
+                           AND VPS.SKD_VOY_NO   = D.SKD_VOY_NO
+                           AND VPS.SKD_DIR_CD   = D.SKD_DIR_CD
+                           AND VPS.YD_CD        = M.YD_CD
+                           AND VPS.CLPT_IND_SEQ = D.CLPT_IND_SEQ
+                       ) AS ACT_DT /*2016.05.10 ETD Add*/
+                     , AP.PAY_DUE_DT
+                     , (SELECT AIH.PAY_DT
+                          FROM AP_INV_HDR AIH
+                         WHERE AIH.CSR_NO = AP.CSR_NO
+                       ) AS PAY_DT
+                  FROM PSO_CHARGE M
+                     , PSO_CHG_DTL D
+                 #if ( ${date_type} == 'VVD')
+                     , VSK_VSL_PORT_SKD S
+                 #end
+                     , MDM_LOCATION LOC
+                     , AP_PAY_INV AP
+                     --, GL_ERR_VVD GEV
+                 WHERE 1=1
+                #if ( ${date_type} == 'CR' || ${date_type} == 'IS')
+                   AND M.ISS_CTY_CD             = D.ISS_CTY_CD(+)
+                   AND M.SO_SEQ                 = D.SO_SEQ(+)
+                   AND SUBSTR(M.YD_CD, 1, 5)    = LOC.LOC_CD(+)
+                #elseif ( ${date_type} == 'VVD')
+                   AND M.ISS_CTY_CD             = D.ISS_CTY_CD
+                   AND M.SO_SEQ                 = D.SO_SEQ
+                   AND D.VSl_CD                 = S.VSL_CD
+                   AND D.SKD_VOY_NO             = S.SKD_VOY_NO
+                   AND D.SKD_DIR_CD             = S.SKD_DIR_CD
+                   AND M.YD_CD                  = S.YD_CD
+                   AND D.CLPT_IND_SEQ           = S.CLPT_IND_SEQ
+                   AND SUBSTR(M.YD_CD, 1, 5)    = LOC.LOC_CD
+                #end
+                   AND AP.INV_SUB_SYS_CD(+)     = 'PSO'
+                   AND M.INV_RGST_NO            = AP.INV_RGST_NO(+)
+                   AND M.INV_OFC_CD             = AP.INV_OFC_CD(+)
+                #if ( ${date_type} == 'CR')
+                   AND NVL(D.CRE_DT, M.CRE_DT)  BETWEEN TO_DATE(@[from_date], 'YYYY-MM-DD') AND TO_DATE(@[to_date], 'YYYY-MM-DD') + .99999 /* 조건 : invoice creation = CR */
+                #elseif ( ${date_type} == 'IS')
+                   AND M.ISS_DT                 BETWEEN TO_DATE(@[from_date], 'YYYY-MM-DD') AND TO_DATE(@[to_date], 'YYYY-MM-DD') + .99999 /* 조건 : issue date = IS  */
+                #elseif ( ${date_type} == 'VVD')
+                   AND S.VPS_ETD_DT             BETWEEN TO_DATE(@[from_date], 'YYYY-MM-DD') AND TO_DATE(@[to_date], 'YYYY-MM-DD') + .99999 /* 조건 : etd date = VVD  */
+                #end
+                /* 조건 : Vendor가 있는 경우 */
+                #if(${vndr_seq} != '')
+                   AND M.VNDR_SEQ               = @[vndr_seq] --'183842'
+                #end
+                /* 조건 : PORT가 있는 경우*/
+                #if( ${port_cd}!='' && ${term_code} =='')
+                   AND M.YD_CD                  LIKE @[port_cd] ||'%'
+                #end
+                /* 조건 : term */
+                #if( ${port_cd}!='' && ${term_code}!='')
+                   AND M.YD_CD                  IN ( '${term_code}' )
+                #end
+                   --AND GEV.ERR_VSL_CD       (+) = D.VSL_CD
+                   --AND GEV.ERR_SKD_VOY_NO   (+) = D.SKD_VOY_NO
+                   --AND GEV.ERR_SKD_DIR_CD   (+) = D.SKD_DIR_CD
+                   --AND GEV.ERR_REV_DIR_CD   (+) = D.REV_DIR_CD
+                   --AND GEV.AVAL_FLG         (+) = 'Y'
+               ) M
+             , (SELECT MA.ACCT_CD
+                     , MA.ACCT_ENG_NM
+                     , TES.LGS_COST_CD
+                     , TES.LGS_COST_FULL_NM
+                  FROM TES_LGS_COST TES
+                     , MDM_ACCOUNT MA
+                 WHERE 1=1
+                   AND TES.LGS_COST_SUBJ_CD     IN ('PT','CN')
+                   AND TES.LGS_COST_CD_CLSS_LVL = 'A'
+                   AND TES.ACCT_CD              = MA.ACCT_CD
+                   AND NVL(MA.DELT_FLG,'N')     = 'N'
+                 ORDER BY TES.LGS_COST_OPT_NO
+               ) C
+             , (SELECT MAX(MC.CNTR_VSL_CLSS_CAPA) CNTR_VSL_CLSS_CAPA
+                     , MC.VSL_CD
+                  FROM MDM_VSL_CNTR MC
+                 GROUP BY MC.VSL_CD
+               ) MC
+         WHERE 1=1
+            --AND RNK = 1
+           AND M.LGS_COST_CD        = C.LGS_COST_CD(+)
+           AND M.VSL_CD             = MC.VSL_CD(+)
+        /*조건 : CTRL H/Q */
+        #if(${vskd_port_rhq_cd} != '' && ${vskd_port_rhq_cd} != 'ALL')
+           AND M.VSKD_PORT_RHQ_CD   = @[vskd_port_rhq_cd]
+        #end
+        /*조건 : Office */
+        #if(${sls_ofc_cd} != '' && ${sls_ofc_cd} != 'ALL')
+           AND M.INV_OFC_CD         = @[sls_ofc_cd]
+        #end
+        /*조건 : VVD : vsl_cd */
+        #if( ${vsl_cd}!='')
+           AND M.VSL_CD             = @[vsl_cd]
+        #end
+        /*조건 : VVD : skd_voy_no */
+        #if( ${skd_voy_no}!='')
+           AND M.SKD_VOY_NO         = @[skd_voy_no]
+        #end
+        /*조건 : VVD : skd_dir_cd */
+        #if( ${skd_dir_cd}!='')
+           AND M.SKD_DIR_CD         = @[skd_dir_cd]
+        #end
+        /*조건 : Lane Code */
+        #if ( ${vsl_slan_cd} != '')
+           AND M.VSL_SLAN_CD        = @[vsl_slan_cd] -- NE4
+        #end
+        /*조건 : Account, Cost Code */
+        #if( ${combo1}!= 'ALL' && ${combo1}!= '' )
+           AND C.ACCT_CD            LIKE DECODE(@[combo1], '110911', '511911', @[combo1]) || '%' --ACCOUNT가 110911이면 511911로 바꿈
+           AND C.LGS_COST_CD        LIKE DECODE(@[combo1], '110911', '____', '______') --ACCOUNT가 110911이면 COST_CD가 네자리인것만 조회
+        #end
+        /* 조건 : VESSEL CLASS */
+        #if ( ${cntr_vsl_clss_capa} != 'ALL' && ${cntr_vsl_clss_capa} != '')
+           AND MC.CNTR_VSL_CLSS_CAPA = @[cntr_vsl_clss_capa] --9000
+        #end
+        /* 조건 : Status */
+        #if ( ${status} != 'ALL' && ${status} != '')
+           AND M.STATUS             = @[status] --Status
+        #end
+       ) M
+ WHERE 1=1
+   AND M.CHK_DATA = 'Y' /*펜들럼일때 M.IO = IN , M.LOCL_AMT = 0 , M.USD_AMT = 0 대상 제외. */
+ ORDER BY M.SLS_OFC_CD
+     , M.CRE_DT
+     , M.INV_NO
+     , M.COST_CD			]]></sql>
+			<params>
+				<param name="from_date" type="12" value="" out="N"/>
+				<param name="to_date" type="12" value="" out="N"/>
+				<param name="vndr_seq" type="12" value="" out="N"/>
+				<param name="port_cd" type="12" value="" out="N"/>
+				<param name="vskd_port_rhq_cd" type="12" value="" out="N"/>
+				<param name="sls_ofc_cd" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="vsl_slan_cd" type="12" value="" out="N"/>
+				<param name="combo1" type="12" value="" out="N"/>
+				<param name="cntr_vsl_clss_capa" type="12" value="" out="N"/>
+				<param name="status" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

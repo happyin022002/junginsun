@@ -1,0 +1,345 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="EQMatchBackNLoadFactorMgtDBDAOLoadFactorByTradeLaneVvdVORSQL">
+			<desc><![CDATA[LoadFactorByTradeLaneVvdVO
+"EMS" Trade 추가에 따른 "EM"로직 추가]]></desc>
+			<sql><![CDATA[
+WITH MAIN AS 
+			(
+			SELECT	TRD_CD ,				/* trade			*/
+					LANE_CD ,				/* lane				*/
+					RLANE_CD,
+					VSL_CD,
+					SKD_VOY_NO,
+					SKD_DIR_CD ,			/* vvd				*/
+					VPS_PORT_CD ,			/* port				*/
+					CLPT_IND_SEQ ,			/* call_ind 		*/
+					CLPT_SEQ ,				/* call_seq 		*/
+					VPS_ETD_DT ,			/* atd				*/
+					PLN_YR,
+					PLN_WK ,				/* atd week			*/	
+					FROM_RGN ,				/* from_region		*/
+					TO_RGN					/* to_region		*/
+			FROM	(
+						SELECT	
+								/*+ 
+									ORDERED USE_NL( DST  OCNT OSCNT DCNT DSCNT ) 
+									INDEX( DST      XPKVSK_VSL_PORT_SKD   )
+									INDEX( OCNT	    XPKMDM_COUNTRY )
+									INDEX( OCNT	    XPKMDM_COUNTRY )
+									INDEX( OSCNT	XPKMDM_SUBCONTINENT )
+									INDEX( OSCNT	XPKMDM_SUBCONTINENT )
+								*/
+					    		BSA.TRD_CD			,											/* trade			*/
+								ORG.LANE_CD			,											/* lane				*/
+								BSA.RLANE_CD        ,                                           /* R -lane Full     */
+								ORG.VSL_CD,	ORG.SKD_VOY_NO,	ORG.SKD_DIR_CD,						/* vvd				*/
+								ORG.VPS_PORT_CD		,											/* port				*/
+								ORG.CLPT_IND_SEQ	,											/* call_ind 		*/
+								ORG.CLPT_SEQ		,											/* call_seq 		*/
+								ORG.VPS_ETD_DT										VPS_ETD_DT,	/* atd				*/
+								DECODE(OSCNT.CONTI_CD,	'F', 'E', OSCNT.CONTI_CD)	FROM_RGN,	/* from_region		*/
+								DECODE(DSCNT.CONTI_CD,	'F', 'E', DSCNT.CONTI_CD)	TO_RGN		/* to_region		*/
+
+						FROM	
+								(
+									SELECT	/*+ INDEX_FFS(BSA_VVD_MST XPKBSA_VVD_MST) */
+											DISTINCT TRD_CD, SUBSTR(RLANE_CD,1, 3) LANE_CD, RLANE_CD RLANE_CD
+									FROM	BSA_VVD_MST   -- 108 건
+								)	BSA	,
+								(
+									SELECT	VPS1.VSL_CD							VSL_CD,		
+											VPS1.SKD_VOY_NO						SKD_VOY_NO,		
+											VPS1.SKD_DIR_CD						SKD_DIR_CD,
+											VPS1.VPS_PORT_CD					VPS_PORT_CD,	
+											VPS1.CLPT_IND_SEQ					CLPT_IND_SEQ,
+											VPS1.CLPT_SEQ						CLPT_SEQ,		
+											TO_CHAR(VPS1.VPS_ETD_DT,'YYYYMMDD')	VPS_ETD_DT,
+											VPS1.SLAN_CD						LANE_CD,
+											(
+												SELECT  /*+ INDEX( VPS2 XAK4VSK_VSL_PORT_SKD ) */
+														VPS_PORT_CD||CLPT_IND_SEQ
+												FROM    VSK_VSL_PORT_SKD    VPS2
+												WHERE   VPS2.VSL_CD				=	VPS1.VSL_CD
+												AND		VPS2.SKD_VOY_NO			=	VPS1.SKD_VOY_NO
+												AND		VPS2.SKD_DIR_CD			=	VPS1.SKD_DIR_CD
+												AND		VPS2.CLPT_SEQ			>	VPS1.CLPT_SEQ
+												AND		NVL(VPS2.VPS_PORT_CD,		' ') NOT IN ('PAPAC', 'EGSUZ')
+												AND		NVL(VPS2.SKD_CNG_STS_CD,	' ') <> 'S'
+												AND     ROWNUM = 1
+											)									TO_PKEY	
+									FROM	VSK_VSL_PORT_SKD	VPS1	
+									WHERE	VPS1.VPS_ETD_DT BETWEEN		TO_DATE(@[fromdate], 'YYYY-MM-DD')
+															AND			TO_DATE(@[todate], 'YYYY-MM-DD') + 0.99999
+									AND		NVL(VPS1.VPS_PORT_CD,		' ') NOT IN ('PAPAC', 'EGSUZ')
+									AND		NVL(VPS1.TURN_PORT_IND_CD,	' ') NOT IN ('D', 'F', 'V')
+									AND		NVL(VPS1.SKD_CNG_STS_CD,	' ') <> 'S'
+								)					ORG	,					
+								VSK_VSL_PORT_SKD	DST	,
+								MDM_COUNTRY			OCNT, 
+								MDM_SUBCONTINENT	OSCNT,
+								MDM_COUNTRY			DCNT, 
+								MDM_SUBCONTINENT	DSCNT
+						WHERE	DST.VSL_CD				=	ORG.VSL_CD
+						AND		DST.SKD_VOY_NO			=	ORG.SKD_VOY_NO
+						AND		DST.SKD_DIR_CD			=	ORG.SKD_DIR_CD
+						AND		DST.VPS_PORT_CD			=	SUBSTR(ORG.TO_PKEY,1,5)
+						AND		DST.CLPT_IND_SEQ		=	SUBSTR(ORG.TO_PKEY,6,2)
+						AND		OCNT.CNT_CD				=	SUBSTR(ORG.VPS_PORT_CD, 1, 2)
+						AND		OCNT.SCONTI_CD			=	OSCNT.SCONTI_CD
+						AND		DCNT.CNT_CD				=	SUBSTR(DST.VPS_PORT_CD, 1, 2)
+						AND		DCNT.SCONTI_CD			=	DSCNT.SCONTI_CD
+						AND		ORG.LANE_CD				=	BSA.LANE_CD
+				
+				#if (${lane} != '')
+				AND		ORG.LANE_CD = @[lane]
+				#end
+
+				#if (${vvd} != '')
+				AND		ORG.VSL_CD				=	SUBSTR(@[vvd],1,4)
+				AND		ORG.SKD_VOY_NO			=	SUBSTR(@[vvd],5,4)
+				AND		ORG.SKD_DIR_CD			=	SUBSTR(@[vvd],9,1)
+				#end
+
+				#if (${trade} == 'AL')
+				AND	(
+						( SUBSTR(BSA.TRD_CD,2,1) = 'P' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) IN ( 'M','A' ) )
+						OR
+						( SUBSTR(BSA.TRD_CD,2,1) = 'A' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) IN ( 'M','E' ) )
+						OR
+						( SUBSTR(BSA.TRD_CD,2,1) = 'E' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) IN ( 'E','A' ) )
+					)
+				#elseif (${trade} == 'TP')
+				AND	( SUBSTR(BSA.TRD_CD,2,1) = 'P' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) IN ( 'M','A' ) )
+				#elseif (${trade} == 'TA')
+				AND	( SUBSTR(BSA.TRD_CD,2,1) = 'A' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) IN ( 'M','E' ) )
+				#elseif (${trade} == 'TE')
+				AND	( SUBSTR(BSA.TRD_CD,2,1) = 'E' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) IN ( 'E','A' ) )
+				#elseif (${trade} == 'AA')
+				AND	( SUBSTR(BSA.TRD_CD,2,1) IN  ( 'P','E' ) AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) = 'A'  )
+				#elseif (${trade} == 'MM')
+				AND	( SUBSTR(BSA.TRD_CD,2,1) IN  ( 'P','A' ) AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) = 'M'  )
+				#elseif (${trade} == 'EE')
+				AND	( SUBSTR(BSA.TRD_CD,2,1) IN  ( 'A','E' ) AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) = 'E'  )
+                #elseif (${trade} == 'EM')
+				AND	( SUBSTR(BSA.TRD_CD,2,1) = 'M' AND DECODE(OSCNT.CONTI_CD, 'F', 'E', OSCNT.CONTI_CD) IN ( 'M','E' ) )
+				#end
+				),
+				EQR_WK_PRD
+
+			#if (${trade} == 'AL')
+			WHERE	(
+					(SUBSTR(TRD_CD,2,1) = 'P' AND FROM_RGN = 'M' AND TO_RGN = 'A')
+			OR		(SUBSTR(TRD_CD,2,1) = 'P' AND FROM_RGN = 'A' AND TO_RGN = 'M')
+
+			OR		(SUBSTR(TRD_CD,2,1) = 'A' AND FROM_RGN = 'M' AND TO_RGN = 'E')
+			OR		(SUBSTR(TRD_CD,2,1) = 'A' AND FROM_RGN = 'E' AND TO_RGN = 'M')
+
+			OR		(SUBSTR(TRD_CD,2,1) = 'E' AND FROM_RGN = 'E' AND TO_RGN = 'A')
+			OR		(SUBSTR(TRD_CD,2,1) = 'E' AND FROM_RGN = 'A' AND TO_RGN = 'E')
+					)
+			#elseif (${trade} == 'TP')
+			WHERE	(
+					(SUBSTR(TRD_CD,2,1) = 'P' AND FROM_RGN = 'M' AND TO_RGN = 'A')
+			OR		(SUBSTR(TRD_CD,2,1) = 'P' AND FROM_RGN = 'A' AND TO_RGN = 'M')
+					)
+			#elseif (${trade} == 'TA')
+			WHERE	(
+					(SUBSTR(TRD_CD,2,1) = 'A' AND FROM_RGN = 'M' AND TO_RGN = 'E')
+			OR		(SUBSTR(TRD_CD,2,1) = 'A' AND FROM_RGN = 'E' AND TO_RGN = 'M')
+					)
+			#elseif (${trade} == 'TE')
+			WHERE	(
+					(SUBSTR(TRD_CD,2,1) = 'E' AND FROM_RGN = 'E' AND TO_RGN = 'A')
+			OR		(SUBSTR(TRD_CD,2,1) = 'E' AND FROM_RGN = 'A' AND TO_RGN = 'E')
+					)
+			#elseif (${trade} == 'AA')
+			WHERE	(
+					(SUBSTR(TRD_CD,2,1) = 'P' AND FROM_RGN = 'A' AND TO_RGN = 'M')
+			OR		(SUBSTR(TRD_CD,2,1) = 'E' AND FROM_RGN = 'A' AND TO_RGN = 'E')
+					)
+			#elseif (${trade} == 'MM')
+			WHERE	(
+					(SUBSTR(TRD_CD,2,1) = 'P' AND FROM_RGN = 'M' AND TO_RGN = 'A')
+			OR		(SUBSTR(TRD_CD,2,1) = 'A' AND FROM_RGN = 'M' AND TO_RGN = 'E')
+					)
+			#elseif (${trade} == 'EE')
+			WHERE	(
+					(SUBSTR(TRD_CD,2,1) = 'A' AND FROM_RGN = 'E' AND TO_RGN = 'M')
+			OR		(SUBSTR(TRD_CD,2,1) = 'E' AND FROM_RGN = 'E' AND TO_RGN = 'A')
+					)
+           #elseif (${trade} == 'EM')
+			WHERE	(
+					(SUBSTR(TRD_CD,2,1) = 'M' AND FROM_RGN = 'E' AND TO_RGN = 'A')
+			OR		(SUBSTR(TRD_CD,2,1) = 'M' AND FROM_RGN = 'M' AND TO_RGN = 'A')
+					)
+			#end
+			AND     VPS_ETD_DT	BETWEEN		WK_ST_DT
+								AND			WK_END_DT
+			)
+			SELECT	/*+ ORDERED USE_NL( M 01 02 RH2 B )*/ 
+					M.TRD_CD trade,								/* trade			*/
+					M.LANE_CD lane,								/* lane				*/
+					M.VSL_CD||M.SKD_VOY_NO||M.SKD_DIR_CD vvd,			/* vvd				*/
+					M.VPS_PORT_CD port,							/* port				*/
+					M.CLPT_IND_SEQ callind,						/* call_ind 		*/
+					M.CLPT_SEQ callseq,							/* call_seq 		*/
+					M.VPS_ETD_DT atd,								/* atd				*/
+					M.PLN_YR||M.PLN_WK atd_week,					/* atd week			*/	
+					M.FROM_RGN fromregion,						/* from_region		*/
+					M.TO_RGN	to_region,							/* to_region		*/
+        		--< BSA > ______________________________________________________________________________________
+        
+                -- (1). RDR
+                DECODE((SELECT 
+                		        SUM(RA.BSA_SLOT)||','||SUM(RA.BSA_WGT)                    	
+                        FROM	RDR_HEADER			RH1,
+                        		RDR_ALLOCATION		RA
+                       WHERE	M.VSL_CD		=	RH1.VSL_CD	(+)
+                        AND     M.SKD_VOY_NO	=   RH1.VOY_NO	(+)
+                        AND     M.SKD_DIR_CD    =   RH1.DIR_CD	(+)
+                        AND     M.FROM_RGN		=   RH1.REGION	(+)
+                        
+                        AND     RH1.VSL_CD		=   RA.VSL_CD	(+)
+                        AND     RH1.VOY_NO		=   RA.VOY_NO	(+)
+                        AND     RH1.DIR_CD		=   RA.DIR_CD	(+)
+                        AND     RH1.REGION		=   RA.REGION	(+)
+                        AND		@[company]		=	RA.OPR_CD	(+)                                     
+                    ),',',NVL(MAX(DECODE(O1.BSA_OP_JB_CD,'007',O1.CRR_BSA_CAPA,0)),0)||','||NVL(MAX(DECODE(O2.BSA_OP_JB_CD,'009',O2.CRR_BSA_CAPA,0)),0),
+                    ( SELECT 
+                		    SUM(RA.BSA_SLOT)||','||SUM(RA.BSA_WGT)                   
+                    FROM	RDR_HEADER			RH1,
+                    		RDR_ALLOCATION		RA
+                    WHERE	M.VSL_CD		=	RH1.VSL_CD	(+)
+                    AND     M.SKD_VOY_NO	=   RH1.VOY_NO	(+)
+                    AND     M.SKD_DIR_CD    =   RH1.DIR_CD	(+)
+                    AND     M.FROM_RGN		=   RH1.REGION	(+)
+                    
+                    AND     RH1.VSL_CD		=   RA.VSL_CD	(+)
+                    AND     RH1.VOY_NO		=   RA.VOY_NO	(+)
+                    AND     RH1.DIR_CD		=   RA.DIR_CD	(+)
+                    AND     RH1.REGION		=   RA.REGION	(+)
+                    AND		@[company]		=	RA.OPR_CD	(+)                                     
+                    )
+                 )  bsaspace	,
+				-- deadSlot-------------------------------------------------------
+            	(SELECT 
+            		   NVL(SUM(DECODE(RU.TYPE,'A',RU.SLOT_QTY,0))                                                    
+            		   +SUM(DECODE(RU.TYPE,'H',RU.SLOT_QTY,'L',RU.SLOT_QTY,0)),0)  /* deadSlot	*/    
+            	FROM    RDR_HEADER      H, 
+            			RDR_UTILIZE     RU
+                WHERE	M.VSL_CD		=	H.VSL_CD	(+)
+                AND     M.SKD_VOY_NO	=   H.VOY_NO	(+)
+                AND     M.SKD_DIR_CD    =   H.DIR_CD	(+)
+                AND     M.FROM_RGN		=   H.REGION	(+)
+            	AND     H.VSL_CD    =   RU.VSL_CD
+            	AND     H.VOY_NO    =   RU.VOY_NO
+            	AND     H.DIR_CD    =   RU.DIR_CD
+            	AND     H.REGION    =   RU.REGION
+            	AND     @[company]  =   RU.OPR_CD
+            	) deadSlot,        		          
+        		
+				--< 실적 > ______________________________________________________________________________________
+        
+        		-- (1). BAY PLAN
+        		
+        		DECODE(SUM(NVL(TO_NUMBER(TRIM(B.WEIGHT)), 0)),0,'','BAY')														dataSource,	/* dataSource */
+        		COUNT(DECODE(FE, 'F', DECODE(SUBSTR(SZTP,2,1), '2', SZTP)))	full20Qty,	/* full20Qty */
+        		COUNT(DECODE(FE, 'F', DECODE(SUBSTR(SZTP,2,1), '4', SZTP)))	full40Qty,	/* full40Qty */
+        		COUNT(DECODE(FE, 'F', DECODE(SUBSTR(SZTP,2,1), '5', SZTP)))	fullHcQty,	/* fullHcQty */
+        		COUNT(DECODE(FE, 'F', DECODE(SUBSTR(SZTP,2,1), '7', SZTP)))	full45Qty,	/* full45Qty */
+        		COUNT(DECODE(FE, 'E', DECODE(SUBSTR(SZTP,2,1), '2', SZTP)))	mty20Qty,	/* mty20Qty  */
+        		COUNT(DECODE(FE, 'E', DECODE(SUBSTR(SZTP,2,1), '4', SZTP)))	mty40Qty,	/* mty40Qty  */
+        		COUNT(DECODE(FE, 'E', DECODE(SUBSTR(SZTP,2,1), '5', SZTP)))	mtyHcQty,	/* mtyHcQty  */
+        		COUNT(DECODE(FE, 'E', DECODE(SUBSTR(SZTP,2,1), '7', SZTP)))	mty45Qty,	/* mty45Qty  */
+        		SUM(NVL(TO_NUMBER(TRIM(B.WEIGHT)), 0))						weightTotal,
+        
+        
+        		--< Release > ______________________________________________________________________________________
+        
+        		( SELECT 
+                        
+                        NVL(NVL(SUM(RA.RELEASE_SLOT),0) + NVL(SUM(RA.SWAP_SLOT),0),0) ||','||  -- releasedteu                               
+                        NVL(NVL(SUM(RA.RELEASE_WGT), 0) + NVL(SUM(RA.SWAP_WGT), 0),0)          -- releasedweight             
+                FROM	RDR_HEADER			RH1,
+                		RDR_ALLOCATION		RA
+                WHERE	M.VSL_CD		=	RH1.VSL_CD	(+)
+                AND     M.SKD_VOY_NO	=   RH1.VOY_NO	(+)
+                AND     M.SKD_DIR_CD    =   RH1.DIR_CD	(+)
+                AND     M.FROM_RGN		=   RH1.REGION	(+)
+                
+                AND     RH1.VSL_CD		=   RA.VSL_CD	(+)
+                AND     RH1.VOY_NO		=   RA.VOY_NO	(+)
+                AND     RH1.DIR_CD		=   RA.DIR_CD	(+)
+                AND     RH1.REGION		=   RA.REGION	(+)
+                AND		@[company]		=	RA.OPR_CD	(+)                                     
+                ) releasedteu
+
+	FROM	
+  		MAIN    M,
+  		BSA_VVD_OTR_CRR  O1,
+  		BSA_VVD_OTR_CRR  O2,
+  		RDR_HEADER   RH2,
+  		BAY_PLAN   B
+------------------------------------------------------- 실적  (1). BAY PLAN
+
+WHERE	M.VSL_CD		=	B.VSL_CD	(+)
+AND     M.SKD_VOY_NO	=   B.VOY_NO	(+)
+AND     M.SKD_DIR_CD    =   B.DIR_CD	(+)
+AND     M.VPS_PORT_CD   =   B.PORT_CD	(+)
+AND     M.CLPT_IND_SEQ  =	B.CALL_IND	(+)
+AND		@[company]		=	B.OPR_CD	(+)
+AND		'F'				=	B.PLAN_TYPE	(+)
+
+-------------------------------------------------------  BSA (2). COA
+
+AND	    M.TRD_CD		=	O1.TRD_CD		(+)		
+AND     M.RLANE_CD      =	O1.RLANE_CD		(+)
+AND		M.VSL_CD		=	O1.VSL_CD		(+)	
+AND		M.SKD_VOY_NO	=	O1.SKD_VOY_NO	(+)
+AND		M.SKD_DIR_CD	=	O1.SKD_DIR_CD	(+)
+AND     '007'           =	O1.BSA_OP_JB_CD	(+) 
+AND     @[company]		=	O1.CRR_CD		(+)
+
+AND     M.TRD_CD		=	O2.TRD_CD		(+)		
+AND     M.RLANE_CD      =	O2.RLANE_CD		(+)
+AND		M.VSL_CD		=	O2.VSL_CD		(+)	
+AND		M.SKD_VOY_NO	=	O2.SKD_VOY_NO	(+)
+AND		M.SKD_DIR_CD	=	O2.SKD_DIR_CD	(+)
+AND     '009'           =	O2.BSA_OP_JB_CD	(+) 
+AND     @[company]		=	O2.CRR_CD		(+)
+
+-------------------------------------------------------  RLSE
+
+AND		M.VSL_CD		=	RH2.VSL_CD	(+)
+AND     M.SKD_VOY_NO	=	RH2.VOY_NO	(+)
+AND     M.SKD_DIR_CD	=	RH2.DIR_CD  (+)
+AND     M.VPS_PORT_CD	=	RH2.PORT_CD	(+)
+
+GROUP BY
+
+        M.TRD_CD			,			/*	trade		*/
+		M.LANE_CD			,			/*	lane		*/
+		M.VSL_CD			,			/*	vsl			*/
+		M.SKD_VOY_NO		,			/*	voy			*/
+		M.SKD_DIR_CD		,			/*	vvd			*/
+		M.VPS_PORT_CD		,			/*	port		*/
+		M.CLPT_IND_SEQ		,			/*	call_ind	*/
+		M.CLPT_SEQ			,			/*	call_seq	*/
+		M.VPS_ETD_DT		,			/*	atd			*/
+		M.PLN_YR			,			/*	pln_yr		*/
+		M.PLN_WK			,			/*	pln_yr		*/
+		M.FROM_RGN			,			/*	from_region	*/
+		M.TO_RGN
+ORDER BY @[company],M.FROM_RGN,M.TRD_CD,M.VPS_ETD_DT,M.VSL_CD||M.SKD_VOY_NO||M.SKD_DIR_CD			]]></sql>
+			<params>
+				<param name="fromdate" type="12" value="" out="N"/>
+				<param name="todate" type="12" value="" out="N"/>
+				<param name="lane" type="12" value="" out="N"/>
+				<param name="vvd" type="12" value="" out="N"/>
+				<param name="company" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

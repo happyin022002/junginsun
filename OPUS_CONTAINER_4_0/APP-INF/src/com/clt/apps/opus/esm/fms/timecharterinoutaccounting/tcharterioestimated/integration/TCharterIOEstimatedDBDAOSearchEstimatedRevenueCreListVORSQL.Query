@@ -1,0 +1,752 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TCharterIOEstimatedDBDAOSearchEstimatedRevenueCreListVORSQL">
+			<desc><![CDATA[Estimate Revenue Creation]]></desc>
+			<sql><![CDATA[
+--/*계약 Data*/
+WITH V_FMS_CONTRACT AS (
+        SELECT DISTINCT VSL_CD
+             , FLET_CTRT_NO
+             , FLET_CTRT_TP_CD
+             , FLET_CTRT_FACT_CD
+             , ACMM_RT_AMT
+          FROM FMS_CONTRACT
+         WHERE 1=1
+           AND FLET_CTRT_FACT_CD = 'ACT'
+           AND DELT_FLG = 'N'
+    )
+--SELECT * FROM V_FMS_CONTRACT;
+--/*Prepayment Settlement VVD Data : Contract Hire Data.*/
+,   V_FMS_VVD AS (
+        SELECT A.*
+          FROM (
+                SELECT DISTINCT G.EXE_YRMON
+                     , V.REV_YRMON
+                     , V.RLANE_CD
+                     , V.VSL_CD||V.SKD_VOY_NO||V.SKD_DIR_CD||V.REV_DIR_CD AS VVD_CD
+                     , V.VSL_CD
+                     , V.SKD_VOY_NO
+                     , V.SKD_DIR_CD
+                     , V.REV_DIR_CD
+                     , V.VST_DT
+                     , V.VED_DT
+                     , C.FLET_CTRT_NO
+                     , C.FLET_CTRT_TP_CD
+                     , C.FLET_CTRT_FACT_CD
+                     , C.ACMM_RT_AMT
+                     , (SELECT DECODE(M.REP_TRD_CD,'COM','Y','N') 
+                          FROM MDM_REV_LANE M
+                         WHERE M.RLANE_CD = G.RLANE_CD
+                        ) AS COM_VVD_FLG
+                  FROM FMS_VVD V
+                     , GL_ESTM_REV_VVD G
+                     , V_FMS_CONTRACT C
+                 WHERE 1=1
+                   AND G.EXE_YRMON      = REPLACE(@[exe_yrmon],'-') 
+                   AND G.REV_YRMON      BETWEEN REPLACE(@[fr_duration],'-') AND REPLACE(@[to_duration],'-')
+                   AND G.ESTM_VVD_TP_CD = @[est_type]
+                   AND G.VSL_CD         = V.VSL_CD
+                   AND G.SKD_VOY_NO     = V.SKD_VOY_NO
+                   AND G.SKD_DIR_CD     = V.SKD_DIR_CD
+                   AND G.REV_DIR_CD     = V.REV_DIR_CD 
+                   AND V.REV_YRMON      BETWEEN REPLACE(@[fr_duration],'-') AND REPLACE(@[to_duration],'-')
+                   AND V.VSL_CD         = C.VSL_CD 
+              ) A
+        WHERE 1=1
+          AND ((A.FLET_CTRT_TP_CD = 'TI' AND A.COM_VVD_FLG = 'N') OR (A.FLET_CTRT_TP_CD = 'TO' AND A.COM_VVD_FLG = 'Y'))
+        ORDER BY A.EXE_YRMON, A.VVD_CD, A.REV_YRMON          
+    )
+--SELECT * FROM V_FMS_VVD;
+--/* Other Account data(Except prepayments) 을 위한 VVD Data.*/
+,   V_FMS_VVD_OTR AS (
+        SELECT A.*
+          FROM (
+                SELECT DISTINCT G.EXE_YRMON
+                     , V.REV_YRMON
+                     , V.RLANE_CD
+                     , V.VSL_CD||V.SKD_VOY_NO||V.SKD_DIR_CD||V.REV_DIR_CD AS VVD_CD
+                     , V.VSL_CD
+                     , V.SKD_VOY_NO
+                     , V.SKD_DIR_CD
+                     , V.REV_DIR_CD
+                     , V.VST_DT
+                     , V.VED_DT
+                  FROM FMS_VVD V
+                     , GL_ESTM_REV_VVD G
+                 WHERE 1=1
+                   AND G.EXE_YRMON      = REPLACE(@[exe_yrmon],'-') 
+                   AND G.REV_YRMON      BETWEEN REPLACE(@[fr_duration],'-') AND REPLACE(@[to_duration],'-')
+                   AND G.ESTM_VVD_TP_CD = @[est_type]
+                   AND G.VSL_CD         = V.VSL_CD
+                   AND G.SKD_VOY_NO     = V.SKD_VOY_NO
+                   AND G.SKD_DIR_CD     = V.SKD_DIR_CD
+                   AND G.REV_DIR_CD     = V.REV_DIR_CD 
+                   AND V.REV_YRMON      BETWEEN REPLACE(@[fr_duration],'-') AND REPLACE(@[to_duration],'-')
+            ) A
+        WHERE 1=1
+        ORDER BY A.EXE_YRMON, A.VVD_CD, A.REV_YRMON          
+    )
+--SELECT * FROM V_FMS_VVD_OTR;
+--/*Prepayment Settlement Contract Hire 금액을 구한다.*/
+, V_FMS_HIRE AS (  
+    SELECT A.VSL_CD
+         , A.SKD_VOY_NO
+         , A.SKD_DIR_CD
+         , A.REV_DIR_CD
+         , A.EXE_YRMON
+         , A.REV_YRMON
+         , A.FLET_CTRT_NO
+         , A.FLET_CTRT_TP_CD
+         , A.HIRE_EFF_DT
+         , A.HIRE_EXP_DT
+         --/*WORKING Month 이후는 Date는 0 으로 계산한다.*/
+         , CASE WHEN A.EXE_YRMON < TO_CHAR(A.HIRE_EFF_DT,'YYYYMM') THEN 0
+                ELSE ROUND( A.HIRE_EXP_DT - A.HIRE_EFF_DT, 4 )
+           END AS ESTM_DYS
+         , A.HIRE_N1ST_AMT
+         , A.HIRE_N2ND_AMT
+         , A.ORI_HIRE_EFF_DT AS ORI_HIRE_EFF_DT
+         , A.ORI_HIRE_EXP_DT AS ORI_HIRE_EXP_DT
+         , ROUND( A.ORI_HIRE_EXP_DT - A.ORI_HIRE_EFF_DT, 4 ) AS SAIL_DYS
+         , A.ACMM_RT_AMT
+      FROM (
+            SELECT A.VSL_CD
+                 , A.SKD_VOY_NO
+                 , A.SKD_DIR_CD
+                 , A.REV_DIR_CD
+                 , A.EXE_YRMON
+                 , A.REV_YRMON
+                 , A.FLET_CTRT_NO
+                 , A.FLET_CTRT_TP_CD
+                 , A.HIRE_EFF_DT
+                 --/*WORKING Month 이후는 Date는 가져오지 않고 Last Day로 변환 한다.*/
+                 , CASE WHEN TO_CHAR(A.HIRE_EFF_DT,'YYYYMM') <= A.EXE_YRMON AND A.EXE_YRMON < TO_CHAR(A.HIRE_EXP_DT,'YYYYMM') THEN TO_DATE(TO_CHAR(LAST_DAY(TO_DATE(A.EXE_YRMON,'YYYYMM')),'YYYYMMDD')||'235959','YYYYMMDDHH24MISS')
+                        ELSE A.HIRE_EXP_DT
+                   END AS HIRE_EXP_DT
+                 , A.HIRE_N1ST_AMT
+                 , A.HIRE_N2ND_AMT
+                 , A.HIRE_EFF_DT AS ORI_HIRE_EFF_DT
+                 , A.HIRE_EXP_DT AS ORI_HIRE_EXP_DT
+                 , ROUND( A.HIRE_EXP_DT - A.HIRE_EFF_DT, 4 ) AS SAIL_DYS
+                 , A.ACMM_RT_AMT
+              FROM (
+                    SELECT A.VSL_CD
+                         , A.SKD_VOY_NO
+                         , A.SKD_DIR_CD
+                         , A.REV_DIR_CD
+                         , A.EXE_YRMON
+                         , A.REV_YRMON
+                         , A.FLET_CTRT_NO
+                         , A.FLET_CTRT_TP_CD
+                         , A.HIRE_EFF_DT
+                         , A.HIRE_EXP_DT
+                         --/*동일 VVD 의 1번째 Row의 날짜를 가져오기 위한 ROW_NUMBER.*/
+                         , ROW_NUMBER() OVER (PARTITION BY A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.REV_DIR_CD, A.REV_YRMON, A.FLET_CTRT_NO, A.FLET_CTRT_TP_CD, A.HIRE_EXP_DT  ORDER BY A.HIRE_EFF_DT ) AS RN
+                         --/*동일 VVD 의 1번째 Row의 날짜를 가져오기 위한 Count.*/
+                         , COUNT(1)     OVER (PARTITION BY A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.REV_DIR_CD, A.REV_YRMON, A.FLET_CTRT_NO, A.FLET_CTRT_TP_CD, A.HIRE_EXP_DT ) AS CNT
+                         , A.HIRE_N1ST_AMT
+                         , A.HIRE_N2ND_AMT
+                         , A.ACMM_RT_AMT
+                      FROM (
+                            SELECT A.VSL_CD
+                                 , A.SKD_VOY_NO
+                                 , A.SKD_DIR_CD
+                                 , A.REV_DIR_CD
+                                 , A.EXE_YRMON
+                                 , A.REV_YRMON
+                                 , C.FLET_CTRT_NO
+                                 , A.FLET_CTRT_TP_CD
+                                 , CASE WHEN A.VST_DT||'000000' >= TO_CHAR(C.EFF_DT,'YYYYMMDDHH24MISS') THEN TO_DATE(A.VST_DT||'000000', 'YYYYMMDDHH24MISS')
+                                        ELSE C.EFF_DT --TRUNC(C.EFF_DT)
+                                   END HIRE_EFF_DT
+                                   --/*VVD의 End Date 가 계약 End Date가 작은 경우 계약날짜 셋팅 (주의 : 계약은 +1일이 되어 있음)*/
+                                 , CASE WHEN A.VED_DT||'235959' > TO_CHAR(C.EXP_DT,'YYYYMMDDHH24MISS') THEN DECODE(SUBSTR(TO_CHAR(C.EXP_DT,'YYYYMMDDHH24MI'), 9, 4),'0000', C.EXP_DT-1,C.EXP_DT)
+                                        ELSE TO_DATE(A.VED_DT||'235959', 'YYYYMMDDHH24MISS')
+                                   END HIRE_EXP_DT
+                                 , CASE WHEN SUBSTR(TO_CHAR(FIRST_VALUE(C.EXP_DT) OVER(PARTITION BY C.FLET_CTRT_NO, A.FLET_CTRT_TP_CD, A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.REV_DIR_CD ORDER BY C.EXP_DT),'YYYYMMDDHH24MISS'),9,4) = '0000' AND C.HIR_CURR_N2ND_CD IS NULL 
+                                        THEN NVL(C.HIR_RT_N1ST_AMT/DECODE(C.HIR_CURR_N1ST_CD, 'USD', 1, (
+                                                                SELECT NVL(EX1.USD_LOCL_XCH_RT,1)
+                                                                  FROM GL_MON_XCH_RT EX1
+                                                                 WHERE C.HIR_CURR_N1ST_CD = EX1.CURR_CD
+                                                                   AND EX1.ACCT_XCH_RT_YRMON = A.REV_YRMON
+                                                                   AND EX1.ACCT_XCH_RT_LVL = '1')),0)
+                                        ELSE FIRST_VALUE(NVL(C.HIR_RT_N1ST_AMT/DECODE(C.HIR_CURR_N1ST_CD, 'USD', 1, (
+                                                                SELECT NVL(EX1.USD_LOCL_XCH_RT,1)
+                                                                  FROM GL_MON_XCH_RT EX1
+                                                                 WHERE C.HIR_CURR_N1ST_CD = EX1.CURR_CD
+                                                                   AND EX1.ACCT_XCH_RT_YRMON = A.REV_YRMON
+                                                                   AND EX1.ACCT_XCH_RT_LVL = '1')),0)) OVER(PARTITION BY C.FLET_CTRT_NO, A.FLET_CTRT_TP_CD, A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.REV_DIR_CD, C.EXP_DT ORDER BY C.EXP_DT DESC)
+                                   END HIRE_N1ST_AMT
+                                 , CASE WHEN SUBSTR(TO_CHAR(FIRST_VALUE(C.EXP_DT) OVER(PARTITION BY C.FLET_CTRT_NO, A.FLET_CTRT_TP_CD, A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.REV_DIR_CD ORDER BY C.EXP_DT),'YYYYMMDDHH24MISS'),9,4) = '0000' AND C.HIR_CURR_N2ND_CD IS NULL 
+                                        THEN NVL(C.HIR_RT_N2ND_AMT/DECODE(C.HIR_CURR_N2ND_CD, 'USD', 1, (
+                                                                SELECT NVL(EX1.USD_LOCL_XCH_RT,1)
+                                                                  FROM GL_MON_XCH_RT EX1
+                                                                 WHERE C.HIR_CURR_N2ND_CD = EX1.CURR_CD
+                                                                   AND EX1.ACCT_XCH_RT_YRMON = A.REV_YRMON
+                                                                   AND EX1.ACCT_XCH_RT_LVL = '1')),0)
+                                        ELSE FIRST_VALUE(NVL(C.HIR_RT_N2ND_AMT/DECODE(C.HIR_CURR_N2ND_CD, 'USD', 1, (
+                                                            SELECT NVL(EX1.USD_LOCL_XCH_RT,1)
+                                                              FROM GL_MON_XCH_RT EX1
+                                                             WHERE C.HIR_CURR_N2ND_CD = EX1.CURR_CD
+                                                               AND EX1.ACCT_XCH_RT_YRMON = A.REV_YRMON
+                                                               AND EX1.ACCT_XCH_RT_LVL = '1')),0)) OVER(PARTITION BY C.FLET_CTRT_NO, A.FLET_CTRT_TP_CD, A.VSL_CD, A.SKD_VOY_NO, A.SKD_DIR_CD, A.REV_DIR_CD, C.EXP_DT   ORDER BY C.EXP_DT DESC)
+                                   END HIRE_N2ND_AMT
+                                 , A.ACMM_RT_AMT
+                              FROM V_FMS_VVD A
+                                 , FMS_HIRE C
+                             WHERE 1=1
+                               AND A.FLET_CTRT_NO       = C.FLET_CTRT_NO
+                               --AND A.VST_DT             <= TO_CHAR(C.EXP_DT,'YYYYMMDD')
+                               AND A.VST_DT             <= TO_CHAR(DECODE(DECODE(SUBSTR(TO_CHAR(C.EXP_DT, 'YYYYMMDDHH24MI'), 9, 4), '0000', 'A', 'B'), 'A', C.EXP_DT - 1, C.EXP_DT),'YYYYMMDD')
+                               AND A.VED_DT             >= TO_CHAR(C.EFF_DT,'YYYYMMDD')
+                       ) A
+                ) A 
+        ) A
+)
+--SELECT * FROM V_FMS_HIRE; 26
+SELECT 'I' AS IBFLAG
+     , A.EXE_YRMON
+     , A.REV_YRMON
+     , A.ACT_DT
+     , A.FLET_CTRT_TP_CD AS RE_DIVR_CD
+     , A.RLANE_CD
+     , A.VVD_CD
+     , A.VSL_CD
+     , A.SKD_VOY_NO
+     , A.SKD_DIR_CD
+     , A.REV_DIR_CD
+     , A.ACCT_CD
+     , A.ACCT_ITM_NM
+     , A.VST_DT
+     , A.VED_DT
+     , A.ESTM_DYS
+     , A.SAIL_DYS
+     , A.ORI_HIRE_EFF_DT
+     , A.ORI_HIRE_EXP_DT
+     , A.HIRE_AMT
+     , A.EST_AMT
+     , A.ACT_AMT
+     , A.ACC_AMT
+     , ROWNUM AS ESTM_SEQ_NO 
+     , 'RV' AS ESTM_VVD_TP_CD
+     , TO_CHAR(A.SLP_EFF_DT,'YYYYMMDD') AS SLP_EFF_DT
+     , TO_CHAR(A.SLP_EXP_DT,'YYYYMMDD') AS SLP_EXP_DT
+  FROM (
+        SELECT A.EXE_YRMON
+             , A.REV_YRMON
+             , A.ACT_DT
+             , A.FLET_CTRT_TP_CD
+             , A.RLANE_CD
+             , A.VVD_CD
+             , A.VSL_CD
+             , A.SKD_VOY_NO
+             , A.SKD_DIR_CD
+             , A.REV_DIR_CD
+             , A.ACCT_CD
+             , A.ACCT_ITM_NM
+             , A.VST_DT
+             , A.VED_DT
+             , A.ESTM_DYS
+             , A.SAIL_DYS
+             , A.ORI_HIRE_EFF_DT
+             , A.ORI_HIRE_EXP_DT
+             , A.HIRE_AMT
+             , A.EST_AMT
+             , A.ACT_AMT
+             , A.ACC_AMT
+             , A.SLP_EFF_DT
+             , A.SLP_EXP_DT
+          FROM (
+          #if (${acct_cd_chart} != '' && ${acct_cd_chart} == 'C') 
+                /*1. 510911	Time Charter Hire : TI/TO 구분없이 VVD,   FLET_SRC_TP_CD = 30 Data 조회.*/
+                SELECT A.EXE_YRMON
+                     , A.REV_YRMON
+                     , TO_CHAR(B.HIRE_EFF_DT,'YYYYMMDD') AS ACT_DT
+                     , NVL(C.FLET_CTRT_TP_CD, A.FLET_CTRT_TP_CD) AS FLET_CTRT_TP_CD
+                     , A.RLANE_CD
+                     , A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD||A.REV_DIR_CD AS VVD_CD
+                     , A.VSL_CD
+                     , A.SKD_VOY_NO
+                     , A.SKD_DIR_CD
+                     , A.REV_DIR_CD
+                     , (SELECT MAX(AC.ACCT_CD)
+                          FROM FMS_ACCT_CATE AC
+                             , FMS_ACCT_ITM AI
+                         WHERE AC.FLET_ACCT_CATE_CD = 'TC'
+                           AND AC.ACCT_CD = AI.ACCT_CD
+                           AND AC.ACCT_ITM_SEQ = AI.ACCT_ITM_SEQ) AS ACCT_CD
+                     , (SELECT MAX(MA.ACCT_ENG_NM)
+                          FROM FMS_ACCT_CATE AC
+                             , FMS_ACCT_ITM AI
+                             , MDM_ACCOUNT MA
+                         WHERE 1=1 --MA.JNL_CRE_FLG = 'Y'
+                           AND AC.FLET_ACCT_CATE_CD = 'TC'
+                           AND AC.ACCT_CD = AI.ACCT_CD
+                           AND AC.ACCT_ITM_SEQ = AI.ACCT_ITM_SEQ
+                           AND MA.DELT_FLG = 'N'
+                           AND MA.ACCT_CD = AI.ACCT_CD) AS ACCT_ITM_NM
+                     , TO_CHAR(B.ORI_HIRE_EFF_DT,'YYYYMMDD') AS VST_DT
+                     , TO_CHAR(B.ORI_HIRE_EXP_DT,'YYYYMMDD') AS VED_DT
+                     , B.ESTM_DYS
+                     , B.SAIL_DYS
+                     , TO_CHAR(B.ORI_HIRE_EFF_DT,'YYYYMMDD') AS ORI_HIRE_EFF_DT
+                     , TO_CHAR(B.ORI_HIRE_EXP_DT,'YYYYMMDD') AS ORI_HIRE_EXP_DT
+                     , ROUND(B.HIRE_AMT, 0) AS HIRE_AMT
+                     , ROUND(SUM(NVL(B.EST_AMT,0)), 3) AS EST_AMT
+                     , ROUND(SUM(NVL(C.ACT_AMT,0)), 3) AS ACT_AMT
+                     , ROUND(SUM(NVL(B.EST_AMT,0)) - SUM(NVL(C.ACT_AMT,0)) , 3) AS ACC_AMT
+                     , C.SLP_EFF_DT
+                     , C.SLP_EXP_DT
+                  FROM (SELECT DISTINCT A.EXE_YRMON
+                             , A.REV_YRMON
+                             , A.FLET_CTRT_NO
+                             , DECODE(A.FLET_CTRT_TP_CD,'TI','E','R') AS FLET_CTRT_TP_CD
+                             , A.RLANE_CD
+                             , A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.REV_DIR_CD
+                             , A.VST_DT
+                             , A.VED_DT
+                          FROM V_FMS_VVD A
+                         WHERE 1=1
+                        ) A
+                     , (SELECT A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.REV_DIR_CD
+                             , A.EXE_YRMON
+                             , A.REV_YRMON
+                             , A.FLET_CTRT_NO
+                             , MIN(A.HIRE_EFF_DT) HIRE_EFF_DT
+                             , MAX(A.HIRE_EXP_DT) HIRE_EXP_DT
+                             , MIN(A.HIRE_N1ST_AMT + A.HIRE_N2ND_AMT) HIRE_AMT
+                             , SUM(NVL(A.EST_AMT + A.EST_ACMM_AMT + NVL(B.EST_OTR_AMT,0), 0)) EST_AMT
+                             , A.ORI_HIRE_EFF_DT
+                             , A.ORI_HIRE_EXP_DT
+                             , A.ESTM_DYS
+                             , A.SAIL_DYS
+                          FROM (
+                                SELECT A.VSL_CD
+                                     , A.SKD_VOY_NO
+                                     , A.SKD_DIR_CD
+                                     , A.REV_DIR_CD
+                                     , A.EXE_YRMON
+                                     , A.REV_YRMON
+                                     , A.FLET_CTRT_NO
+                                     , A.HIRE_EFF_DT
+                                     , A.HIRE_EXP_DT
+                                     , A.ESTM_DYS
+                                     , A.HIRE_N1ST_AMT
+                                     , A.HIRE_N2ND_AMT
+                                     , A.ESTM_DYS*(A.HIRE_N1ST_AMT + A.HIRE_N2ND_AMT) AS EST_AMT
+                                     , (SELECT NVL(A.ESTM_DYS*(A.HIRE_N1ST_AMT + A.HIRE_N2ND_AMT) * TO_NUMBER(FV.ACMM_RT_AMT/100) * -1, 0)
+                                          FROM V_FMS_HIRE FV
+                                         WHERE 1=1
+                                           --AND FV.FLET_CTRT_TP_CD   = 'TI'
+                                           AND FV.FLET_CTRT_NO      = A.FLET_CTRT_NO
+                                           AND FV.VSL_CD            = A.VSL_CD
+                                           AND FV.SKD_VOY_NO        = A.SKD_VOY_NO
+                                           AND FV.REV_DIR_CD        = A.REV_DIR_CD
+                                           AND ROWNUM = 1) AS EST_ACMM_AMT
+                                     , A.ORI_HIRE_EFF_DT
+                                     , A.ORI_HIRE_EXP_DT
+                                     , A.SAIL_DYS
+                                  FROM V_FMS_HIRE A
+                                 WHERE 1=1
+                                ) A
+                              , ( SELECT DISTINCT TH.VSL_CD
+                                         , TH.SKD_VOY_NO
+                                         , TH.SKD_DIR_CD
+                                         , TH.REV_DIR_CD
+                                         , TH.FLET_CTRT_NO
+                                         , SUM(CASE WHEN TH.ESTM_DYS <> 0 THEN FMS_OTRAMT_FNC(OE.FLET_CTRT_NO, OE.ACCT_CD, OE.ACCT_ITM_SEQ, TO_CHAR(TH.HIRE_EFF_DT,'YYYYMMDDHH24MI'), TO_CHAR(TH.HIRE_EXP_DT + 0.00001,'YYYYMMDDHH24MI')) 
+                                                ELSE 0
+                                           END) AS EST_OTR_AMT
+                                      FROM FMS_OTR_EXPN OE
+                                         , V_FMS_HIRE TH
+                                     WHERE 1=1
+                                       AND OE.FLET_CTRT_NO  =  TH.FLET_CTRT_NO
+                                       AND OE.EFF_DT        <= TH.HIRE_EFF_DT
+                                       AND OE.EXP_DT        >= TH.HIRE_EXP_DT
+                                       --AND TH.FLET_CTRT_TP_CD = 'TI'
+                                     GROUP BY TH.VSL_CD
+                                         , TH.SKD_VOY_NO
+                                         , TH.SKD_DIR_CD
+                                         , TH.REV_DIR_CD
+                                         , TH.FLET_CTRT_NO
+                               ) B
+                         WHERE 1=1
+                           --AND A.ESTM_DYS > 0 -- 추가
+                           AND A.VSL_CD = B.VSL_CD(+)
+                           AND A.SKD_VOY_NO = B.SKD_VOY_NO(+)
+                           AND A.SKD_DIR_CD = B.SKD_DIR_CD(+)
+                           AND A.FLET_CTRT_NO = B.FLET_CTRT_NO(+)
+                         GROUP BY A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.REV_DIR_CD
+                             , A.EXE_YRMON
+                             , A.REV_YRMON
+                             , A.FLET_CTRT_NO 
+                             , A.ORI_HIRE_EFF_DT
+                             , A.ORI_HIRE_EXP_DT
+                             , A.ESTM_DYS
+                             , A.SAIL_DYS
+                       ) B
+                     , (SELECT A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.REV_DIR_CD
+                             , A.EXE_YRMON
+                             , A.REV_YRMON
+                             , A.FLET_CTRT_NO
+                             , SUM(FS.CSR_AMT/DECODE(FS.CSR_CURR_CD, 'USD', 1, (SELECT NVL(EX1.USD_LOCL_XCH_RT,1)
+                                                                                  FROM GL_MON_XCH_RT EX1
+                                                                                 WHERE FS.CSR_CURR_CD = EX1.CURR_CD
+                                                                                   AND EX1.ACCT_XCH_RT_YRMON = A.REV_YRMON
+                                                                                   AND EX1.ACCT_XCH_RT_LVL = '1'))) ACT_AMT
+                             , MIN(FS.VVD_EFF_DT) SLP_EFF_DT
+                             , MAX(FS.VVD_EXP_DT) SLP_EXP_DT
+                             , DECODE(FS.SLP_TP_CD,'07','E','R') AS FLET_CTRT_TP_CD
+                          FROM V_FMS_VVD A
+                             , FMS_CONSULTATION FC
+                             , FMS_CSUL_SLP FS
+                         WHERE 1=1
+                           AND A.FLET_CTRT_NO       = FC.FLET_CTRT_NO
+                           AND FC.SLP_TP_CD         = FS.SLP_TP_CD
+                           AND FC.SLP_FUNC_CD       = FS.SLP_FUNC_CD
+                           AND FC.SLP_OFC_CD        = FS.SLP_OFC_CD
+                           AND FC.SLP_ISS_DT        = FS.SLP_ISS_DT
+                           AND FC.SLP_SER_NO        = FS.SLP_SER_NO
+                           AND A.VSL_CD             = FS.VSL_CD
+                           AND A.SKD_VOY_NO         = FS.SKD_VOY_NO
+                           AND A.SKD_DIR_CD         = FS.SKD_DIR_CD
+                           AND A.REV_DIR_CD         = FS.REV_DIR_CD
+                           AND FC.APRO_FLG          = 'Y'
+                           AND FC.CXL_FLG           = 'N'
+                           AND SUBSTR(FC.EFF_DT,1,6)  BETWEEN REPLACE(@[fr_duration],'-') AND REPLACE(@[to_duration],'-')
+                           AND FS.FLET_SRC_TP_CD    IN (  /*30 Prepayments Settlement 된 레코드.*/
+		                                              #foreach($FLET_SRC_TP_CD IN ${cht_flet_src_tp_cds})
+                                                           #if($cht_flet_src_tp_cds.hasNext()) '$FLET_SRC_TP_CD', #else '$FLET_SRC_TP_CD' #end
+                                                      #end )
+                         GROUP BY A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.REV_DIR_CD
+                             , A.EXE_YRMON
+                             , A.REV_YRMON
+                             , A.FLET_CTRT_NO
+                             , DECODE(FS.SLP_TP_CD,'07','E','R')
+                        
+                        /*Sublet Revenue(TO) 계약에 걸린 Account(110811) 실적구하기.*/
+                        UNION ALL
+                        SELECT A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.REV_DIR_CD
+                             , A.EXE_YRMON
+                             , A.REV_YRMON
+                             , A.FLET_CTRT_NO
+                             , SUM(FS.CSR_AMT/DECODE(FS.CSR_CURR_CD, 'USD', 1, (SELECT NVL(EX1.USD_LOCL_XCH_RT,1)
+                                                                                  FROM GL_MON_XCH_RT EX1
+                                                                                 WHERE FS.CSR_CURR_CD = EX1.CURR_CD
+                                                                                   AND EX1.ACCT_XCH_RT_YRMON = A.REV_YRMON
+                                                                                   AND EX1.ACCT_XCH_RT_LVL = '1'))) ACT_AMT
+                             , MIN(FS.VVD_EFF_DT) SLP_EFF_DT
+                             , MAX(FS.VVD_EXP_DT) SLP_EXP_DT
+                             , DECODE(FS.SLP_TP_CD,'07','E','R') AS FLET_CTRT_TP_CD
+                          FROM V_FMS_VVD A
+                             , FMS_CONSULTATION FC
+                             , FMS_CSUL_SLP FS
+                         WHERE 1=1
+                           AND A.FLET_CTRT_NO       = FC.FLET_CTRT_NO
+                           AND FC.SLP_TP_CD         = FS.SLP_TP_CD
+                           AND FC.SLP_FUNC_CD       = FS.SLP_FUNC_CD
+                           AND FC.SLP_OFC_CD        = FS.SLP_OFC_CD
+                           AND FC.SLP_ISS_DT        = FS.SLP_ISS_DT
+                           AND FC.SLP_SER_NO        = FS.SLP_SER_NO
+                           AND A.VSL_CD             = FS.VSL_CD
+                           AND A.SKD_VOY_NO         = FS.SKD_VOY_NO
+                           AND A.SKD_DIR_CD         = FS.SKD_DIR_CD
+                           AND A.REV_DIR_CD         = FS.REV_DIR_CD
+                           AND FC.APRO_FLG          = 'Y'
+                           AND FC.CXL_FLG           = 'N'
+                           AND SUBSTR(FC.EFF_DT,1,6)  BETWEEN REPLACE(@[fr_duration],'-') AND REPLACE(@[to_duration],'-')
+                           AND FS.FLET_SRC_TP_CD    NOT IN (  /* !30 !R1 Prepayments Settlement 된 레코드.*/
+		                                              #foreach($FLET_SRC_TP_CD IN ${cht_not_flet_src_tp_cds})
+                                                           #if($cht_not_flet_src_tp_cds.hasNext()) '$FLET_SRC_TP_CD', #else '$FLET_SRC_TP_CD' #end
+                                                      #end )
+                           AND FS.ACCT_CD IN (  SELECT AI.AR_CR_ACCT_CD /*Sublet Revenue(TO) 411211 Hire 계정 */
+                                                  FROM FMS_ACCT_CATE AC
+                                                     , FMS_ACCT_ITM AI
+                                                 WHERE AC.FLET_ACCT_CATE_CD = 'TO'
+                                                   AND AC.ACCT_CD = AI.ACCT_CD
+                                                   AND AC.ACCT_ITM_SEQ = AI.ACCT_ITM_SEQ
+                                                   AND AI.AR_CR_ACCT_CD = FS.ACCT_CD
+                                                   )
+                         GROUP BY A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.REV_DIR_CD
+                             , A.EXE_YRMON
+                             , A.REV_YRMON
+                             , A.FLET_CTRT_NO
+                             , DECODE(FS.SLP_TP_CD,'07','E','R')
+                       ) C
+                 WHERE A.VSL_CD         = B.VSL_CD
+                   AND A.SKD_VOY_NO     = B.SKD_VOY_NO
+                   AND A.SKD_DIR_CD     = B.SKD_DIR_CD
+                   AND A.REV_DIR_CD     = B.REV_DIR_CD
+                   AND A.EXE_YRMON      = B.EXE_YRMON
+                   AND A.REV_YRMON      = B.REV_YRMON
+                   AND A.FLET_CTRT_NO   = B.FLET_CTRT_NO
+                   AND A.VSL_CD         = C.VSL_CD(+)
+                   AND A.SKD_VOY_NO     = C.SKD_VOY_NO(+)
+                   AND A.SKD_DIR_CD     = C.SKD_DIR_CD(+)
+                   AND A.REV_DIR_CD     = C.REV_DIR_CD(+)
+                   AND A.EXE_YRMON      = C.EXE_YRMON(+)
+                   AND A.REV_YRMON      = C.REV_YRMON(+)
+                   AND A.FLET_CTRT_NO   = C.FLET_CTRT_NO(+)
+                 GROUP BY 
+                       A.EXE_YRMON
+                     , A.REV_YRMON
+                     , TO_CHAR(B.HIRE_EFF_DT,'YYYYMMDD')
+                     , NVL(C.FLET_CTRT_TP_CD, A.FLET_CTRT_TP_CD)
+                     , A.RLANE_CD
+                     , A.VSL_CD
+                     , A.SKD_VOY_NO
+                     , A.SKD_DIR_CD
+                     , A.REV_DIR_CD
+                     --, A.VST_DT
+                     --, A.VED_DT
+                     , B.ESTM_DYS
+                     , B.SAIL_DYS
+                     , B.HIRE_AMT
+                     , B.ORI_HIRE_EFF_DT
+                     , B.ORI_HIRE_EXP_DT
+                     , C.SLP_EFF_DT
+                     , C.SLP_EXP_DT
+        #end 
+
+		#if (${acct_cd_chart} != '' && ${acct_cd_chart} == 'C' &&  ${acct_cd_other} != '' && ${acct_cd_other} == 'O') 
+        		UNION ALL
+		#end         
+
+		#if (${acct_cd_other} != '' && ${acct_cd_other} == 'O') 
+                /*2. Others Account VVD,   FLET_SRC_TP_CD <> 30 Data 조회*/
+                SELECT A.EXE_YRMON
+                     , A.REV_YRMON
+                     , A.VST_DT AS ACT_DT
+                     , C.FLET_CTRT_TP_CD
+                     , A.RLANE_CD
+                     , A.VSL_CD||A.SKD_VOY_NO||A.SKD_DIR_CD||A.REV_DIR_CD AS VVD_CD
+                     , A.VSL_CD
+                     , A.SKD_VOY_NO
+                     , A.SKD_DIR_CD
+                     , A.REV_DIR_CD
+                     , C.ACCT_CD
+                     , C.ACCT_ITM_NM
+                     , A.VST_DT
+                     , A.VED_DT
+                     , NULL AS ESTM_DYS
+                     , NULL AS SAIL_DYS
+                     , A.VST_DT AS ORI_HIRE_EFF_DT
+                     , A.VED_DT AS ORI_HIRE_EXP_DT
+                     , NULL AS HIRE_AMT
+                     , NULL AS EST_AMT
+                     , ROUND(SUM(NVL(C.ACT_AMT,0)), 3) AS ACT_AMT
+                     , ROUND(0 - SUM(NVL(C.ACT_AMT,0)) , 3) AS ACC_AMT
+                     , C.SLP_EFF_DT
+                     , C.SLP_EXP_DT
+                  FROM (SELECT DISTINCT A.EXE_YRMON
+                             , A.REV_YRMON
+                             , A.RLANE_CD
+                             , A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.REV_DIR_CD
+                             , A.VST_DT
+                             , A.VED_DT
+                          FROM V_FMS_VVD_OTR A
+                         WHERE 1=1
+                        ) A
+                     , (
+                        /*Other Account..*/
+                        SELECT A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.REV_DIR_CD
+                             , A.EXE_YRMON
+                             , A.REV_YRMON
+                             , SUM(FS.CSR_AMT/DECODE(FS.CSR_CURR_CD, 'USD', 1, (SELECT NVL(EX1.USD_LOCL_XCH_RT,1)
+                                                                                  FROM GL_MON_XCH_RT EX1
+                                                                                 WHERE FS.CSR_CURR_CD = EX1.CURR_CD
+                                                                                   AND EX1.ACCT_XCH_RT_YRMON = A.REV_YRMON
+                                                                                   AND EX1.ACCT_XCH_RT_LVL = '1'))) ACT_AMT
+                             , MIN(FS.VVD_EFF_DT) SLP_EFF_DT
+                             , MAX(FS.VVD_EXP_DT) SLP_EXP_DT
+                             , FS.ACCT_CD
+                             , (SELECT MA.ACCT_ENG_NM
+                                  FROM MDM_ACCOUNT MA
+                                 WHERE 1=1 --MA.JNL_CRE_FLG = 'Y'
+                                   AND MA.DELT_FLG = 'N'
+                                   AND MA.ACCT_CD = FS.ACCT_CD) AS ACCT_ITM_NM
+                             , DECODE(FS.SLP_TP_CD,'07','E','R') AS FLET_CTRT_TP_CD
+                          FROM V_FMS_VVD_OTR A
+                             , FMS_CONSULTATION FC
+                             , FMS_CSUL_SLP FS
+                         WHERE 1=1
+                           AND FC.SLP_TP_CD         = FS.SLP_TP_CD
+                           AND FC.SLP_FUNC_CD       = FS.SLP_FUNC_CD
+                           AND FC.SLP_OFC_CD        = FS.SLP_OFC_CD
+                           AND FC.SLP_ISS_DT        = FS.SLP_ISS_DT
+                           AND FC.SLP_SER_NO        = FS.SLP_SER_NO
+                           AND A.VSL_CD             = FS.VSL_CD
+                           AND A.SKD_VOY_NO         = FS.SKD_VOY_NO
+                           AND A.SKD_DIR_CD         = FS.SKD_DIR_CD
+                           AND A.REV_DIR_CD         = FS.REV_DIR_CD
+                           AND FC.APRO_FLG          = 'Y'
+                           AND FC.CXL_FLG           = 'N'
+                           AND SUBSTR(FC.EFF_DT,1,6)  BETWEEN REPLACE(@[fr_duration],'-') AND REPLACE(@[to_duration],'-')
+                           --AND FS.FLET_SRC_TP_CD    <> '30' /*Prepayments Settlement외 Other 레코드.*/
+                           AND FS.FLET_SRC_TP_CD    NOT IN ( /*30 Prepayments Settlement외 Other 레코드. , 차변 에서 차변 계정을 제외한다(중복 CsrAmt를 방지).*/
+		                                              #foreach($FLET_SRC_TP_CD IN ${otr_flet_src_tp_cds})
+                                                           #if($otr_flet_src_tp_cds.hasNext()) '$FLET_SRC_TP_CD', #else '$FLET_SRC_TP_CD' #end
+                                                      #end )
+						   AND FS.ACCT_CD NOT IN (  SELECT DISTINCT AR_CR_ACCT_CD /*411211, 411915 계정*/
+                                                      FROM FMS_ACCT_ITM
+                                                     WHERE AR_CR_ACCT_CD IS NOT NULL
+                                                    UNION ALL
+                                                    SELECT AC.ACCT_CD /* 110811 TO 계약의 Sublet Revenue Hire 계정.*/
+                                                      FROM FMS_ACCT_CATE AC
+                                                         , FMS_ACCT_ITM AI
+                                                     WHERE AC.FLET_ACCT_CATE_CD = 'TO'
+                                                       AND AC.ACCT_CD = AI.ACCT_CD
+                                                       AND AC.ACCT_ITM_SEQ = AI.ACCT_ITM_SEQ
+                                           ) 
+                           AND FS.STL_FLG           = 'N' /*Other이므로 Settlement가 안된 Data 조건.*/
+                         GROUP BY A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.REV_DIR_CD
+                             , A.EXE_YRMON
+                             , A.REV_YRMON
+                             , FS.ACCT_CD
+                             , DECODE(FS.SLP_TP_CD,'07','E','R')
+                        
+                        UNION ALL
+                        /*Other Account(Sublet Revenue BOD,BOR)..*/
+                        SELECT A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.REV_DIR_CD
+                             , A.EXE_YRMON
+                             , A.REV_YRMON
+                             , SUM(FS.CSR_AMT/DECODE(FS.CSR_CURR_CD, 'USD', 1, (SELECT NVL(EX1.USD_LOCL_XCH_RT,1)
+                                                                                  FROM GL_MON_XCH_RT EX1
+                                                                                 WHERE FS.CSR_CURR_CD = EX1.CURR_CD
+                                                                                   AND EX1.ACCT_XCH_RT_YRMON = A.REV_YRMON
+                                                                                   AND EX1.ACCT_XCH_RT_LVL = '1'))) ACT_AMT
+                             , MIN(FS.VVD_EFF_DT) SLP_EFF_DT
+                             , MAX(FS.VVD_EXP_DT) SLP_EXP_DT
+                             , FS.ACCT_CD
+                             , (SELECT MA.ACCT_ENG_NM
+                                  FROM MDM_ACCOUNT MA
+                                 WHERE 1=1 --MA.JNL_CRE_FLG = 'Y'
+                                   AND MA.DELT_FLG = 'N'
+                                   AND MA.ACCT_CD = FS.ACCT_CD) AS ACCT_ITM_NM
+                             , DECODE(FS.SLP_TP_CD,'07','E','R') AS FLET_CTRT_TP_CD
+                          FROM V_FMS_VVD_OTR A
+                             , FMS_CONSULTATION FC
+                             , FMS_CSUL_SLP FS
+                         WHERE 1=1
+                           AND FC.SLP_TP_CD         = FS.SLP_TP_CD
+                           AND FC.SLP_FUNC_CD       = FS.SLP_FUNC_CD
+                           AND FC.SLP_OFC_CD        = FS.SLP_OFC_CD
+                           AND FC.SLP_ISS_DT        = FS.SLP_ISS_DT
+                           AND FC.SLP_SER_NO        = FS.SLP_SER_NO
+                           AND A.VSL_CD             = FS.VSL_CD
+                           AND A.SKD_VOY_NO         = FS.SKD_VOY_NO
+                           AND A.SKD_DIR_CD         = FS.SKD_DIR_CD
+                           AND A.REV_DIR_CD         = FS.REV_DIR_CD
+                           AND FC.APRO_FLG          = 'Y'
+                           AND FC.CXL_FLG           = 'N'
+                           AND SUBSTR(FC.EFF_DT,1,6)  BETWEEN REPLACE(@[fr_duration],'-') AND REPLACE(@[to_duration],'-')
+                           --AND FS.FLET_SRC_TP_CD    <> '30' /*Prepayments Settlement외 Other 레코드.*/
+                           AND FS.FLET_SRC_TP_CD    NOT IN ( /*30 Prepayments Settlement외 Other 레코드. , 차변 에서 차변 계정을 제외한다(중복 CsrAmt를 방지).*/
+		                                              #foreach($FLET_SRC_TP_CD IN ${otr_not_flet_src_tp_cds})
+                                                           #if($otr_flet_src_tp_cds.hasNext()) '$FLET_SRC_TP_CD', #else '$FLET_SRC_TP_CD' #end
+                                                      #end )
+						   AND FS.ACCT_CD NOT IN (  SELECT AI.AR_CR_ACCT_CD /* 411211 TO 계약의 Sublet Revenue에서의 변환된 계정은 제외. BOD,BOR 계정을 찾기 위한 부분..*/
+                                                      FROM FMS_ACCT_CATE AC
+                                                         , FMS_ACCT_ITM AI
+                                                     WHERE AC.FLET_ACCT_CATE_CD = 'TO'
+                                                       AND AC.ACCT_CD = AI.ACCT_CD
+                                                       AND AC.ACCT_ITM_SEQ = AI.ACCT_ITM_SEQ
+                                                    UNION ALL
+                                                    SELECT AC.ACCT_CD /* 110811 TO 계약의 Sublet Revenue Hire 계정.*/
+                                                      FROM FMS_ACCT_CATE AC
+                                                         , FMS_ACCT_ITM AI
+                                                     WHERE AC.FLET_ACCT_CATE_CD = 'TO'
+                                                       AND AC.ACCT_CD = AI.ACCT_CD
+                                                       AND AC.ACCT_ITM_SEQ = AI.ACCT_ITM_SEQ
+                                           ) 
+                           AND FS.STL_FLG           = 'N' /*Other이므로 Settlement가 안된 Data 조건.*/
+                         GROUP BY A.VSL_CD
+                             , A.SKD_VOY_NO
+                             , A.SKD_DIR_CD
+                             , A.REV_DIR_CD
+                             , A.EXE_YRMON
+                             , A.REV_YRMON
+                             , FS.ACCT_CD
+                             , DECODE(FS.SLP_TP_CD,'07','E','R')
+                             
+                       ) C
+                 WHERE 1=1 
+                   AND A.VSL_CD         = C.VSL_CD
+                   AND A.SKD_VOY_NO     = C.SKD_VOY_NO
+                   AND A.SKD_DIR_CD     = C.SKD_DIR_CD
+                   AND A.REV_DIR_CD     = C.REV_DIR_CD
+                   AND A.EXE_YRMON      = C.EXE_YRMON
+                   AND A.REV_YRMON      = C.REV_YRMON
+                 GROUP BY 
+                       A.EXE_YRMON
+                     , A.REV_YRMON
+                     , A.VST_DT
+                     , A.RLANE_CD
+                     , A.VSL_CD
+                     , A.SKD_VOY_NO
+                     , A.SKD_DIR_CD
+                     , A.REV_DIR_CD
+                     , C.FLET_CTRT_TP_CD
+                     , C.ACCT_CD
+                     , C.ACCT_ITM_NM
+                     , A.VST_DT
+                     , A.VED_DT
+                     , C.SLP_EFF_DT
+                     , C.SLP_EXP_DT
+		#end
+       			) A
+ 		WHERE 1=1
+		#if (${vvd_cd} != '')
+   		  AND A.VVD_CD LIKE @[vvd_cd]||'%'
+		#end
+		#if (${re_divr_cd} != '') 
+          AND A.FLET_CTRT_TP_CD = @[re_divr_cd] /*Expense, Revenue*/
+		#end
+   		  AND SUBSTR(A.VST_DT,1,6) <= REPLACE(@[exe_yrmon],'-')
+        ORDER BY A.FLET_CTRT_TP_CD,  A.VVD_CD, NVL(A.HIRE_AMT,'0') DESC, A.ACT_DT, A.ACCT_CD
+    ) A			]]></sql>
+			<params>
+				<param name="exe_yrmon" type="12" value="" out="N"/>
+				<param name="fr_duration" type="12" value="" out="N"/>
+				<param name="to_duration" type="12" value="" out="N"/>
+				<param name="est_type" type="12" value="" out="N"/>
+				<param name="vvd_cd" type="12" value="" out="N"/>
+				<param name="re_divr_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

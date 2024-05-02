@@ -1,0 +1,66 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : EsdTpb0806Event.java
+*@FileTitle : AdjustmentManage
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.10.01
+*@LastModifier : 최 선
+*@LastVersion : 1.0
+* 2009.10.01 최 선 
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esd.tpb.processmanage.adjustmentmanage.event;
+
+import java.util.Arrays;
+
+import com.clt.apps.opus.esd.tpb.processmanage.adjustmentmanage.vo.SearchAdjustmentManageListVO;
+import com.clt.framework.support.layer.event.EventSupport;
+
+
+/**
+ * ESD_TPB_0806 에 대한 PDTO(Data Transfer Object including Parameters)<br>
+ * -  ESD_TPB_0806HTMLAction에서 작성<br>
+ * - ServiceCommand Layer로 전달하는 PDTO로 사용<br>
+ *
+ * @author Sun, CHOI
+ * @see ESD_TPB_0806HTMLAction 참조
+ * @since J2EE 1.6
+ */
+
+public class EsdTpb0806Event extends EventSupport {
+
+	private static final long serialVersionUID = 1L;
+	
+	/** Table Value Object 조회 조건 및 단건 처리  */
+	private SearchAdjustmentManageListVO searchAdjustmentManageListVO = null;
+	
+	/** Table Value Object Multi Data 처리 */
+	private SearchAdjustmentManageListVO[] searchAdjustmentManageListVOs = null;
+
+	public EsdTpb0806Event(){}
+	
+	public void setSearchAdjustmentManageListVO(SearchAdjustmentManageListVO searchAdjustmentManageListVO){
+		this. searchAdjustmentManageListVO = searchAdjustmentManageListVO;
+	}
+
+	public void setSearchAdjustmentManageListVOS(SearchAdjustmentManageListVO[] searchAdjustmentManageListVOs){
+		if(searchAdjustmentManageListVOs != null){
+			SearchAdjustmentManageListVO[] tmpVOs = Arrays.copyOf(searchAdjustmentManageListVOs, searchAdjustmentManageListVOs.length);
+			this.searchAdjustmentManageListVOs = tmpVOs;
+		}
+	}
+
+	public SearchAdjustmentManageListVO getSearchAdjustmentManageListVO(){
+		return searchAdjustmentManageListVO;
+	}
+
+	public SearchAdjustmentManageListVO[] getSearchAdjustmentManageListVOS(){
+		SearchAdjustmentManageListVO[] rtnVOs = null;
+		if (this.searchAdjustmentManageListVOs != null) {
+			rtnVOs = Arrays.copyOf(searchAdjustmentManageListVOs, searchAdjustmentManageListVOs.length);
+		}
+		return rtnVOs;
+	}
+
+}

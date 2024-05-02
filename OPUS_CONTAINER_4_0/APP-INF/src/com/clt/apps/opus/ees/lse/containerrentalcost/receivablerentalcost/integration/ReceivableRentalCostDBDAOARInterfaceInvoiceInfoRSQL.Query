@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ReceivableRentalCostDBDAOARInterfaceInvoiceInfoRSQL">
+			<desc><![CDATA[Invoice 자료의 AR Interface Main 정보를 조회합니다.]]></desc>
+			<sql><![CDATA[
+SELECT  P.INV_NO AS BL_SRC_NO,
+        P.INV_NO AS INV_SRC_NO,
+        P.VNDR_CNT_CD AS CUST_CNT_CD,                     
+        P.CUST_SEQ AS CUST_SEQ,                         
+        P.AR_OFC_CD AS OFC_CD,                     
+        'LSE' AS IF_SRC_CD,                     
+        'CNTC' AS VSL_CD,                       
+		--TO_CHAR(A.GL_EFF_DT, 'YYMM') AS SKD_VOY_NO, 
+        SUBSTR(B.QTY_YRMON, 3, 6) AS SKD_VOY_NO,
+        'M' AS SKD_DIR_CD,                 
+        'OTH' AS SVC_SCP_CD,                  
+		--TO_CHAR(LAST_DAY(A.GL_EFF_DT), 'YYYYMMDD') AS SAIL_DT,
+        TO_CHAR(LAST_DAY(TO_DATE(B.QTY_YRMON, 'YYYYMM')), 'YYYYMMDD') AS SAIL_DT,
+        TO_CHAR(SYSDATE,'YYYYMMDD') AS SAIL_ARR_DT,         
+        P.INV_DUE_DT AS DUE_DT, 
+       	TO_CHAR(A.GL_EFF_DT, 'YYYYMMDD') AS GL_EFF_DT,
+        'CNT' AS SLAN_CD,
+        'O' AS IO_BND_CD,
+        'CNTC' AS TRNK_VSL_CD,
+		--TO_CHAR(A.GL_EFF_DT, 'YYMM') AS TRNK_SKD_VOY_NO,
+        SUBSTR(B.QTY_YRMON, 3, 6) AS TRNK_SKD_VOY_NO,
+        'M' AS TRNK_SKD_DIR_CD, 
+        P.LOC_CD AS POR_CD,    
+        P.LOC_CD AS POL_CD,    
+        P.LOC_CD AS POD_CD,    
+        P.LOC_CD AS DEL_CD,    
+        NVL(B.BKG_TEU_QTY, 0) AS BKG_TEU_QTY,
+        NVL(B.BKG_FEU_QTY, 0) AS BKG_FEU_QTY,
+        P.INV_NO AS INV_REF_NO,
+        P.CRE_USR_ID AS CRE_USR_ID,
+        SYSDATE AS CRE_DT,
+        P.CRE_USR_ID AS UPD_USR_ID,
+        SYSDATE AS UPD_DT
+FROM   (SELECT  @[inv_no]     AS INV_NO,
+	            @[cost_yrmon] AS COST_YRMON,                        
+    	        @[inv_due_dt] AS INV_DUE_DT,
+        	    @[cre_usr_id] AS CRE_USR_ID,
+	            A.OFC_CD, 
+				A.LOC_CD, 
+				A.AR_OFC_CD, 
+				@[cust_cnt_cd] AS VNDR_CNT_CD,
+				@[cust_seq]    AS CUST_SEQ
+	    FROM    MDM_ORGANIZATION A
+    	WHERE   A.OFC_CD = @[ofc_cd]
+		) P,
+	   (SELECT  DECODE(CLZ_STS_CD, 'O', ISU_GL_DT, 'C', MIN_GL_DT) AS GL_EFF_DT
+        FROM   (SELECT  A.CLZ_STS_CD, TO_DATE(@[inv_isu_dt], 'YYYYMMDD') AS ISU_GL_DT, 
+                        TO_DATE(MIN(B.EFF_YRMON||'01') OVER(),'YYYYMMDD') AS MIN_GL_DT 
+                FROM    AP_PERIOD A,
+                        AP_PERIOD B                        
+                WHERE   A.SYS_DIV_CD = B.SYS_DIV_CD
+                AND     A.AR_AP_DIV_CD = B.AR_AP_DIV_CD
+                AND     A.OFC_CD = B.OFC_CD
+                AND     A.SYS_DIV_CD = 33
+                AND     A.AR_AP_DIV_CD = 'R'
+                AND     A.OFC_CD IN (SELECT  DECODE(ROWNUM,1, AR_OFC_CD, AR_HD_QTR_OFC_CD)    
+                                     FROM    MDM_ORGANIZATION,
+                                            (SELECT LEVEL  FROM  DUAL
+                                             CONNECT BY LEVEL <= 2)
+                                     WHERE   OFC_CD = @[ofc_cd]) 
+                AND     A.EFF_YRMON  = TO_CHAR(TO_DATE(@[inv_isu_dt], 'YYYYMMDD'), 'YYYYMM')
+                AND     B.EFF_YRMON >= TO_CHAR(TO_DATE(@[inv_isu_dt], 'YYYYMMDD'), 'YYYYMM')
+                AND     B.CLZ_STS_CD = 'O'
+                )
+        WHERE   ROWNUM = 1
+		) A,
+       (SELECT  SUM(CASE WHEN SUBSTR(B.CNTR_TPSZ_CD, 2)  = '2' 
+						 THEN COUNT(DISTINCT B.CNTR_NO) END) BKG_TEU_QTY,
+                SUM(CASE WHEN SUBSTR(B.CNTR_TPSZ_CD, 2) <> '2' 
+					     THEN COUNT(DISTINCT B.CNTR_NO) END) BKG_FEU_QTY,
+                MAX(A.QTY_YRMON) AS QTY_YRMON        
+        FROM    LSE_RCV_RNTL_CHG A,
+                LSE_RCV_RNTL_CHG_DTL B
+        WHERE   A.COST_YRMON = B.COST_YRMON
+        AND     A.AGMT_CTY_CD = B.AGMT_CTY_CD
+        AND     A.AGMT_SEQ = B.AGMT_SEQ
+        AND     A.RCV_RNTL_SEQ = B.RCV_RNTL_SEQ
+        AND     A.COST_YRMON = @[cost_yrmon]
+        AND		A.INV_NO = @[inv_no]      
+#if (${rcv_rntl_seq} != '')
+		AND     A.RCV_RNTL_SEQ IN (
+	#foreach($key IN ${rcv_rntl_no_seq})
+		#if($velocityCount < $rcv_rntl_no_seq.size())
+			'$key',
+		#else
+			'$key'
+		#end
+	#end
+				)
+#end        
+        GROUP BY A.QTY_YRMON, B.CNTR_TPSZ_CD
+		) B			]]></sql>
+			<params>
+				<param name="inv_no" type="12" value="" out="N"/>
+				<param name="cost_yrmon" type="12" value="" out="N"/>
+				<param name="inv_due_dt" type="12" value="" out="N"/>
+				<param name="cre_usr_id" type="12" value="" out="N"/>
+				<param name="cust_cnt_cd" type="12" value="" out="N"/>
+				<param name="cust_seq" type="2" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="inv_isu_dt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,781 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PerformanceInquiryDBDAOSearchClosingTPBListRSQL">
+			<desc><![CDATA[SearchClosingTPBList]]></desc>
+			<sql><![CDATA[
+#if (${s_status} == 'S')
+/* 1. By Status */
+SELECT o.rhq if_rhq_cd, o.ofc if_ofc_cd
+      ,NVL(a.cnt,0)+NVL(b.cnt,0)+NVL(c.cnt,0) cnt_abc
+      ,NVL(a.amt,0) amt_a
+      ,NVL(b.amt,0) amt_b
+      ,NVL(c.amt,0) amt_c
+      ,NVL(d.cnt,0) cnt_d, NVL(d.amt,0) amt_d
+      ,NVL(e.cnt,0) cnt_e, NVL(e.amt,0) amt_e
+      ,NVL(f.cnt,0) cnt_f, NVL(f.amt,0) amt_f
+      ,NVL(a.cnt,0)+NVL(b.cnt,0)+NVL(c.cnt,0)+NVL(d.cnt,0)+NVL(e.cnt,0)+NVL(f.cnt,0) cnt_tot
+      ,NVL(a.amt,0)+NVL(b.amt,0)+NVL(c.amt,0)+NVL(d.amt,0)+NVL(e.amt,0)+NVL(f.amt,0) amt_tot
+  FROM (
+          SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+            FROM TPB_HNDL_OFC
+           WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+      	     AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	     AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	     AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+       UNION ALL
+          SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+            FROM DUAL
+       ) o,
+       (
+          -- Closed ERP I/F
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,SUM(DECODE(NVL(a.adj_amt,0.0),0.0,1,0)) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.clt_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+                 UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('N')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+                                         SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+                                         SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+                                         SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+                                      )
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cd IN ('E','L','A')
+		     AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+		     AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+		     AND a.n3pty_inv_no IS NOT NULL
+#if (${s_exclude_roc} == 'Y') 
+		     AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+        GROUP BY ROLLUP(m.rhq, m.ofc)
+          HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) a,
+       (
+          -- Closed Discount
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,COUNT(0) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.adj_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c, TPB_ADJ_STS e,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+                 UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.n3pty_no = e.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('N')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+	                                   )
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cd IN ('E','L','A')
+             AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+		     AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+             AND a.n3pty_inv_no IS NOT NULL
+             AND e.stl_sts_lst_flg = 'Y'
+             AND e.n3pty_stl_tp_cd = 'D'
+#if (${s_exclude_roc} == 'Y')
+		     AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+	    GROUP BY ROLLUP(m.rhq, m.ofc)
+          HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) b,
+       (
+          -- Closed Currency Chage Adj.
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                 ,COUNT(0) cnt
+                 ,SUM(TPB_GET_USD_AMT_FNC(a.adj_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+             FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c, TPB_ADJ_STS e,
+                  (
+                     SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                       FROM TPB_HNDL_OFC
+                      WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	                AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	                AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	                AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+                  UNION ALL
+                     SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                       FROM DUAL
+                  ) m
+            WHERE a.n3pty_no = c.n3pty_no
+              AND a.n3pty_no = e.n3pty_no
+              AND a.ofc_cd = m.ofc
+              AND a.n3pty_delt_tp_cd IN ('N')
+              AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                      SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                      SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                      SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+	                                    )
+              AND c.ots_sts_lst_flg = 'Y'
+              AND c.ots_sts_cd IN ('E','L','A')
+              AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+              AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+              AND a.n3pty_inv_no IS NOT NULL
+              AND e.stl_sts_lst_flg = 'Y'
+              AND e.n3pty_stl_tp_cd = 'C'
+#if (${s_exclude_roc} == 'Y')
+              AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+	     GROUP BY ROLLUP(m.rhq, m.ofc)
+           HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) c,
+       (
+          -- Closed Write-Off
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,COUNT(0) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.adj_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c, TPB_ADJ_STS e,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+                 UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.n3pty_no = e.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('N')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+	                                   )
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cd IN ('E','L','A')
+             AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+             AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+             AND e.stl_sts_lst_flg = 'Y'
+             AND e.n3pty_stl_tp_cd = 'W'
+#if (${s_exclude_roc} == 'Y')
+             AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+        GROUP BY ROLLUP(m.rhq, m.ofc)
+          HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) d,
+       (
+          -- Process Close
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,COUNT(0) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.ots_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+    	         UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('C')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+                                      )
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+             AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+		GROUP BY ROLLUP(m.rhq, m.ofc)
+		  HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) e,
+       ( 
+		  -- Closed ROC
+		  SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,COUNT(0) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.ots_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c, TPB_ADJ_STS e,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+    	         UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.n3pty_no = e.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('N')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+	                                   )
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cd IN ('E','L','A')
+
+-- 2009-03-13 O Wan-Ki
+             AND e.cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])
+             AND e.cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1
+             AND e.stl_sts_lst_flg = 'Y'
+             AND e.n3pty_stl_tp_cd = 'O'
+
+-- 2009-03-11 O Wan-Ki      1.2 ROC Close 보완 - 2008-11-10 이후 ROC 에 의한 close 는 없다
+             --AND e.cre_dt < to_date('2008-11-10','YYYY-MM-DD')
+#if (${s_exclude_roc} == 'Y')
+             AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+        GROUP BY ROLLUP(m.rhq, m.ofc)
+          HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) f
+ WHERE 1 = 1
+   AND o.rhq = a.rhq(+) AND o.ofc = a.ofc(+)
+   AND o.rhq = b.rhq(+) AND o.ofc = b.ofc(+)
+   AND o.rhq = c.rhq(+) AND o.ofc = c.ofc(+)
+   AND o.rhq = d.rhq(+) AND o.ofc = d.ofc(+)
+   AND o.rhq = e.rhq(+) AND o.ofc = e.ofc(+)
+   AND o.rhq = f.rhq(+) AND o.ofc = f.ofc(+)
+ ORDER BY o.seq, o.rhq, o.ofc
+
+#elseif (${s_status} == 'E')
+-- 2. By Expense Type
+
+SELECT o.rhq if_rhq_cd, o.ofc if_ofc_cd
+      ,NVL(a.cnt,0) cnt_a, NVL(a.amt,0) amt_a
+      ,NVL(b.cnt,0) cnt_b, NVL(b.amt,0) amt_b
+      ,NVL(c.cnt,0) cnt_c, NVL(c.amt,0) amt_c
+      ,NVL(a.cnt,0)+NVL(b.cnt,0)+NVL(c.cnt,0) cnt_tot
+      ,NVL(a.amt,0)+NVL(b.amt,0)+NVL(c.amt,0) amt_tot
+  FROM (
+          SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+            FROM TPB_HNDL_OFC
+           WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	     AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	     AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	     AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+       UNION ALL
+          SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+            FROM DUAL
+       ) o,
+       (
+          -- TES
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,COUNT(0) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.ots_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+    	         UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('N')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+	                                  )
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cd IN ('E','L','A')
+             AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+             AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+             AND a.n3pty_expn_tp_cd = 'TES'
+#if (${s_exclude_roc} == 'Y') 
+             AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+	    GROUP BY ROLLUP(m.rhq, m.ofc)
+          HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) a,
+       (
+          -- TRS
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,COUNT(0) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.ots_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+    	         UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('N')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+	                                   )
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cd IN ('E','L','A')
+             AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+             AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+             AND a.n3pty_expn_tp_cd = 'TRS'
+#if (${s_exclude_roc} == 'Y') 
+             AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+	    GROUP BY ROLLUP(m.rhq, m.ofc)
+          HAVING GROUPING(m.rhq) = 1 OR GROUPING(m.ofc) = 0
+       ) b,
+       (
+          -- MNR
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,COUNT(0) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.ots_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+                 UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('N')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+	                                   )
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cd IN ('E','L','A')
+             AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+             AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+             AND a.n3pty_expn_tp_cd = 'MNR'
+#if (${s_exclude_roc} == 'Y') 
+             AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+	    GROUP BY ROLLUP(m.rhq, m.ofc)
+          HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) c
+ WHERE 1 = 1
+   AND o.rhq = a.rhq(+) AND o.ofc = a.ofc(+)
+   AND o.rhq = b.rhq(+) AND o.ofc = b.ofc(+)
+   AND o.rhq = c.rhq(+) AND o.ofc = c.ofc(+)
+ ORDER BY o.seq, o.rhq, o.ofc
+
+#elseif (${s_status} == 'A')
+-- 3. Aging
+
+SELECT o.rhq if_rhq_cd, o.ofc if_ofc_cd
+      ,NVL(a.cnt,0) cnt_a, NVL(a.amt,0) amt_a
+      ,NVL(b.cnt,0) cnt_b, NVL(b.amt,0) amt_b
+      ,NVL(c.cnt,0) cnt_c, NVL(c.amt,0) amt_c
+      ,NVL(d.cnt,0) cnt_d, NVL(d.amt,0) amt_d
+      ,NVL(e.cnt,0) cnt_e, NVL(e.amt,0) amt_e
+      ,NVL(a.cnt,0)+NVL(b.cnt,0)+NVL(c.cnt,0)+NVL(d.cnt,0)+NVL(e.cnt,0) cnt_tot
+      ,NVL(a.amt,0)+NVL(b.amt,0)+NVL(c.amt,0)+NVL(d.amt,0)+NVL(e.amt,0) amt_tot
+  FROM (
+          SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+            FROM TPB_HNDL_OFC
+           WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	     AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	     AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	     AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+       UNION ALL
+          SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+            FROM DUAL
+       ) o,
+       (
+          -- in 30 days
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,COUNT(0) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.ots_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+    	         UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('N')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+	                                   )
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cd IN ('E','L','A')
+             AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+             AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+             AND a.cfm_dt <= SYSDATE - 0
+             AND a.cfm_dt > SYSDATE - 31
+#if (${s_exclude_roc} == 'Y') 
+             AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+	    GROUP BY ROLLUP(m.rhq, m.ofc)
+          HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) a,
+       (
+          -- 31~60 days
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,COUNT(0) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.ots_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+    	         UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('N')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+	                                   )
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cd IN ('E','L','A')
+             AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+             AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+             AND a.cfm_dt <= SYSDATE - 31
+             AND a.cfm_dt > SYSDATE - 61
+#if (${s_exclude_roc} == 'Y') 
+             AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+	    GROUP BY ROLLUP(m.rhq, m.ofc)
+          HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) b,
+       (
+          -- 61~90 days
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,COUNT(0) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.ots_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+    	         UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('N')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+	                                   )
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cd IN ('E','L','A')
+             AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+             AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+             AND a.cfm_dt <= SYSDATE - 61
+             AND a.cfm_dt > SYSDATE - 91
+#if (${s_exclude_roc} == 'Y') 
+             AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+	    GROUP BY ROLLUP(m.rhq, m.ofc)
+          HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) c,
+       (
+          -- 91~180 days
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,COUNT(0) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.ots_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+                 UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('N')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+	                                   )
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cd IN ('E','L','A')
+             AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+             AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+             AND a.cfm_dt <= SYSDATE - 91
+             AND a.cfm_dt > SYSDATE - 181
+#if (${s_exclude_roc} == 'Y') 
+             AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+	    GROUP BY ROLLUP(m.rhq, m.ofc)
+          HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) d,
+       (
+          -- over 180 days
+          SELECT NVL(m.rhq,'(TOTAL)') rhq, NVL(m.ofc,'(TOTAL)') ofc
+                ,COUNT(0) cnt
+                ,SUM(TPB_GET_USD_AMT_FNC(a.ots_amt,a.curr_cd,TPB_GET_LCL_DATE_FNC(a.cfm_dt,a.ofc_cd))) amt
+            FROM TPB_OTS_GRP a, TPB_OTS_GRP_STS c,
+                 (
+                    SELECT 0 seq, rhq_cd AS rhq, ofc_cd ofc
+                      FROM TPB_HNDL_OFC
+                     WHERE n3pty_ofc_tp_cd='T' AND DELT_FLG = 'N'
+#if (${s_if_rhq_cd} != '') 
+    	               AND rhq_cd = @[s_if_rhq_cd]     /* bind */
+#end
+#if (${s_if_ctrl_cd} != '') 
+    	               AND n3pty_ctrl_ofc_cd = @[s_if_ctrl_cd]
+#end
+#if (${s_if_ofc_cd} != '') 
+    	               AND ofc_cd = @[s_if_ofc_cd]     /* bind */
+#end
+    	         UNION ALL
+                    SELECT 999 seq, '(TOTAL)' rhq, '(TOTAL)' ofc
+                      FROM DUAL
+                 ) m
+           WHERE a.n3pty_no = c.n3pty_no
+             AND a.ofc_cd = m.ofc
+             AND a.n3pty_delt_tp_cd IN ('N')
+             AND a.n3pty_bil_tp_cd IN (
+#if (${s_exclude_jo} == 'X') /* excluding JO */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd NOT IN ('JO') UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#elseif (${s_exclude_jo} == 'O') /* only JO */ 
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE n3pty_bil_tp_cd IN ('JO')
+#elseif (${s_exclude_jo} == 'A') /* ALL */
+	                                     SELECT n3pty_bil_tp_cd FROM tpb_n3rd_pty_bil_tp WHERE 1=1 UNION ALL SELECT 'MX' n3pty_bil_tp_cd FROM DUAL
+#end
+)
+             AND c.ots_sts_lst_flg = 'Y'
+             AND c.ots_sts_cd IN ('E','L','A')
+             AND c.ots_sts_cre_dt >= TPB_GET_SRCH_DATE_FNC(@[s_sdate],'YYYY-MM-DD',@[user_ofc_cd])  /* bind s_date, ofc */
+             AND c.ots_sts_cre_dt < TPB_GET_SRCH_DATE_FNC(@[s_edate],'YYYY-MM-DD',@[user_ofc_cd]) + 1 /* bind e_date, ofc */
+             AND a.cfm_dt <= SYSDATE - 181
+#if (${s_exclude_roc} == 'Y') 
+             AND NOT EXISTS ( SELECT 0 FROM TPB_OTS_DTL s WHERE s.FM_CLT_CNG_OFC_N3PTY_NO = a.n3pty_no )
+#end
+        GROUP BY ROLLUP(m.rhq, m.ofc)
+          HAVING GROUPING(m.rhq)=1 OR GROUPING(m.ofc)=0
+       ) e
+ WHERE 1 = 1
+   AND o.rhq = a.rhq(+) AND o.ofc = a.ofc(+)
+   AND o.rhq = b.rhq(+) AND o.ofc = b.ofc(+)
+   AND o.rhq = c.rhq(+) AND o.ofc = c.ofc(+)
+   AND o.rhq = d.rhq(+) AND o.ofc = d.ofc(+)
+   AND o.rhq = e.rhq(+) AND o.ofc = e.ofc(+)
+ ORDER BY o.seq, o.rhq, o.ofc
+#end			]]></sql>
+			<params>
+				<param name="s_if_rhq_cd" type="12" value="" out="N"/>
+				<param name="s_if_ctrl_cd" type="12" value="" out="N"/>
+				<param name="s_if_ofc_cd" type="12" value="" out="N"/>
+				<param name="s_sdate" type="12" value="" out="N"/>
+				<param name="user_ofc_cd" type="12" value="" out="N"/>
+				<param name="s_edate" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

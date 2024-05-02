@@ -1,0 +1,597 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="MonthlyQuotaAdjustmentSlsRHQDBDAOSearchMonthlyQuotaAdjustmentSlsRhq0156List01RSQL">
+			<desc><![CDATA[MonthlyQuotaAdjustmentSlsRhq 조정을 위한 조회
+2011.03.02 SAQ_GET_AQ_DP_SEQ_FNC -> DECODE(NVL(MRS.CTRT_AQ_CD, 99), '99', 99, 11)||MRS.CTRT_AQ_CD 수정]]></desc>
+			<sql><![CDATA[
+WITH TMP_INPUT_PARMAS AS
+   (
+    SELECT  MQTA_STEP_CD,
+            BSE_YR,
+            BSE_QTR_CD,
+            TRD_CD,
+            DIR_CD,
+            MQTA_VER_NO,
+            SAQ_STS_CD,
+            GLINE_VER_NO,
+            CRE_OFC_CD AS RHQ_CD,
+            INCL_PORT_FLG,
+            @[targetMonth] TGT_YR_MON,
+            @[bef_yr_qtr] BEF_YR_QTR,
+            TO_CHAR(ADD_MONTHS(TO_DATE(@[targetMonth], 'YYYYMM'), -1), 'YYYYMM')
+         		AS BEF_YR_MON,
+            @[slsFcastPubNo] AS SLS_FCAST_PUB_NO,
+            @[mqtaMdlVerNo] AS MQTA_MDL_VER_NO,
+            @[search_sub_trd_cd] AS SUB_TRD_CD,
+            @[search_rlane_cd] AS RLANE_CD,
+           ( SELECT RLS.MQTA_RLSE_VER_NO AS MQTA_RLSE_VER_NO
+             FROM   SAQ_MON_QTA_RLSE RLS
+             WHERE  RLS.BSE_YR||RLS.BSE_QTR_CD = @[bef_yr_qtr]
+             AND    RLS.QTA_RLSE_STS_CD = 'R'
+           ) MQTA_RLSE_VER_NO -- Monthly Quota
+    FROM   SAQ_MON_QTA_STEP_VER
+    WHERE  MQTA_STEP_CD = @[mQtaStepCd]
+    AND    GLINE_VER_NO = @[glineVerNo]
+    AND    MQTA_VER_NO = @[mQtaVerNo]
+    AND    BSE_YR = @[year]
+    AND    BSE_QTR_CD = @[bse_qtr_cd]
+    AND    TRD_CD = @[trade]
+    AND    DIR_CD = @[bound]
+    					),
+TMP_MON_TGT_VVD_ADJ AS (
+    SELECT -- saq_mon_tgt_vvd_adj BSA, Voyage
+        VVD.SUB_TRD_CD,
+        VVD.RLANE_CD,
+        VVD.SPRT_GRP_CD,
+        VVD.BSA_GRP_CD,
+        (VVD.RLANE_CD||'-'||VVD.SPRT_GRP_CD||VVD.BSA_GRP_CD) AS LANE_GRP,
+        SUM(DISTINCT VVD.FNL_BSA_CAPA) AS TOT_BSA,
+        COUNT(DISTINCT VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD) AS TOT_VOY
+    FROM   SAQ_MON_TGT_VVD_ADJ VVD, TMP_INPUT_PARMAS INP
+    WHERE  VVD.BSE_YR = INP.BSE_YR
+    AND    VVD.BSE_QTR_CD = INP.BSE_QTR_CD
+    AND    VVD.GLINE_VER_NO = INP.GLINE_VER_NO
+    AND    VVD.TRD_CD = INP.TRD_CD
+    AND    VVD.DIR_CD = INP.DIR_CD
+    AND    VVD.BSE_YR||VVD.BSE_MON = INP.TGT_YR_MON
+    AND    VVD.SUB_TRD_CD LIKE INP.SUB_TRD_CD || '%'
+    AND    VVD.RLANE_CD LIKE INP.RLANE_CD||'%'
+    GROUP BY VVD.SUB_TRD_CD,VVD.RLANE_CD,VVD.SPRT_GRP_CD,VVD.BSA_GRP_CD
+    )
+SELECT /*+ ORDERED USE_HASH(RHQ UNI)*/
+    MIN(RHQ.SUB_TRD_CD||DECODE(RHQ.RLANE_CD,'RBCCO','ZZ',SUBSTR(RHQ.RLANE_CD,-2))||RHQ.RLANE_CD||RHQ.SPRT_GRP_CD) KEY, -- hidden
+    RHQ.SUB_TRD_CD,
+    RHQ.LANE_GRP,
+    DECODE(DIR.DIR_CD,'',RHQ.LANE_GRP,SUBSTR(RHQ.LANE_GRP, 0,6)||DIR.DIR_CD||SUBSTR(RHQ.LANE_GRP, 6,9)) CONV_LANE_GRP,
+    MIN(RHQ.RLANE_CD) AS RLANE_CD,  --hidden
+    MIN(RHQ.SPRT_GRP_CD) AS SPRT_GRP_CD,  --hidden
+    MIN(RHQ.BSA_GRP_CD) AS BSA_GRP_CD,  --hidden
+    RHQ.POL_CD,
+    RHQ.POD_CD,
+    NVL(DECODE(RHQ.SLS_RGN_OFC_CD,'Total','Total',RHQ.SLS_AQ_CD),' ') SLS_AQ_CD,
+    RHQ.SLS_RGN_OFC_CD,
+    MIN(RHQ.POL_SEQ) AS POL_SEQ,
+    MIN(RHQ.POD_SEQ) AS POD_SEQ,
+    TO_NUMBER(ITM.CODE) AS ITEM_CODE,  --hidden
+    ITM.ROW_SEQ,  --hidden
+    REPLACE(ITM.TEXT,'(P)','') AS ITEM,
+    MIN(CASE WHEN UNI.GUBUN = 'MONTHLY' AND UNI.BSE_MON = SUBSTR(BEF_YR_MON,5,2) THEN
+            ROUND(DECODE( ITM.CODE,
+                     '01', UNI.TOT_BSA,
+                     '02', UNI.TOT_VOY,
+                     '03', UNI.TOT_LOD,
+                     '04', DECODE(UNI.TOT_BSA, 0, '', ROUND((UNI.TOT_LOD/UNI.TOT_BSA)*100, 1)),
+                     '05', UNI.TOT_REV,
+                     '06', UNI.TOT_RPB,
+                     '07', UNI.TOT_CM,
+                     '08', UNI.TOT_RA_CM,
+                     '09', UNI.TOT_CMB,
+                     '10', UNI.TOT_RA_CMB,
+                     '11', UNI.TOT_OP,
+                     '12', UNI.TOT_RA_OP,
+                     '13', UNI.TOT_OPB,
+                     '14', UNI.TOT_RA_OPB ), 13)
+        END) AS RECENT_MONTHLY,
+    MIN(CASE WHEN UNI.GUBUN = 'FORECAST' THEN
+            ROUND(DECODE( ITM.CODE, --'01', uni.tot_bsa,
+                     '01', UNI.TOT_BSA,
+                     '02', UNI.TOT_VOY,
+                     '03', UNI.TOT_LOD/UNI.TOT_VOY,
+                     '04', DECODE(UNI.TOT_BSA, 0, '', ROUND(((UNI.TOT_LOD/UNI.TOT_VOY)/UNI.TOT_BSA)*100, 1)),
+                     '05', UNI.TOT_REV/UNI.TOT_VOY,
+                     '06', (UNI.TOT_REV/UNI.TOT_VOY)/(UNI.TOT_LOD/UNI.TOT_VOY),
+                     '07', UNI.TOT_CM/UNI.TOT_VOY,
+                     '08', 0,
+                     '09', (UNI.TOT_CM/UNI.TOT_VOY)/(UNI.TOT_LOD/UNI.TOT_VOY),
+                     '10', 0,
+                     '11', UNI.TOT_OP/UNI.TOT_VOY,
+                     '12', UNI.TOT_RA_OP/UNI.TOT_VOY,
+                     '13', (UNI.TOT_OP/UNI.TOT_VOY)/(UNI.TOT_LOD/UNI.TOT_VOY),
+                     '14', (UNI.TOT_RA_OP/UNI.TOT_VOY)/(UNI.TOT_LOD/UNI.TOT_VOY) ), 13)
+        END) AS FCAST_01,
+    MIN(CASE WHEN UNI.GUBUN = 'MODEL' THEN
+            ROUND(DECODE( ITM.CODE, -- '01', uni.tot_bsa,
+                     '01', UNI.TOT_BSA,
+                     '02', UNI.TOT_VOY,
+                     '03', UNI.TOT_LOD/UNI.TOT_VOY,
+                     '04', DECODE(UNI.TOT_BSA, 0, '', ROUND(((UNI.TOT_LOD/UNI.TOT_VOY)/UNI.TOT_BSA)*100, 1)),
+                     '05', UNI.TOT_REV/UNI.TOT_VOY,
+                     '06', (UNI.TOT_REV/UNI.TOT_VOY)/(UNI.TOT_LOD/UNI.TOT_VOY),
+                     '07', UNI.TOT_CM/UNI.TOT_VOY,
+                     '08', UNI.TOT_RA_CM/UNI.TOT_VOY,
+                     '09', (UNI.TOT_CM/UNI.TOT_VOY)/(UNI.TOT_LOD/UNI.TOT_VOY),
+                     '10', (UNI.TOT_RA_CM/UNI.TOT_VOY)/(UNI.TOT_LOD/UNI.TOT_VOY),
+                     '11', UNI.TOT_OP/UNI.TOT_VOY,
+                     '12', UNI.TOT_RA_OP/UNI.TOT_VOY,
+                     '13', (UNI.TOT_OP/UNI.TOT_VOY)/(UNI.TOT_LOD/UNI.TOT_VOY),
+                     '14', (UNI.TOT_RA_OP/UNI.TOT_VOY)/(UNI.TOT_LOD/UNI.TOT_VOY) ), 13)
+        END) AS MODEL_01,
+    MIN(CASE WHEN RHQ.GUBUN = 'RHQ' THEN
+            ROUND(DECODE( ITM.CODE,
+                     '01', UNI.TOT_BSA,
+                     '02', RHQ.TOT_VOY,
+                     '03', RHQ.TOT_LOD,
+                     '04', DECODE(RHQ.TOT_BSA, 0, '', ROUND((RHQ.TOT_LOD/RHQ.TOT_BSA)*100, 1)),
+                     '05', RHQ.TOT_REV,
+                     '06', RHQ.TOT_RPB,
+                     '07', RHQ.TOT_CM,
+                     '08', RHQ.TOT_RA_CM,
+                     '09', RHQ.TOT_CMB,
+                     '10', RHQ.TOT_RA_CMB,
+                     '11', RHQ.TOT_OP,
+                     '12', RHQ.TOT_RA_OP,
+                     '13', RHQ.TOT_OPB,
+                     '14', RHQ.TOT_RA_OPB ), 13)
+        END) AS RHQ_01,
+    MIN(CASE WHEN RHQ.GUBUN = 'INITIAL' THEN
+            ROUND(DECODE( ITM.CODE,
+                     '01', UNI.TOT_BSA,
+                     '02', RHQ.TOT_VOY,
+                     '03', RHQ.TOT_LOD,
+                     '04', DECODE(RHQ.TOT_BSA, 0, '', ROUND((RHQ.TOT_LOD/RHQ.TOT_BSA)*100, 1)),
+                     '05', RHQ.TOT_REV,
+                     '06', RHQ.TOT_RPB,
+                     '07', RHQ.TOT_CM,
+                     '08', RHQ.TOT_RA_CM,
+                     '09', RHQ.TOT_CMB,
+                     '10', RHQ.TOT_RA_CMB,
+                     '11', RHQ.TOT_OP,
+                     '12', RHQ.TOT_RA_OP,
+                     '13', RHQ.TOT_OPB,
+                     '14', RHQ.TOT_RA_OPB ), 13)
+        END) AS INITIAL_01,
+    MIN(CASE WHEN INP.SAQ_STS_CD != 'DR' AND RHQ.GUBUN = 'RHQ' THEN RHQ.TOT_LOD
+             WHEN INP.SAQ_STS_CD = 'DR' AND RHQ.GUBUN = 'FINAL' THEN RHQ.TOT_LOD
+        END) AS TOT_LOD,
+    MIN(CASE WHEN INP.SAQ_STS_CD != 'DR' AND RHQ.GUBUN = 'RHQ' THEN RHQ.TOT_RPB
+             WHEN INP.SAQ_STS_CD = 'DR' AND RHQ.GUBUN = 'FINAL' THEN RHQ.TOT_RPB
+        END) AS TOT_RPB,
+    MIN(DECODE(RHQ.GUBUN, 'RHQ', RHQ.CM_UC_AMT)) AS CM_UC_AMT,
+    MIN(DECODE(RHQ.GUBUN, 'RHQ', RHQ.OPFIT_UC_AMT)) AS OPFIT_UC_AMT,
+    MIN(DECODE(RHQ.GUBUN, 'RHQ', RHQ.RA_CM_UC_AMT)) AS RA_CM_UC_AMT,
+    MIN(DECODE(RHQ.GUBUN, 'RHQ', RHQ.RA_OPFIT_UC_AMT)) AS RA_OPFIT_UC_AMT,
+    MIN(DECODE(RHQ.GUBUN, 'RHQ', RHQ.TOT_BSA)) AS TOT_BSA,
+    MIN(DECODE(RHQ.GUBUN, 'RHQ', RHQ.LOW_QTY)) AS LOW_QTY ,
+    RHQ.RGN_GRP
+FROM TMP_INPUT_PARMAS INP,
+    (
+    SELECT  INTG_CD_VAL_CTNT AS CODE,
+            INTG_CD_VAL_DP_DESC AS TEXT,
+            INTG_CD_VAL_DP_SEQ AS ROW_SEQ
+    FROM  COM_INTG_CD_DTL
+    WHERE INTG_CD_ID = 'CD01389'
+    ) ITM, (
+    SELECT -- RHQ, Final
+ 		DECODE(RHQ.MQTA_STEP_CD, MIN(INP.MQTA_STEP_CD), 'RHQ', '11', 'INITIAL') AS GUBUN,
+ 		RHQ.BSE_MON AS BSE_MON,
+ 		RHQ.SUB_TRD_CD,
+ 		(RHQ.RLANE_CD||'-'||RHQ.SPRT_GRP_CD||RHQ.BSA_GRP_CD) AS LANE_GRP,
+ 		RHQ.RLANE_CD,
+ 		RHQ.SPRT_GRP_CD,
+ 		RHQ.BSA_GRP_CD,
+ 		RHQ.SLS_AQ_CD,
+ 		NVL(RHQ.SLS_RGN_OFC_CD,'Total') SLS_RGN_OFC_CD,
+         NVL(DECODE(INP.INCL_PORT_FLG, 'Y', NVL(RHQ.POL_CD, '00000'), '00000'), '00000') AS POL_CD,
+         NVL(DECODE(INP.INCL_PORT_FLG, 'Y', NVL(RHQ.POD_CD, '00000'), '00000'), '00000') AS POD_CD,
+ 		MAX(VVD.TOT_BSA) AS TOT_BSA,
+ 		MAX(VVD.TOT_VOY) AS TOT_VOY,
+ 		SUM(RHQ.LOD_QTY) AS TOT_LOD ,
+ 		SUM(RHQ.GRS_RPB_REV*RHQ.LOD_QTY) AS TOT_REV,
+ 		DECODE(SUM(RHQ.LOD_QTY), 0, 0,SUM(RHQ.GRS_RPB_REV*RHQ.LOD_QTY)/SUM(RHQ.LOD_QTY)) AS TOT_RPB,
+ 		SUM((RHQ.GRS_RPB_REV-RHQ.CM_UC_AMT)*RHQ.LOD_QTY) AS TOT_CM,
+ 		SUM((RHQ.GRS_RPB_REV-RHQ.RA_CM_UC_AMT)*RHQ.LOD_QTY) AS TOT_RA_CM,
+ 		DECODE(SUM(RHQ.LOD_QTY), 0, 0, SUM((RHQ.GRS_RPB_REV-RHQ.CM_UC_AMT)*RHQ.LOD_QTY)/SUM(RHQ.LOD_QTY)) AS TOT_CMB,
+ 		DECODE(SUM(RHQ.LOD_QTY), 0, 0, SUM((RHQ.GRS_RPB_REV-RHQ.RA_CM_UC_AMT)*RHQ.LOD_QTY)/SUM(RHQ.LOD_QTY)) AS TOT_RA_CMB,
+ 		SUM((RHQ.GRS_RPB_REV-RHQ.OPFIT_UC_AMT)*RHQ.LOD_QTY) AS TOT_OP,
+ 		SUM((RHQ.GRS_RPB_REV-RHQ.RA_OPFIT_UC_AMT)*RHQ.LOD_QTY) AS TOT_RA_OP,
+ 		DECODE(SUM(RHQ.LOD_QTY), 0, 0, SUM((RHQ.GRS_RPB_REV-RHQ.OPFIT_UC_AMT)*RHQ.LOD_QTY)/SUM(RHQ.LOD_QTY)) AS TOT_OPB,
+ 		DECODE(SUM(RHQ.LOD_QTY), 0, 0, SUM((RHQ.GRS_RPB_REV-RHQ.RA_OPFIT_UC_AMT)*RHQ.LOD_QTY)/SUM(RHQ.LOD_QTY)) AS TOT_RA_OPB,
+ 		SUM(RHQ.CM_UC_AMT) AS CM_UC_AMT,
+ 		SUM(RHQ.OPFIT_UC_AMT) AS OPFIT_UC_AMT,
+ 		SUM(RHQ.RA_CM_UC_AMT) AS RA_CM_UC_AMT,
+ 		SUM(RHQ.RA_OPFIT_UC_AMT) AS RA_OPFIT_UC_AMT,
+ 		SUM(NVL(LOD.LOW_QTY, 0)) AS LOW_QTY,
+ 		DECODE(INP.INCL_PORT_FLG, 'N', '000', NVL(MAX(POL.PORT_SEQ), 999)) AS POL_SEQ,
+ 		DECODE(INP.INCL_PORT_FLG, 'N', '000', NVL(MAX(POD.PORT_SEQ), 999)) AS POD_SEQ,
+ 		GROUPING (RHQ.SLS_RGN_OFC_CD) RGN_GRP
+    FROM   (
+            SELECT QTY.SUB_TRD_CD,QTY.RLANE_CD,QTY.CTRT_RHQ_CD,QTY.CTRT_RGN_OFC_CD,
+                   MIN(DECODE(INP.INCL_PORT_FLG, 'Y', QTY.POL_CD, '00000')) AS POL_CD,
+                   MIN(DECODE(INP.INCL_PORT_FLG, 'Y', QTY.POD_CD, '00000')) AS POD_CD,
+                   SUM(SPC_GNTE_QTY) AS LOW_QTY
+            FROM   SAQ_MON_QTA_SPC_GNTE QTY,
+                   TMP_INPUT_PARMAS INP
+            WHERE  QTY.MQTA_MDL_VER_NO = INP.MQTA_MDL_VER_NO
+            AND    QTY.BSE_YR = SUBSTR(INP.TGT_YR_MON, 1,4)
+            AND    QTY.BSE_MON = SUBSTR(INP.TGT_YR_MON, 5,6)
+            AND    QTY.TRD_CD = INP.TRD_CD
+            AND    QTY.DIR_CD = INP.DIR_CD
+            AND    QTY.CTRT_RHQ_CD = INP.RHQ_CD
+            GROUP BY QTY.SUB_TRD_CD,QTY.RLANE_CD,QTY.CTRT_RHQ_CD,QTY.CTRT_RGN_OFC_CD,
+                 DECODE(INP.INCL_PORT_FLG, 'Y', QTY.POL_CD, '00000'),
+                 DECODE(INP.INCL_PORT_FLG, 'Y', QTY.POD_CD, '00000')
+            ) LOD,
+           TMP_INPUT_PARMAS INP,
+           SAQ_MON_QTA_STEP_VER VER,
+           SAQ_MON_QTA_LOD_TGT RHQ,
+           TMP_MON_TGT_VVD_ADJ VVD,
+           SAQ_MON_QTA_PORT_SEQ POL,
+           SAQ_MON_QTA_PORT_SEQ POD
+    WHERE  VER.MQTA_STEP_CD IN (INP.MQTA_STEP_CD, '11') -- RHQ, initial
+    AND    VER.BSE_YR = INP.BSE_YR
+    AND    VER.BSE_QTR_CD = INP.BSE_QTR_CD
+    AND    VER.TRD_CD = INP.TRD_CD
+    AND    VER.DIR_CD = INP.DIR_CD
+    AND    VER.GLINE_VER_NO = INP.GLINE_VER_NO
+    AND    ((VER.MQTA_STEP_CD = '08' AND VER.MQTA_VER_NO = INP.MQTA_VER_NO)
+            OR (VER.MQTA_STEP_CD = '11' AND VER.GLINE_VER_NO = INP.GLINE_VER_NO))
+    AND    RHQ.MQTA_STEP_CD = VER.MQTA_STEP_CD
+    AND    RHQ.BSE_YR = VER.BSE_YR
+    AND    RHQ.BSE_QTR_CD = VER.BSE_QTR_CD
+    AND    RHQ.BSE_MON = SUBSTR(INP.TGT_YR_MON, 5,2)
+    AND    RHQ.TRD_CD = VER.TRD_CD
+    AND    RHQ.DIR_CD = VER.DIR_CD
+    AND    RHQ.MQTA_VER_NO = VER.MQTA_VER_NO
+    AND    RHQ.SUB_TRD_CD = VVD.SUB_TRD_CD
+    AND    RHQ.RLANE_CD = VVD.RLANE_CD
+    AND    RHQ.SPRT_GRP_CD = VVD.SPRT_GRP_CD
+    AND    RHQ.BSA_GRP_CD = VVD.BSA_GRP_CD
+    AND    RHQ.SLS_RHQ_CD = INP.RHQ_CD
+    AND    RHQ.SUB_TRD_CD LIKE INP.SUB_TRD_CD || '%'
+    AND    RHQ.RLANE_CD LIKE INP.RLANE_CD||'%'
+    AND    LOD.SUB_TRD_CD(+) = RHQ.SUB_TRD_CD
+    AND    LOD.RLANE_CD(+) = RHQ.RLANE_CD
+    AND    LOD.CTRT_RHQ_CD(+) = RHQ.SLS_RHQ_CD
+    AND    LOD.CTRT_RGN_OFC_CD(+) = RHQ.SLS_RGN_OFC_CD
+    AND    LOD.POL_CD(+) = RHQ.POL_CD
+    AND    LOD.POD_CD(+) = RHQ.POD_CD
+    AND    POL.BSE_YR(+) = RHQ.BSE_YR
+    AND    POL.BSE_QTR_CD(+) = RHQ.BSE_QTR_CD
+    AND    POL.GLINE_VER_NO(+) = @[glineVerNo]
+    AND    POL.TRD_CD(+) = RHQ.TRD_CD
+    AND    POL.DIR_CD(+) = RHQ.DIR_CD
+    AND    POL.RLANE_CD(+) = RHQ.RLANE_CD
+    AND    POL.SPRT_GRP_CD(+) = RHQ.SPRT_GRP_CD
+    AND    POL.BSA_GRP_CD(+) = RHQ.BSA_GRP_CD
+    AND    POL.PORT_CD(+) = RHQ.POL_CD
+    AND    POD.BSE_YR(+) = RHQ.BSE_YR
+    AND    POD.BSE_QTR_CD(+) = RHQ.BSE_QTR_CD
+    AND    POD.GLINE_VER_NO(+) = @[glineVerNo]
+    AND    POD.TRD_CD(+) = RHQ.TRD_CD
+    AND    POD.DIR_CD(+) = RHQ.DIR_CD
+    AND    POD.RLANE_CD(+) = RHQ.RLANE_CD
+    AND    POD.SPRT_GRP_CD(+) = RHQ.SPRT_GRP_CD
+    AND    POD.BSA_GRP_CD(+) = RHQ.BSA_GRP_CD
+    AND    POD.PORT_CD(+) = RHQ.POD_CD
+  GROUP BY GROUPING SETS( (  RHQ.MQTA_STEP_CD,RHQ.BSE_MON,RHQ.SUB_TRD_CD, RHQ.RLANE_CD,
+ 	 RHQ.SPRT_GRP_CD, RHQ.BSA_GRP_CD, RHQ.SLS_RGN_OFC_CD, RHQ.SLS_AQ_CD, INP.INCL_PORT_FLG,
+ 				 DECODE(INP.INCL_PORT_FLG, 'Y', NVL(RHQ.POL_CD, '00000'), '00000'),
+ 				 DECODE(INP.INCL_PORT_FLG, 'Y', NVL(RHQ.POD_CD, '00000'), '00000')    )
+ 	 , (RHQ.MQTA_STEP_CD,RHQ.BSE_MON,RHQ.SUB_TRD_CD, RHQ.RLANE_CD, RHQ.SPRT_GRP_CD, RHQ.BSA_GRP_CD ))
+    ) RHQ, (
+    SELECT -- Recent Quota Monthly
+           'MONTHLY' AS GUBUN,
+           QTA.BSE_MON,
+           QTA.SUB_TRD_CD,
+           ADJ.LANE_GRP,
+ 		  NVL(QTA.RGN_OFC_CD,'Total') SLS_RGN_OFC_CD,
+           QTA.POL_CD,
+           QTA.POD_CD,
+           VVD.TOT_BSA AS TOT_BSA,
+           VVD.TOT_VOY AS TOT_VOY,
+           (QTA.TOT_LOD/VVD.TOT_VOY) AS TOT_LOD,
+           (QTA.TOT_REV/VVD.TOT_VOY) AS TOT_REV,
+           (QTA.TOT_REV/VVD.TOT_VOY)/(QTA.TOT_LOD/VVD.TOT_VOY) AS TOT_RPB,
+           (QTA.TOT_CM/VVD.TOT_VOY) AS TOT_CM,
+           (QTA.TOT_RA_CM/VVD.TOT_VOY) AS TOT_RA_CM,
+           (QTA.TOT_CM/VVD.TOT_VOY)/(QTA.TOT_LOD/VVD.TOT_VOY) AS TOT_CMB,
+           (QTA.TOT_RA_CM/VVD.TOT_VOY)/(QTA.TOT_LOD/VVD.TOT_VOY) AS TOT_RA_CMB,
+           (QTA.TOT_OP/VVD.TOT_VOY) AS TOT_OP,
+           (QTA.TOT_RA_OP/VVD.TOT_VOY) AS TOT_RA_OP,
+           (QTA.TOT_OP/VVD.TOT_VOY)/(QTA.TOT_LOD/VVD.TOT_VOY) AS TOT_OPB,
+           (QTA.TOT_RA_OP/VVD.TOT_VOY)/(QTA.TOT_LOD/VVD.TOT_VOY) AS TOT_RA_OPB ,
+ 		  RGN_GRP
+    FROM   (
+           SELECT -- Monthly
+                  QTA.GUBUN,
+                  QTA.BSE_MON,
+                  QTA.SUB_TRD_CD,
+                  QTA.RLANE_CD,
+                  QTA.RGN_OFC_CD,
+                  QTA.POL_CD,
+                  QTA.POD_CD,
+                  QTA.TOT_LOD,
+                  QTA.TOT_REV ,
+                  QTA.TOT_RPB ,
+                  QTA.TOT_CM ,
+                  QTA.TOT_RA_CM ,
+                  QTA.TOT_CMB,
+                  QTA.TOT_RA_CMB ,
+                  QTA.TOT_OP ,
+                  QTA.TOT_RA_OP,
+                  QTA.TOT_OPB ,
+                  QTA.TOT_RA_OPB,
+ 			     QTA.RGN_GRP
+           FROM   TMP_INPUT_PARMAS INP, (
+                  SELECT -- Monthly
+                         'MONTHLY' AS GUBUN,
+                         NVL(DIR.CONV_DIR_CD, QTA.DIR_CD) DIR_CD,
+                         QTA.BSE_MON,
+                         VVD.SUB_TRD_CD,
+                         QTA.RLANE_CD,
+                         QTA.RGN_OFC_CD,
+                         NVL(DECODE(INP.INCL_PORT_FLG, 'Y', NVL(QTA.POL_CD, '00000'), '00000'), '00000') AS POL_CD,
+                         NVL(DECODE(INP.INCL_PORT_FLG, 'Y', NVL(QTA.POD_CD, '00000'), '00000'), '00000') AS POD_CD,
+                         SUM(QTA.LOD_QTY         ) AS TOT_LOD,
+                         SUM(QTA.GRS_RPB_REV*QTA.LOD_QTY) AS TOT_REV ,
+                         SUM(QTA.GRS_RPB_REV*QTA.LOD_QTY)/SUM(QTA.LOD_QTY) AS TOT_RPB ,
+                         SUM((QTA.GRS_RPB_REV-QTA.CM_UC_AMT)*QTA.LOD_QTY) AS TOT_CM ,
+                         SUM((QTA.GRS_RPB_REV-QTA.RA_CM_UC_AMT)*QTA.LOD_QTY) AS TOT_RA_CM ,
+                         SUM((QTA.GRS_RPB_REV-QTA.CM_UC_AMT)*QTA.LOD_QTY)/SUM(QTA.LOD_QTY) AS TOT_CMB,
+                         SUM((QTA.GRS_RPB_REV-QTA.RA_CM_UC_AMT)*QTA.LOD_QTY)
+                             /SUM(QTA.LOD_QTY) AS TOT_RA_CMB ,
+                         SUM((QTA.GRS_RPB_REV-QTA.OPFIT_UC_AMT)*QTA.LOD_QTY    ) AS TOT_OP ,
+                         SUM((QTA.GRS_RPB_REV-QTA.RA_OPFIT_UC_AMT)*QTA.LOD_QTY ) AS TOT_RA_OP,
+                         SUM((QTA.GRS_RPB_REV-QTA.OPFIT_UC_AMT)*QTA.LOD_QTY    )
+                             /SUM(QTA.LOD_QTY) AS TOT_OPB ,
+                         SUM((QTA.GRS_RPB_REV-QTA.RA_OPFIT_UC_AMT)*QTA.LOD_QTY )
+                             /SUM(QTA.LOD_QTY) AS TOT_RA_OPB,
+ 			            GROUPING (QTA.RGN_OFC_CD) RGN_GRP
+                  FROM  (
+                         SELECT DISTINCT
+                                RLS.MQTA_RLSE_VER_NO AS MQTA_RLSE_VER_NO,
+                                RLS.BSE_YR AS BEF_YR,
+                                RLS.BSE_QTR_CD AS BEF_QTR_CD
+                         FROM   SAQ_MON_QTA_RLSE RLS,
+                                TMP_INPUT_PARMAS INP
+                         WHERE  RLS.BSE_YR||RLS.BSE_QTR_CD = INP.BEF_YR_QTR
+                         AND    RLS.QTA_RLSE_STS_CD = 'R'
+                        ) RLS,
+                        TMP_INPUT_PARMAS    INP,
+                        SAQ_MON_DIR_CONV    DIR,
+                        SAQ_MON_CFM_TGT_VVD VVD,
+                        SAQ_MON_CFM_QTA     QTA
+                  WHERE QTA.MQTA_RLSE_VER_NO = RLS.MQTA_RLSE_VER_NO
+                  AND   QTA.BSE_YR = RLS.BEF_YR
+                  AND   QTA.BSE_QTR_CD = RLS.BEF_QTR_CD
+                  AND   QTA.BSE_MON = DECODE(RLS.BEF_QTR_CD, '1Q', '03', '2Q', '06', '3Q', '09', '4Q', '12')
+                  AND   QTA.TRD_CD = INP.TRD_CD
+                  AND   QTA.RHQ_CD = INP.RHQ_CD
+                  AND   VVD.SUB_TRD_CD LIKE INP.SUB_TRD_CD || '%'
+                  AND   QTA.RLANE_CD LIKE INP.RLANE_CD||'%'
+                  AND   QTA.QTA_TGT_CD = 'T' -- Q : Sales Quota, T : Load Target
+                  AND   VVD.MQTA_RLSE_VER_NO = QTA.MQTA_RLSE_VER_NO
+                  AND   VVD.BSE_YR = QTA.BSE_YR
+                  AND   VVD.BSE_QTR_CD = QTA.BSE_QTR_CD
+                  AND   VVD.BSE_MON = QTA.BSE_MON
+                  AND   VVD.RLANE_CD = QTA.RLANE_CD
+                  AND   VVD.TRD_CD = QTA.TRD_CD
+                  AND   VVD.DIR_CD = QTA.DIR_CD
+                  AND   VVD.VSL_CD = QTA.VSL_CD
+                  AND   VVD.SKD_VOY_NO = QTA.SKD_VOY_NO
+                  AND   VVD.SKD_DIR_CD = QTA.SKD_DIR_CD
+                  AND   QTA.LOD_QTY > 0
+                  AND   QTA.BSE_YR = DIR.BSE_YR(+)
+                  AND   DIR.BSE_QTR_CD(+) = @[bse_qtr_cd]
+                  AND   QTA.TRD_CD = DIR.TRD_CD(+)
+                  AND   QTA.RLANE_CD = DIR.RLANE_CD(+)
+                  AND   QTA.DIR_CD = DIR.DIR_CD(+)
+ 	             GROUP BY GROUPING SETS ( ( NVL(DIR.CONV_DIR_CD, QTA.DIR_CD), QTA.BSE_MON, VVD.SUB_TRD_CD,QTA.RLANE_CD,QTA.RGN_OFC_CD, INP.INCL_PORT_FLG,
+ 				          DECODE(INP.INCL_PORT_FLG, 'Y', NVL(QTA.POL_CD, '00000'), '00000'),
+ 				          DECODE(INP.INCL_PORT_FLG, 'Y', NVL(QTA.POD_CD, '00000'), '00000')    )
+ 				          ,(QTA.BSE_MON, VVD.SUB_TRD_CD,QTA.RLANE_CD))
+           ) QTA
+           WHERE NVL(QTA.DIR_CD, INP.DIR_CD) = INP.DIR_CD
+        ) QTA,
+        (
+         SELECT -- BSA, VOYAGE
+                VVD.BSE_MON,
+                VVD.SUB_TRD_CD,
+                VVD.RLANE_CD,
+                VVD.TOT_BSA,
+                VVD.TOT_VOY
+         FROM  TMP_INPUT_PARMAS INP, (
+                SELECT -- BSA, VOYAGE
+                       NVL(DIR.CONV_DIR_CD, VVD.DIR_CD) DIR_CD,
+                       VVD.BSE_MON,
+                       VVD.SUB_TRD_CD,
+                       VVD.RLANE_CD,
+                       SUM(VVD.FNL_BSA_CAPA) AS TOT_BSA,
+                       COUNT(DISTINCT VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD) AS TOT_VOY
+                FROM  (
+                       SELECT DISTINCT
+                              RLS.MQTA_RLSE_VER_NO AS MQTA_RLSE_VER_NO,
+                              RLS.BSE_YR AS BEF_YR,
+                              RLS.BSE_QTR_CD AS BEF_QTR_CD
+                       FROM   SAQ_MON_QTA_RLSE RLS,
+                              TMP_INPUT_PARMAS INP
+                       WHERE  RLS.BSE_YR||RLS.BSE_QTR_CD = INP.BEF_YR_QTR
+                       AND    RLS.QTA_RLSE_STS_CD = 'R'
+                      ) RLS,
+                      SAQ_MON_DIR_CONV    DIR,
+                      TMP_INPUT_PARMAS    INP,
+                      SAQ_MON_CFM_TGT_VVD VVD
+               WHERE  VVD.MQTA_RLSE_VER_NO = RLS.MQTA_RLSE_VER_NO
+               AND    VVD.BSE_YR = RLS.BEF_YR
+               AND    VVD.BSE_QTR_CD = RLS.BEF_QTR_CD
+               AND    VVD.BSE_MON IN DECODE(RLS.BEF_QTR_CD, '1Q', '03', '2Q', '06', '3Q', '09', '4Q', '12')
+               AND    VVD.TRD_CD = INP.TRD_CD
+               AND    VVD.SUB_TRD_CD LIKE INP.SUB_TRD_CD || '%'
+               AND    VVD.RLANE_CD LIKE INP.RLANE_CD||'%'
+               AND    VVD.BSE_YR = DIR.BSE_YR(+)
+               AND    DIR.BSE_QTR_CD(+) = @[bse_qtr_cd]
+               AND    VVD.TRD_CD = DIR.TRD_CD(+)
+               AND    VVD.RLANE_CD = DIR.RLANE_CD(+)
+               AND    VVD.DIR_CD = DIR.DIR_CD(+)
+               GROUP BY NVL(DIR.CONV_DIR_CD, VVD.DIR_CD), VVD.BSE_MON, VVD.SUB_TRD_CD, VVD.RLANE_CD
+            ) VVD
+            WHERE NVL(VVD.DIR_CD, INP.DIR_CD) = INP.DIR_CD
+        ) VVD,
+        TMP_MON_TGT_VVD_ADJ ADJ
+    WHERE QTA.BSE_MON = VVD.BSE_MON
+    AND   QTA.SUB_TRD_CD = VVD.SUB_TRD_CD
+    AND   QTA.RLANE_CD = VVD.RLANE_CD
+    AND   ADJ.SUB_TRD_CD = QTA.SUB_TRD_CD
+    AND   ADJ.RLANE_CD = QTA.RLANE_CD
+    UNION ALL
+    SELECT /*+ ORDERED USE_HASH(fsm vvd) */ -- Forecast
+        'FORECAST' AS GUBUN,
+        MIN(FSM.BSE_MON) AS BSE_MON,
+        FSM.SUB_TRD_CD,
+        (VVD.RLANE_CD||'-'||VVD.SPRT_GRP_CD||VVD.BSA_GRP_CD) AS LANE_GRP,
+ 		NVL(FSM.SLS_RGN_OFC_CD,'Total') SLS_RGN_OFC_CD,
+        NVL(DECODE(INP.INCL_PORT_FLG, 'Y', NVL(FSM.POL_CD, '00000'), '00000'), '00000') AS POL_CD,
+        NVL(DECODE(INP.INCL_PORT_FLG, 'Y', NVL(FSM.POD_CD, '00000'), '00000'), '00000') AS POD_CD,
+        SUM(DISTINCT VVD.FNL_BSA_CAPA) AS TOT_BSA,
+        COUNT(DISTINCT VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD) AS TOT_VOY,
+        SUM(FSM.LOD_QTY) AS TOT_LOD ,
+        SUM(FSM.GRS_RPB_REV*FSM.LOD_QTY) AS TOT_REV ,
+        SUM(FSM.GRS_RPB_REV*FSM.LOD_QTY)/SUM(FSM.LOD_QTY) AS TOT_RPB ,
+        SUM((FSM.GRS_RPB_REV-FSM.CM_UC_AMT)*FSM.LOD_QTY) AS TOT_CM ,
+        0 AS TOT_RA_CM ,
+        SUM((FSM.GRS_RPB_REV-FSM.CM_UC_AMT)*FSM.LOD_QTY)/SUM(FSM.LOD_QTY) AS TOT_CMB,
+            0 AS TOT_RA_CMB ,
+        SUM((FSM.GRS_RPB_REV-FSM.OPFIT_UC_AMT)*FSM.LOD_QTY    ) AS TOT_OP ,
+        0 AS TOT_RA_OP,
+        SUM((FSM.GRS_RPB_REV-FSM.OPFIT_UC_AMT)*FSM.LOD_QTY    )
+            /SUM(FSM.LOD_QTY) AS TOT_OPB ,
+            0 AS TOT_RA_OPB,
+ 		GROUPING (FSM.SLS_RGN_OFC_CD) RGN_GRP
+    FROM   TMP_INPUT_PARMAS INP,
+           SAQ_MON_FCAST_SLS_SMRY FSM,
+           SAQ_MON_TGT_VVD_ADJ VVD
+    WHERE  FSM.SLS_FCAST_PUB_NO = INP.SLS_FCAST_PUB_NO
+    AND    FSM.BSE_YR = SUBSTR(INP.TGT_YR_MON, 1, 4)
+    AND    FSM.BSE_MON = SUBSTR(INP.TGT_YR_MON, 5, 2)
+    AND    FSM.TRD_CD = INP.TRD_CD
+    AND    FSM.DIR_CD = INP.DIR_CD
+    AND    FSM.SLS_RHQ_CD = INP.RHQ_CD
+    AND    FSM.SUB_TRD_CD LIKE INP.SUB_TRD_CD || '%'
+    AND    FSM.RLANE_CD LIKE INP.RLANE_CD||'%'
+    AND    VVD.BSE_YR = INP.BSE_YR
+    AND    VVD.BSE_QTR_CD = INP.BSE_QTR_CD
+    AND    VVD.GLINE_VER_NO = INP.GLINE_VER_NO
+    AND    VVD.BSE_MON = FSM.BSE_MON
+    AND    VVD.RLANE_CD = FSM.RLANE_CD
+    AND    VVD.TRD_CD = FSM.TRD_CD
+    AND    VVD.DIR_CD = FSM.DIR_CD
+    AND    VVD.VSL_CD = FSM.VSL_CD
+    AND    VVD.SKD_VOY_NO = FSM.SKD_VOY_NO
+    AND    VVD.SKD_DIR_CD = FSM.SKD_DIR_CD
+ 	    GROUP BY GROUPING SETS( (  FSM.SUB_TRD_CD, VVD.RLANE_CD, VVD.SPRT_GRP_CD, VVD.BSA_GRP_CD, FSM.SLS_RGN_OFC_CD, INP.INCL_PORT_FLG,
+ 				 DECODE(INP.INCL_PORT_FLG, 'Y', NVL(FSM.POL_CD, '00000'), '00000'),
+ 				 DECODE(INP.INCL_PORT_FLG, 'Y', NVL(FSM.POD_CD, '00000'), '00000')    )
+ 			 , (FSM.SUB_TRD_CD, VVD.RLANE_CD, VVD.SPRT_GRP_CD, VVD.BSA_GRP_CD ))
+    UNION ALL
+    SELECT -- Model Result
+        'MODEL' AS GUBUN,
+        MIN(MRS.BSE_MON) AS BSE_MON,
+        MRS.SUB_TRD_CD,
+        (VVD.RLANE_CD||'-'||VVD.SPRT_GRP_CD||VVD.BSA_GRP_CD) AS LANE_GRP,
+ 		NVL(MRS.SLS_RGN_OFC_CD,'Total') SLS_RGN_OFC_CD,
+        NVL(DECODE(INP.INCL_PORT_FLG, 'Y', NVL(MRS.POL_CD, '00000'), '00000'), '00000') AS POL_CD,
+        NVL(DECODE(INP.INCL_PORT_FLG, 'Y', NVL(MRS.POD_CD, '00000'), '00000'), '00000') AS POD_CD,
+        SUM(DISTINCT VVD.FNL_BSA_CAPA) AS TOT_BSA,
+        COUNT(DISTINCT VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD) AS TOT_VOY,
+        SUM(MRS.LOD_QTY         ) AS TOT_LOD ,
+        SUM(MRS.GRS_RPB_REV*MRS.LOD_QTY) AS TOT_REV ,
+        SUM(MRS.GRS_RPB_REV*MRS.LOD_QTY)/SUM(MRS.LOD_QTY) AS TOT_RPB ,
+        SUM((MRS.GRS_RPB_REV-MRS.CM_UC_AMT)*MRS.LOD_QTY) AS TOT_CM ,
+        SUM((MRS.GRS_RPB_REV-MRS.RA_CM_UC_AMT)*MRS.LOD_QTY) AS TOT_RA_CM ,
+        SUM((MRS.GRS_RPB_REV-MRS.CM_UC_AMT)*MRS.LOD_QTY)/SUM(MRS.LOD_QTY) AS TOT_CMB,
+        SUM((MRS.GRS_RPB_REV-MRS.RA_CM_UC_AMT)*MRS.LOD_QTY)
+            /SUM(MRS.LOD_QTY) AS TOT_RA_CMB ,
+        SUM((MRS.GRS_RPB_REV-MRS.OPFIT_UC_AMT)*MRS.LOD_QTY    ) AS TOT_OP ,
+        SUM((MRS.GRS_RPB_REV-MRS.RA_OPFIT_UC_AMT)*MRS.LOD_QTY ) AS TOT_RA_OP,
+        SUM((MRS.GRS_RPB_REV-MRS.OPFIT_UC_AMT)*MRS.LOD_QTY    )
+            /SUM(MRS.LOD_QTY) AS TOT_OPB ,
+        SUM((MRS.GRS_RPB_REV-MRS.RA_OPFIT_UC_AMT)*MRS.LOD_QTY )
+            /SUM(MRS.LOD_QTY) AS TOT_RA_OPB ,
+ 		GROUPING (MRS.SLS_RGN_OFC_CD) RGN_GRP
+    FROM   TMP_INPUT_PARMAS INP,
+           SAQ_MON_MDL_SLS_SMRY MRS,
+           SAQ_MON_TGT_VVD_ADJ VVD
+    WHERE  MRS.MQTA_MDL_VER_NO = INP.MQTA_MDL_VER_NO
+    AND    MRS.BSE_YR = SUBSTR(INP.TGT_YR_MON, 1, 4)
+    AND    MRS.BSE_MON = SUBSTR(INP.TGT_YR_MON, 5, 2)
+    AND    MRS.TRD_CD = INP.TRD_CD
+    AND    MRS.DIR_CD = INP.DIR_CD
+    AND    MRS.SLS_RHQ_CD = INP.RHQ_CD
+    AND    MRS.SUB_TRD_CD LIKE INP.SUB_TRD_CD || '%'
+    AND    MRS.RLANE_CD LIKE INP.RLANE_CD||'%'
+    AND    VVD.BSE_YR = INP.BSE_YR
+    AND    VVD.BSE_QTR_CD = INP.BSE_QTR_CD
+    AND    VVD.GLINE_VER_NO = INP.GLINE_VER_NO
+    AND    VVD.BSE_MON = MRS.BSE_MON
+    AND    VVD.RLANE_CD = MRS.RLANE_CD
+    AND    VVD.TRD_CD = MRS.TRD_CD
+    AND    VVD.DIR_CD = MRS.DIR_CD
+    AND    VVD.VSL_CD = MRS.VSL_CD
+    AND    VVD.SKD_VOY_NO = MRS.SKD_VOY_NO
+    AND    VVD.SKD_DIR_CD = MRS.SKD_DIR_CD
+ 	    GROUP BY GROUPING SETS( ( MRS.SUB_TRD_CD, VVD.RLANE_CD, VVD.SPRT_GRP_CD, VVD.BSA_GRP_CD, MRS.SLS_RGN_OFC_CD, INP.INCL_PORT_FLG,
+ 				 DECODE(INP.INCL_PORT_FLG, 'Y', NVL(MRS.POL_CD, '00000'), '00000'),
+ 				 DECODE(INP.INCL_PORT_FLG, 'Y', NVL(MRS.POD_CD, '00000'), '00000')    )
+ 			,(MRS.SUB_TRD_CD, VVD.RLANE_CD, VVD.SPRT_GRP_CD, VVD.BSA_GRP_CD))
+    ) UNI
+        ,     (
+                SELECT
+                    DIR.RLANE_CD,
+                    DIR.DIR_CD
+                FROM
+                    SAQ_MON_DIR_CONV DIR,
+                    TMP_INPUT_PARMAS INP
+                WHERE
+                         DIR.BSE_YR = INP.BSE_YR
+                   AND DIR.BSE_QTR_CD = INP.BSE_QTR_CD
+                   AND DIR.TRD_CD = INP.TRD_CD
+                   AND DIR.CONV_DIR_CD = INP.DIR_CD
+                ) DIR
+WHERE  UNI.SUB_TRD_CD(+) = RHQ.SUB_TRD_CD
+AND    UNI.LANE_GRP(+) = RHQ.LANE_GRP
+AND    UNI.SLS_RGN_OFC_CD(+) = RHQ.SLS_RGN_OFC_CD
+AND    UNI.POL_CD(+) = RHQ.POL_CD
+AND    UNI.POD_CD(+) = RHQ.POD_CD
+AND    DIR.RLANE_CD(+) = RHQ.RLANE_CD
+GROUP BY RHQ.SUB_TRD_CD, RHQ.LANE_GRP, DIR.DIR_CD, RHQ.RGN_GRP , RHQ.SLS_RGN_OFC_CD, RHQ.POL_CD, RHQ.POD_CD,
+         ITM.CODE, ITM.TEXT, ITM.ROW_SEQ,INP.INCL_PORT_FLG, RHQ.SLS_AQ_CD
+ORDER BY KEY, LANE_GRP, RHQ.RGN_GRP DESC, POL_SEQ, POL_CD, POD_SEQ, POD_CD, DECODE(NVL(RHQ.SLS_AQ_CD, 99), '99', 99, 11)||RHQ.SLS_AQ_CD, SLS_RGN_OFC_CD, ROW_SEQ			]]></sql>
+			<params>
+				<param name="targetMonth" type="12" value="" out="N"/>
+				<param name="bef_yr_qtr" type="12" value="" out="N"/>
+				<param name="slsFcastPubNo" type="12" value="" out="N"/>
+				<param name="mqtaMdlVerNo" type="12" value="" out="N"/>
+				<param name="search_sub_trd_cd" type="12" value="" out="N"/>
+				<param name="search_rlane_cd" type="12" value="" out="N"/>
+				<param name="mQtaStepCd" type="12" value="" out="N"/>
+				<param name="glineVerNo" type="12" value="" out="N"/>
+				<param name="mQtaVerNo" type="12" value="" out="N"/>
+				<param name="year" type="12" value="" out="N"/>
+				<param name="bse_qtr_cd" type="12" value="" out="N"/>
+				<param name="trade" type="12" value="" out="N"/>
+				<param name="bound" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

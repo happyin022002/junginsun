@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="ProformaScheduleMgtDBDAOSearchPfSkdEotpDetailRSQL">
+			<desc><![CDATA[searchPfSkdEotpSummary]]></desc>
+			<sql><![CDATA[
+SELECT  ON_TM                                                        AS ON_TM
+        , DECODE(ON_TM, 1, 'Y', 'N')                                 AS ON_TM_YN            /* ON TIME (Y/N)    */
+        , CLASS                                                      AS VSL_CLASS        /* VESSEL CLASS        */
+        , VVD                                                        AS VVD
+        , LTRIM(TO_CHAR(ROUND(OLD_PORT_TM, 1)     , '99,990.0'))     AS OLD_PORT_TM
+        , LTRIM(TO_CHAR(ROUND(NEW_PORT_TM, 1)     , '99,990.0'))     AS NEW_PORT_TM
+        , LTRIM(TO_CHAR(TO_NUMBER(NEW_PORT_BF)    , '99,990.0'))     AS NEW_PORT_BUF_TM
+        , LTRIM(TO_CHAR(DECODE(NEW_SPD, 0, LNK_DIST, ROUND((LNK_DIST / NEW_SPD), 1)), '99,990.0')) AS NEW_SEA_TM1
+        , LTRIM(TO_CHAR(TO_NUMBER(NEW_SEA_BF)     , '99,990.0'))     AS NEW_SEA_BUF_TM
+        , LNK_DIST                                                   AS LNK_DIST            
+        , LTRIM(TO_CHAR(MAX_SPD                   , '99,990.0'))     AS MAX_SPD
+        , LTRIM(TO_CHAR(OLD_SPD                   , '99,990.0'))     AS ACT_SPD
+        , LTRIM(TO_CHAR(DECODE(CHK_EOTP01, 'N', RECOVERY_TM), '99,990.0'))  AS RECOVERY_TM
+        , CHK_EOTP01                                                 AS CHK_EOTP01
+		, LTRIM(TO_CHAR(ROUND(EOTP01, 1), '99,990.0'))               AS EOTP01
+        , DECODE(CHK_EOTP01, 'N', DECODE(SIGN(EOTP01 + EOTP02), -1, 'N', 'Y'), CHK_EOTP01) AS CHK_EOTP02
+		, LTRIM(TO_CHAR(ROUND(EOTP02, 1), '99,990.0'))               AS EOTP02     
+        , LTRIM(TO_CHAR(OLD_SEA_TM      , '99,990.0'))               AS ACT_SAIL_TM
+FROM    (
+             SELECT  CLASS
+                     , VVD
+                     , MAX_SPD
+                     , OLD_SPD
+                     , OLD_SEA_TM
+                     , NEW_SEA_TM                   
+                     , ((NEW_PORT_TM + NEW_PORT_BF) - OLD_PORT_TM) + ((NEW_SEA_TM  + NEW_SEA_BF ) -  OLD_SEA_TM) + OLD_SEA_TM    AS EOTP01                    
+                     /** A Port의 Working Hour - (Lane Simulation에서 입력된 Cargo Volume / A Port의 Terminal Productivity+ Port Buffer( Document Hour + Dead Hour))
+                     + Standard Distance/ Service Speed + Sea Buffer - Actual 항해시간(Actual Distance /Actual Speed) **/                    
+                     , DECODE( SIGN(((NEW_PORT_TM + NEW_PORT_BF) - OLD_PORT_TM ) + ((NEW_SEA_TM  + NEW_SEA_BF ) -  OLD_SEA_TM) + OLD_SEA_TM ), -1, 'N', 'Y') AS CHK_EOTP01                      
+                     /* A Port의 Working Hour - (Lane Simulation에서 입력된 Cargo Volume / A Port의 Terminal Productivity+ Port Buffer( Document Hour + Dead Hour))
+                            + Standard Distance / Service Speed + Sea Buffer - Actual 항해시간(Actual Distance /Actual Speed)
+                            + (Standard Distance /Actual Speed - Standard Distance/MAX Speed )***/
+                    , (( NEW_PORT_TM + NEW_PORT_BF) - OLD_PORT_TM ) + ((NEW_SEA_TM  + NEW_SEA_BF ) - (OLD_SEA_TM)) + OLD_SEA_TM  +
+                      (( DECODE(NVL(OLD_SPD, 0),0,0, (LNK_DIST/OLD_SPD))) - (DECODE(NVL(MAX_SPD, 0),0,0, (LNK_DIST/MAX_SPD)))) AS EOTP02
+                    , ON_TM
+                    , OLD_PORT_TM
+                    , NEW_PORT_TM
+                    , CASE WHEN NVL(OLD_SPD, 0) = 0 THEN NULL
+                           WHEN NVL(MAX_SPD, 0) = 0 THEN NULL
+                           ELSE LNK_DIST * (( 1 / OLD_SPD) - (1 / MAX_SPD))
+                           END        AS RECOVERY_TM /* Max. Recovery Time (회복 가능 시간) */
+                    , LNK_DIST
+                    , NEW_SPD
+                    , NEW_SEA_BF
+                    , NEW_PORT_BF
+            FROM    (
+                         SELECT  T1.VSL_CD || T2.SKD_VOY_NO || T2.SKD_DIR_CD AS VVD                                
+                                 , T4.CNTR_VSL_CLSS_CAPA                     AS CLASS                                
+                                 , DECODE( SIGN (T1.ARR_DLAY_HRS1 + T1.ARR_DLAY_HRS2 + T1.DEP_DLAY_HRS1 + T1.DEP_DLAY_HRS2), 1, 0, 1) AS ON_TM
+                                 , NVL((
+                                          SELECT  /*+ INDEX_ASC(S2 XAK4VSK_VSL_PORT_SKD) */
+                                                  S1.AVG_SPD
+                                          FROM    VSK_DEP_RPT S1, VSK_VSL_PORT_SKD S2
+                                          WHERE   1               = 1
+                                          AND     S1.VSL_CD       = S2.VSL_CD
+                                          AND     S1.SKD_VOY_NO   = S2.SKD_VOY_NO
+                                          AND     S1.SKD_DIR_CD   = S2.SKD_DIR_CD
+                                          AND     S1.VPS_PORT_CD  = S2.VPS_PORT_CD
+                                          AND     S1.CLPT_IND_SEQ = S2.CLPT_IND_SEQ
+                                          AND     S2.VSL_CD       = T2.VSL_CD
+                                          AND     S2.SKD_VOY_NO   = T2.SKD_VOY_NO
+                                          AND     S2.SKD_DIR_CD   = T2.SKD_DIR_CD
+                                          AND     S2.CLPT_SEQ     > T2.CLPT_SEQ
+                                          AND     S2.VPS_PORT_CD  = @[to_port_cd]
+                                          AND     ROWNUM          = 1
+                                        ),
+                                        (
+                                          SELECT  AVG(RMN_AVG_SPD)
+                                          FROM    VSK_NOON_RPT
+                                          WHERE   1            = 1
+                                          AND     VSL_CD       = T2.VSL_CD
+                                          AND     SKD_VOY_NO   = T2.SKD_VOY_NO
+                                          AND     SKD_DIR_CD   = T2.SKD_DIR_CD
+                                          AND     NXT_PORT_CD  = @[to_port_cd]
+                                     ))                                                                     AS OLD_SPD    /* OLD SPEED */                
+                                  ,(
+                                    SELECT  /*+ INDEX_ASC(S XAK4VSK_VSL_PORT_SKD) */
+                                            ROUND((S.ACT_BRTH_DT - T1.ACT_DEP_DT) * 24 , 1)
+                                    FROM    VSK_VSL_SKD_RSLT S
+                                    WHERE   1               = 1
+                                    AND     T1.VSL_CD       = S.VSL_CD
+                                    AND     T1.SKD_VOY_NO   = S.SKD_VOY_NO
+                                    AND     T1.SKD_DIR_CD   = S.SKD_DIR_CD
+                                    AND     T1.CLPT_SEQ     < S.CLPT_SEQ
+                                    AND     'S'            != NVL(S.SKD_CNG_STS_CD, ' ')
+                                    AND     S.VPS_PORT_CD   = @[to_port_cd]
+                                    AND     ROWNUM          = 1
+                                   )                                                                        AS OLD_SEA_TM        /*OLD (SEA TIME + BUFFER TIME) */
+                                , ROUND((T1.ACT_DEP_DT - T1.ACT_BRTH_DT) * 24 , 1)                          AS OLD_PORT_TM        /*OLD (PORT TIME + BUFFER TIME) */
+                                , CASE WHEN TO_NUMBER(NVL(@[ib_ipcgo_qty], '0') + NVL(@[ob_ipcgo_qty], '0') + NVL(@[ib_ocn_cgo_qty], '0') + NVL(@[ob_ocn_cgo_qty], '0')) > 0 THEN
+                                     TO_NUMBER(DECODE(@[tml_prod_qty],0,0,(DECODE(@[tml_prod_qty],0,(@[ib_ipcgo_qty] + @[ob_ipcgo_qty] + @[ib_ocn_cgo_qty] + @[ob_ocn_cgo_qty]),(@[ib_ipcgo_qty] + @[ob_ipcgo_qty] + @[ib_ocn_cgo_qty] + @[ob_ocn_cgo_qty]) / @[tml_prod_qty]))))
+                                  ELSE
+                                      NVL(TO_NUMBER(@[act_wrk_hrs]), 0)
+                                  END                                                                       AS NEW_PORT_TM
+                                , @[port_buf_hrs]                                                           AS NEW_PORT_BF
+                                , DECODE(@[lnk_spd], 0, @[lnk_dist], ROUND(@[lnk_dist] / @[lnk_spd], 1))    AS NEW_SEA_TM
+                                , @[sea_buf_hrs]                                                            AS NEW_SEA_BF
+                                , @[lnk_dist]                                                               AS LNK_DIST
+                                , @[lnk_spd]                                                                AS NEW_SPD
+                                , T4.MAX_SPD                                                                AS MAX_SPD
+                                , T2.VPS_PORT_CD
+                                , T2.CLPT_IND_SEQ                                
+                        FROM    VSK_VSL_SKD_RSLT T1, VSK_VSL_PORT_SKD T2, VSK_VSL_SKD T3, MDM_VSL_CNTR T4
+                        WHERE   1               = 1
+                        AND     T1.VSL_CD       = T2.VSL_CD
+                        AND     T1.SKD_VOY_NO   = T2.SKD_VOY_NO
+                        AND     T1.SKD_DIR_CD   = T2.SKD_DIR_CD
+                        AND     T1.VPS_PORT_CD  = T2.VPS_PORT_CD
+                        AND     T1.CLPT_IND_SEQ = T2.CLPT_IND_SEQ
+                        AND     T1.VSL_CD       = T3.VSL_CD
+                        AND     T1.SKD_VOY_NO   = T3.SKD_VOY_NO
+                        AND     T1.SKD_DIR_CD   = T3.SKD_DIR_CD
+                        AND     T3.VSL_CD       = T4.VSL_CD
+                        AND     T4.CNTR_VSL_CLSS_CAPA   IN (@[n1st_vsl_clss_cd], @[n2nd_vsl_clss_cd], @[n3rd_vsl_clss_cd])
+                        AND     T1.VPS_PORT_CD  = @[bf_port_cd]
+                        AND        'S'         != NVL(T1.SKD_CNG_STS_CD, ' ')
+                        AND     T2.VPS_ETD_DT   BETWEEN SYSDATE - @[hist_yr] AND     SYSDATE
+                        AND     EXISTS  (
+                                         SELECT  'X'
+                                         FROM    VSK_VSL_SKD_RSLT S
+                                         WHERE   1                = 1
+                                         AND     T1.VSL_CD        = S.VSL_CD
+                                         AND     T1.SKD_VOY_NO    = S.SKD_VOY_NO 
+                                         AND     T1.SKD_DIR_CD    = S.SKD_DIR_CD 
+                                         AND     T1.CLPT_SEQ      < S.CLPT_SEQ
+                                         AND     S.VPS_PORT_CD    = @[to_port_cd]
+                                         AND     'S'              != NVL(S.SKD_CNG_STS_CD, ' ')
+                                         AND     ROWNUM           = 1
+                                        )
+                    ) T10
+          ) T20
+ORDER BY VSL_CLASS, VVD			]]></sql>
+			<params>
+				<param name="to_port_cd" type="12" value="" out="N"/>
+				<param name="ib_ipcgo_qty" type="12" value="" out="N"/>
+				<param name="ob_ipcgo_qty" type="12" value="" out="N"/>
+				<param name="ib_ocn_cgo_qty" type="12" value="" out="N"/>
+				<param name="ob_ocn_cgo_qty" type="12" value="" out="N"/>
+				<param name="tml_prod_qty" type="12" value="" out="N"/>
+				<param name="act_wrk_hrs" type="12" value="" out="N"/>
+				<param name="port_buf_hrs" type="12" value="" out="N"/>
+				<param name="lnk_spd" type="12" value="" out="N"/>
+				<param name="lnk_dist" type="12" value="" out="N"/>
+				<param name="sea_buf_hrs" type="12" value="" out="N"/>
+				<param name="n1st_vsl_clss_cd" type="12" value="" out="N"/>
+				<param name="n2nd_vsl_clss_cd" type="12" value="" out="N"/>
+				<param name="n3rd_vsl_clss_cd" type="12" value="" out="N"/>
+				<param name="bf_port_cd" type="12" value="" out="N"/>
+				<param name="hist_yr" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

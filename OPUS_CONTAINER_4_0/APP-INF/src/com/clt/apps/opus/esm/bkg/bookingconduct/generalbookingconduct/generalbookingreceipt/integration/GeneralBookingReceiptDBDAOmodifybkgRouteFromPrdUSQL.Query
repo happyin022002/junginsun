@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="GeneralBookingReceiptDBDAOmodifybkgRouteFromPrdUSQL">
+			<desc><![CDATA[prd의 정보로 bkg의 route를 update한다.]]></desc>
+			<sql><![CDATA[
+#if (${pctl_no} == 'Over T/S')
+UPDATE BKG_BKG_HIS BK
+   SET PCTL_NO = 'Z'||SUBSTR(BK.PCTL_NO, 2, 20)
+ WHERE BKG_NO = @[bkg_no]
+   AND BK.CORR_NO  = 'TMP0000001'
+#else
+
+#if (${ca_flg} == 'Y')
+ MERGE INTO BKG_BKG_HIS BK
+#else
+ MERGE INTO BKG_BOOKING BK
+#end
+ USING (SELECT @[bkg_no] BKG_NO
+				, MST.PCTL_NO
+				, TRUNK.VSL_SLAN_CD
+                , MST.TRNK_VSL_CD
+                , MST.TRNK_SKD_VOY_NO
+                , MST.TRNK_SKD_DIR_CD
+                , MST.MTY_PKUP_YD_CD
+                , MST.MCNTR_DOR_ARR_DUE_DT
+                , MST.FULL_RTN_YD_CD
+                , MST.POR_CD
+                , MST.POR_NOD_CD
+                , MST.POL_CD
+                , MST.POL_NOD_CD
+                , MST.POD_CD
+                , MST.POD_NOD_CD
+                , MST.DEL_CD
+                , MST.DEL_NOD_CD
+                , MST.FULL_PKUP_YD_CD
+                , MST.MTY_RTN_YD_CD
+                , MST.N1ST_VSL_LODG_DUE_DT
+                , MST.BKG_RCV_TERM_CD
+                , MST.BKG_DE_TERM_CD
+				, DECODE(MST.POL_NOD_CD, TRUNK.ORG_NOD_CD,  '', SUBSTR(TRUNK.ORG_NOD_CD,  1, 5)) PRE_RLY_PORT_CD
+				, DECODE(MST.POD_NOD_CD, TRUNK.DEST_NOD_CD, '', SUBSTR(TRUNK.DEST_NOD_CD, 1, 5)) PST_RLY_PORT_CD
+				, OLD_ROUTE.POR_CD OLD_POR_CD
+				, OLD_ROUTE.POL_CD OLD_POL_CD
+				, DECODE(OLD_ROUTE.POR_CD||OLD_ROUTE.POL_CD, MST.POR_CD||MST.POL_CD, 'N', 'Y') POR_POL_CHANGE
+				, (SELECT TRSP_MOD_CD 
+					 FROM PRD_INLND_ROUT_MST 
+					WHERE (ROUT_ORG_NOD_CD, ROUT_DEST_NOD_CD, ROUT_SEQ) =
+					      (SELECT DTL.ROUT_ORG_NOD_CD, DTL.ROUT_DEST_NOD_CD, ROUT_SEQ 
+					         FROM PRD_PROD_CTL_ROUT_DTL DTL
+					        WHERE DTL.PCTL_NO        = MST.PCTL_NO   
+					          AND DTL.PCTL_IO_BND_CD = 'O'
+						      AND DTL.ROUT_SEQ       <> 0
+							  AND ROWNUM = 1) 
+       			  ) OB_TRSP_MOD_CD
+				, (SELECT TRSP_MOD_CD 
+					 FROM PRD_INLND_ROUT_MST 
+					WHERE (ROUT_ORG_NOD_CD, ROUT_DEST_NOD_CD, ROUT_SEQ) =
+					      (SELECT DTL.ROUT_ORG_NOD_CD, DTL.ROUT_DEST_NOD_CD, ROUT_SEQ 
+					         FROM PRD_PROD_CTL_ROUT_DTL DTL
+					        WHERE DTL.PCTL_NO        = MST.PCTL_NO   
+					          AND DTL.PCTL_IO_BND_CD = 'I'
+						      AND DTL.ROUT_SEQ       <> 0
+							  AND ROWNUM = 1) 
+       			  ) IB_TRSP_MOD_CD
+				, (SELECT MIN(DTL.ARR_ST_DT) 
+				     FROM PRD_PROD_CTL_ROUT_DTL DTL
+					WHERE MST.PCTL_NO     = DTL.PCTL_NO
+ 					  AND PCTL_IO_BND_CD  = 'T'
+				      AND DTL.TRSP_MOD_CD IN ('VD', 'WD')) POL_ETD
+				, (SELECT MAX(DTL.DEP_FSH_DT) 
+				     FROM PRD_PROD_CTL_ROUT_DTL DTL
+					WHERE MST.PCTL_NO     = DTL.PCTL_NO
+ 					  AND PCTL_IO_BND_CD  = 'T'
+				      AND DTL.TRSP_MOD_CD IN ('VD', 'WD')) POD_ETA 
+				, (SELECT ARR_ST_DT
+					 FROM PRD_PROD_CTL_ROUT_DTL DTL
+					WHERE MST.PCTL_NO     = DTL.PCTL_NO
+					  AND PCTL_IO_BND_CD = 'O'
+					  AND MTY_YD_FLG     = 'Y'
+					  AND (PCTL_NO, ORG_NOD_CD) IN (SELECT PCTL_NO, MTY_PKUP_YD_CD
+											          FROM PRD_PROD_CTL_MST MST
+ 												     WHERE MST.PCTL_NO = DTL.PCTL_NO)
+					  AND ROWNUM = 1) MTY_PKUP_DT
+				, (SELECT N1ST_VVD.VSL_CD||N1ST_VVD.SKD_VOY_NO||N1ST_VVD.SKD_DIR_CD
+					 FROM PRD_PROD_CTL_ROUT_DTL N1ST_VVD
+					WHERE MST.PCTL_NO       = N1ST_VVD.PCTL_NO
+ 					  AND N1ST_VVD.PCTL_SEQ = (SELECT MIN(PCTL_SEQ)
+												 FROM PRD_PROD_CTL_ROUT_DTL DTL
+												WHERE N1ST_VVD.PCTL_NO = DTL.PCTL_NO
+												  AND DTL.VSL_CD IS NOT NULL
+												  AND DTL.TRSP_MOD_CD IN ('VD', 'WD'))) PRD_FIRST_VVD
+				, (SELECT FIRST_VVD
+					 FROM (SELECT VVD.VSL_PRE_PST_CD, VVD.VSL_SEQ, VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD FIRST_VVD
+#if (${ca_flg} == 'Y')
+    						 FROM BKG_VVD_HIS VVD, BKG_BKG_HIS BK
+    						WHERE BK.BKG_NO   = @[bkg_no]
+							  AND BK.CORR_NO  = 'TMP0000001'
+							  AND VVD.CORR_NO = 'TMP0000001'
+#else
+    						 FROM BKG_VVD VVD, BKG_BOOKING BK
+    						WHERE BK.BKG_NO = @[bkg_no]
+#end
+    						  AND BK.BKG_NO = VVD.BKG_NO
+    						  AND BK.POL_CD = VVD.POL_CD
+    						  AND VVD.VSL_PRE_PST_CD IN ('S', 'T')
+							ORDER BY VVD.VSL_PRE_PST_CD, VSL_SEQ)
+					WHERE ROWNUM = 1) BKG_FIRST_VVD
+          FROM PRD_PROD_CTL_MST MST
+				, PRD_PROD_CTL_MST OLD_ROUTE
+      		    , PRD_PROD_CTL_ROUT_DTL TRUNK
+		 WHERE MST.PCTL_NO       = TRUNK.PCTL_NO
+		   AND TRUNK.TRSP_MOD_CD IN ('VD', 'WD')
+		   AND TRUNK.VSL_CD      = MST.TRNK_VSL_CD
+		   AND TRUNK.SKD_VOY_NO  = MST.TRNK_SKD_VOY_NO 
+		   AND TRUNK.SKD_DIR_CD  = MST.TRNK_SKD_DIR_CD
+		   AND TRUNK.TZ_DWLL_TM_HRS = (SELECT MAX(TZ_DWLL_TM_HRS) 
+                                 		 FROM PRD_PROD_CTL_ROUT_DTL MAX_DWLL
+		                                WHERE MAX_DWLL.PCTL_NO  = @[pctl_no]
+        		                          AND TRUNK.TRSP_MOD_CD IN ('VD', 'WD')
+                		                  AND TRUNK.VSL_CD      = MAX_DWLL.VSL_CD
+                        		          AND TRUNK.SKD_VOY_NO  = MAX_DWLL.SKD_VOY_NO 
+                                		  AND TRUNK.SKD_DIR_CD  = MAX_DWLL.SKD_DIR_CD)
+		   AND MST.PCTL_NO = NVL(@[pctl_no],
+#if (${ca_flg} == 'Y')
+        							(SELECT PCTL_NO FROM BKG_BKG_HIS WHERE BKG_NO  = @[bkg_no] AND CORR_NO = 'TMP0000001')
+#else
+		     					    (SELECT PCTL_NO FROM BKG_BOOKING WHERE BKG_NO  = @[bkg_no])
+#end				
+								)
+		   
+#if (${ca_flg} == 'Y')
+		   AND OLD_ROUTE.PCTL_NO = (SELECT PCTL_NO FROM BKG_BKG_HIS WHERE BKG_NO  = @[bkg_no] AND CORR_NO = 'TMP0000001')
+#else
+		   AND OLD_ROUTE.PCTL_NO = (SELECT PCTL_NO FROM BKG_BOOKING WHERE BKG_NO  = @[bkg_no])
+#end				
+		) PRD
+    ON (BK.BKG_NO = PRD.BKG_NO)
+  WHEN MATCHED THEN
+UPDATE SET 
+#if(${cu_mode} == 'C')
+       BK.SLAN_CD			= CASE WHEN BK.VSL_CD = 'COXX' OR BK.VSL_CD = 'COYY' OR BK.VSL_CD = 'COZZ' THEN 'SYS' ELSE PRD.VSL_SLAN_CD END
+     , BK.VSL_CD            = PRD.TRNK_VSL_CD
+     , BK.SKD_VOY_NO        = PRD.TRNK_SKD_VOY_NO
+     , BK.SKD_DIR_CD        = PRD.TRNK_SKD_DIR_CD
+	 , BK.MTY_PKUP_YD_CD    = NVL(PRD.MTY_PKUP_YD_CD, BK.MTY_PKUP_YD_CD)
+     , BK.FULL_RTN_YD_CD    = NVL(PRD.FULL_RTN_YD_CD, BK.FULL_RTN_YD_CD)
+     , BK.MTY_PKUP_DT       = NVL(PRD.MTY_PKUP_DT,    BK.MTY_PKUP_DT)
+     , BK.POR_CD            = PRD.POR_CD
+     , BK.POR_NOD_CD        = PRD.POR_NOD_CD
+     , BK.POL_CD            = PRD.POL_CD
+     , BK.POL_NOD_CD        = PRD.POL_NOD_CD
+     , BK.POD_CD            = PRD.POD_CD
+     , BK.POD_NOD_CD        = PRD.POD_NOD_CD
+     , BK.DEL_CD            = PRD.DEL_CD
+     , BK.DEL_NOD_CD        = PRD.DEL_NOD_CD
+     , BK.FULL_PKUP_YD_CD   = NVL(PRD.FULL_PKUP_YD_CD, 		BK.FULL_PKUP_YD_CD)
+     , BK.MTY_RTN_YD_CD     = NVL(PRD.MTY_RTN_YD_CD,   		BK.MTY_RTN_YD_CD)
+     , BK.LODG_DUE_DT       = NVL(PRD.N1ST_VSL_LODG_DUE_DT, BK.LODG_DUE_DT)
+     , BK.MTY_DOR_ARR_DT    = NVL(PRD.MCNTR_DOR_ARR_DUE_DT, BK.MTY_DOR_ARR_DT)
+  	 , BK.PRE_RLY_PORT_CD	= PRD.PRE_RLY_PORT_CD
+	 , BK.PST_RLY_PORT_CD	= PRD.PST_RLY_PORT_CD
+ 	 , BK.ORG_TRNS_MOD_CD   = CASE WHEN OB_TRSP_MOD_CD = 'WD' THEN DECODE(PRD.POR_CD, PRD.POL_CD, 'F', 'B')
+								   WHEN OB_TRSP_MOD_CD = 'RD' THEN 'R'
+								   WHEN OB_TRSP_MOD_CD = 'TD' THEN 'T'
+								   WHEN OB_TRSP_MOD_CD = 'TR' THEN 'A'
+								   WHEN OB_TRSP_MOD_CD = 'TW' THEN DECODE(PRD.POR_CD, PRD.POL_CD, 'E', 'U') END 
+	 , BK.DEST_TRNS_MOD_CD  = CASE WHEN IB_TRSP_MOD_CD = 'WD' THEN DECODE(PRD.POD_CD, PRD.DEL_CD, 'F', 'B')
+								   WHEN IB_TRSP_MOD_CD = 'RD' THEN 'R'
+								   WHEN IB_TRSP_MOD_CD = 'TD' THEN 'T'
+								   WHEN IB_TRSP_MOD_CD = 'TR' THEN 'A'
+								   WHEN IB_TRSP_MOD_CD = 'TW' THEN DECODE(PRD.POD_CD, PRD.DEL_CD, 'E', 'U') END 
+     , BK.SHP_BAK_FLG       = 'N'
+     , BK.PORT_CLZ_DT 		= (SELECT NVL((SELECT MAX(HOL.HOL_DT) + 1
+								             FROM DMT_HOLIDAY HOL
+								            WHERE (HOL_YR,CNT_CD,RGN_CD,STE_CD,LOC_CD,HOL_DESC)
+						                          IN (SELECT HOL_YR,CNT_CD,RGN_CD,STE_CD,LOC_CD,HOL_DESC
+						                                FROM DMT_HOLIDAY
+						                               WHERE SUBSTR(PRD.POL_NOD_CD, 1, 2) = CNT_CD(+)
+	                    						         AND SUBSTR(PRD.POL_NOD_CD, 1, 5) = CASE WHEN TRIM(HOL.LOC_CD) IS NULL THEN SUBSTR(PRD.POL_NOD_CD, 1, 5)
+	                                            						                  		 else HOL.LOC_CD end 
+						                                 AND HOL_YR                      = TO_CHAR(PCT, 'yyyy')
+                    							         AND TO_CHAR(HOL_DT, 'yyyymmdd') = TO_CHAR(PCT, 'yyyymmdd'))
+										), TO_DATE(TO_CHAR(PCT, 'YYYYMMDD'), 'YYYYMMDD')) PCT
+								 FROM (SELECT CASE WHEN TRIM(TO_CHAR(POL_ETD + 2, 'DAY', 'NLS_DATE_LANGUAGE=ENGLISH')) = 'SUNDAY'   THEN POL_ETD + 4
+							                       WHEN TRIM(TO_CHAR(POL_ETD + 2, 'DAY', 'NLS_DATE_LANGUAGE=ENGLISH')) = 'SATURDAY' THEN POL_ETD + 3 
+								                   ELSE POL_ETD + 2 END PCT
+								         FROM (SELECT MIN(DTL.ARR_ST_DT) POL_ETD
+											     FROM PRD_PROD_CTL_ROUT_DTL DTL
+												WHERE DTL.PCTL_NO 		= @[pctl_no]
+											      and DTL.TRSP_MOD_CD 	in ('VD', 'WD')
+							 					  and PCTL_IO_BND_CD 	= 'T')))
+	 , BK.POL_ETD_DT		= PRD.POL_ETD
+	 , BK.POD_ETA_DT		= PRD.POD_ETA
+	 , BK.PCTL_NO			= PRD.PCTL_NO
+#else
+       BK.SLAN_CD			= CASE WHEN BK.VSL_CD = 'COXX' OR BK.VSL_CD = 'COYY' OR BK.VSL_CD = 'COZZ' THEN 'SYS' ELSE DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.SLAN_CD, PRD.VSL_SLAN_CD) END
+     , BK.VSL_CD            = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.VSL_CD,        PRD.TRNK_VSL_CD)
+     , BK.SKD_VOY_NO        = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.SKD_VOY_NO,    PRD.TRNK_SKD_VOY_NO)
+     , BK.SKD_DIR_CD        = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.SKD_DIR_CD, PRD.TRNK_SKD_DIR_CD)
+#if(${update_mt_pkup} == 'Y')
+	 , BK.MTY_PKUP_YD_CD    = NVL(PRD.MTY_PKUP_YD_CD, BK.MTY_PKUP_YD_CD)
+     , BK.MTY_PKUP_DT       = NVL(PRD.MTY_PKUP_DT, BK.MTY_PKUP_DT)
+#else
+	 , BK.MTY_PKUP_YD_CD    = CASE WHEN BK.PCTL_NO = PRD.PCTL_NO    THEN BK.MTY_PKUP_YD_CD
+								   WHEN PRD.POR_CD = PRD.OLD_POR_CD THEN BK.MTY_PKUP_YD_CD
+								   ELSE NVL(PRD.MTY_PKUP_YD_CD, BK.MTY_PKUP_YD_CD) END
+     , BK.MTY_PKUP_DT       = CASE WHEN BK.PCTL_NO = PRD.PCTL_NO    THEN BK.MTY_PKUP_DT
+								   WHEN PRD.POR_CD = PRD.OLD_POR_CD THEN BK.MTY_PKUP_DT
+								   ELSE NVL(PRD.MTY_PKUP_DT, BK.MTY_PKUP_DT) END
+#end 
+#if(${update_full_rtn_yd_cd} == 'Y')
+     , BK.FULL_RTN_YD_CD    = PRD.FULL_RTN_YD_CD
+#else
+     , BK.FULL_RTN_YD_CD    = CASE WHEN BK.PCTL_NO = PRD.PCTL_NO THEN BK.FULL_RTN_YD_CD
+								   WHEN PRD.POR_CD = PRD.OLD_POR_CD AND PRD.PRD_FIRST_VVD = PRD.BKG_FIRST_VVD THEN BK.FULL_RTN_YD_CD 
+								   ELSE PRD.FULL_RTN_YD_CD END
+#end 
+     , BK.POR_CD            = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.POR_CD,     PRD.por_Cd)
+     , BK.POR_NOD_CD        = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.POR_NOD_CD, PRD.por_nod_cd)
+     , BK.POL_CD            = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.POL_CD,     PRD.pol_cd)
+     , BK.POL_NOD_CD        = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.POL_NOD_CD, PRD.pol_nod_cd)
+     , BK.POD_CD            = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.POD_CD,     PRD.pod_cd)
+     , BK.POD_NOD_CD        = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.POD_NOD_CD, PRD.pod_nod_cd)
+     , BK.DEL_CD            = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.DEL_CD, 	 PRD.del_cd)
+     , BK.DEL_NOD_CD        = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.DEL_NOD_CD, PRD.del_nod_cd)
+     , BK.FULL_PKUP_YD_CD   = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.FULL_PKUP_YD_CD, nvl(PRD.full_pkup_yd_cd, 		bk.full_pkup_yd_cd))
+     , BK.MTY_RTN_YD_CD     = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.MTY_RTN_YD_CD,   nvl(PRD.mty_rtn_yd_cd,   		bk.mty_rtn_yd_cd))
+     , BK.LODG_DUE_DT       = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.LODG_DUE_DT,     nvl(PRD.n1st_vsl_lodg_due_dt, bk.lodg_due_dt))
+     , BK.MTY_DOR_ARR_DT    = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.MTY_DOR_ARR_DT,  nvl(PRD.mcntr_dor_arr_due_dt, bk.mty_dor_arr_dt))
+  	 , BK.PRE_RLY_PORT_CD	= DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.PRE_RLY_PORT_CD, PRD.PRE_RLY_PORT_CD)
+	 , BK.PST_RLY_PORT_CD	= DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.PST_RLY_PORT_CD, PRD.PST_RLY_PORT_CD)
+ 	 , BK.ORG_TRNS_MOD_CD   = CASE WHEN BK.PCTL_NO = PRD.PCTL_NO THEN BK.ORG_TRNS_MOD_CD
+								   WHEN OB_TRSP_MOD_CD = 'WD' THEN DECODE(PRD.POR_CD, PRD.POL_CD, 'F', 'B')
+								   WHEN OB_TRSP_MOD_CD = 'RD' THEN 'R'
+								   WHEN OB_TRSP_MOD_CD = 'TD' THEN 'T'
+								   WHEN OB_TRSP_MOD_CD = 'TR' THEN 'A'
+								   WHEN OB_TRSP_MOD_CD = 'TW' THEN DECODE(PRD.POR_CD, PRD.POL_CD, 'E', 'U') END 
+	 , BK.DEST_TRNS_MOD_CD  = CASE WHEN BK.PCTL_NO = PRD.PCTL_NO THEN BK.DEST_TRNS_MOD_CD
+								   WHEN IB_TRSP_MOD_CD = 'WD' THEN DECODE(PRD.POD_CD, PRD.DEL_CD, 'F', 'B')
+								   WHEN IB_TRSP_MOD_CD = 'RD' THEN 'R'
+								   WHEN IB_TRSP_MOD_CD = 'TD' THEN 'T'
+								   WHEN IB_TRSP_MOD_CD = 'TR' THEN 'A'
+								   WHEN IB_TRSP_MOD_CD = 'TW' THEN DECODE(PRD.POD_CD, PRD.DEL_CD, 'E', 'U') END 
+     , BK.SHP_BAK_FLG       = DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.SHP_BAK_FLG, 
+									CASE WHEN SUBSTR(PRD.POL_CD, 1, 2) = SUBSTR(PRD.POD_CD, 1, 2) 
+											AND PRD.PRE_RLY_PORT_CD IS NOT NULL 
+											AND PRD.PST_RLY_PORT_CD IS NOT NULL THEN 'Y' 
+										 ELSE 'N' END)
+     , BK.PORT_CLZ_DT 		= DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.PORT_CLZ_DT,
+								(SELECT NVL((SELECT MAX(HOL.HOL_DT) + 1
+								             FROM DMT_HOLIDAY HOL
+								            WHERE (HOL_YR,CNT_CD,RGN_CD,STE_CD,LOC_CD,HOL_DESC)
+						                          IN (SELECT HOL_YR,CNT_CD,RGN_CD,STE_CD,LOC_CD,HOL_DESC
+						                                FROM DMT_HOLIDAY
+						                               WHERE SUBSTR(PRD.POL_NOD_CD, 1, 2) = CNT_CD(+)
+	                    						         AND SUBSTR(PRD.POL_NOD_CD, 1, 5) = CASE WHEN TRIM(HOL.LOC_CD) IS NULL THEN SUBSTR(PRD.POL_NOD_CD, 1, 5)
+	                                            						                  		 else HOL.LOC_CD end 
+						                                 AND HOL_YR                      = TO_CHAR(PCT, 'yyyy')
+                    							         AND TO_CHAR(HOL_DT, 'yyyymmdd') = TO_CHAR(PCT, 'yyyymmdd'))
+										), TO_DATE(TO_CHAR(PCT, 'YYYYMMDD'), 'YYYYMMDD')) PCT
+								 FROM (SELECT CASE WHEN TRIM(TO_CHAR(POL_ETD + 2, 'DAY', 'NLS_DATE_LANGUAGE=ENGLISH')) = 'SUNDAY'   THEN POL_ETD + 4
+							                       WHEN TRIM(TO_CHAR(POL_ETD + 2, 'DAY', 'NLS_DATE_LANGUAGE=ENGLISH')) = 'SATURDAY' THEN POL_ETD + 3 
+								                   ELSE POL_ETD + 2 END PCT
+								         FROM (SELECT MIN(DTL.ARR_ST_DT) POL_ETD
+											     FROM PRD_PROD_CTL_ROUT_DTL DTL
+												WHERE DTL.PCTL_NO 		= @[pctl_no]
+											      and DTL.TRSP_MOD_CD 	in ('VD', 'WD')
+							 					  and PCTL_IO_BND_CD 	= 'T'))))
+	 , BK.POL_ETD_DT		= DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.POL_ETD_DT, PRD.POL_ETD)
+	 , BK.POD_ETA_DT		= DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.POD_ETA_DT, PRD.POD_ETA)
+	 , BK.PCTL_NO			= DECODE(BK.PCTL_NO, PRD.PCTL_NO, BK.PCTL_NO,    PRD.PCTL_NO)
+#end
+#if (${ca_flg} == 'Y')
+ where CORR_NO = 'TMP0000001'
+#end
+
+#end			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="SEL000010200" out="N"/>
+				<param name="pctl_no" type="12" value="R1001160000385130001" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

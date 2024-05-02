@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="LeaseReportDBDAOsearchOnHireReportbyMonthSummaryRSQL">
+			<desc><![CDATA[월별로 임차한 실적조회
+ "Including"  -> 해당월 LSI 로 시작, 짝 lso 가 찾기==> TERM CHANGE FLAG 무시
+ "Excluding" -> 해당월 LSI 가 T/C='N' 로 시작, 짝 lso 가 T/C='N' 만
+ "Only"       -> 해당월 LSI  T/C='N', LSO가 T/C='Y' , 실제 반납한 LSO(기준 LSI 보다 큰 LSO 이고 T/C='N')]]></desc>
+			<sql><![CDATA[
+WITH PARAM
+AS (
+    SELECT 
+         @[period_stdt] PERIOD_STDT
+        ,@[period_eddt] PERIOD_EDDT
+        ,@[loc_cd] LOC_CD
+        ,@[loc_tp] LOC_TP
+        ,@[term_change] TERM_CHANGE
+	FROM   DUAL
+)
+, XXX AS ( 
+SELECT
+      #foreach($key IN ${tysz})
+          SUM(DECODE(DD, '$key' , EE, 0)) $key ,
+      #end  
+      CC  
+FROM ( SELECT 
+         TO_CHAR(C.CNTR_STS_EVNT_DT , 'YYYY-MM') CC,
+         A.CNTR_TPSZ_CD DD, 
+         COUNT(A.CNTR_NO) EE
+       FROM MST_CONTAINER A,
+            MDM_CNTR_TP_SZ B,
+            MST_CNTR_STS_HIS C,
+            LSE_AGREEMENT D ,
+            PARAM P
+       WHERE A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD
+       AND   A.CNTR_NO = C.CNTR_NO
+       AND   C.CNTR_STS_EVNT_DT BETWEEN TO_DATE(P.PERIOD_STDT, 'YYYYMMDD') AND TO_DATE(P.PERIOD_EDDT, 'YYYYMMDD')
+       AND   C.AGMT_CTY_CD = D.AGMT_CTY_CD
+       AND   C.AGMT_SEQ    = D.AGMT_SEQ
+--     AND   SUBSTR(NVL(C.CNTR_STS_RMK, ' '), 1, 6) <> 'SELLOE'
+       AND   C.AGMT_SEQ <> 999990
+	   AND   A.CO_CRE_FLG = 'N'
+	   AND   P.TERM_CHANGE IS NULL
+
+#if (${dii} != '' )
+  #if (${dii} == 'N' )
+          AND C.CNTR_STS_CD IN ('LSI','OWN')
+  #elseif (${dii} == 'Y' ) 
+          AND C.CNTR_STS_CD = 'DII'
+  #end
+#else
+          AND C.CNTR_STS_CD IN ('LSI','DII','OWN')
+#end
+#if (${loc_cd} != '' ) 
+       AND DECODE(P.loc_tp, 'R', C.RCC_CD, 'L', C.LCC_CD, 'S', C.SCC_CD ) = P.LOC_CD
+#end
+
+#if (${lstm_cd_str} != '' ) 
+          AND D.LSTM_CD IN ( #foreach($key IN ${lstm_cd})
+                                 #if($velocityCount < $lstm_cd.size())
+                                     '$key',
+                                 #else
+                                     '$key'
+                                 #end
+                             #end )
+#end
+
+       GROUP BY TO_CHAR(C.CNTR_STS_EVNT_DT , 'YYYY-MM'), A.CNTR_TPSZ_CD 
+	    UNION ALL /* Term Change Excluding */
+	   SELECT 
+         TO_CHAR(C.CNTR_STS_EVNT_DT , 'YYYY-MM') CC,
+         A.CNTR_TPSZ_CD DD, 
+         COUNT(A.CNTR_NO) EE
+       FROM MST_CONTAINER A,
+            MDM_CNTR_TP_SZ B,
+            (SELECT A.*
+               FROM 
+                 (SELECT A.*,
+                     (SELECT /*+ INDEX_ASC(T02 XPKMST_CNTR_STS_HIS) */
+                               CNTR_STS_SEQ
+                      FROM   MST_CNTR_STS_HIS T02
+                      WHERE  A.CNTR_NO      = T02.CNTR_NO
+                      AND    A.CNTR_STS_SEQ < T02.CNTR_STS_SEQ
+                      AND    T02.CNTR_STS_CD  = 'LSO'
+                      AND    T02.CNTR_LSTM_CNG_FLG='Y'
+                      AND    ROWNUM           = 1
+                      ) AS LSO_STS_SEQ
+              FROM   MST_CNTR_STS_HIS A,
+                     PARAM P
+              WHERE   A.CNTR_STS_EVNT_DT BETWEEN TO_DATE(P.PERIOD_STDT, 'YYYYMMDD') AND TO_DATE(P.PERIOD_EDDT, 'YYYYMMDD') 
+               AND    A.AGMT_SEQ <> 999990
+               AND    A.CNTR_STS_CD IN ('LSI','DII','OWN')
+               AND    A.CNTR_LSTM_CNG_FLG='N'	
+-- T-project 특정 오피스 예외사항 제거				  
+--               AND    SUBSTR(NVL(A.CNTR_STS_RMK, ' '), 1, 6) <> 'SELLOE'
+                )A
+           WHERE LSO_STS_SEQ IS NULL )C,
+            LSE_AGREEMENT D ,
+            PARAM P
+       WHERE A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD
+       AND   A.CNTR_NO 		= C.CNTR_NO
+       AND   C.AGMT_CTY_CD = D.AGMT_CTY_CD
+       AND   C.AGMT_SEQ    = D.AGMT_SEQ      
+	   AND   A.CO_CRE_FLG = 'N'
+	   AND   P.TERM_CHANGE = 'N'      
+
+#if (${dii} != '' )
+  #if (${dii} == 'N' )
+          AND C.CNTR_STS_CD IN ('LSI','OWN')
+  #elseif (${dii} == 'Y' ) 
+          AND C.CNTR_STS_CD = 'DII'
+  #end
+#else
+          AND C.CNTR_STS_CD IN ('LSI','DII','OWN')
+#end
+#if (${loc_cd} != '' ) 
+       AND DECODE(P.loc_tp, 'R', C.RCC_CD, 'L', C.LCC_CD, 'S', C.SCC_CD ) = P.LOC_CD
+#end
+
+#if (${lstm_cd_str} != '' ) 
+          AND D.LSTM_CD IN ( #foreach($key IN ${lstm_cd})
+                                 #if($velocityCount < $lstm_cd.size())
+                                     '$key',
+                                 #else
+                                     '$key'
+                                 #end
+                             #end )
+#end
+
+       GROUP BY TO_CHAR(C.CNTR_STS_EVNT_DT , 'YYYY-MM'), A.CNTR_TPSZ_CD 
+	   UNION ALL /* Term Change Only */
+	   SELECT 
+         TO_CHAR(C.CNTR_STS_EVNT_DT , 'YYYY-MM') CC,
+         A.CNTR_TPSZ_CD DD, 
+         COUNT(A.CNTR_NO) EE
+       FROM MST_CONTAINER A,
+            MDM_CNTR_TP_SZ B,
+            (SELECT A.*
+               FROM 
+                 (SELECT A.*,
+                     (SELECT /*+ INDEX_ASC(T02 XPKMST_CNTR_STS_HIS) */
+                               CNTR_LSTM_CNG_FLG
+                      FROM   MST_CNTR_STS_HIS T02
+                      WHERE  A.CNTR_NO      = T02.CNTR_NO
+                      AND    A.CNTR_STS_SEQ < T02.CNTR_STS_SEQ
+                      AND    T02.CNTR_STS_CD  = 'LSO'
+                      AND    T02.CNTR_LSTM_CNG_FLG='Y'
+                      AND    ROWNUM           = 1
+                      ) AS LSO_CHK_FLG
+              	FROM   MST_CNTR_STS_HIS A,
+               	      PARAM P
+              	WHERE   A.CNTR_STS_EVNT_DT BETWEEN TO_DATE(P.PERIOD_STDT, 'YYYYMMDD') AND TO_DATE(P.PERIOD_EDDT, 'YYYYMMDD') 
+               	AND    A.AGMT_SEQ <> 999990
+               	AND    A.CNTR_STS_CD IN ('LSI','DII','OWN')
+               	AND    A.CNTR_LSTM_CNG_FLG='N'					  
+--             	AND    SUBSTR(NVL(A.CNTR_STS_RMK, ' '), 1, 6) <> 'SELLOE'
+                )A
+              WHERE LSO_CHK_FLG ='Y')C,
+            LSE_AGREEMENT D ,
+            PARAM P
+       WHERE A.CNTR_TPSZ_CD = B.CNTR_TPSZ_CD
+       AND   A.CNTR_NO 		= C.CNTR_NO
+       AND   C.AGMT_CTY_CD = D.AGMT_CTY_CD
+       AND   C.AGMT_SEQ    = D.AGMT_SEQ      
+	   AND   A.CO_CRE_FLG = 'N'
+	   AND  'Y' 		= NVL(P.TERM_CHANGE,'N')
+#if (${dii} != '' )
+  #if (${dii} == 'N' )
+          AND C.CNTR_STS_CD IN ('LSI','OWN')
+  #elseif (${dii} == 'Y' ) 
+          AND C.CNTR_STS_CD = 'DII'
+  #end
+#else
+          AND C.CNTR_STS_CD IN ('LSI','DII','OWN')
+#end
+#if (${loc_cd} != '' ) 
+       AND DECODE(P.loc_tp, 'R', C.RCC_CD, 'L', C.LCC_CD, 'S', C.SCC_CD ) = P.LOC_CD
+#end
+
+#if (${lstm_cd_str} != '' ) 
+          AND D.LSTM_CD IN ( #foreach($key IN ${lstm_cd})
+                                 #if($velocityCount < $lstm_cd.size())
+                                     '$key',
+                                 #else
+                                     '$key'
+                                 #end
+                             #end )
+#end
+
+       GROUP BY TO_CHAR(C.CNTR_STS_EVNT_DT , 'YYYY-MM'), A.CNTR_TPSZ_CD 
+	)
+GROUP BY CC 
+ORDER BY CC )
+SELECT
+  #foreach($key IN ${tysz})            
+   DECODE( AA.RCC , 'Ratio' ,  TO_CHAR( AA.$key , '990.00') , TO_CHAR( AA.$key , '999,999,999,990'  )) $key ,        
+  #end
+  TO_CHAR( AA.DIV_TOTAL , '999,999,999,990'  ) DIV_TOTAL ,
+  TO_CHAR((AA.DIV_TOTAL / BB.DIV_TOTAL ) * 100 , '990.00' ) || '%'  RATIO ,
+  AA.RCC
+FROM
+(SELECT
+      #foreach($key IN ${tysz})
+         $key ,
+      #end  
+        (
+      #foreach($key IN ${tysz})
+          #if($velocityCount < $tysz.size())
+              $key + 
+          #else
+              $key
+          #end
+      #end 
+       ) DIV_TOTAL ,
+      CC RCC
+FROM XXX
+UNION ALL
+SELECT
+      #foreach($key IN ${tysz})
+        SUM( $key ) $key,
+      #end  
+        (
+      #foreach($key IN ${tysz})
+          #if($velocityCount < $tysz.size())
+              SUM($key) + 
+          #else
+              SUM($key)
+          #end
+      #end 
+       ) DIV_TOTAL ,
+      'G.TTL' RCC
+FROM XXX
+UNION ALL
+SELECT
+      #foreach($key IN ${tysz})
+       SUM( $key ) / (
+          #foreach($key IN ${tysz})            
+              #if($velocityCount < $tysz.size())
+                   SUM($key) + 
+              #else
+                   SUM($key)
+              #end         
+          #end  
+                       ) * 100  $key ,
+      #end  
+      100 DIV_TOTAL ,
+      'Ratio' RCC
+FROM XXX ) AA , ( SELECT
+                    (#foreach($key IN ${tysz})            
+                        #if($velocityCount < $tysz.size())
+                           SUM($key) + 
+                        #else
+                           SUM($key)
+                        #end         
+                     #end ) DIV_TOTAL 
+                  FROM XXX ) BB			]]></sql>
+			<params>
+				<param name="period_stdt" type="12" value="" out="N"/>
+				<param name="period_eddt" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="loc_tp" type="12" value="" out="N"/>
+				<param name="term_change" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

@@ -1,0 +1,64 @@
+/*=========================================================
+*Copyright(c) 2012 CyberLogitec
+*@FileName : EsmAcm0032Event.java
+*@FileTitle : Batch Management
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2012.05.25
+*@LastModifier : 김봉균
+*@LastVersion : 1.0
+* 2012.05.25 김봉균
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.acm.acmrequest.batmanagement.event;
+
+import java.util.Arrays;
+
+import com.clt.apps.opus.esm.acm.acmrequest.batmanagement.vo.BATManagementVO;
+import com.clt.framework.support.layer.event.EventSupport;
+
+/**
+ * ESM_ACM_0032 에 대한 PDTO(Data Transfer Object including Parameters)<br>
+ * -  ESM_ACM_0032HTMLAction에서 작성<br>
+ * - ServiceCommand Layer로 전달하는 PDTO로 사용<br>
+ *
+ * @author KIM BONG-GYOON
+ * @see ESM_ACM_0032HTMLAction 참조
+ * @since J2EE 1.6
+ */
+public class EsmAcm0032Event extends EventSupport {
+
+	private static final long serialVersionUID = 1L;
+
+	/** Table Value Object 조회 조건 및 단건 처리  */
+	private BATManagementVO batManagementVO = null;
+
+	/** Table Value Object Multi Data 처리 */
+	private BATManagementVO[] batManagementVOs = null;
+
+	public EsmAcm0032Event() {}
+
+	public BATManagementVO getBATManagementVO() {
+		return batManagementVO;
+	}
+
+	public void setBATManagementVO(BATManagementVO batManagementVO) {
+		this.batManagementVO = batManagementVO;
+	}
+
+	public BATManagementVO[] getBATManagementVOs() {
+		BATManagementVO[] rtnVOs = null;
+		if (this.batManagementVOs != null) {
+			rtnVOs = Arrays.copyOf(batManagementVOs, batManagementVOs.length);
+		}
+		return rtnVOs;
+	}
+
+	public void setBATManagementVOs(BATManagementVO[] batManagementVOs) {
+		if(batManagementVOs != null){
+			BATManagementVO[] tmpVOs = Arrays.copyOf(batManagementVOs, batManagementVOs.length);
+			this.batManagementVOs  = tmpVOs;
+		}
+	}
+
+}

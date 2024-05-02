@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="RFAExceptionTariffMgtDBDAOSearchSCTariffListByDateUserIDRCVRSQL">
+			<desc><![CDATA[DEM/DET Adjustment Request & Approval Status 조회(SC, DATE, Received)용 쿼리]]></desc>
+			<sql><![CDATA[
+SELECT	DISTINCT 'TO' AS TO_CC
+	,	SP_HDR.SC_NO
+	,	LPAD(SC_VER.SC_EXPT_VER_SEQ, 3, '0') AS VER_NO
+	,	CD_DTL.INTG_CD_VAL_DP_DESC AS STATUS
+
+	#if(${group_by} == 'CVRG')
+	,	SC_GRP.SC_EXPT_GRP_SEQ AS GRP_SEQ
+    ,   SC_GRP.DMDT_TRF_CD
+	,	SC_CVRG.CVRG_SEQ
+	,	SC_CVRG.CNT_CD
+	,	CASE 
+			WHEN SUBSTR(SC_CVRG.CNT_CD, 1, 2) IN ('CA', 'US') 
+				THEN SC_CVRG.STE_CD 
+				ELSE SC_CVRG.RGN_CD 
+		END AS RGN_CD
+	,	SC_CVRG.LOC_CD
+	#end
+
+    ,   SC_VER_PROG.PROG_OFC_CD AS REQ_OFC_CD
+    ,   DECODE(SC_VER.DMDT_EXPT_VER_STS_CD, 'D', '', SC_VER_PROG2.PROG_OFC_CD) AS APRO_OFC_CD
+    ,   TO_CHAR(SC_VER_PROG.PROG_DT, 'YYYY-MM-DD') AS UPD_DT
+    ,   SC_VER.PROP_NO
+    ,   SP_PTY.CUST_CNT_CD || LPAD(SP_PTY.CUST_SEQ, 6, '0') AS CUST_CD
+    ,   CUST.CUST_LGL_ENG_NM AS CUST_NM
+
+FROM	DMT_SC_EXPT_VER SC_VER
+	,	DMT_SC_EXPT_VER_PROG SC_VER_PROG
+	,	DMT_SC_EXPT_VER_PROG SC_VER_PROG2
+	,	DMT_SC_EXPT_GRP SC_GRP
+	#if(${group_by} == 'CVRG')
+	,	DMT_SC_EXPT_CVRG SC_CVRG
+	#end
+	,	PRI_SP_HDR SP_HDR
+	,	PRI_SP_MN SP_MN
+	,	PRI_SP_CTRT_PTY	SP_PTY
+	,	COM_INTG_CD_DTL CD_DTL
+    ,   MDM_CUSTOMER CUST
+
+WHERE	SC_VER.PROP_NO = SC_VER_PROG.PROP_NO
+	AND	SC_VER.SC_EXPT_VER_SEQ = SC_VER_PROG.SC_EXPT_VER_SEQ
+	AND SC_VER.PROP_NO = SC_VER_PROG2.PROP_NO
+	AND	SC_VER.SC_EXPT_VER_SEQ = SC_VER_PROG2.SC_EXPT_VER_SEQ
+	AND SC_VER.DMDT_EXPT_VER_STS_CD IN ('A', 'D', 'L')
+	AND SC_VER.DELT_FLG = 'N'
+	AND SC_VER.UPD_DT BETWEEN TO_DATE(@[fm_dt], 'YYYY-MM-DD') AND TO_DATE(@[to_dt], 'YYYY-MM-DD') + 0.99999
+	AND SC_VER_PROG.PROG_SEQ =
+		(
+			SELECT  /*+ INDEX_DESC(DMT_SC_EXPT_VER_PROG XPKDMT_SC_EXPT_VER_PROG) */ PROG_SEQ
+			FROM    DMT_SC_EXPT_VER_PROG 
+			WHERE   PROP_NO = SC_VER_PROG.PROP_NO
+				AND SC_EXPT_VER_SEQ = SC_VER_PROG.SC_EXPT_VER_SEQ 
+				AND DMDT_EXPT_VER_STS_CD = 'R'
+				AND	ROWNUM = 1						
+		)
+	AND SC_VER_PROG.PROG_USR_ID = @[usr_id]
+	AND SC_VER_PROG2.PROG_SEQ =
+		(
+			SELECT  /*+ INDEX_DESC(DMT_SC_EXPT_VER_PROG XPKDMT_SC_EXPT_VER_PROG) */ PROG_SEQ
+			FROM    DMT_SC_EXPT_VER_PROG 
+			WHERE   PROP_NO = SC_VER_PROG2.PROP_NO
+				AND SC_EXPT_VER_SEQ = SC_VER_PROG2.SC_EXPT_VER_SEQ 
+				AND DMDT_EXPT_VER_STS_CD IN ('A', 'D', 'L')
+				AND	ROWNUM = 1						
+		)
+	AND	SC_VER.PROP_NO = SP_HDR.PROP_NO
+	AND SP_HDR.PROP_NO = SP_MN.PROP_NO
+	AND SP_MN.AMDT_SEQ =
+		(
+			SELECT	/*+ INDEX_DESC(PRI_SP_MN XPKPRI_SP_MN) */ AMDT_SEQ
+			FROM	PRI_SP_MN
+			WHERE	PROP_NO = SP_MN.PROP_NO
+				AND ROWNUM = 1
+		)
+	AND SP_MN.PROP_NO = SP_PTY.PROP_NO
+	AND SP_MN.AMDT_SEQ = SP_PTY.AMDT_SEQ
+	
+	#if(${cust_cd} != '')
+    AND SP_PTY.CUST_CNT_CD = SUBSTR(@[cust_cd], 0, 2) AND SP_PTY.CUST_SEQ = SUBSTR(@[cust_cd], 3)
+	#end
+
+    AND SP_PTY.PRC_CTRT_PTY_TP_CD = 'C'
+    AND SP_PTY.CUST_CNT_CD = CUST.CUST_CNT_CD
+    AND SP_PTY.CUST_SEQ = CUST.CUST_SEQ
+	AND SC_VER.PROP_NO = SC_GRP.PROP_NO
+	AND SC_VER.SC_EXPT_VER_SEQ = SC_GRP.SC_EXPT_VER_SEQ
+	AND SC_GRP.DMDT_TRF_CD IN 
+		(
+			#foreach( $trf_cd in ${trf_cd_list} )
+				#if($velocityCount < $trf_cd_list.size()) '$trf_cd', #else '$trf_cd' #end
+			#end
+		)
+
+	#if(${group_by} == 'CVRG')
+	AND SC_GRP.PROP_NO = SC_CVRG.PROP_NO
+	AND SC_GRP.SC_EXPT_VER_SEQ = SC_CVRG.SC_EXPT_VER_SEQ
+	AND SC_GRP.SC_EXPT_GRP_SEQ = SC_CVRG.SC_EXPT_GRP_SEQ
+	#end
+
+   	AND SC_VER.DMDT_EXPT_VER_STS_CD = CD_DTL.INTG_CD_VAL_CTNT
+    AND CD_DTL.INTG_CD_ID = 'CD01972'
+
+ORDER BY UPD_DT, PROP_NO #if(${group_by} == 'CVRG'), GRP_SEQ,	CVRG_SEQ #end			]]></sql>
+			<params>
+				<param name="fm_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="cust_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

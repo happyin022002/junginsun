@@ -1,0 +1,301 @@
+CREATE OR REPLACE FUNCTION OPUSADM.PRD_GET_INLND_CCT_FNC
+(
+I_PCTL_NO     IN VARCHAR2
+)
+  RETURN DATE
+  AUTHID CURRENT_USER IS
+
+/* ========================================================
+   1. Object Name      : PRD_GET_INLND_CCT_FNC
+   2. Version          : 1.1
+   3. Create Date      : 2016.xx.xx
+   4. Sub System       : Product Catalog
+   5. Author           :
+   6. Description      : O/B Inland 구간의 CY Cut Off Time by Proforma in Inland
+   7. Revision History : 2016.xx.xx : 최초 생성
+                       : 2016.09.28 : Port CCT Function 변경
+                         - PRD_GET_CCT_FNC >> PRD_COMMON_PKG.PRD_GET_CCT_BY_PC_FNC
+======================================================== */
+
+  /* 2016-02-11 */
+
+  V_CCT                DATE;
+  V_ETB_DT             DATE;
+  V_ETD_DT             DATE;
+  V_ETA_DT             DATE;
+
+  V_VVD                VARCHAR2(10) := '';
+  V_CLPT_IND_SEQ       VARCHAR2(10) := '';
+
+  V_CGO_TP_CD          VARCHAR2(10) := '';
+  V_VSL_SLAN_CD        VARCHAR2(10) := '';
+  V_O_YD_CD            VARCHAR2(10) := '';
+  V_D_YD_CD            VARCHAR2(10) := '';
+
+  V_INLND_CCT_TP_CD    VARCHAR2(10) := '';
+  V_CCT_DY_CD          NUMBER(1);
+  V_CGO_CLZ_HRMNT      VARCHAR2(10) := '';
+  V_AVAL_WK_NO         VARCHAR2(10) := '';
+  V_AVAL_DY_CD         NUMBER(1);
+  V_AVAL_HRMNT         VARCHAR2(10) := '';
+  V_INLND_TRSP_FREQ_CD VARCHAR2(10) := '';
+  V_INLND_WK_ITVAL_NO  VARCHAR2(10) := '';
+  V_EFF_FM_DT          DATE;
+  V_SUN_ST_FLG         VARCHAR2(10) := '';
+  V_MON_ST_FLG         VARCHAR2(10) := '';
+  V_TUE_ST_FLG         VARCHAR2(10) := '';
+  V_WED_ST_FLG         VARCHAR2(10) := '';
+  V_THU_ST_FLG         VARCHAR2(10) := '';
+  V_FRI_ST_FLG         VARCHAR2(10) := '';
+  V_SAT_ST_FLG         VARCHAR2(10) := '';
+
+  V_BASE_DT           DATE;
+  V_AVAIL_DT          DATE;
+  V_N1ST_AVAIL_DT     DATE;
+    V_N1ST_CUT_DT       DATE;
+  V_INLND_CCT         DATE;
+  V_CUT_AVAL_GAP_HOUR NUMBER := 0;
+  V_BASE_AVAL_GAP_DAY NUMBER := 0;
+  V_MAX_DT            NUMBER := 0;
+  V_PRIO_SEQ          NUMBER := 0;
+
+BEGIN
+
+  DBMS_OUTPUT.disable ;
+
+
+    SELECT SLAN_CD,VPS_ETB_DT,VPS_ETA_DT,VPS_ETD_DT,VSL_CD||SKD_VOY_NO||SKD_DIR_CD,CLPT_IND_SEQ
+      INTO V_VSL_SLAN_CD,V_ETB_DT,V_ETA_DT,V_ETD_DT,V_VVD,V_CLPT_IND_SEQ
+      FROM VSK_VSL_PORT_SKD
+     WHERE (VSL_CD,SKD_VOY_NO,SKD_DIR_CD,VPS_PORT_CD,CLPT_IND_SEQ,SLAN_CD) =
+            (
+            SELECT /*+ INDEX(PRD_PROD_CTL_ROUT_DTL XPKPRD_PROD_CTL_ROUT_DTL) */
+              VSL_CD,SKD_VOY_NO,SKD_DIR_CD,
+            SUBSTR(ORG_NOD_CD,1,5),
+            ORG_CLPT_IND_SEQ,VSL_SLAN_CD
+            FROM PRD_PROD_CTL_ROUT_DTL
+            WHERE PCTL_NO = I_PCTL_NO
+            AND PCTL_IO_BND_CD ='T'
+            AND ROWNUM = 1 );
+
+    DBMS_OUTPUT.PUT_LINE('V_VSL_SLAN_CD: '||V_VSL_SLAN_CD) ;
+    DBMS_OUTPUT.PUT_LINE('V_ETB_DT: '||TO_CHAR(V_ETB_DT,'YYYY-MM-DD HH24:MI')) ;
+    DBMS_OUTPUT.PUT_LINE('V_ETA_DT: '||TO_CHAR(V_ETA_DT,'YYYY-MM-DD HH24:MI')) ;
+    DBMS_OUTPUT.PUT_LINE('V_ETD_DT: '||TO_CHAR(V_ETD_DT,'YYYY-MM-DD HH24:MI')) ;
+    DBMS_OUTPUT.PUT_LINE('V_VVD: '||V_VVD) ;
+
+
+
+    SELECT (CASE WHEN NVL(DG_SPCL_FLG,'N') ='Y' AND NVL(RF_SPCL_FLG,'N') = 'Y' THEN 'RD'
+                 WHEN NVL(DG_SPCL_FLG,'N') ='Y' AND NVL(SPCL_AWK_CGO_FLG,'N')  ='Y' THEN 'AD'
+                 WHEN NVL(DG_SPCL_FLG,'N') ='Y' AND NVL(RF_SPCL_FLG,'N') <>  'Y' AND NVL(SPCL_AWK_CGO_FLG,'N')  <> 'Y' THEN 'DG'
+                 WHEN NVL(DG_SPCL_FLG,'N') <>'Y' AND NVL(RF_SPCL_FLG,'N') = 'Y' THEN 'RF'
+                 WHEN NVL(DG_SPCL_FLG,'N') <>'Y' AND NVL(SPCL_AWK_CGO_FLG,'N')  ='Y' THEN 'AK'
+                 WHEN NVL(BB_SPCL_FLG,'N') ='Y' THEN 'BB'
+                 WHEN NVL(DG_SPCL_FLG,'N')||NVL(RF_SPCL_FLG,'N')||NVL(SPCL_AWK_CGO_FLG,'N')||NVL(BB_SPCL_FLG,'N') ='NNNN' THEN 'GP'
+            END )
+      INTO V_CGO_TP_CD
+      FROM PRD_PROD_CTL_MST M
+     WHERE PCTL_NO = I_PCTL_NO;
+
+    DBMS_OUTPUT.PUT_LINE('V_CGO_TP_CD: '||V_CGO_TP_CD) ;
+
+   SELECT   FULL_RTN_YD_CD
+          , ROUT_DEST_NOD_CD --ORG / DEST
+          , PRIO_SEQ
+     INTO   V_O_YD_CD
+          , V_D_YD_CD
+          , V_PRIO_SEQ
+     FROM PRD_INLND_ROUT_MST
+    WHERE ( ROUT_ORG_NOD_CD ,ROUT_DEST_NOD_CD,ROUT_SEQ )=
+            (SELECT /*+ INDEX(PRD_PROD_CTL_ROUT_DTL XPKPRD_PROD_CTL_ROUT_DTL) */
+                    ROUT_ORG_NOD_CD ,ROUT_DEST_NOD_CD,ROUT_SEQ
+               FROM PRD_PROD_CTL_ROUT_DTL
+              WHERE PCTL_NO = I_PCTL_NO
+                AND PCTL_IO_BND_CD ='O'
+                AND ROWNUM =1
+            );
+     -- AND INSTR(TRSP_MOD_CD,'R') > 0 ;
+
+
+    DBMS_OUTPUT.PUT_LINE('V_O_YD_CD : '||V_O_YD_CD) ;
+    DBMS_OUTPUT.PUT_LINE('V_D_YD_CD : '||V_D_YD_CD) ;
+    DBMS_OUTPUT.PUT_LINE('V_PRIO_SEQ: '||V_PRIO_SEQ) ;
+    
+    V_CCT := PRD_COMMON_PKG.PRD_GET_CCT_BY_PC_FNC(I_PCTL_NO);
+
+   -- V_CCT := PRD_GET_CCT_FNC(V_D_YD_CD,V_VSL_SLAN_CD,SUBSTR(V_VVD,9,1),V_INLND_CCT_TP_CD,V_VVD,V_CLPT_IND_SEQ,V_ETB_DT,V_ETD_DT) ;
+
+    SELECT INLND_CCT_TP_CD
+          ,DECODE(CCT_DY_CD, 'SUN', 1, 'MON', 2, 'TUE', 3, 'WED', 4, 'THU', 5, 'FRI', 6, 'SAT', 7) CCT_DY_CD
+          ,CGO_CLZ_HRMNT
+          ,AVAL_WK_NO
+          ,DECODE(AVAL_DY_CD, 'SUN', 1, 'MON', 2, 'TUE', 3, 'WED', 4, 'THU', 5, 'FRI', 6, 'SAT', 7) AVAL_DY_CD
+          ,AVAL_HRMNT
+          ,INLND_TRSP_FREQ_CD
+          ,INLND_TRSP_WK_ITVAL_NO
+          ,EFF_FM_DT
+          ,SUN_ST_FLG
+          ,MON_ST_FLG
+          ,TUE_ST_FLG
+          ,WED_ST_FLG
+          ,THU_ST_FLG
+          ,FRI_ST_FLG
+          ,SAT_ST_FLG
+      INTO V_INLND_CCT_TP_CD
+          ,V_CCT_DY_CD
+          ,V_CGO_CLZ_HRMNT
+          ,V_AVAL_WK_NO
+          ,V_AVAL_DY_CD
+          ,V_AVAL_HRMNT
+          ,V_INLND_TRSP_FREQ_CD
+          ,V_INLND_WK_ITVAL_NO
+          ,V_EFF_FM_DT
+          ,V_SUN_ST_FLG
+          ,V_MON_ST_FLG
+          ,V_TUE_ST_FLG
+          ,V_WED_ST_FLG
+          ,V_THU_ST_FLG
+          ,V_FRI_ST_FLG
+          ,V_SAT_ST_FLG
+      FROM PRD_INLND_CUT_OFF_TM_MGMT M1
+          WHERE  DECODE(SPCL_CGO_CNTR_TP_CD,V_CGO_TP_CD,1,'AL',10) + DECODE(LANE_CD, V_VSL_SLAN_CD, 1, 'ALL', 2) =
+                                                                      (SELECT MIN(DECODE(SPCL_CGO_CNTR_TP_CD,V_CGO_TP_CD,1,'AL',10) + DECODE(LANE_CD, V_VSL_SLAN_CD, 1, 'ALL', 2))
+                                                                         FROM PRD_INLND_CUT_OFF_TM_MGMT M2
+                                                                      WHERE  M2.ORG_YD_CD  = M1.ORG_YD_CD
+                                                                         AND M2.DEST_YD_CD = M1.DEST_YD_CD
+                                                                         AND DECODE(M2.INLND_CCT_TP_CD, 'PCO', V_CCT, 'ETA', V_ETA_DT, 'ETB', V_ETB_DT) BETWEEN M2.EFF_FM_DT AND M2.EFF_TO_DT
+                                                                         AND NVL(M2.DELT_FLG, 'N') = 'N'
+                                                                          )
+     AND ORG_YD_CD = V_O_YD_CD
+     AND DEST_YD_CD = V_D_YD_CD
+
+
+     AND DECODE(INLND_CCT_TP_CD, 'PCO', V_CCT, 'ETA', V_ETA_DT, 'ETB', V_ETB_DT) BETWEEN EFF_FM_DT AND EFF_TO_DT
+     --AND DECODE(INLND_CCT_TP_CD, 'PCO', PRD_COMMON_PKG.PRD_GET_CCT_BY_PC_FNC(I_PCTL_NO), 'ETA', V_ETA_DT, 'ETB', V_ETB_DT) BETWEEN EFF_FM_DT AND EFF_TO_DT
+
+
+     AND NVL(DELT_FLG, 'N') = 'N'
+     AND PRIO_SEQ = (SELECT NVL(MIN(M3.PRIO_SEQ), 0)     -- 0 means 'ALL'
+                       FROM PRD_INLND_CUT_OFF_TM_MGMT M3
+                      WHERE M3.LANE_CD             = M1.LANE_CD
+                        AND M3.ORG_YD_CD           = M1.ORG_YD_CD
+                        AND M3.DEST_YD_CD          = M1.DEST_YD_CD
+                        AND M3.SPCL_CGO_CNTR_TP_CD = M1.SPCL_CGO_CNTR_TP_CD
+                        AND M3.EFF_FM_DT           = M1.EFF_FM_DT
+                        AND M3.EFF_TO_DT           = M1.EFF_TO_DT
+                        AND M3.PRIO_SEQ            = V_PRIO_SEQ)
+     AND ROWNUM = 1                   
+    ;
+
+
+  -- GAP HOUR BETWEEN CUT OFF AND AVAIL
+  SELECT ((CASE
+                 WHEN NEXT_DAY(TO_DATE(TO_CHAR(NEXT_DAY(SYSDATE,1), 'YYYYMMDD') || V_CGO_CLZ_HRMNT, 'YYYYMMDDHH24MI'), V_CCT_DY_CD) > NEXT_DAY(TO_DATE(TO_CHAR(NEXT_DAY(SYSDATE,1), 'YYYYMMDD') || V_AVAL_HRMNT, 'YYYYMMDDHH24MI'), V_AVAL_DY_CD) THEN
+                    (NEXT_DAY(TO_DATE(TO_CHAR(NEXT_DAY(SYSDATE,1) + 7, 'YYYYMMDD') || V_AVAL_HRMNT, 'YYYYMMDDHH24MI'), V_AVAL_DY_CD) - NEXT_DAY(TO_DATE(TO_CHAR(NEXT_DAY(SYSDATE,1), 'YYYYMMDD') || V_CGO_CLZ_HRMNT, 'YYYYMMDDHH24MI'), V_CCT_DY_CD))
+                 ELSE
+                    (NEXT_DAY(TO_DATE(TO_CHAR(NEXT_DAY(SYSDATE,1), 'YYYYMMDD') || V_AVAL_HRMNT, 'YYYYMMDDHH24MI'), V_AVAL_DY_CD) - NEXT_DAY(TO_DATE(TO_CHAR(NEXT_DAY(SYSDATE,1), 'YYYYMMDD') || V_CGO_CLZ_HRMNT, 'YYYYMMDDHH24MI'), V_CCT_DY_CD))
+             END) * 24) + (NVL(V_AVAL_WK_NO, 0) * 7 * 24)
+
+    INTO V_CUT_AVAL_GAP_HOUR
+    FROM DUAL;
+
+
+  DBMS_OUTPUT.PUT_LINE('GAP HOUR : ' || V_CUT_AVAL_GAP_HOUR);
+
+  -- BASE DATE SET
+  V_BASE_DT := CASE V_INLND_CCT_TP_CD
+                 WHEN 'PCO' THEN
+                  V_CCT
+                 WHEN 'ETA' THEN
+                  V_ETA_DT
+                 WHEN 'ETB' THEN
+                  V_ETB_DT
+               END;
+
+  DBMS_OUTPUT.PUT_LINE('V_BASE_DT: ' || TO_CHAR(V_BASE_DT, 'YYYY/MM/DD HH24:MI'));
+  DBMS_OUTPUT.PUT_LINE('V_AVAL_DY_CD: ' || V_AVAL_DY_CD);
+
+
+  SELECT NEXT_DAY(TO_DATE(TO_CHAR(V_BASE_DT, 'YYYYMMDD') || V_AVAL_HRMNT, 'YYYYMMDDHH24MI'), V_AVAL_DY_CD) - 7 INTO V_N1ST_AVAIL_DT FROM DUAL;
+
+    DBMS_OUTPUT.PUT_LINE('V_N1ST_AVAIL_DT: ' || TO_CHAR(V_N1ST_AVAIL_DT, 'YYYY/MM/DD HH24:MI'));
+
+    IF V_BASE_DT < V_N1ST_AVAIL_DT THEN
+       V_N1ST_AVAIL_DT := V_N1ST_AVAIL_DT -7 ;
+    END IF ;
+
+  DBMS_OUTPUT.PUT_LINE('V_N1ST_AVAIL_DT22: ' || TO_CHAR(V_N1ST_AVAIL_DT, 'YYYY/MM/DD HH24:MI'));
+
+  -- GAP BETWEEN BASE AND AVAIL
+  V_BASE_AVAL_GAP_DAY := V_BASE_DT - V_N1ST_AVAIL_DT;
+
+  DBMS_OUTPUT.PUT_LINE('V_BASE_AVAL_GAP_DAY: ' || V_BASE_AVAL_GAP_DAY);
+
+  -- CHECK IF THERE IS ANOTHER POSSIBLE DATE WITH BASE AND N1ST AVAIL
+    SELECT TO_DATE(TO_CHAR(V_N1ST_AVAIL_DT - V_CUT_AVAL_GAP_HOUR/24,'YYYYMMDD')||V_CGO_CLZ_HRMNT,'YYYYMMDDHH24MI')
+      INTO V_N1ST_CUT_DT
+      FROM DUAL ;
+
+    DBMS_OUTPUT.PUT_LINE('V_N1ST_CUT_DT: ' || TO_CHAR(V_N1ST_CUT_DT, 'YYYY/MM/DD HH24:MI'));
+
+    -- CHECK IF THERE IS ANOTHER POSSIBLE DATE WITH BASE AND N1ST AVAIL
+  SELECT MAX(DT)
+    INTO V_AVAIL_DT
+    FROM (SELECT DECODE(V_SUN_ST_FLG, 1, NEXT_DAY(V_N1ST_CUT_DT,1)+V_CUT_AVAL_GAP_HOUR/24,V_N1ST_AVAIL_DT) DT FROM DUAL UNION ALL
+              SELECT DECODE(V_MON_ST_FLG, 1, NEXT_DAY(V_N1ST_CUT_DT,2)+V_CUT_AVAL_GAP_HOUR/24,V_N1ST_AVAIL_DT) DT FROM DUAL UNION ALL
+              SELECT DECODE(V_TUE_ST_FLG, 1, NEXT_DAY(V_N1ST_CUT_DT,3)+V_CUT_AVAL_GAP_HOUR/24,V_N1ST_AVAIL_DT) DT FROM DUAL UNION ALL
+              SELECT DECODE(V_WED_ST_FLG, 1, NEXT_DAY(V_N1ST_CUT_DT,4)+V_CUT_AVAL_GAP_HOUR/24,V_N1ST_AVAIL_DT) DT FROM DUAL UNION ALL
+              SELECT DECODE(V_THU_ST_FLG, 1, NEXT_DAY(V_N1ST_CUT_DT,5)+V_CUT_AVAL_GAP_HOUR/24,V_N1ST_AVAIL_DT) DT FROM DUAL UNION ALL
+              SELECT DECODE(V_FRI_ST_FLG, 1, NEXT_DAY(V_N1ST_CUT_DT,6)+V_CUT_AVAL_GAP_HOUR/24,V_N1ST_AVAIL_DT) DT FROM DUAL UNION ALL
+              SELECT DECODE(V_SAT_ST_FLG, 1, NEXT_DAY(V_N1ST_CUT_DT,7)+V_CUT_AVAL_GAP_HOUR/24,V_N1ST_AVAIL_DT) DT FROM DUAL
+              ) D
+   WHERE D.DT BETWEEN V_N1ST_AVAIL_DT AND V_BASE_DT ;
+
+     IF V_AVAIL_DT IS NULL THEN V_AVAIL_DT := V_N1ST_AVAIL_DT ;
+     END IF ;
+
+
+  DBMS_OUTPUT.PUT_LINE('V_AVAIL_DT: ' || TO_CHAR(V_AVAIL_DT, 'YYYY/MM/DD HH24:MI'));
+
+  -- INLND CCT SET
+  SELECT  TO_DATE(TO_CHAR((V_AVAIL_DT - V_CUT_AVAL_GAP_HOUR / 24),'YYYY/MM/DD')||' '||V_CGO_CLZ_HRMNT,'YYYY/MM/DD HH24MI')
+      INTO V_INLND_CCT
+      FROM DUAL ;
+
+  DBMS_OUTPUT.PUT_LINE('V_INLND_CCT : ' || TO_CHAR(V_INLND_CCT, 'YYYY/MM/DD HH24:MI'));
+
+  -- WEEKLY INTERVAL IS TO BE CALCULATED BY EFF FROM DATE (EFF DATE INITIALIZATION)
+  SELECT NEXT_DAY(V_EFF_FM_DT, 1) - 7 INTO V_EFF_FM_DT FROM DUAL;
+
+  -- WEEKLY INTERVAL PROCESS
+  SELECT MAX(DT)
+    INTO V_MAX_DT
+    FROM (     SELECT DECODE(V_SUN_ST_FLG, 1, 1) DT FROM DUAL
+     UNION ALL SELECT DECODE(V_MON_ST_FLG, 1, 2) DT FROM DUAL
+     UNION ALL SELECT DECODE(V_TUE_ST_FLG, 1, 3) DT FROM DUAL
+     UNION ALL SELECT DECODE(V_WED_ST_FLG, 1, 4) DT FROM DUAL
+     UNION ALL SELECT DECODE(V_THU_ST_FLG, 1, 5) DT FROM DUAL
+     UNION ALL SELECT DECODE(V_FRI_ST_FLG, 1, 6) DT FROM DUAL
+     UNION ALL SELECT DECODE(V_SAT_ST_FLG, 1, 7) DT FROM DUAL) ;
+
+  IF V_INLND_WK_ITVAL_NO IS NOT NULL AND V_INLND_WK_ITVAL_NO > 1
+     AND    (((V_INLND_CCT - V_EFF_FM_DT) / ( 7 * V_INLND_WK_ITVAL_NO )) -
+        FLOOR((V_INLND_CCT - V_EFF_FM_DT) / ( 7 * V_INLND_WK_ITVAL_NO )))*V_INLND_WK_ITVAL_NO*7 >= 7
+    THEN
+           SELECT  -- 날짜를 초기로 돌리고 최신 맥스 DAY로 설정해준다.
+                NEXT_DAY(V_INLND_CCT -
+                          (
+                           (((V_INLND_CCT - V_EFF_FM_DT) / ( 7 * V_INLND_WK_ITVAL_NO )) -
+                       FLOOR((V_INLND_CCT - V_EFF_FM_DT) / ( 7 * V_INLND_WK_ITVAL_NO )))*V_INLND_WK_ITVAL_NO*7
+                          ),V_MAX_DT)
+             INTO V_INLND_CCT
+             FROM DUAL  ;
+
+  END IF ;
+
+    RETURN V_INLND_CCT ;
+
+END PRD_GET_INLND_CCT_FNC
+;
+/

@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="UsaManifestListDownloadDBDAOsearchBlRSQL">
+			<desc><![CDATA[UsaBlInfoVO 생성]]></desc>
+			<sql><![CDATA[
+SELECT  'US' AS CNT_CD
+       ,B.BL_NO
+       ,B.BKG_NO
+       ,V.VSL_CD
+       ,V.SKD_VOY_NO
+       ,V.SKD_DIR_CD
+	   ,B.SLAN_CD
+       ,TO_CHAR(S.VPS_ETA_DT,'YYYYMMDDHH24MISS') AS VSL_ARR_DT
+       ,V.POL_CD AS CSTMS_POL_CD
+       ,V.POD_CD AS CSTMS_POD_CD
+       ,B.POR_CD
+	   ,B.POL_CD
+	   ,B.POD_CD
+       ,B.DEL_CD
+       --------------------------------------------------------------------------
+       -- POD = US & DEL <> US (62 TYPE)
+       -- 국경을 넘기 전 마지막 US LOC 이 필요함
+       --------------------------------------------------------------------------
+       ,CASE WHEN V.POD_CD LIKE 'US%' AND B.DEL_CD NOT LIKE 'US%'
+             THEN (SELECT MAX(LST_LOC_CD) LST_LOC_CD
+                     FROM TRS_DMST_LST_CTY
+                    WHERE ORG_LOC_CD  = V.POD_CD
+                      AND DEST_LOC_CD = B.DEL_CD
+                      AND DELT_FLG    = 'N'
+                  )
+             ELSE ''
+         END USA_LST_LOC_CD
+       ,DECODE(@[cstms_port_cd], NULL, V.POD_CD, @[cstms_port_cd]) CSTMS_PORT_CD
+	   ,DECODE(SUBSTR(V.POD_CD, 1, 2), 'US', 'N', 'Y') AS FROB_FLG
+       --------------------------------------------------------------------------
+       -- ENTRY TYPE SETUP 에서 설정한 정보가 우선적용된다. (setInbondData)
+       -- HUB_LOC_CD, CSTMS_LOC_CD, 
+       --------------------------------------------------------------------------
+       ,CASE WHEN V.POD_CD = B.DEL_CD THEN V.POD_CD
+      		 ELSE L2.SCC_CD 
+         END HUB_LOC_CD
+       ,'' AS CSTMS_LOC_CD
+       ,CASE WHEN B.BKG_CGO_TP_CD = 'P' THEN (SELECT COUNT(CNTR_NO) FROM BKG_CONTAINER WHERE BKG_NO = @[bkg_no])
+             ELSE D.PCK_QTY
+        END PCK_QTY
+       ,NVL((SELECT P.PCK_CD
+               FROM MDM_PCK_TP P
+              WHERE D.PCK_TP_CD  = P.PCK_CD
+            ),'PKG') AS AMS_PCK_TP_CD
+       ,CASE WHEN B.BKG_CGO_TP_CD = 'P' THEN (SELECT COUNT(CNTR_NO) FROM BKG_CONTAINER WHERE BKG_NO = @[bkg_no])
+             ELSE D.ACT_WGT
+        END CGO_WGT
+	   ,NVL(D.WGT_UT_CD,'KGS') AS WGT_UT_CD
+       ,D.MEAS_QTY
+       ,D.MEAS_UT_CD
+       ,B.RCV_TERM_CD
+       ,B.DE_TERM_CD
+       ,D.BDR_FLG
+       ,TO_CHAR(D.BDR_DT,'YYYYMMDDHH24MISS') AS BDR_DT
+	   ,'' AS BDR_OFC_CD
+	   ,'' AS BDR_IF_USR_ID
+	   ,'' AS BDR_IF_DT
+       --------------------------------------------------------------------------
+	   -- C/A Report(I/B) 화면에서 다운로드 호출 시
+	   -- 넘겨받은 CA_NO, CA_ISS_DT 데이터를 BL 테이블에 저장
+       --------------------------------------------------------------------------
+       ,DECODE(@[ca_no], NULL, NVL2(C.CA_NO, 'Y', NULL), 'Y') AS CA_FLG
+       ,DECODE(@[ca_iss_dt], NULL, C.CA_ISS_DT, @[ca_iss_dt]) CA_ISS_DT
+       ,DECODE(@[ca_no], NULL, C.CA_NO, @[ca_no]) CA_NO
+       ,B.SCAC_CD
+       ,NVL(B.USA_CSTMS_FILE_CD,'3') AS CSTMS_FILE_TP_CD
+	   ,'' AS MF_NO
+       ,B.BKG_CGO_TP_CD AS FULL_MTY_CD
+       --------------------------------------------------------------------------
+	   -- Split B/L 인 경우 Old B/L No 구하여 PRE_MF_NO에 세팅
+       --------------------------------------------------------------------------
+       ,(SELECT BL_NO
+           FROM BKG_BOOKING
+          WHERE BKG_NO = ( SELECT DECODE(BKG_CRE_TP_CD, 'S', FM_BKG_NO, NULL) BKG_NO
+                             FROM BKG_BOOKING
+                            WHERE BKG_NO = @[bkg_no]
+                         )
+        ) PRE_MF_NO
+       ,@[usr_id] AS CRE_USR_ID
+	   ,@[usr_id] AS UPD_USR_ID
+	   ,B.POD_NOD_CD
+	   ,B.DEL_NOD_CD
+	   ,B.CUST_TO_ORD_FLG
+      --------------------------------------------------------------------------
+       -- FROB(F)  : US 혹은 PR 에 DISCHARGING 하지않고 지나가는 BL
+       -- LOCAL(L) : POD, DEL 이 모두 US 혹은 PR PORT이고, POD, DEL의 SCC_CD가 같을 때
+       -- PMIB(I)  : 그외는 PMIB의 경우로 세관신고 외에 INBOND 신고를 해야한다.
+       --------------------------------------------------------------------------
+       ,CASE WHEN SUBSTR(V.POD_CD,1,2) NOT IN ('US', (SELECT ATTR_CTNT1 FROM BKG_CSTMS_CD_CONV_CTNT WHERE CNT_CD='US' AND CSTMS_DIV_ID='US_CNT_CD_LIST')) THEN 'F'
+			 WHEN SUBSTR(V.POD_CD,1,2)     IN ('US', (SELECT ATTR_CTNT1 FROM BKG_CSTMS_CD_CONV_CTNT WHERE CNT_CD='US' AND CSTMS_DIV_ID='US_CNT_CD_LIST'))
+                  AND SUBSTR(B.DEL_CD,1,2) IN ('US', (SELECT ATTR_CTNT1 FROM BKG_CSTMS_CD_CONV_CTNT WHERE CNT_CD='US' AND CSTMS_DIV_ID='US_CNT_CD_LIST'))
+                  AND L1.SCC_CD = L2.SCC_CD THEN 'L'									
+             ELSE 'I'
+        END LOCL_TRNS_CD
+       --------------------------------------------------------------------------
+	   -- 1) 61 : POD=US & DEL=US 혹은 POD=PR & DEL=PR 이면서, POD's SCC 와 DEL's SCC 가 다른 경우
+	   -- 2) 62 : POD=US, DEL <> US 혹은 POD=PR & DEL <> PR 인 경우
+	   -- 3) 63 : POD <> US & DEL <> US 혹은 POD <> PR & DEL <> PR 이고, FROB 이 아닌 경우 (Pre 또는 Post 에 US 가 있는경우)
+       --------------------------------------------------------------------------
+       ,CASE WHEN SUBSTR(V.POD_CD,1,2)     IN ('US', (SELECT ATTR_CTNT1 FROM BKG_CSTMS_CD_CONV_CTNT WHERE CNT_CD='US' AND CSTMS_DIV_ID='US_CNT_CD_LIST'))
+                  AND SUBSTR(B.DEL_CD,1,2) IN ('US', (SELECT ATTR_CTNT1 FROM BKG_CSTMS_CD_CONV_CTNT WHERE CNT_CD='US' AND CSTMS_DIV_ID='US_CNT_CD_LIST'))
+                  AND L1.SCC_CD <> L2.SCC_CD 
+             THEN '61'
+             WHEN SUBSTR(V.POD_CD,1,2)         IN ('US', (SELECT ATTR_CTNT1 FROM BKG_CSTMS_CD_CONV_CTNT WHERE CNT_CD='US' AND CSTMS_DIV_ID='US_CNT_CD_LIST'))
+                  AND SUBSTR(B.DEL_CD,1,2) NOT IN ('US', (SELECT ATTR_CTNT1 FROM BKG_CSTMS_CD_CONV_CTNT WHERE CNT_CD='US' AND CSTMS_DIV_ID='US_CNT_CD_LIST'))
+             THEN '62'
+             WHEN SUBSTR(V.POD_CD,1,2)     NOT IN ('US', (SELECT ATTR_CTNT1 FROM BKG_CSTMS_CD_CONV_CTNT WHERE CNT_CD='US' AND CSTMS_DIV_ID='US_CNT_CD_LIST'))
+                  AND SUBSTR(B.DEL_CD,1,2) NOT IN ('US', (SELECT ATTR_CTNT1 FROM BKG_CSTMS_CD_CONV_CTNT WHERE CNT_CD='US' AND CSTMS_DIV_ID='US_CNT_CD_LIST'))
+             THEN '63'
+             ELSE ''
+         END IBD_TP_CD
+       ,V.VSL_PRE_PST_CD||V.VSL_SEQ VVD_ORDER
+  FROM BKG_BOOKING      B
+      ,BKG_VVD          V
+      ,BKG_BL_DOC       D
+      ,VSK_VSL_PORT_SKD S
+      ,MDM_LOCATION     L1
+      ,MDM_LOCATION     L2
+ 	  ,(SELECT BKG_NO
+              ,CORR_NO AS CA_NO
+        	  ,TO_CHAR(CORR_DT,'YYYYMMDDHH24MISS') AS CA_ISS_DT
+          FROM BKG_CORRECTION
+         WHERE CORR_DT = ( SELECT MAX(CORR_DT)
+                             FROM BKG_CORRECTION
+                            WHERE BKG_NO = @[bkg_no]
+                              AND CORR_CXL_FLG = 'N' 
+                         )
+           AND BKG_NO = @[bkg_no]
+           AND CORR_CXL_FLG = 'N'
+       ) C
+ WHERE 1=1
+   AND B.BKG_NO     = @[bkg_no]
+   AND V.VSL_CD     = @[vsl_cd]
+   AND V.SKD_VOY_NO = @[skd_voy_no]
+   AND V.SKD_DIR_CD = @[skd_dir_cd]
+   AND B.BKG_NO     = V.BKG_NO
+   AND B.BKG_NO     = D.BKG_NO
+   AND V.VSL_CD     = S.VSL_CD
+   AND V.SKD_VOY_NO = S.SKD_VOY_NO
+   AND V.SKD_DIR_CD = S.SKD_DIR_CD
+   AND V.POD_CD     = S.VPS_PORT_CD
+   AND S.CLPT_IND_SEQ = (SELECT /*+ INDEX_ASC(P XPKVSK_VSL_PORT_SKD) */ P.CLPT_IND_SEQ
+                           FROM VSK_VSL_PORT_SKD P
+                          WHERE 1=1
+                            AND P.VSL_CD = V.VSL_CD
+                            AND P.SKD_VOY_NO = V.SKD_VOY_NO
+                            AND P.SKD_DIR_CD = V.SKD_DIR_CD
+                            AND P.VPS_PORT_CD = V.POD_CD
+                            AND NVL(P.SKD_CNG_STS_CD, 'X') <> 'S'
+                            AND ROWNUM = 1)
+   AND V.POD_CD     = L1.LOC_CD
+   AND B.DEL_CD     = L2.LOC_CD
+   AND B.BKG_NO     = C.BKG_NO(+)
+ORDER BY VVD_ORDER DESC
+			]]></sql>
+			<params>
+				<param name="cstms_port_cd" type="12" value="" out="N"/>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="ca_no" type="12" value="" out="N"/>
+				<param name="ca_iss_dt" type="12" value="" out="N"/>
+				<param name="usr_id" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

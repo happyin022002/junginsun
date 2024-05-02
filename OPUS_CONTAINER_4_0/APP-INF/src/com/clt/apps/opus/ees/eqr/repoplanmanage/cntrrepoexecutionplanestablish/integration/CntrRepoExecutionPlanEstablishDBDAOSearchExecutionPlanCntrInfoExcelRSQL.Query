@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CntrRepoExecutionPlanEstablishDBDAOSearchExecutionPlanCntrInfoExcelRSQL">
+			<desc><![CDATA[EQR_EXE_PLN_CNTR &  BKG_BKG_CNTR 테이블에서  
+컨테이너-MOVEMENT정보 조회(특정 컨테이터 검색에서 사용)
+
+- 20100414 SQL 조회속도 튜닝 - 신용찬 (DBA 김봉갑 수석)
+
+- 20100510 SQL QUERY 수정, 신용찬 수석(신범철 확인)
+1. CNMV_YR, CNMV_ID_NO --> CM.CNMV_YR, CM.CNMV_SEQ, CM.CNMV_SPLIT_NO 으로 변경
+2. XPKCTM_MOVEMENT --> XUK1CTM_MOVEMENT 으로 변경]]></desc>
+			<sql><![CDATA[
+SELECT /*+ leading(MC) USE_NL(MC CM)*/
+       MC.CNTR_NO,
+       MC.CNTR_TPSZ_CD,
+       MC.LSTM_CD,
+       CM.MVMT_STS_CD ,
+       MC.VNDR_ABBR_NM ,
+       MC.CNTR_USE_CO_CD ,
+       MC.DMG_FLG,
+       MC.CNTR_HNGR_RCK_CD ,
+       MC.CNTR_HNGR_BAR_ATCH_KNT ,
+       MC.RFUB_FLG,
+       MC.DISP_FLG,
+       MC.PLST_FLR_FLG ,
+       MC.IMDT_EXT_FLG,
+       MC.RF_TP_CD_C ,
+       MC.RF_TP_CD_H
+FROM CTM_MOVEMENT CM,
+( 
+ with cntr_info as 
+    (
+        SELECT /*+  LEADING(MV)  */ MC.CNTR_NO,
+               MC.CNTR_TPSZ_CD,
+               MC.LSTM_CD,
+               MC.CNMV_STS_CD,
+               MV.VNDR_ABBR_NM ,
+               MC.CNTR_USE_CO_CD,
+               MC.DMG_FLG,
+               MC.CNTR_HNGR_RCK_CD,
+               MC.CNTR_HNGR_BAR_ATCH_KNT,
+               MC.RFUB_FLG,
+               MC.DISP_FLG,
+               MC.PLST_FLR_FLG ,
+               MC.IMDT_EXT_FLG,
+               DECODE(MC.RF_TP_CD, 'C', 'Y') RF_TP_CD_C ,
+               DECODE(MC.RF_TP_CD, 'H', 'Y') RF_TP_CD_H
+        FROM MST_CONTAINER MC ,
+             MDM_VENDOR MV
+        WHERE MC.VNDR_SEQ = MV.VNDR_SEQ
+
+    #if(${trans_mode} != 'F')  --Off-Hire의 경우 INACTIVE 한 것도 가능하게 함.
+        AND MC.ACIAC_DIV_CD <> 'I' --Active한 것만 가져온다
+    #end
+
+        AND MC.CNTR_NO NOT IN 
+        ( 
+            -- 동일한 PLN_WEEK 에 중복되는 cntr_no가 없게 함.
+            SELECT DISTINCT CNTR_NO
+            FROM EQR_EXE_PLN_CNTR
+            WHERE PLN_YRWK = @[pln_yrwk]
+            AND NVL(FM_ECC_CD, 'XXXXX') = @[fm_ecc]
+            AND NVL(TO_ECC_CD, 'XXXXX') = @[to_ecc]
+            AND TRSP_MOD_CD = DECODE(@[trans_mode] , 'S', 'X', @[trans_mode])
+            --trans_mode = 'S'는 ecc_internal임. ECC Internal은 cntr 제한 없이 가능하게 함. 
+        ) 
+        -- modified : R200710053965 : Container List  Load Excel 시 10자리 cntr auto search기능추가.
+
+    #if(${cntr_no} != '')
+        AND CASE 
+			#foreach(${key} in ${cntrNoArr})
+				 WHEN MC.CNTR_NO LIKE '${key}'||'%' THEN 1
+			#end
+                 ELSE 0 END = 1  
+    #end
+    
+    )
+	SELECT CNTR_NO,
+           CNTR_TPSZ_CD,
+           LSTM_CD,
+           CNMV_STS_CD,
+           VNDR_ABBR_NM ,
+           CNTR_USE_CO_CD ,
+           DMG_FLG,
+           CNTR_HNGR_RCK_CD,
+           CNTR_HNGR_BAR_ATCH_KNT,
+           RFUB_FLG,
+           DISP_FLG,
+           PLST_FLR_FLG ,
+           IMDT_EXT_FLG,
+           RF_TP_CD_C ,
+           RF_TP_CD_H ,
+           (
+		       --SELECT  /*+index_desc(a XPKCTM_MOVEMENT) */ -- XPKCTM_MOVEMENT --> XUK1CTM_MOVEMENT 으로 변경,  20100510 신용찬 수정(신범철 확인)   
+               SELECT  /*+index_desc(a XUK1CTM_MOVEMENT) */
+                       CNMV_YR
+               FROM CTM_MOVEMENT a
+               WHERE A.CNTR_NO = ci.CNTR_NO
+               AND ROWNUM = 1
+           ) CNMV_YR,
+           -- CNMV_YR, CNMV_ID_NO --> CM.CNMV_YR, CM.CNMV_SEQ, CM.CNMV_SPLIT_NO 으로 변경,  20100510 신용찬 수정(신범철 확인)  
+           -- XPKCTM_MOVEMENT --> XUK1CTM_MOVEMENT 으로 변경            
+           --(
+           --    SELECT  /*+index_desc(a XPKCTM_MOVEMENT) */
+           --            CNMV_ID_NO
+           --    FROM CTM_MOVEMENT a
+           --    WHERE A.CNTR_NO = ci.CNTR_NO
+           --    AND ROWNUM = 1
+           --) CNMV_ID_NO
+           (
+		       SELECT  /*+index_desc(a XUK1CTM_MOVEMENT) */
+                       CNMV_SEQ
+               FROM CTM_MOVEMENT a
+               WHERE A.CNTR_NO = ci.CNTR_NO
+               AND ROWNUM = 1
+           ) CNMV_SEQ,
+           (
+		       SELECT  /*+index_desc(a XUK1CTM_MOVEMENT) */
+                       CNMV_SPLIT_NO
+               FROM CTM_MOVEMENT a
+               WHERE A.CNTR_NO = ci.CNTR_NO
+               AND ROWNUM = 1
+           ) CNMV_SPLIT_NO
+    FROM cntr_info ci
+) MC
+WHERE CM.CNTR_NO       = MC.CNTR_NO
+AND   CM.CNMV_YR       = MC.CNMV_YR
+-- CNMV_YR, CNMV_ID_NO --> CM.CNMV_YR, CM.CNMV_SEQ, CM.CNMV_SPLIT_NO 으로 변경,  20100510 신용찬 수정(신범철 확인)  
+--AND   CM.CNMV_ID_NO = MC.CNMV_ID_NO
+AND   CM.CNMV_SEQ      = MC.CNMV_SEQ
+AND   CM.CNMV_SPLIT_NO = MC.CNMV_SPLIT_NO			]]></sql>
+			<params>
+				<param name="pln_yrwk" type="12" value="" out="N"/>
+				<param name="fm_ecc" type="12" value="" out="N"/>
+				<param name="to_ecc" type="12" value="" out="N"/>
+				<param name="trans_mode" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

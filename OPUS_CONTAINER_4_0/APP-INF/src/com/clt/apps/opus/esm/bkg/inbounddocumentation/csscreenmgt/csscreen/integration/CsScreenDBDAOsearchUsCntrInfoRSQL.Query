@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="CsScreenDBDAOsearchUsCntrInfoRSQL">
+			<desc><![CDATA[고객 응대를 위한 In-bound US C/S Screen_Main_US)에서 Container별 P/N  발송 정보를 조회한다.]]></desc>
+			<sql><![CDATA[
+WITH
+   BL_CNTR_LIST AS (
+      SELECT BKGM.BKG_NO               AS BKG_NO
+            ,BKGM.BL_NO                AS BL_NO
+            ,CNTR.CNTR_NO              AS CNTR_NO
+            ,CNTR.CNTR_TPSZ_CD         AS TPSZ_CD
+            ,LTRIM(TO_CHAR( DECODE( CNTR.WGT_UT_CD,'LBS',CNTR.CNTR_WGT,
+                                                  NVL(TRS_COMMON_PKG.GET_CONV_WGT_TO_LBS_FNC('KGM', NVL(CNTR_WGT, 0)), 0)), '99999999.999')) AS CNTR_WGT
+            ,'LBS'                     AS WGT_UT_CD  
+            ,CNTR.PCK_QTY              AS PCK_QTY
+            ,CNTR.PCK_TP_CD            AS PCK_TP_CD  
+            ,CASE WHEN DECODE(CNTR.RC_FLG,'Y',1,0)     +DECODE(CNTR.DCGO_FLG,'Y',1,0)+
+                       DECODE(CNTR.AWK_CGO_FLG,'Y',1,0)+DECODE(CNTR.RD_CGO_FLG,'Y',1,0) +DECODE(CNTR.BB_CGO_FLG,'Y',1,0) +DECODE(CNTR.HNGR_FLG,'Y',1,0)> 0 THEN 'SPC'
+                  ELSE ''  
+                  END                AS SPC
+            ,LOC.EQ_CTRL_OFC_CD        AS EQ_CTRL_OFC
+      FROM BKG_BOOKING   BKGM
+          ,BKG_CONTAINER CNTR
+          ,MDM_LOCATION  LOC
+      WHERE BKGM.BKG_NO =  @[bkg_no]
+      AND   CNTR.BKG_NO = BKGM.BKG_NO
+      AND   LOC.LOC_CD  = BKGM.DEL_CD
+ )
+  , BKG_PKUP_NTC_SEQ AS (
+     SELECT BKG_NO,CNTR_NO,NTC_SEQ,PKUP_NTC_TP_CD,RNUM
+     FROM (
+          SELECT CNTR.BKG_NO
+                ,CNTR.CNTR_NO
+                ,PNTC.NTC_SEQ
+                ,PNTC.PKUP_NTC_TP_CD
+                ,PNTC.UPD_USR_ID
+                ,PNTC.UPD_DT
+                -- 아래 ROWNUMBER는 BKG NO, CNTR NO별로 한 건만 보여주기 위한 값
+                ,ROW_NUMBER() OVER (PARTITION BY PNTC.BKG_NO,PNTC.CNTR_NO
+                                  ORDER BY NVL(PNTC.EXP_SND_KR_DT,TO_DATE('0001-01-01','YYYY-MM-DD')) DESC, PNTC.NTC_SEQ DESC) AS RNUM
+          FROM BL_CNTR_LIST CNTR
+             , BKG_PKUP_NTC PNTC
+          WHERE PNTC.BKG_NO              = CNTR.BKG_NO
+          AND   PNTC.CNTR_NO             = CNTR.CNTR_NO 
+          AND   PNTC.PKUP_NTC_TP_CD      <> 'TO'
+          AND   PNTC.PKUP_NTC_SND_STS_CD <> 'X'
+      )
+      WHERE 1=1
+      AND   RNUM = 1
+)  
+,BEFORE_FINAL AS ( 
+    SELECT CNTR.BKG_NO                                                                 AS BKG_NO
+          ,CNTR.CNTR_NO                                                                AS CNTR_NO
+          ,CNTR.TPSZ_CD                                                                AS TPSZ_CD
+          ,CNTR.CNTR_WGT                                                               AS CNTR_WGT
+          ,CNTR.WGT_UT_CD                                                              AS WGT_UT_CD
+          ,LTRIM(TO_CHAR(CNTR.PCK_QTY, '999999'))                                     AS PCK_QTY
+          ,CNTR.PCK_TP_CD                                                              AS PCK_TP_CD 
+          ,CNTR.SPC                                                                    AS SPC 
+          ,NVL(PNNO.PKUP_NO,PNTC.PKUP_NO)                                              AS PKUP_NO
+          ,NVL(PNTC.PKUP_YD_CD,PNNO.PKUP_YD_CD)                                        AS PKUP_YD
+          ,TO_CHAR(NVL(PNTC.PKUP_AVAL_DT,PNNO.PKUP_AVAL_DT), 'YYYY-MM-DD HH24:MI')     AS AVAL_DT    
+          ,TO_CHAR(NVL(PNTC.LST_FREE_DT,PNNO.LST_FREE_DT), 'YYYY-MM-DD HH24:MI')       AS FREE_DT 
+          ,DECODE(PNNO.PKUP_MNL_UPLD_FLG,'Y','MA','N','AUTO',' ')                      AS NTC_TP
+          ,NVL(TO_CHAR(PNNO.PKUP_UPD_DT, 'YYYY-MM-DD HH24:MI'), ' ')                   AS PKUP_UPD_DT 
+          ,NVL(TO_CHAR(PNTC.PKUP_NTC_EVNT_DT, 'YYYY-MM-DD HH24:MI'), ' ')              AS PKUP_EVNT_DT   
+          ,PNNO.PKUP_UPD_USR_ID                                                        AS PKUP_UPD_USR_ID         
+          ,PNTC.DIFF_RMK                                                               AS PKUP_RMK
+          ,( SELECT DECODE(COUNT(*),0,'N','Y') 
+             FROM BKG_AN_DEST_OFC_STUP
+             WHERE EQ_CTRL_OFC_CD  = LOC.EQ_CTRL_OFC_CD 
+               AND HNDL_OFC_CD     = @[login_ofc_cd] 
+               AND DEST_OFC_CNTC_CD='I' )                                               AS PKUP_NO_AUTH
+    FROM BL_CNTR_LIST           CNTR      
+        ,BKG_PKUP_NTC_SEQ       PNTS
+        ,BKG_PKUP_NTC           PNTC
+        ,BKG_PKUP_NTC_PKUP_NO   PNNO  
+        ,MDM_LOCATION           LOC
+    WHERE 1=1
+    AND   PNTS.BKG_NO(+)           = CNTR.BKG_NO  
+    AND   PNTS.CNTR_NO(+)          = CNTR.CNTR_NO
+    AND   PNTC.BKG_NO(+)           = PNTS.BKG_NO  
+    AND   PNTC.CNTR_NO(+)          = PNTS.CNTR_NO
+    AND   PNTC.NTC_SEQ(+)          = PNTS.NTC_SEQ
+    AND   PNNO.BKG_NO(+)           = CNTR.BKG_NO
+    AND   PNNO.CNTR_NO(+)          = CNTR.CNTR_NO 
+    AND   PNNO.OFC_CD(+)           = CNTR.EQ_CTRL_OFC
+    AND   LOC.LOC_CD(+)            = SUBSTR(PNNO.PKUP_YD_CD,1,5)
+) 
+SELECT BKG_NO     
+      ,CNTR_NO    -- Container No  
+      ,TPSZ_CD    -- TS
+      ,PKUP_NO    -- Pickup Information Pickup No.
+      ,PKUP_YD          -- Pickup Information Yard
+      ,AVAL_DT          -- Pickup Information AVAL_DT
+      ,FREE_DT          -- Pickup Information FREE_DT
+      ,NTC_TP
+      ,PKUP_UPD_DT      -- Pickup Notice Information Updated Date
+      ,CNTR_WGT         -- Weight
+      ,WGT_UT_CD        -- Weight Unit
+      ,PCK_QTY          -- Package
+      ,PCK_TP_CD        -- Package Unit
+      ,SPC              -- SPC
+      ,PKUP_EVNT_DT     -- Pickup Information Updated Date
+      ,DECODE(SUBSTR(BEFORE_FINAL.PKUP_UPD_USR_ID,1,3),'BAT','Auto', USR.OFC_CD) AS OFC_CD     -- Pickup Notice Information OFC
+      ,DECODE(SUBSTR(BEFORE_FINAL.PKUP_UPD_USR_ID,1,3),'BAT','Auto', USR.USR_NM) AS USR_NM     -- Pickup Notice Information OFC
+      ,PKUP_RMK         -- Pickup Notice Information Remark(s)
+FROM BEFORE_FINAL 
+    ,COM_USER USR
+WHERE 1=1
+AND USR.USR_ID(+) = BEFORE_FINAL.PKUP_UPD_USR_ID			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="" out="N"/>
+				<param name="login_ofc_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

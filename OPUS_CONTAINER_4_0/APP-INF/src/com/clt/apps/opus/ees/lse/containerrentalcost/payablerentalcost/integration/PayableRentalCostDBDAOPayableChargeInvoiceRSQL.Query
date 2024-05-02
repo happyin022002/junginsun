@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PayableRentalCostDBDAOPayableChargeInvoiceRSQL">
+			<desc><![CDATA[Payable Charge Creation : Audit가 완료된 Data들을 Invoice Creation 하기 위한 조회]]></desc>
+			<sql><![CDATA[
+SELECT A.*
+FROM   (
+         SELECT A.CHG_SEQ
+              , C.INV_NO
+              , 'CNTC' || SUBSTR(C.CHG_COST_YRMON, 3, 4) || 'MM' AS VVD
+              , A.AGMT_CTY_CD || LPAD(A.AGMT_SEQ, 6, '0') AS AGMT_NO
+              , A.AGMT_CTY_CD
+              , A.AGMT_SEQ
+              , A.LSTM_CD
+              , A.LSE_CTRT_NO
+              , A.LSE_PAY_CHG_TP_CD
+              , A.CNTR_TPSZ_CD
+              , A.TTL_COST_AMT
+              , A.CR_AMT
+              , NVL(A.ACCT_CD, B.ACCT_CD) AS ACCT_CD
+              , NVL(A.COST_CD, B.COST_CD) AS COST_CD
+              , D.RPT_DP_SEQ
+	          , NVL(A.LGS_COST_FULL_NM, B.LGS_COST_FULL_NM) COST_NM
+         FROM   ( SELECT A.CHG_SEQ
+                       , A.AGMT_CTY_CD
+                       , A.AGMT_SEQ
+                       , A.LSTM_CD
+                       , A.LSE_CTRT_NO
+                       , A.LSE_PAY_CHG_TP_CD
+                       , A.CNTR_TPSZ_CD
+                       , A.TTL_COST_AMT
+                       , A.CR_AMT
+                       , B.ACCT_CD
+                       , B.COST_CD
+		 , B.LGS_COST_FULL_NM
+                  FROM   ( SELECT A.CHG_SEQ
+                                , A.AGMT_CTY_CD
+                                , A.AGMT_SEQ
+                                , B.LSTM_CD
+                                , B.LSE_CTRT_NO
+                                , A.LSE_PAY_CHG_TP_CD
+                                , A.CNTR_TPSZ_CD
+                                , SUM(A.DSCR_COST_AMT) AS TTL_COST_AMT
+                                , SUM(A.CR_AMT)       AS CR_AMT
+                           FROM   LSE_PAY_RNTL_CHG_DTL   A
+                                , LSE_AGREEMENT          B
+                           WHERE  A.AGMT_CTY_CD = B.AGMT_CTY_CD
+                           AND    A.AGMT_SEQ = B.AGMT_SEQ
+                           AND    A.CNTR_AUD_STS_CD = 'A'
+                           AND    A.CHG_SEQ IN (
+#foreach($key IN ${chg_seq})
+#if($velocityCount < $chg_seq.size())
+         $key,
+#else
+         $key
+#end
+#end
+                                             )
+                           GROUP  BY A.CHG_SEQ
+                                   , A.AGMT_CTY_CD
+                                   , A.AGMT_SEQ
+                                   , B.LSTM_CD
+                                   , B.LSE_CTRT_NO
+                                   , A.LSE_PAY_CHG_TP_CD
+                                   , A.CNTR_TPSZ_CD
+                           ) A
+                         , (SELECT  LSE_RCV_CHG_TP_CD, ACCT_CD, LSTM_CD, COST_CD, LGS_COST_FULL_NM 
+                            FROM    LSE_RNTL_COST_ACCT_ORD WHERE LSTM_CD = 'XX'
+                            UNION ALL
+                            SELECT  LSE_RCV_CHG_TP_CD, ACCT_CD, 'BX' , COST_CD, LGS_COST_FULL_NM
+                            FROM    LSE_RNTL_COST_ACCT_ORD WHERE LSTM_CD = 'XX'
+                            UNION ALL
+                            SELECT  LSE_RCV_CHG_TP_CD, ACCT_CD, LSTM_CD, COST_CD, LGS_COST_FULL_NM
+                            FROM   (SELECT  A.LSE_RCV_CHG_TP_CD,
+                                            A.LSTM_CD AS ZZZ,
+                                            A.ACCT_CD AS ACCT_CD,
+                                            A.COST_CD,
+                                            B.LSTM_CD AS LSTM_CD,
+			          A.LGS_COST_FULL_NM AS LGS_COST_FULL_NM
+                                    FROM    LSE_RNTL_COST_ACCT_ORD A,
+                                            MST_LSE_TERM B
+                                    WHERE   A.LSTM_CD IN('XX', B.LSTM_CD)
+                                    )
+                            WHERE  (LSE_RCV_CHG_TP_CD, ZZZ, LSTM_CD) NOT IN (SELECT A.LSE_RCV_CHG_TP_CD, 'XX', B.LSTM_CD
+                                                                             FROM   LSE_RNTL_COST_ACCT_ORD A,
+                                                                                    MST_LSE_TERM B
+                                                                             WHERE  A.LSTM_CD = B.LSTM_CD)                                                                                                                                                                                          
+                            ) B   
+                  WHERE  A.LSTM_CD = B.LSTM_CD(+)
+                  AND    A.LSE_PAY_CHG_TP_CD = B.LSE_RCV_CHG_TP_CD(+)
+                ) A
+              , LSE_RNTL_COST_ACCT_ORD B
+              , LSE_PAY_RNTL_CHG C
+              , ( SELECT CNTR_TPSZ_CD, RPT_DP_SEQ FROM MDM_CNTR_TP_SZ
+                  UNION
+                  SELECT 'BX', 990 AS RPT_DP_SEQ FROM DUAL
+                  UNION
+                  SELECT 'XX', 991 AS RPT_DP_SEQ FROM DUAL ) D
+         WHERE  NVL2(A.ACCT_CD, A.LSE_PAY_CHG_TP_CD, 'XXX')= B.LSE_RCV_CHG_TP_CD(+)
+		 AND    CASE WHEN A.ACCT_CD IS NULL AND A.LSTM_CD IN('ST','LT', 'MI') 
+                     THEN A.LSTM_CD ELSE 'XX' END = B.LSTM_CD(+)
+         AND    C.CHG_SEQ = A.CHG_SEQ
+         AND    D.CNTR_TPSZ_CD = A.CNTR_TPSZ_CD
+       ) A
+ORDER  BY A.INV_NO
+        , A.AGMT_NO
+        , A.LSE_PAY_CHG_TP_CD
+        , A.RPT_DP_SEQ			]]></sql>
+			<params>
+			</params>
+		</query>
+	</querys>
+</sqls>

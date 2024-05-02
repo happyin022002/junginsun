@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AvailabilityDBDAOsearchAvailabilityPeriodListRSQL">
+			<desc><![CDATA[availability]]></desc>
+			<sql><![CDATA[
+select  x.eq_no
+       ,x.eq_tpsz_cd
+       ,x.eq_tpsz_nm
+       ,x.iso_cd
+       ,x.iso_nm
+       ,x.cntr_wgt
+       ,x.f
+       ,x.o
+       ,x.c
+       ,x.cntr_pkup_no
+       ,x.pkup_no
+       ,x.aval_dt
+       ,x.lst_free_dt
+       ,x.trsp_wo_no
+       ,x.trsp_so_no
+       ,x.bl_no
+       ,x.bkg_no
+       ,x.cop_no
+       ,(select to_char(max(ESTM_DT), 'YYYY-MM-DD HH24:MI:SS') from sce_cop_dtl where cop_no=x.cop_no and act_cd='FIRRAD') lst_nod_pln_dt
+       ,x.wo_fmt_tp_cd
+from   (select b.eq_no
+              ,b.eq_tpsz_cd
+              ,(select cntr_tpsz_rmk from mdm_cntr_tp_sz where cntr_tpsz_cd = b.eq_tpsz_cd) eq_tpsz_nm
+              ,(select cntr_tpsz_iso_cd from mdm_cntr_tp_sz where cntr_tpsz_cd = b.eq_tpsz_cd)	iso_cd
+              ,(select iso_cntr_tpsz_nm from mst_iso_cntr_tp_sz where iso_cntr_tpsz_cd = (select cntr_tpsz_iso_cd from mdm_cntr_tp_sz where cntr_tpsz_cd = b.eq_tpsz_cd)) as iso_nm
+              ,b.cntr_wgt
+              ,nvl(d.FRT_CLT_FLG,'N') f
+	          ,nvl(d.OBL_RDEM_FLG,'N') o
+		      -- POD : 'CA',DEL : 'US'의 경우 Rail AMS 정보를 보여준다.
+		      ,nvl(CASE WHEN (substr(b.pod_cd,0,2) = 'CA') and (substr(b.del_cd,0,2) = 'US') THEN
+                	   (
+                		select /*+ index_desc(x XPKBKG_CSTMS_ADV_CNTR_RSLT) */
+                		       x.cstms_clr_cd
+                		  from bkg_cstms_adv_cntr_rslt x
+                		 where x.cnt_cd = 'US'  --상수값 
+                           and x.bl_no = b.bl_no
+                		   and (substr(x.cntr_no,0,length(x.cntr_no)-1) = substr(b.eq_no,0,length(b.eq_no)-1) OR x.cntr_no = substr(b.eq_no,0,length(b.eq_no)-1))
+                		   and rownum < 2
+                		)
+		           ELSE d.CSTMS_CLR_CD
+		           END,'N' ) as c
+              ,e.cntr_no cntr_pkup_no
+              ,e.pkup_no pkup_no
+              ,to_char(e.pkup_aval_dt, 'YYYY-MM-DD HH24:MI:SS') aval_dt
+              ,to_char(e.lst_free_dt,  'YYYY-MM-DD HH24:MI:SS') lst_free_dt
+              ,a.trsp_wo_ofc_cty_cd ||a.trsp_wo_seq as trsp_wo_no
+              ,b.trsp_so_ofc_cty_cd || b.trsp_so_seq as trsp_so_no
+              ,b.bl_no
+              ,b.bkg_no
+              ,b.cop_no
+        	  ,a.wo_fmt_tp_cd
+       from (select trsp_wo_ofc_cty_cd,trsp_wo_seq,wo_fmt_tp_cd
+               from trs_trsp_wrk_ord wk
+              where wk.wo_vndr_seq = @[vndr_tmp]
+            #if (${r_period_flg} == 'W')
+            	AND wk.locl_cre_dt >= to_date(@[r_from_dt],'yyyymmdd')
+            	AND wk.locl_cre_dt <= to_date(@[r_to_dt]||'235959','yyyymmddhh24miss')
+            #end
+			 ) a
+    	   ,TRS_TRSP_SVC_ORD b
+    	   ,BKG_CGO_RLSE d
+    	   ,BKG_PKUP_NTC_PKUP_NO e
+    	   ,MDM_LOCATION loc
+       where b.trsp_wo_ofc_cty_cd = a.trsp_wo_ofc_cty_cd
+         and b.trsp_wo_seq = a.trsp_wo_seq
+         and nvl(b.WO_RJCT_FLG,'N') != 'Y'
+         and b.eq_no is not null
+         and b.DELT_FLG = 'N'
+       #if (${r_period_flg} == 'A')
+         AND e.pkup_aval_dt >= to_date(@[r_from_dt],'yyyymmdd')
+         AND e.pkup_aval_dt <= to_date(@[r_to_dt]||'235959','yyyymmddhh24miss')
+       #elseif(${r_period_flg} == 'L')
+         AND e.lst_free_dt >= to_date(@[r_from_dt],'yyyymmdd')
+         AND e.lst_free_dt <= to_date(@[r_to_dt]||'235959','yyyymmddhh24miss')
+       #end
+         and d.bl_no(+) = b.bl_no
+         and e.cntr_no(+) = b.eq_no
+         and e.bkg_no(+) = b.bkg_no
+         and e.del_cd = loc.loc_cd(+)
+         and e.ofc_cd = loc.eq_ctrl_ofc_cd(+) 
+       --F : Freight Collect 여부
+       #if (${r_cgor_frt_pay_ind_flg} != '')
+         and d.FRT_CLT_FLG  = @[r_cgor_frt_pay_ind_flg]
+       #end
+        
+       --O : Original B/L 회수 여부
+       #if (${r_cgor_org_bl_rcvr_ind_flg} != '')
+         and d.OBL_RDEM_FLG  = @[r_cgor_org_bl_rcvr_ind_flg]
+       #end
+        
+       --C : 세관통관여부
+       #if (${r_cgor_cstms_acpt_re_ind_flg} != '')
+         and (d.CSTMS_CLR_CD = @[r_cgor_cstms_acpt_re_ind_flg] or f.CSTMS_CLR_CD = @[r_cgor_cstms_acpt_re_ind_flg])
+       #end
+        
+       --Pickup Number  생성 여부
+       #if ((${r_cntr_pkup_no_flg} != '') && (${r_cntr_pkup_no_flg} == 'Y'))
+         and   e.pkup_no  is not null
+       #elseif((${r_cntr_pkup_no_flg} != '') && (${r_cntr_pkup_no_flg} == 'N'))
+         and   e.pkup_no  is null
+       #end
+       ) x
+#if ((${r_avl_sts_flg} != '') && (${r_avl_sts_flg} == 'A'))
+where nvl(x.f,'N')||nvl(x.o,'N')||nvl(x.c,'N') IN ('YYY','YYW')
+  and x.pkup_no is not null
+  and x.lst_free_dt is not null
+#elseif((${r_avl_sts_flg} != '') && (${r_avl_sts_flg} == 'U'))
+where (nvl(x.f,'N')||nvl(x.o,'N')||nvl(x.c,'N') NOT IN ('YYY','YYW')
+   or x.pkup_no is null
+   or x.lst_free_dt is null)
+#end
+order by x.eq_no asc			]]></sql>
+			<params>
+				<param name="vndr_tmp" type="2" value="1" out="N"/>
+				<param name="r_from_dt" type="12" value="20090909" out="N"/>
+				<param name="r_to_dt" type="12" value="20090909" out="N"/>
+				<param name="r_cgor_frt_pay_ind_flg" type="12" value="" out="N"/>
+				<param name="r_cgor_org_bl_rcvr_ind_flg" type="12" value="1" out="N"/>
+				<param name="r_cgor_cstms_acpt_re_ind_flg" type="12" value="1" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

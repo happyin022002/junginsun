@@ -1,0 +1,141 @@
+/*=========================================================
+*Copyright(c) 2009 CyberLogitec
+*@FileName : EsmSaq0167ViewAdapter.java
+*@FileTitle : QTA Edit - Office Add
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2009.09.11
+*@LastModifier : Choi.M.C
+*@LastVersion : 1.0
+* 2008-04-28 Y.S.CHOI (Project No. S2S-08U-002)
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.saq.monthlysalesquotamanage.monthlyquotacfmadjustment.event;
+
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+
+import com.clt.apps.opus.esm.saq.common.common.vo.QuotaConditionVO;
+import com.clt.apps.opus.esm.saq.common.common.vo.ReturnVO;
+import com.clt.apps.opus.esm.saq.monthlysalesquotamanage.monthlyquotacfmadjustment.vo.SearchMonthlyQtaEditListVO;
+import com.clt.framework.component.common.AbstractValueObject;
+import com.clt.framework.component.rowset.DBRowSet;
+import com.clt.framework.core.controller.ViewAdapter;
+import com.clt.framework.core.layer.event.EventResponse;
+
+/**
+ * 기본 IBSheet XML 생성<br>
+ * - IBSheet로 반환할 서버처리결과를 XML로 변환하는 클래스이다.<br>
+ * 
+ * @author ChoiI.M.C
+ * @see ViewAdapter 참조
+ * @since J2EE 1.5
+ */
+public class EsmSaq0167ViewAdapter extends ViewAdapter {
+
+	public EsmSaq0167ViewAdapter() {
+		// TODO Auto-generated constructor stub
+	}
+
+	/**
+	 * VO List를 Parsing하여 <Data>태그 부분의 XML문자열을 반환한다.<br>
+	 * 
+	 * @param vos List<AbstractValueObject> List 객체
+	 * @param colOrder String[] Column명 문자열 
+	 * @param prefix String IBSheet savename's prefix
+	 * @return String <Data>태그 부분의 XML문자열
+	 * @exception 
+	 */
+	@SuppressWarnings("unchecked")
+	@Override
+	protected String makeDataTag(List<AbstractValueObject> vos, String prefix) {
+		// TODO Auto-generated method stub
+		StringBuilder sbufXML = new StringBuilder();
+
+		ReturnVO listVO = (ReturnVO)vos.get(0);
+		QuotaConditionVO conditionVO = listVO.getConditionVO();
+		
+		if(conditionVO.getChkCommand().equals("SEARCHLIST") || conditionVO.getChkCommand().equals("SEARCHLIST01")){
+
+			List<SearchMonthlyQtaEditListVO> list =  (List<SearchMonthlyQtaEditListVO>) listVO.getList(0);
+			int totCnt = list.size();
+			
+			sbufXML.append("<DATA TOTAL='" + totCnt +"'>\n");
+			for(int j=0; j<totCnt; j++){
+				
+				SearchMonthlyQtaEditListVO colValues = list.get(j);
+				
+				sbufXML.append("<TR>");
+				sbufXML.append("<TD></TD>");
+				sbufXML.append("<TD>"+colValues.getDeltFlg()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getBseMon()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getBseWk()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getTrdCd()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getRlaneCd()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getNewRlaneCd()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getVslCd()+colValues.getSkdVoyNo()+colValues.getSkdDirCd()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getRgnOfcCd()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getVslCd()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getSkdVoyNo()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getSkdDirCd()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getDirCd()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getSubTrdCd()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getRhqCd()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getAqCd()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getIocCd()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getVvdSeq()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getLstLodgPortEtdDt()+"</TD>");
+				sbufXML.append("<TD>"+colValues.getBsaCapa()+"</TD>");
+				sbufXML.append("<TD>"+(colValues.getAddTpCd().equals("O") ? "Office" : "Lane")+"</TD>");
+				sbufXML.append("</TR>\n");
+			}
+			sbufXML.append("</DATA>\n");
+		}
+		return sbufXML.toString();
+	}
+	
+	@SuppressWarnings("unchecked")
+	protected String getETCData(EventResponse eventResponse) { 
+		if(eventResponse==null) 
+			return ""; 
+
+			StringBuilder sb = new StringBuilder(); 
+			HashMap<String, String> etc_data = (HashMap<String, String>) eventResponse.getETCData();
+
+			sb.append("<ETC-DATA>\n"); 
+			if(etc_data !=null && etc_data.size()>0){ 
+				Iterator it = etc_data.keySet().iterator(); 
+				while(it.hasNext()) {
+					String key = (String)it.next();
+					String val = "" + etc_data.get(key); 
+					sb.append("<ETC KEY='" + key + "'><![CDATA[" + val + "]]></ETC>\n");
+					
+				} 
+			}
+			
+			sb.append("<ETC KEY='status'><![CDATA[OK]]></ETC>\n");
+			sb.append("</ETC-DATA>\n"); 
+			//Pivot 관련 ETC-DATA생성 
+			sb.append(getPivotETCData(eventResponse)); 
+
+			return sb.toString(); 
+	} 
+
+	
+	/**
+	 * DBRowSet를 Parsing하여 <DATA>태그를 생성한다.<br>
+	 * IBSheet의 prefix값이 있는 경우 COLORDER에 prefix를 붙인 column명으로 표시해 준다.<br>
+	 * 
+	 * @param rs DBRowSet 		VO객체
+	 * @param prefix String 		IBSheet savename's prefix string
+	 * @return String IBSheet 		<DATA>태그
+	 * @exception 
+	 */
+	@Override
+	protected String makeDataTag(DBRowSet arg0, String arg1) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+}

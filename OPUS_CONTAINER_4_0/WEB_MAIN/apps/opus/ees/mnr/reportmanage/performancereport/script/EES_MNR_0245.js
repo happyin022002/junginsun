@@ -1,0 +1,654 @@
+/*=========================================================
+*Copyright(c) 2014 CyberLogitec
+*@FileName : EES_MNR_0245.js
+*@FileTitle : Disposal Performance by Month
+*@author     : CLT
+*@version    : 1.0
+*@since      : 2014/05/20
+=========================================================*/
+/****************************************************************************************
+  Event code : INIT=0; ADD=1; SEARCH=2; SEARCHLIST=3;
+						MODIFY=4; REMOVE=5; REMOVELIST=6 MULTI=7
+						OTHER CASE : COMMAND01=11; ~ COMMAND20=30;
+ ***************************************************************************************/
+    /**
+     * @extends
+     * @class EES_MNR_0245 : business script for EES_MNR_0245.
+     */
+    function EES_MNR_0245() {
+    	this.processButtonClick=processButtonClick;
+		this.setSheetObject=setSheetObject;
+		this.loadPage=loadPage;
+		this.initControl=initControl;
+		this.obj_blur=obj_blur;
+		this.obj_focus=obj_focus;
+		this.obj_change=obj_change;
+		this.obj_keypress=obj_keypress;
+		this.obj_keyup=obj_keyup;
+		this.obj_keydown=obj_keydown;
+		this.initSheet=initSheet;
+		this.doActionIBSheet=doActionIBSheet;
+		this.sheet1_OnSearchEnd=sheet1_OnSearchEnd;
+		this.openPopup=openPopup;
+		this.initDynamicEqTpszCd=initDynamicEqTpszCd;
+		this.setDynamicEqTpszHeader=setDynamicEqTpszHeader;
+		this.validateForm=validateForm;
+		this.clearForm=clearForm;
+    }
+   	/* developer job	*/
+   	/* Sheet Select Back Color */
+    var MNR_SELECT_BACK_COLOR="#99FFFF";
+	var MNR_TOTCOL_BACK_COLOR="#EFEBEF";
+	var cntrTpSz=new Array();
+	var chssTpSz=new Array();
+	var gsetTpSz=new Array();
+	var vCntrTpszHdr="| | | | | | | | | | | | | | | | | | | | | | | | | | | | | |";
+	var vArrCntrTpsz=vCntrTpszHdr.split("|");
+	var vCntrTpszCnt=vArrCntrTpsz.length;
+	// common global variables
+	var tabObjects=new Array();
+	var tabCnt=0 ;
+	var beforetab=1;
+	var sheetObjects=new Array();
+	var sheetCnt=0;
+	// Combo Object Array
+	var comboObjects=new Array();
+	var comboCnt=0;
+	// Event handler processing by button click event */
+	document.onclick=processButtonClick;
+	// Event handler processing by button name */
+    function processButtonClick() {
+        var sheetObject=sheetObjects[0];
+        /*******************************************************/
+        var formObj=document.form;
+     	try {
+     		var srcObj=ComGetEvent();
+ 			var srcName=ComGetEvent("name");
+ 			if(ComGetBtnDisable(srcName)) return false;
+ 			switch(srcName) {
+ 				case "btn_Retrieve":
+ 					doActionIBSheet(sheetObjects[0], formObj, IBSEARCH);
+ 					break;
+ 				case "btn_New":
+					ComResetAll();
+					setDynamicEqTpszHeader(sheetObjects[0], "U");
+					formObj.p_loc_cd.readOnly=true;
+					formObj.p_loc_cd.className="input2";
+					ComEnableObject(formObj.btns_search, false);
+					ComSetFocus(formObj.p_str_evnt_dt);
+					comboObjects[0].SetSelectIndex(0);
+ 					break;
+             	case "btns_search":	//Form Location. retrieving popup
+ 					openPopup("1");
+ 					break;
+ 				case "btns_search2":	//retrieving Buyer popup
+ 					openPopup("2");
+ 					break;
+				case "btns_calendar":	// Event Duration (FromTo)
+					if ( srcObj.style.filter == "" ) {
+						var cal=new ComCalendarFromTo();
+						cal.select(formObj.p_str_evnt_dt, formObj.p_end_evnt_dt, 'yyyy-MM-dd');
+					}
+					break;
+             	case "btn_DownExcel":
+             		if(sheetObject.RowCount() < 1){//no data
+             			ComShowCodeMessage("COM132501");
+             		}else{
+             			sheetObject.Down2Excel({DownCols: makeHiddenSkipCol(sheetObject), SheetDesign:1,Merge:1});
+             		}             		
+					break;
+ 			} // end switch
+     	} catch(e) {
+     		if(e == "[object Error]") {
+     			ComShowMessage(OBJECT_ERROR);
+     		} else {
+     			ComShowMessage(e.message);
+     		}
+     	}
+    }
+    /**
+     * registering IBSheet Object as list
+     * adding process for list in case of needing batch processing with other items
+     * defining list on the top of source
+     */
+    function setSheetObject(sheet_obj) {
+       sheetObjects[sheetCnt++]=sheet_obj;
+    }
+    /**
+	 * registering IBMultiCombo Object as list
+	 * adding process for list in case of needing batch processing with other items
+	 * defining list on the top of source
+	 */
+	function setComboObject(combo_obj){
+		comboObjects[comboCnt++]=combo_obj;
+	}
+    /**
+     * initializing sheet
+     * implementing onLoad event handler in body tag
+     * adding first-served functions after loading screen.
+     */
+    function loadPage() {
+    	var formObj=document.form;
+		for(i=0; i < sheetObjects.length; i++) {
+	        //
+			ComConfigSheet (sheetObjects[i] );
+			initSheet(sheetObjects[i], i+1);
+	        //
+			ComEndConfigSheet(sheetObjects[i]);
+		}
+		/* initializing IBMultiCombo */
+		for ( var k=0 ; k < comboObjects.length ; k++ ) {
+	        initCombo(comboObjects[k], k+1);
+	    }
+		doActionIBSheet(sheetObjects[0], document.form, IBCREATE);
+    }
+    /**
+	 * handling event after ending sheet Load
+	 */
+    // Axon handling event
+  	// 1. event catch
+  	function initControl() {
+  		var formObj=document.form;
+  		axon_event.addListenerFormat('blur',		'obj_blur',		formObj); 
+//		axon_event.addListenerFormat('focus',		'obj_focus',	formObj); 
+//  	axon_event.addListenerFormat('keypress',	'obj_keypress',	formObj); 
+//		axon_event.addListenerFormat('keyup',		'obj_keyup',	formObj); 
+//		axon_event.addListenerForm('keydown',		'obj_keydown',	formObj); 
+		axon_event.addListenerForm('change',   		'obj_change',  	formObj); 
+  	}
+	//setting event duplicate
+	var preEventType=null;
+  	// 2. handling event -- Start
+  	/**
+	 * checking on HTML Control's onblur event.
+	 **/
+	function obj_blur() {
+		var obj=event.srcElement;
+		if(preEventType == event.type) {
+			preEventType=null;
+			return;
+		}
+	    switch(ComGetEvent("name")) {
+	        default: //do nothing
+	        	ComChkObjValid(obj);
+	        	break;
+	    }
+	}
+	/**
+	 * checking on HTML Control's focus event.
+	 */
+	function obj_focus() {
+		var obj=ComGetEvent();
+	    if(obj.readOnly) {
+	    	ComSetNextFocus(obj);
+	    } else {
+	    	//clearing mask separator
+		    ComClearSeparator(obj);
+	    }
+	}
+	/**
+	 * handling Change Event
+	 */
+	function obj_change() {
+		var obj=ComGetEvent();
+		var formObj=document.form;
+		var sheetObj=sheetObjects[0];
+		var tabObj=tabObjects[0];
+		switch(ComGetEvent("name")) {
+			case "p_str_evnt_dt":
+    		case "p_end_evnt_dt":
+    			checkDurationDate(obj);
+	    		break;
+			case "p_eq_knd_cd":			//Equipment Type
+				sheetObjects[0].RemoveAll();
+				setDynamicEqTpszHeader(sheetObjects[0], obj.value);
+				break;
+			case "p_loc_tp":		//Location Type
+				formObj.p_loc_cd.value="";
+				if(obj.value == "") {
+					formObj.p_loc_cd.readOnly=true;
+					formObj.p_loc_cd.className="input2";
+					ComEnableObject(formObj.btns_search, false);
+				} else {
+					formObj.p_loc_cd.readOnly=false;
+					formObj.p_loc_cd.className="input";
+					ComEnableObject(formObj.btns_search, true);
+					ComSetNextFocus(obj);
+				}
+				break;
+			case "p_loc_cd":	//Location Code
+    			if ( ComTrim(obj.value) != "" ) {
+	        		doActionIBSheet(sheetObjects[0], formObj , IBSEARCH_ASYNC01);
+  				}
+    			break;
+    		case "p_cust_cd":	//Buyer Code
+    			if ( ComTrim(obj.value) != "" ) {
+	        		doActionIBSheet(sheetObjects[0], formObj , IBSEARCH_ASYNC02);
+  				}
+    			break;
+		}
+	}
+	function resizeSheet( sheetObj ){
+	    ComResizeSheet( sheetObj );
+	}
+	/**
+	 * handling Key-Press Event
+	 */  
+  	/**
+  	 * handling Key-Up Event
+  	 */ 
+   	/**
+     * handling Key-Down Event
+     */  
+  	//2. handling event -- End
+  	/**
+     * setting sheet initial values and header
+     * param : sheetObj, sheetNo
+     * adding case as numbers of counting sheets
+     */
+    function initSheet(sheetObj, sheetNo) {
+    	var formObj=document.form;
+		var sheetid=sheetObj.id;
+		var cnt=0;
+		switch(sheetid) {
+			case "sheet1":
+				  with(sheetObj){
+			   
+				   var HeadTitle="Month||G.TTL|Ratio|TTL Amount(USD)"+ vCntrTpszHdr +"|";
+				   var headCount=ComCountHeadTitle(HeadTitle);
+				   cnt=0;
+	
+				   SetConfig( { SearchMode:2, MergeSheet:0, Page:20, FrozenCol:5, DataRowMerge:1 } );
+	
+				   var info    = { Sort:1, ColMove:0, HeaderCheck:0, ColResize:1 };
+				   var headers = [ { Text:HeadTitle, Align:"Center"} ];
+				   InitHeaders(headers, info);
+				   var colList = new Array();
+				   var cols = [ {Type:"Text",      Hidden:0,  Width:100,  Align:"Center",  ColMerge:1,   SaveName:"apro_mon",          KeyField:0,   CalcLogic:"",   Format:"" },
+						 {Type:"Text",      Hidden:1, Width:70,   Align:"Center",  ColMerge:1,   SaveName:"disp_qty_tot",      KeyField:0,   CalcLogic:"",   Format:"" },
+						 {Type:"Text",      Hidden:0,  Width:70,   Align:"Right",   ColMerge:1,   SaveName:"disp_qty_cnt",      KeyField:0,   CalcLogic:"",   Format:"" },
+						 {Type:"Text",      Hidden:0,  Width:70,   Align:"Right",   ColMerge:1,   SaveName:"disp_qty_rto",      KeyField:0,   CalcLogic:"",   Format:"" },
+						 {Type:"Text",      Hidden:0,  Width:110,  Align:"Right",   ColMerge:1,   SaveName:"cal_part_amt_tot",  KeyField:0,   CalcLogic:"",   Format:"" } ];
+						for(var j = 1; j < vCntrTpszCnt; j++) {
+							var tpsz_dp_no = "tpsz_dp"+ ComLpad(j, 2, "0");
+							if(vArrCntrTpsz[j] != "") {
+									cols.push({Type:"Text",      Hidden:0,  Width:80,   Align:"Right",   ColMerge:0,   SaveName:tpsz_dp_no,          KeyField:0,   CalcLogic:"",   Format:"" });
+									eval('SetColHidden("tpsz_dp'+ ComLpad(j, 2, "0") + '",0);');
+							} else {
+									cols.push({Type:"Text",      Hidden:1,  Width:80,   Align:"Right",   ColMerge:0,   SaveName:tpsz_dp_no,          KeyField:0,   CalcLogic:"",   Format:"" });
+									eval('SetColHidden("tpsz_dp'+ ComLpad(j, 2, "0") + '",1);');
+							}
+						 }
+//						cols.push({Type:"Text",   Hidden:1, Width:50,   Align:"Right",   ColMerge:1,   SaveName:"auto_sum",          KeyField:0,   CalcLogic:"",   Format:"" });
+				   
+					InitColumns(cols);	
+					SetEditable(0);
+					SetSheetHeight(ComGetSheetHeight(sheetObj, 20));
+					SetCountFormat("[SELECTDATAROW / TOTALROWS]");
+					resizeSheet( sheetObj );
+			   		}
+				  break;
+		}
+	}
+	/**
+	 * setting combo initial values and header
+	 * param : comboObj, sheetNo
+	 * adding case as numbers of counting combos
+	 */
+	function initCombo(comboObj, comboNo) {
+	    switch(comboObj.id) {
+	        case "combo1":
+	        	with(comboObj) {
+	            	SetDropHeight(250);
+	        	}
+	        	break;
+	    }
+	}
+	/**
+	 * handling process for sheet
+	 * @param sheetObj
+	 * @param formObj
+	 * @param sAction
+	 * @param CondParam
+	 * @param PageNo
+	 */
+    function doActionIBSheet(sheetObj, formObj, sAction, CondParam, PageNo) {
+        sheetObj.ShowDebugMsg(false);
+		switch(sAction) {
+			case IBCREATE:
+				//Equipment Type/Size Grid Header Item Setting
+				initDynamicEqTpszCd(sheetObj);
+				setDynamicEqTpszHeader(sheetObj, formObj.p_eq_knd_cd.value);
+				//Disposal Kind Combo Item Setting
+				//retrieving common combo.
+				var sCondition=new Array (
+					new Array("MnrGenCd","CD00038", "COMMON")	//DISP_RSN_CD
+				)
+				var comboList=MnrComSearchCombo(sheetObjects[0],sCondition);
+				//setting DISP_RSN_CD 
+				if(comboList[0] != null){
+					for(var j=0; j < comboList[0].length;j++){
+						var tempText=comboList[0][j].split("|");
+						comboObjects[0].InsertItem(j,tempText[1] ,tempText[0]);
+					}
+				}
+				comboObjects[0].InsertItem(0 , 'ALL','');
+				comboObjects[0].SetSelectIndex(0);
+				break;
+			case IBSEARCH:			//retrieving
+				if(validateForm(sheetObj, formObj, sAction)) {
+					if(sheetObj.id == "sheet1") {
+						formObj.f_cmd.value=SEARCH;
+						sheetObj.SetWaitImageVisible(0);
+						ComOpenWait(true);
+						var sXml=sheetObj.GetSearchData("EES_MNR_0245GS.do", FormQueryString(formObj));
+						if(ComGetTotalRows(sXml) > 4) {
+//							sheetObj.RenderSheet(0);
+							sheetObj.LoadSearchData(sXml,{Sync:0} );
+//							sheetObj.RenderSheet(1);
+						} else {
+							sheetObj.LoadSearchData("<SHEET><ETC-DATA><ETC KEY='Exception'><![CDATA[]]></ETC><ETC KEY='TRANS_RESULT_KEY'><![CDATA[S]]></ETC></ETC-DATA>	<DATA  TOTAL='0'></DATA></SHEET>",{Sync:0} );
+						}
+						ComOpenWait(false);
+						sheetObj.SetWaitImageVisible(1);
+					}
+				}
+				break;
+			case IBSEARCH_ASYNC01:	// retrieving Location
+ 				if(validateForm(sheetObj,formObj,sAction)) {
+ 					if ( sheetObj.id == "sheet1") {
+						var vLocType=formObj.p_loc_tp.value;
+						var vLocCode=formObj.p_loc_cd.value;
+ 						var param="f_cmd="+SEARCH+"&loc_nm=&un_loc_ind_cd=&cnt_cd=&loc_eq_ofc=&select=&loc_state=";
+ 						if(vLocType == "RCC") {
+							param += "&loc_cd=&rcc_cd="+ vLocCode +"&lcc_cd=";
+ 						} else if(vLocType == "LCC") {
+							param += "&loc_cd=&rcc_cd=&lcc_cd="+ vLocCode;
+ 						} else if(vLocType == "SCC") {//SCC is subset of LOC.
+							param += "&loc_cd="+ vLocCode +"&rcc_cd=&lcc_cd=";
+ 						}
+ 						sheetObj.SetWaitImageVisible(0);
+ 						var sXml=sheetObj.GetSearchData("COM_ENS_051GS.do", param);
+						sheetObj.SetWaitImageVisible(1);
+						if ( ComGetTotalRows(sXml) < 1 ) {
+							ComShowCodeMessage("MNR00117");
+ 							formObj.p_loc_cd.value="";
+							ComSetFocus(formObj.p_loc_cd);
+						} else if(vLocType == "SCC") {
+							var aryData=MnrXmlToArray(sXml);
+							if(vLocCode != aryData[0][11]) {
+								ComShowCodeMessage("MNR00117");
+	 							formObj.p_loc_cd.value="";
+								ComSetFocus(formObj.p_loc_cd);
+							}
+						}
+					}
+				}
+ 				break;
+ 			case IBSEARCH_ASYNC02:	// retrieving Buyer Code
+ 				if(validateForm(sheetObj,formObj,sAction)) {
+ 					if ( sheetObj.id == "sheet1") {
+ 						var vCustCntCd=formObj.p_cust_cd.value;
+ 						var param="f_cmd="+SEARCH+"&cust_cd="+ vCustCntCd.substr(0,2) +"&cust="+ vCustCntCd.substr(2);
+ 						sheetObj.SetWaitImageVisible(0);
+ 						var sXml=sheetObj.GetSearchData("COM_ENS_041GS.do", param);
+						sheetObj.SetWaitImageVisible(1);
+						if ( ComGetTotalRows(sXml) != 1 ) {
+							ComShowCodeMessage("MNR00025", "Buyer");
+ 							clearForm("p_cust_cd");
+							ComSetFocus(formObj.p_cust_cd);
+						} else {
+							var aryData=MnrXmlToArray(sXml);
+							ComSetObjValue(formObj.p_vndr_nm, aryData[0][1]);
+							formObj.p_vndr_nm.focus();
+						}
+					}
+				}
+ 				break;
+		}
+    }
+	/**
+     * event after retrieving
+	 * @param sheetObj
+	 * @param ErrMsg
+     */
+    function sheet1_OnSearchEnd(sheetObj, ErrMsg) {
+    	with(sheetObj) {
+    		var formObj=document.form;
+			var viewCnt=0;
+			if(LastRow()> 3) {
+				SetColBackColor("disp_qty_cnt",MNR_TOTCOL_BACK_COLOR);
+				SetColBackColor("disp_qty_rto",MNR_TOTCOL_BACK_COLOR);
+				SetColBackColor("cal_part_amt_tot",MNR_TOTCOL_BACK_COLOR);
+				
+				for(var i=HeaderRows(); i<=LastRow()-4; i++){
+					var year = GetCellValue(i, "apro_mon").substr(0,4);
+					var mon  = GetCellValue(i, "apro_mon").substr(4,6);
+					var yrMn = year + "-" + mon;
+					SetCellValue(i, "apro_mon", yrMn);
+				}
+				
+				for ( var i=1 ; i < vCntrTpszCnt ; i++ ) {
+//					var cellData=eval('GetCellValue(LastRow()-7, "tpsz_dp'+ ComLpad(i, 2, "0") + '")');
+					var cellData=eval('GetCellValue(LastRow()-3, "tpsz_dp'+ ComLpad(i, 2, "0") + '")');
+					if(cellData <= 0) {
+						eval('SetColHidden("tpsz_dp'+ ComLpad(i, 2, "0") + '",1);');
+						console.debug("a: " + i + " ::: " + "tpsz_dp"+ ComLpad(i, 2, "0"));
+					} else {
+						eval('SetColHidden("tpsz_dp'+ ComLpad(i, 2, "0") + '",0);');
+					}
+					var viewFlag=eval('GetColHidden("tpsz_dp'+ ComLpad(i, 2, "0") + '")');
+					if(viewFlag == false) {
+						viewCnt++;
+					}
+				}
+				if(360 + (viewCnt * 80) > 984) {
+					SetSheetWidth(984);
+				} else {
+					SetSheetWidth(370 + (viewCnt * 80));
+				}
+
+				SetRangeBackColor(LastRow()-3, 0, LastRow(), LastCol(), "#FFA7A7");
+     			SetRangeFontBold(LastRow()-3, 0, LastRow(), LastCol(), 1);
+			}
+    	}
+    }
+	/**
+	 * combo1_OnBlur
+	 */
+	function combo1_OnBlur(comboObj, Index_Code, Text) {
+		var formObj=document.form;
+		formObj.p_disp_rsn_cd.value=ComGetObjValue(comboObj);
+		if(ComGetObjValue(formObj.p_disp_rsn_cd) == "ALL") {
+			ComSetObjValue(formObj.p_disp_rsn_cd, "");
+		}
+	}
+	/**
+	 * cobo1_OnKeyDown
+	 */
+	function combo1_OnKeyDown(comboObj, KeyCode, Shift) {
+		var formObj=document.form;
+		var sheetObj=sheetObjects[0];
+		with(comboObj) {
+			if(KeyCode == 13) {
+				formObj.p_disp_rsn_cd.value=ComGetObjValue(comboObj);
+				if(ComGetObjValue(formObj.p_disp_rsn_cd) == "ALL") {
+					ComSetObjValue(formObj.p_disp_rsn_cd, "");
+				}
+				doActionIBSheet(sheetObjects[0], formObj, IBSEARCH);
+			}
+		}
+	}
+	/**
+     * Pop-up Open <br>
+     * @param type 1:Location Code, 2:Currency Code
+     * @param Row IBSheet Row index
+     * @param Col IBSheet Col index
+     */
+    function openPopup(type, Row, Col) {
+    	var formObj=document.form;
+    	if ( type == "1" ) {
+    		switch(formObj.p_loc_tp.value) {
+    			case "RCC" :	//RCC
+    				ComOpenPopupWithTarget('/opuscntr/COM_ENS_051.do', 755, 480,"rcc_cd:p_loc_cd", "1,0,1,1,1,1,1", true);
+    				break;
+    			case "LCC" :	//LCC
+    				ComOpenPopupWithTarget('/opuscntr/COM_ENS_051.do', 755, 480,"lcc_cd:p_loc_cd", "1,0,1,1,1,1,1", true);
+    				break;
+    			case "SCC" :	//SCC
+    				ComOpenPopupWithTarget('/opuscntr/COM_ENS_051.do', 755, 480,"scc_cd:p_loc_cd", "1,0,1,1,1,1,1", true);
+    				break;
+    			default : 	//do nothing
+    		}
+    	} else if(type == "2") {
+    		ComOpenPopup('/opuscntr/COM_ENS_041.do', 780, 490, 'setPopData_BuyerCd', '1,0,1,1,1,1,1,1', true);
+    	}
+    	return;
+    }
+	/**
+	 * (Service Provider) handling Pop-up Return Value <br>
+	 * @param {arry} Return value array of returnedValues Pop-up
+	 * @param Row IBSheet Row index
+	 * @param Col IBSheet Col index
+	 * @param Sheet Array index
+	 */
+	function setPopData_BuyerCd(aryPopupData, Row, Col, SheetIdx) {
+		var formObj=document.form;
+		if ( aryPopupData.length > 0 ) {
+			formObj.p_cust_cd.value=aryPopupData[0][3];
+			formObj.p_vndr_nm.value=aryPopupData[0][4];
+		}
+	}
+	/**
+	 * setting type size per EQ TYPE as list.
+	 */
+	function initDynamicEqTpszCd(sheetObj) {
+		var arrXml=MnrComSearchGrid(sheetObj,"type_size_search_ind","");
+		if(arrXml != null) {
+			for(var i=0; i < arrXml.length; i++) {
+				if(i == 0){//U
+					cntrTpSz=MnrXmlToOneDimArray(arrXml[i], "cd_id");
+				} else if(i == 1){//Z
+					chssTpSz=MnrXmlToOneDimArray(arrXml[i], "cd_id");
+				} else if(i == 2){//G
+					gsetTpSz=MnrXmlToOneDimArray(arrXml[i], "cd_id");
+				}
+			}
+		}
+	}
+	/**
+	 * Equipment Type/Size Grid Header Setting
+	 */
+	function setDynamicEqTpszHeader(sheetObj, eqKndCd) {
+		var eqTpSzAry=new Array();
+		if(eqKndCd == "U") {
+			eqTpSzAry=cntrTpSz;
+		} else if(eqKndCd == "Z") {
+			eqTpSzAry=chssTpSz;
+		} else {//eqKndCd is 'G'
+			eqTpSzAry=gsetTpSz;
+		}
+		if(eqTpSzAry.length > 0) {
+			var eqTpSzStr="|"+ eqTpSzAry.toString().replace(/,/g, "|");
+			vCntrTpszHdr=eqTpSzStr;
+			vArrCntrTpsz=eqTpSzStr.split("|");
+			vCntrTpszCnt=vArrCntrTpsz.length;
+			for(i=0; i < sheetObjects.length; i++) {
+				/* resetting IBSheet */
+				//
+				ComConfigSheet (sheetObjects[i] );
+				initSheet(sheetObjects[i], i+1);
+				//
+				ComEndConfigSheet(sheetObjects[i]);
+			}
+		}
+	}
+	/**
+	 * handling Duration Date Validation <br>
+	 */
+    function checkDurationDate(eventObj) {
+    	var formObj=document.form;
+    	var vEffDt=ComReplaceStr(ComGetObjValue(formObj.p_str_evnt_dt),"-","");
+		var vExpDt=ComReplaceStr(ComGetObjValue(formObj.p_end_evnt_dt),"-","");
+		/* Duration Date Validation(p_str_evnt_dt) */
+		if(vEffDt == "" && eventObj == null) {
+			ComShowCodeMessage("MNR00172", "Start Date");
+			ComSetFocus(formObj.p_str_evnt_dt);
+			return false;
+		} else if(vEffDt == "" && eventObj.name == "p_str_evnt_dt") {
+			ComShowCodeMessage("MNR00172", "Start Date");
+			ComSetFocus(formObj.p_str_evnt_dt);
+			return false;
+		} else if (vEffDt != "" && !ComIsDate(formObj.p_str_evnt_dt) ) {
+			ComShowCodeMessage("MNR00346");
+			ComSetObjValue(formObj.p_str_evnt_dt,"");
+			ComSetFocus(formObj.p_str_evnt_dt);
+			return false;
+		}
+		/* Duration Date Validation(end_evnt_dt) */
+		if(vExpDt == "" && eventObj == null) {
+			ComShowCodeMessage("MNR00172", "End Date");
+			ComSetFocus(formObj.p_end_evnt_dt);
+			return false;
+		} else if(vExpDt == "" && eventObj.name == "p_end_evnt_dt") {
+			ComShowCodeMessage("MNR00172", "End Date");
+			ComSetFocus(formObj.p_end_evnt_dt);
+			return false;
+		} else if (vExpDt != "" && !ComIsDate(formObj.p_end_evnt_dt) ) {
+			ComShowCodeMessage("MNR00347");
+			ComSetObjValue(formObj.p_end_evnt_dt,"");
+			ComSetFocus(formObj.p_end_evnt_dt);
+			return false;
+		}
+		/* Duration Date Validation(str_evnt_dt < end_evnt_dt) */
+		if(vEffDt != "" && vExpDt != "") {
+			if ( ComChkPeriod(vEffDt, vExpDt) != 1 ) {
+				ComShowCodeMessage("MNR00346");
+				if(eventObj == null) {
+					ComSetObjValue(formObj.p_end_evnt_dt,"");
+					ComSetFocus(formObj.p_end_evnt_dt);
+				} else {
+					ComSetObjValue(eventObj,"");
+					ComSetFocus(eventObj);
+				}
+				return false;
+			}
+		}
+		return true;
+    }
+    /**
+	 * handling process for input validation
+	 * @param sheetObj
+	 * @param formObj
+	 * @param sAction
+	 */
+	function validateForm(sheetObj, formObj, sAction) {
+    	with(formObj) {
+    		switch(sAction) {
+    			case IBSEARCH:      //retrieving
+    				if (!checkDurationDate()) {
+    					return false;
+    				}
+    				return ComChkValid(formObj, true);
+    				break;
+				default :	//do nothing
+    		}
+    	}
+        return true;
+	}
+  	/**
+	 * handling Form Element Clear <br>
+	 * @param fieldName
+	 */
+	function clearForm(fieldName) {
+		var formObj=document.form;
+		switch(fieldName) {
+			case "p_cust_cd":
+				ComSetObjValue(formObj.p_cust_cd, 	"");
+				ComSetObjValue(formObj.p_vndr_nm,  	"");
+				ComSetFocus(formObj.p_cust_cd);
+				break;
+			default :	//do nothing
+		}
+	}
+	/* developer job */

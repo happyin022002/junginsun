@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="GeneralBookingReceiptDBDAOModifyCargoClosingTimeByReplanUSQL">
+			<desc><![CDATA[cargo closing time을 계산하여 넣는다.]]></desc>
+			<sql><![CDATA[
+update bkg_clz_tm
+   set CLZ_YD_CD = case when clz_tp_cd = 'F' then (SELECT ORG_NOD_CD
+													 from prd_prod_ctl_rout_dtl dtl 
+												        , prd_prod_ctl_mst mst 
+												        , sce_cop_hdr cop 
+													where dtl.PCTL_IO_BND_CD = 'O' 
+													  and dtl.TRSP_MOD_CD    = 'RD' 
+													  and mst.pctl_no        = dtl.pctl_no 
+													  and mst.pctl_no        = cop.pctl_no 
+													  and cop.bkg_no         = @[bkg_no]
+													  and cop.COP_STS_CD     <> 'X'
+													  and dtl.pctl_seq = (select min(fst.pctl_seq)
+													                        from prd_prod_ctl_rout_dtl fst 
+													                       where fst.pctl_no = mst.pctl_no 
+													                         and fst.PCTL_IO_BND_CD = 'O'                         
+													                         and fst.TRSP_MOD_CD = 'RD')
+  													  and rownum = 1)
+						WHEN CLZ_TP_CD = 'O' THEN (SELECT ORG_NOD_CD
+													 from prd_prod_ctl_rout_dtl dtl 
+												        , prd_prod_ctl_mst mst 
+												        , sce_cop_hdr cop 
+													where dtl.PCTL_IO_BND_CD = 'O' 
+													  and dtl.TRSP_MOD_CD    = 'RD' 
+													  and mst.pctl_no        = dtl.pctl_no 
+													  and mst.pctl_no        = cop.pctl_no 
+													  and cop.bkg_no         = @[bkg_no]  
+													  and cop.COP_STS_CD     <> 'X'
+													  and dtl.pctl_seq = (select max(fst.pctl_seq)
+													                        from prd_prod_ctl_rout_dtl fst 
+													                       where fst.pctl_no = mst.pctl_no 
+													                         and fst.PCTL_IO_BND_CD = 'O'                         
+													                         and fst.TRSP_MOD_CD = 'RD')
+  													  and rownum = 1)
+						WHEN CLZ_TP_CD = 'R' THEN (SELECT FULL_RTN_YD_CD FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+						WHEN CLZ_TP_CD = 'T' THEN (SELECT pol_nod_cd     FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+						WHEN CLZ_TP_CD = 'D' THEN (SELECT pol_nod_cd     FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+						WHEN CLZ_TP_CD = 'E' THEN (SELECT pol_nod_cd     FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+						WHEN CLZ_TP_CD = 'M' THEN (SELECT mty_pkup_yd_cd FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+						ELSE '' END
+     , sys_set_dt = case when clz_tp_cd = 'F' then to_date(NVL(@[from_dt], TO_CHAR(SYS_SET_DT, 'YYYYMMDD')), 'yyyymmdd')
+                         when clz_tp_cd = 'O' then to_date(NVL(@[to_dt],   TO_CHAR(SYS_SET_DT, 'YYYYMMDD')), 'yyyymmdd')
+                         when clz_tp_cd = 'M' then (SELECT mty_pkup_dt FROM BKG_BOOKING WHERE BKG_NO = @[bkg_no])
+                         when clz_tp_cd = 'T' then (select  PRD_COMMON_PKG.PRD_GET_CCT_BY_BKG_FNC(@[bkg_no])
+                                                     from (SELECT SKD.SLAN_CD SLAN_CD
+                                                                 , VVD.SKD_DIR_CD SLAN_DIR_CD
+                                                                 , CASE WHEN DCGO_FLG = 'Y' THEN 'DG'
+																		WHEN RC_FLG   = 'Y' THEN 'RF'
+                                                                        WHEN DCGO_FLG = 'N' AND RC_FLG = 'N' AND AWK_CGO_FLG = 'N' AND BB_CGO_FLG = 'N' THEN 'DR'
+                                                                        ELSE 'AL' END CGO_TP_CD
+                                                                 , VPS_ETB_DT
+                                                                 , VPS_ETD_DT
+                                                                 , pol_nod_cd
+																 , NVL(VVD.POL_CLPT_IND_SEQ, 1) AS CLPT_IND_SEQ
+                                                                 , VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD AS VVD
+                                                               FROM BKG_BOOKING BK, BKG_VVD VVD, VSK_VSL_PORT_SKD SKD
+                                                              WHERE BK.BKG_NO = VVD.BKG_NO
+                                                                AND BK.POL_CD = VVD.POL_CD
+                                                                AND VVD.VSL_PRE_PST_CD IN ('S', 'T')
+																AND VVD.VSL_CD	   NOT IN ('COXX','COYY','COZZ')
+                                                                AND VVD.VSL_CD     = SKD.VSL_CD
+                                                                AND VVD.SKD_VOY_NO = SKD.SKD_VOY_NO
+                                                                AND VVD.SKD_DIR_CD = SKD.SKD_DIR_CD
+                                                                AND VVD.POL_CD     = SKD.VPS_PORT_CD
+                                                                AND NVL(VVD.POL_CLPT_IND_SEQ, 1) = SKD.CLPT_IND_SEQ
+                                                                AND BK.BKG_NO      = @[bkg_no]) skd) 
+                         when clz_tp_cd = 'R' then (CASE WHEN (SELECT /*+index_asc(scd XPKSCE_COP_DTL) */ decode(BK.POL_CD,SUBSTR(SCD.NOD_CD,1,5),'Y','N')
+                                                              FROM SCE_COP_HDR SCH
+                                                                   ,SCE_COP_DTL SCD
+                                                                   ,BKG_BOOKING BK
+                                                              WHERE BK.BKG_NO = @[bkg_no]
+                                                              AND SCH.BKG_NO = BK.BKG_NO
+                                                              AND SCH.COP_NO = SCD.COP_NO
+                                                              AND SCD.ACT_CD LIKE 'F%AD'
+                                                              AND rownum = 1) = 'N' THEN
+                                                             (SELECT    NVL(PRD_GET_INLND_CCT_FNC(BK.PCTL_NO)
+                                                                 ,(SELECT /*+INDEX_DESC(DTL XPKPRD_PROD_CTL_ROUT_DTL)*/
+                                                                         DTL.ARR_ST_DT
+                                                                  FROM PRD_PROD_CTL_ROUT_DTL DTL, PRD_INLND_ROUT_MST O
+                                                                  WHERE DTL.PCTL_NO = BK.PCTL_NO
+                                                                  AND DTL.PCTL_IO_BND_CD = 'O'
+                                                                  AND DTL.ROUT_ORG_NOD_CD = O.ROUT_ORG_NOD_CD
+                                                                  AND DTL.ROUT_DEST_NOD_CD = O.ROUT_DEST_NOD_CD
+                                                                  AND DTL.ROUT_SEQ = O.ROUT_SEQ
+                                                                  AND DTL.ORG_NOD_CD = O.FULL_RTN_YD_CD
+                                                                  AND DTL.ROUT_SEQ > 0
+                                                                  AND DTL.NOD_LNK_DIV_CD = 'N'
+                                                                  AND ROWNUM = 1
+                                                                  UNION ALL
+                                                                  SELECT /*+INDEX_DESC(DTL XPKPRD_PROD_CTL_ROUT_DTL)*/
+                                                                       DTL.ARR_ST_DT
+                                                                  FROM PRD_PROD_CTL_ROUT_DTL DTL
+                                                                  WHERE DTL.PCTL_NO = BK.PCTL_NO
+                                                                  AND DTL.PCTL_IO_BND_CD = 'O'
+                                                                  AND DTL.ROUT_SEQ = 0
+                                                                  AND ROWNUM = 1))
+                                                            FROM BKG_BOOKING BK
+                                                            WHERE BK.BKG_NO = @[bkg_no])
+                                                             
+                                                      ELSE
+                                                           (select PRD_COMMON_PKG.PRD_GET_CCT_BY_BKG_FNC(@[bkg_no])
+                                                              from (SELECT SKD.SLAN_CD SLAN_CD
+                                                                       , VVD.SKD_DIR_CD SLAN_DIR_CD
+                                                                       , CASE WHEN DCGO_FLG = 'Y' THEN 'DG'
+      																		  WHEN RC_FLG   = 'Y' THEN 'RF'
+                                                                              WHEN DCGO_FLG = 'N' AND RC_FLG = 'N' AND AWK_CGO_FLG = 'N' AND BB_CGO_FLG = 'N' THEN 'DR'
+                                                                              ELSE 'AL' END CGO_TP_CD
+                                                                       , VPS_ETB_DT
+                                                                       , VPS_ETD_DT
+                                                                       , pol_nod_cd
+      																   , NVL(VVD.POL_CLPT_IND_SEQ, 1) AS CLPT_IND_SEQ
+                                                                       , VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD AS VVD
+                                                                     FROM BKG_BOOKING BK, BKG_VVD VVD, VSK_VSL_PORT_SKD SKD
+                                                                    WHERE BK.BKG_NO = VVD.BKG_NO
+                                                                      AND BK.POL_CD = VVD.POL_CD
+                                                                      AND VVD.VSL_PRE_PST_CD IN ('S', 'T')
+      																  AND VVD.VSL_CD	   NOT IN ('COXX','COYY','COZZ')
+                                                                      AND VVD.VSL_CD     = SKD.VSL_CD
+                                                                      AND VVD.SKD_VOY_NO = SKD.SKD_VOY_NO
+                                                                      AND VVD.SKD_DIR_CD = SKD.SKD_DIR_CD
+                                                                      AND VVD.POL_CD     = SKD.VPS_PORT_CD
+                                                                      AND NVL(VVD.POL_CLPT_IND_SEQ, 1) = SKD.CLPT_IND_SEQ
+                                                                      AND BK.BKG_NO      = @[bkg_no]) skd)
+                                                      END)
+						 WHEN CLZ_TP_CD = 'D' THEN (SELECT CASE WHEN XCLD_HOL_FLG = 'Y' THEN 
+                                                                    NVL((SELECT MIN(HOL.HOL_DT) - 1 + (1/24*17)--연휴시작 전일 17시
+                                                                           FROM DMT_HOLIDAY HOL
+ 															              WHERE (HOL_YR,CNT_CD,RGN_CD,STE_CD,LOC_CD,HOL_DESC)
+														                          in (select HOL_YR,CNT_CD,RGN_CD,STE_CD,LOC_CD,HOL_DESC
+														                                from dmt_holiday 	
+														                               WHERE SUBSTR(DCT.POL_NOD_CD, 1, 2) = CNT_CD(+)
+															                             AND SUBSTR(DCT.POL_NOD_CD, 1, 5) = case when trim(hol.loc_cd) is null then SUBSTR(DCT.POL_NOD_CD, 1, 5)
+											                                                             						 else HOL.LOC_CD end 
+                     														            and hol_yr = to_char(DCT, 'yyyy')
+                    	      														    and to_char(HOL_DT, 'yyyymmdd') = to_char(DCT, 'yyyymmdd'))), DCT.DCT)
+
+                                                                ELSE DCT.DCT END DCT
+                                                      FROM (SELECT CASE WHEN TRIM(TO_CHAR(DCT, 'DAY', 'NLS_DATE_LANGUAGE=ENGLISH')) = 'SUNDAY' AND XCLD_SUN_FLG ='Y' AND XCLD_SAT_FLG ='Y' AND XCLD_FRI_FLG = 'Y' THEN DCT - 3 
+																		WHEN TRIM(TO_CHAR(DCT, 'DAY', 'NLS_DATE_LANGUAGE=ENGLISH')) = 'SUNDAY' AND XCLD_SUN_FLG ='Y' AND XCLD_SAT_FLG ='Y' AND XCLD_FRI_FLG = 'N' THEN DCT - 2 
+																		WHEN TRIM(TO_CHAR(DCT, 'DAY', 'NLS_DATE_LANGUAGE=ENGLISH')) = 'SUNDAY' AND XCLD_SUN_FLG ='Y' AND XCLD_SAT_FLG ='N' THEN DCT - 1
+            															WHEN TRIM(TO_CHAR(DCT, 'DAY', 'NLS_DATE_LANGUAGE=ENGLISH')) = 'SATURDAY' AND XCLD_SAT_FLG ='Y' AND XCLD_FRI_FLG = 'Y' THEN DCT - 2 
+            															WHEN TRIM(TO_CHAR(DCT, 'DAY', 'NLS_DATE_LANGUAGE=ENGLISH')) = 'SATURDAY' AND XCLD_SAT_FLG ='Y' AND XCLD_FRI_FLG = 'N' THEN DCT - 1 
+            															WHEN TRIM(TO_CHAR(DCT, 'DAY', 'NLS_DATE_LANGUAGE=ENGLISH')) = 'FRIDAY' AND XCLD_FRI_FLG ='Y'   THEN DCT - 1
+       															    ELSE DCT END DCT
+                                                                 , POL_NOD_CD
+                                                                 , XCLD_HOL_FLG
+                                                              from (SELECT CASE WHEN DOC_CLZ_TP_CD = 'B' THEN BKG.etb + (ITVAL_HRS/24) --ETB
+                                                                                WHEN DOC_CLZ_TP_CD = 'D' THEN BKG.etd + (ITVAL_HRS/24) --ETD
+                                                                                WHEN DOC_CLZ_TP_CD = 'A' THEN BKG.eta + (ITVAL_HRS/24) --ETA
+																				WHEN DOC_CLZ_TP_CD = 'Y' AND DOC_CLZ_DY_CD = '1DA' THEN to_date(to_char(BKG.eta,'YYYY/MM/DD'),'YYYY/MM/DD')-1 + DOC_CLZ_DY_HRS/(24*60) --ETA - 1
+																				WHEN DOC_CLZ_TP_CD = 'Y' AND DOC_CLZ_DY_CD = '2DA' THEN to_date(to_char(BKG.eta,'YYYY/MM/DD'),'YYYY/MM/DD')-2 + DOC_CLZ_DY_HRS/(24*60) --ETA - 2
+																				WHEN DOC_CLZ_TP_CD = 'Y' AND DOC_CLZ_DY_CD = '3DA' THEN to_date(to_char(BKG.eta,'YYYY/MM/DD'),'YYYY/MM/DD')-3 + DOC_CLZ_DY_HRS/(24*60) --ETA - 3
+																				WHEN DOC_CLZ_TP_CD = 'Y' AND DOC_CLZ_DY_CD = '1DB' THEN to_date(to_char(BKG.etb,'YYYY/MM/DD'),'YYYY/MM/DD')-1 + DOC_CLZ_DY_HRS/(24*60) --ETB - 1 
+																				WHEN DOC_CLZ_TP_CD = 'Y' AND DOC_CLZ_DY_CD = '2DB' THEN to_date(to_char(BKG.etb,'YYYY/MM/DD'),'YYYY/MM/DD')-2 + DOC_CLZ_DY_HRS/(24*60) --ETB - 2 
+																				WHEN DOC_CLZ_TP_CD = 'Y' AND DOC_CLZ_DY_CD = '3DB' THEN to_date(to_char(BKG.etb,'YYYY/MM/DD'),'YYYY/MM/DD')-3 + DOC_CLZ_DY_HRS/(24*60) --ETB - 3 
+																				WHEN DOC_CLZ_TP_CD = 'Y' AND DOC_CLZ_DY_CD = '1DD' THEN to_date(to_char(BKG.etd,'YYYY/MM/DD'),'YYYY/MM/DD')-1 + DOC_CLZ_DY_HRS/(24*60) --ETD - 1 
+																				WHEN DOC_CLZ_TP_CD = 'Y' AND DOC_CLZ_DY_CD = '2DD' THEN to_date(to_char(BKG.etd,'YYYY/MM/DD'),'YYYY/MM/DD')-2 + DOC_CLZ_DY_HRS/(24*60) --ETD - 2 
+																				WHEN DOC_CLZ_TP_CD = 'Y' AND DOC_CLZ_DY_CD = '3DD' THEN to_date(to_char(BKG.etd,'YYYY/MM/DD'),'YYYY/MM/DD')-3 + DOC_CLZ_DY_HRS/(24*60) --ETD - 3 
+																				WHEN DOC_CLZ_TP_CD = 'Y' AND DOC_CLZ_DY_CD = 'MON' OR DOC_CLZ_DY_CD = 'TUE' OR DOC_CLZ_DY_CD = 'WED' OR DOC_CLZ_DY_CD = 'THU' OR DOC_CLZ_DY_CD = 'FRI' 
+																							OR DOC_CLZ_DY_CD = 'SAT' OR DOC_CLZ_DY_CD = 'SUN' THEN 
+																								( SELECT to_date(to_char(BKG.etd,'YYYY/MM/DD'),'YYYY/MM/DD')-CPY_NO + DOC_CLZ_DY_HRS/(24*60)  
+																								  FROM   COM_CPY_NO 
+																								  WHERE  CPY_NO BETWEEN 1 AND 7
+																									 AND    DOC_CLZ_DY_CD = TO_CHAR(BKG.etd - CPY_NO , 'DY', 'NLS_DATE_LANGUAGE = ENGLISH') ) 
+
+
+                                                                           END  DCT
+                                                                         , CLZ_SET.XCLD_HOL_FLG
+                                                                         , CLZ_SET.XCLD_SUN_FLG
+                                                                         , CLZ_SET.XCLD_SAT_FLG
+                                                                         , CLZ_SET.XCLD_FRI_FLG
+                                                                         , BKG.POL_NOD_CD
+																         , decode(clz_set.VSL_SLAN_CD, '*', 2, 1) ORD1
+																         , decode(clz_set.DEST_CNT_CD, '*', 2, 1) ORD2   
+                                                                      FROM bkg_DOC_CLZ_SET clz_set, 
+                                                                                (SELECT SKD.SLAN_CD SLAN_CD
+                                                                                         , SKD.VPS_ETB_DT etb
+                                                                                         , SKD.VPS_ETD_DT etd
+                                                                                         , SKD.vps_eta_dt eta
+                                                                                         , BK.pol_nod_cd
+                                                                                         , BK.pod_nod_cd
+                                                                                FROM BKG_BOOKING BK, BKG_VVD VVD, VSK_VSL_PORT_SKD SKD
+                                                                                WHERE BK.BKG_NO = VVD.BKG_NO
+                                                                                AND BK.POL_CD = VVD.POL_CD
+                                                                                AND VVD.VSL_PRE_PST_CD IN ('S', 'T')
+																				AND VVD.VSL_CD	   NOT IN ('COXX','COYY','COZZ')
+                                                                                AND VVD.VSL_CD     = SKD.VSL_CD
+                                                                                AND VVD.SKD_VOY_NO = SKD.SKD_VOY_NO
+                                                                                AND VVD.SKD_DIR_CD = SKD.SKD_DIR_CD
+                                                                                AND VVD.POL_CD     = SKD.VPS_PORT_CD
+                                                                                AND NVL(VVD.POL_CLPT_IND_SEQ, 1) = SKD.CLPT_IND_SEQ
+                                                                                AND BK.BKG_NO      = @[bkg_no]) BKG
+                                                                     WHERE clz_set.YD_CD       like substr(BKG.pol_nod_cd, 1, 5)||'%'
+                                                                       AND clz_set.VSL_SLAN_CD = decode(clz_set.VSL_SLAN_CD, '*', clz_set.VSL_SLAN_CD, BKG.SLAN_CD)
+                                                                       and clz_set.DEST_CNT_CD = decode(clz_set.DEST_CNT_CD, '*', clz_set.DEST_CNT_CD, SUBSTR(BKG.POD_NOD_CD, 1, 2))
+                                                                       AND clz_set.DELT_FLG    = 'N'
+																	 ORDER BY ORD1, ORD2
+                                                                    ) 
+														     WHERE ROWNUM = 1	
+                                                            ) DCT)
+                    end    
+     , upd_dt = sysdate
+     , upd_usr_id = NVL(@[usr_id], 'SYSTEM')
+ where bkg_no = @[bkg_no]  
+   and clz_tp_cd in ('O', 'F', 'T', 'R', 'D', 'E', 'M')			]]></sql>
+			<params>
+				<param name="bkg_no" type="12" value="SEL000090300" out="N"/>
+				<param name="from_dt" type="12" value="" out="N"/>
+				<param name="to_dt" type="12" value="" out="N"/>
+				<param name="usr_id" type="12" value="2006505" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

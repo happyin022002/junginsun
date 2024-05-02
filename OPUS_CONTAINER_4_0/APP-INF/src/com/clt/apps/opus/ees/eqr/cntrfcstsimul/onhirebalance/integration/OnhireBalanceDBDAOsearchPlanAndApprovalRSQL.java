@@ -1,0 +1,261 @@
+/*=========================================================
+*Copyright(c) 2014 CyberLogitec
+*@FileName : OnhireBalanceDBDAOsearchPlanAndApprovalRSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2014.04.01
+*@LastModifier : 신용찬
+*@LastVersion : 1.0
+* 2014.04.01 신용찬
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.ees.eqr.cntrfcstsimul.onhirebalance.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author YongChanShin
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class OnhireBalanceDBDAOsearchPlanAndApprovalRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * Retrieve LT/ST/OW Plan & Approval 
+	  * </pre>
+	  */
+	public OnhireBalanceDBDAOsearchPlanAndApprovalRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("fmperiod",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("lcc_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("toperiod_pkup",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("fmperiod_pkup",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("rcc_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("yrwk",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("yrwk_pkup",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("toperiod",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.clt.apps.opus.ees.eqr.cntrfcstsimul.onhirebalance.integration").append("\n"); 
+		query.append("FileName : OnhireBalanceDBDAOsearchPlanAndApprovalRSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("-- LT/ST/OW Plan & Approval " ).append("\n"); 
+		query.append("SELECT A.LSE_RQST_NO" ).append("\n"); 
+		query.append("      ,A.ONH_ORD_YR" ).append("\n"); 
+		query.append("      ,A.ONH_PLN_YRWK" ).append("\n"); 
+		query.append("      ,A.ONH_PKUP_YRWK" ).append("\n"); 
+		query.append("      ,A.RCC_CD" ).append("\n"); 
+		query.append("      ,A.LCC_CD" ).append("\n"); 
+		query.append("      ,A.EQ_LSTM_CD" ).append("\n"); 
+		query.append("      ,A.LSE_PLN_SEQ -- HIDDEN" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'D2', B.CNTR_QTY)),0) D2_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'D4', B.CNTR_QTY)),0) D4_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'D5', B.CNTR_QTY)),0) D5_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'D7', B.CNTR_QTY)),0) D7_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'R2', B.CNTR_QTY)),0) R2_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'R5', B.CNTR_QTY)),0) R5_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'R9', B.CNTR_QTY)),0) R9_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'O2', B.CNTR_QTY)),0) O2_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'O4', B.CNTR_QTY)),0) O4_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'O5', B.CNTR_QTY)),0) O5_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'S2', B.CNTR_QTY)),0) S2_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'S4', B.CNTR_QTY)),0) S4_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'F2', B.CNTR_QTY)),0) F2_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'F4', B.CNTR_QTY)),0) F4_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'F5', B.CNTR_QTY)),0) F5_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'A2', B.CNTR_QTY)),0) A2_QTY" ).append("\n"); 
+		query.append("      ,NVL(SUM(DECODE(B.CNTR_TPSZ_CD, 'A4', B.CNTR_QTY)),0) A4_QTY      " ).append("\n"); 
+		query.append("      " ).append("\n"); 
+		query.append("      ,C.CNTR_ONH_AUTH_NO" ).append("\n"); 
+		query.append("      ,C.MFT_YR" ).append("\n"); 
+		query.append("      ,C.AGMT_CTY_CD||C.AGMT_SEQ AGMT_NO" ).append("\n"); 
+		query.append("      ,C.ONH_LOC_CD" ).append("\n"); 
+		query.append("      " ).append("\n"); 
+		query.append("      ,CASE WHEN A.LSE_RQST_NO IS NULL     AND C.CNTR_ONH_AUTH_NO IS NULL     THEN 'S'" ).append("\n"); 
+		query.append("            WHEN A.LSE_RQST_NO IS NOT NULL AND C.CNTR_ONH_AUTH_NO IS NULL     THEN 'R'" ).append("\n"); 
+		query.append("            WHEN A.LSE_RQST_NO IS NOT NULL AND C.CNTR_ONH_AUTH_NO IS NOT NULL THEN 'A'" ).append("\n"); 
+		query.append("       END STS_CD  -- HIDDEN" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("      ,CASE WHEN A.LSE_RQST_NO IS NULL     AND C.CNTR_ONH_AUTH_NO IS NULL     THEN 'Saved'" ).append("\n"); 
+		query.append("            WHEN A.LSE_RQST_NO IS NOT NULL AND C.CNTR_ONH_AUTH_NO IS NULL     THEN 'Requested'" ).append("\n"); 
+		query.append("            WHEN A.LSE_RQST_NO IS NOT NULL AND C.CNTR_ONH_AUTH_NO IS NOT NULL THEN 'Approved'" ).append("\n"); 
+		query.append("       END STS_NM   " ).append("\n"); 
+		query.append("              " ).append("\n"); 
+		query.append("FROM  EQR_CTRL_ONH_PLN_APRO        A" ).append("\n"); 
+		query.append("    , EQR_CTRL_ONH_PLN_APRO_QTY    B" ).append("\n"); 
+		query.append("    ,(SELECT LSE_RQST_NO " ).append("\n"); 
+		query.append("           , CNTR_ONH_AUTH_NO" ).append("\n"); 
+		query.append("           , MFT_YR" ).append("\n"); 
+		query.append("           , AGMT_CTY_CD" ).append("\n"); 
+		query.append("           , AGMT_SEQ AGMT_NO" ).append("\n"); 
+		query.append("           , AGMT_SEQ" ).append("\n"); 
+		query.append("           , ONH_LOC_CD" ).append("\n"); 
+		query.append("      FROM   LSE_ONH_APRO " ).append("\n"); 
+		query.append("      WHERE  DELT_FLG  = 'N'  ) C" ).append("\n"); 
+		query.append("WHERE A.ONH_PLN_YRWK = B.ONH_PLN_YRWK" ).append("\n"); 
+		query.append("AND   A.LCC_CD       = B.LCC_CD" ).append("\n"); 
+		query.append("AND   A.EQ_LSTM_CD   = B.EQ_LSTM_CD" ).append("\n"); 
+		query.append("AND   A.LSE_PLN_SEQ  = B.LSE_PLN_SEQ    " ).append("\n"); 
+		query.append("AND   A.LSE_RQST_NO  = C.LSE_RQST_NO(+)" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("-- WEEK" ).append("\n"); 
+		query.append("#if(${div_flag} == '1') -- APPROVAL WEEK" ).append("\n"); 
+		query.append("AND   A.ONH_PLN_YRWK = @[yrwk]" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("#elseif(${div_flag} == '2') -- APPROVAL WEEK - PERIOD" ).append("\n"); 
+		query.append("  #if(${periodtp} == 'W') -- PERIOD WEEK" ).append("\n"); 
+		query.append("AND   A.ONH_PLN_YRWK BETWEEN @[fmperiod] AND @[toperiod]" ).append("\n"); 
+		query.append("  #else -- PERIOD MONTH" ).append("\n"); 
+		query.append("AND   A.ONH_PLN_YRWK BETWEEN ( SELECT MIN(PLN_YR)||MIN(PLN_WK) FMPERIOD " ).append("\n"); 
+		query.append("                               FROM   EQR_WK_PRD" ).append("\n"); 
+		query.append("                               WHERE  PLN_YR  = SUBSTR(@[fmperiod],1,4)" ).append("\n"); 
+		query.append("                               AND    PLN_MON = SUBSTR(@[fmperiod],5,6) )" ).append("\n"); 
+		query.append("                     AND     ( SELECT MIN(PLN_YR)||MAX(PLN_WK) TOPERIOD " ).append("\n"); 
+		query.append("                               FROM   EQR_WK_PRD" ).append("\n"); 
+		query.append("                               WHERE  PLN_YR  = SUBSTR(@[toperiod],1,4)" ).append("\n"); 
+		query.append("                               AND    PLN_MON = SUBSTR(@[toperiod],5,6) )" ).append("\n"); 
+		query.append("  #end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("#elseif(${div_flag} == '3') -- PICK-UP WEEK" ).append("\n"); 
+		query.append("AND   A.ONH_PKUP_YRWK = @[yrwk_pkup]" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("#elseif(${div_flag} == '4') -- PICK-UP WEEK - PERIOD" ).append("\n"); 
+		query.append("  #if(${periodtp_pkup} == 'W') -- PERIOD WEEK" ).append("\n"); 
+		query.append("AND   A.ONH_PKUP_YRWK BETWEEN @[fmperiod_pkup] AND @[toperiod_pkup]" ).append("\n"); 
+		query.append("  #else -- PERIOD MONTH" ).append("\n"); 
+		query.append("AND   A.ONH_PKUP_YRWK BETWEEN ( SELECT MIN(PLN_YR)||MIN(PLN_WK) FMPERIOD " ).append("\n"); 
+		query.append("                               FROM   EQR_WK_PRD" ).append("\n"); 
+		query.append("                               WHERE  PLN_YR  = SUBSTR(@[fmperiod_pkup],1,4)" ).append("\n"); 
+		query.append("                               AND    PLN_MON = SUBSTR(@[fmperiod_pkup],5,6) )" ).append("\n"); 
+		query.append("                     AND     ( SELECT MIN(PLN_YR)||MAX(PLN_WK) TOPERIOD " ).append("\n"); 
+		query.append("                               FROM   EQR_WK_PRD" ).append("\n"); 
+		query.append("                               WHERE  PLN_YR  = SUBSTR(@[toperiod_pkup],1,4)" ).append("\n"); 
+		query.append("                               AND    PLN_MON = SUBSTR(@[toperiod_pkup],5,6) )" ).append("\n"); 
+		query.append("  #end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("-- LOCATION" ).append("\n"); 
+		query.append("AND   A.LCC_CD IN (" ).append("\n"); 
+		query.append("                     SELECT LCC_CD " ).append("\n"); 
+		query.append("                     FROM MDM_EQ_ORZ_CHT" ).append("\n"); 
+		query.append("                     WHERE 1=1" ).append("\n"); 
+		query.append("#if(${rcc_cd} != '' && ${rcc_cd} != 'ALL')" ).append("\n"); 
+		query.append("                     AND   RCC_CD = @[rcc_cd] -- RCC" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("#if(${lcc_cd} != '' && ${lcc_cd} != 'ALL')" ).append("\n"); 
+		query.append("                     AND   LCC_CD = @[lcc_cd] -- LCC" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("                  )" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("-- STATUS" ).append("\n"); 
+		query.append("-- R" ).append("\n"); 
+		query.append("#if(${sts_cd} == 'R')" ).append("\n"); 
+		query.append("AND (A.LSE_RQST_NO IS NOT NULL AND C.CNTR_ONH_AUTH_NO IS NULL) " ).append("\n"); 
+		query.append("-- S" ).append("\n"); 
+		query.append("#elseif(${sts_cd} == 'S')" ).append("\n"); 
+		query.append("AND (A.LSE_RQST_NO IS NULL AND C.CNTR_ONH_AUTH_NO IS NULL) " ).append("\n"); 
+		query.append("---- A" ).append("\n"); 
+		query.append("#elseif(${sts_cd} == 'A')" ).append("\n"); 
+		query.append("AND (A.LSE_RQST_NO IS NOT NULL AND C.CNTR_ONH_AUTH_NO IS NOT NULL)                   " ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("GROUP BY A.LSE_RQST_NO" ).append("\n"); 
+		query.append("        ,A.ONH_ORD_YR" ).append("\n"); 
+		query.append("        ,A.ONH_PLN_YRWK" ).append("\n"); 
+		query.append("        ,A.ONH_PKUP_YRWK" ).append("\n"); 
+		query.append("        ,A.RCC_CD" ).append("\n"); 
+		query.append("        ,A.LCC_CD" ).append("\n"); 
+		query.append("        ,A.EQ_LSTM_CD" ).append("\n"); 
+		query.append("        ,A.LSE_PLN_SEQ" ).append("\n"); 
+		query.append("        ,C.CNTR_ONH_AUTH_NO" ).append("\n"); 
+		query.append("        ,C.MFT_YR" ).append("\n"); 
+		query.append("        ,C.AGMT_CTY_CD||C.AGMT_SEQ" ).append("\n"); 
+		query.append("        ,C.ONH_LOC_CD" ).append("\n"); 
+		query.append("        " ).append("\n"); 
+		query.append("ORDER BY A.ONH_PLN_YRWK" ).append("\n"); 
+		query.append("        ,A.RCC_CD" ).append("\n"); 
+		query.append("        ,A.LCC_CD" ).append("\n"); 
+		query.append("        ,A.EQ_LSTM_CD" ).append("\n"); 
+		query.append("        ,A.LSE_PLN_SEQ" ).append("\n"); 
+
+	}
+}

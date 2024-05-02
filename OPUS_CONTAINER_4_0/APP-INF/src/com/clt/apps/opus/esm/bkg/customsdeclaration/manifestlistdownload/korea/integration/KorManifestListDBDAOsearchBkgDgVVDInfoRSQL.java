@@ -1,0 +1,190 @@
+/*=========================================================
+*Copyright(c) 2013 CyberLogitec
+*@FileName : KorManifestListDBDAOsearchBkgDgVVDInfoRSQL.java
+*@FileTitle :
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2013.02.26
+*@LastModifier :
+*@LastVersion : 1.0
+* 2013.02.26
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.bkg.customsdeclaration.manifestlistdownload.korea.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class KorManifestListDBDAOsearchBkgDgVVDInfoRSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+
+	Logger log =Logger.getLogger(this.getClass());
+
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+
+	/**
+	  * <pre>
+	  * VVD 기본 정보를 Retrieve
+	  * </pre>
+	  */
+	public KorManifestListDBDAOsearchBkgDgVVDInfoRSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("vvd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("substance",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("io_bnd_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("total_cntr",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("job_code2",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("pol_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("pod_cd",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("total_wgt",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("user_id",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n");
+		query.append("Path : com.clt.apps.opus.esm.bkg.customsdeclaration.manifestlistdownload.korea.integration").append("\n");
+		query.append("FileName : KorManifestListDBDAOsearchBkgDgVVDInfoRSQL").append("\n");
+		query.append("*/").append("\n");
+	}
+
+	public String getSQL(){
+		return query.toString();
+	}
+
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("SELECT	MRN.MRN_NO||MRN.MRN_CHK_NO||CHR(9)||  /* MRN */" ).append("\n");
+		query.append("MRN.VSL_CD||MRN.SKD_VOY_NO||MRN.SKD_DIR_CD||CHR(9)||" ).append("\n");
+		query.append("0||CHR(9)||" ).append("\n");
+		query.append("MAX(" ).append("\n");
+		query.append("MRN.PORT_CD||CHR(9)||" ).append("\n");
+		query.append("MRN.IO_BND_CD||CHR(9)||" ).append("\n");
+		query.append("V.VSL_ENG_NM||CHR(9)|| /* VSL FULL NAME */" ).append("\n");
+		query.append("V.CALL_SGN_NO||CHR(9)||  /* CALL SIGN */" ).append("\n");
+		query.append("NULL||CHR(9)||	/*	SEND DATE	*/" ).append("\n");
+		query.append("NULL||CHR(9)||	/*	SEND DATE	*/" ).append("\n");
+		query.append("NULL||CHR(9)||	/*	DOC	NO	*/" ).append("\n");
+		query.append("DECODE(MRN.PORT_CD,'KRPUS', '020', 'KRINC', '030', 'KRPTK', '031', 'KRKAN', '622', 'KRGIN', '050')||CHR(9)|| /* AUTHORITY */" ).append("\n");
+		query.append("DECODE(MRN.IO_BND_CD, 'I', '01', '02')||CHR(9)|| /* IO */" ).append("\n");
+		query.append("0||CHR(9)||	/*	IN CNT	입항횟수	*/" ).append("\n");
+		query.append("TO_CHAR(ETA, 'YYYY-MM-DD HH24:MI')||CHR(9)|| /* ARRIVAL DATE */" ).append("\n");
+		query.append("'01'||CHR(9)||	/*	TRANS CODE	*/" ).append("\n");
+		query.append("DECODE(MRN.PORT_CD,'KRPUS','BS-G-4122','KRKAN','YS-G-2013','KRINC','IC-G-1048','KRPTK','PT-K-1107','KRUSN','US-G-0901','KRGIN','GI-G-1003','BS-G-4122')||CHR(9)|| /* Discharge  Company Code */" ).append("\n");
+		query.append("DECODE(MRN.PORT_CD,'KRPUS','㈜한진해운 신항만','KRKAN','㈜한진해운 광양터미널','KRINC','㈜ 인천컨테이너터미널','KRPTK','㈜ 평택컨테인너 터미널','KRUSN','㈜ 동방울산신항컨테이너 터미널','KRGIN','한진해운경인터미널','㈜한진해운 신항만')||CHR(9)|| /* DSCH Com */" ).append("\n");
+		query.append("@[total_cntr]||CHR(9)||	/*	TOTAL CNTR	*/" ).append("\n");
+		query.append("@[total_wgt]||CHR(9)||	/*	TOTAL WEIGHT	*/" ).append("\n");
+		query.append("DECODE(MRN.IO_BND_CD, 'I', '1', '2')||CHR(9)||	/*	JOB CODE 1	*/" ).append("\n");
+		query.append("@[job_code2]||CHR(9)||	/*	JOB CODE2	*/" ).append("\n");
+		query.append("TO_CHAR(ETA, 'YYYY-MM-DD HH24:MI')||CHR(9)||		/*	FROM DATE	*/" ).append("\n");
+		query.append("TO_CHAR(ETD, 'YYYY-MM-DD HH24:MI')||CHR(9)||		/*	TO DATE	*/" ).append("\n");
+		query.append("CASE WHEN MRN.IO_BND_CD = 'O' AND MRN.PORT_CD = 'KRPTK' THEN ''" ).append("\n");
+		query.append("ELSE PRE_PORT END ||CHR(9)||	/*	PREVIOUS PORT	*/" ).append("\n");
+		query.append("NULL||CHR(9)||		/*	PORT AREA		*/" ).append("\n");
+		query.append("NULL||CHR(9)||		/*	PORT ANCH		*/" ).append("\n");
+		query.append("NULL||CHR(9)||		/*	PORT DESC	*/" ).append("\n");
+		query.append("@[substance]||CHR(9)||		/*	SUBSTANCE	*/" ).append("\n");
+		query.append("SUI.USR_NM||' '||SUI.XTN_PHN_NO			/*	CONTACT	*/" ).append("\n");
+		query.append(")||CHR(9)||" ).append("\n");
+		query.append("@[pol_cd]||CHR(9)||		/* ADD 시킬경우 INDICATOR로 사용 */" ).append("\n");
+		query.append("@[pod_cd]||CHR(9)||		/* ADD 시킬경우 INDICATOR로 사용 */" ).append("\n");
+		query.append("MAX(DECODE(MRN.IO_BND_CD, 'I', TO_CHAR(ETA, 'YYYY-MM-DD HH24:MI'), TO_CHAR(ETD, 'YYYY-MM-DD HH24:MI')))||CHR(9)||0 DATA" ).append("\n");
+		query.append("FROM	BKG_CSTMS_KR_MF_REF_NO MRN, MDM_VSL_CNTR V, COM_USER SUI," ).append("\n");
+		query.append("(	SELECT	VPS.VSL_CD VSL, VPS.SKD_VOY_NO VOY, VPS.SKD_DIR_CD DIR," ).append("\n");
+		query.append("VPS.VPS_PORT_CD PORT,	VPS2.VPS_PORT_CD	PRE_PORT," ).append("\n");
+		query.append("VPS.VPS_ETA_DT ETA," ).append("\n");
+		query.append("VPS.VPS_ETD_DT	ETD" ).append("\n");
+		query.append("FROM	VSK_VSL_PORT_SKD  VPS, VSK_VSL_PORT_SKD  VPS2" ).append("\n");
+		query.append("WHERE	VPS.VSL_CD					=	SUBSTR(@[vvd],1,4)" ).append("\n");
+		query.append("AND		VPS.SKD_VOY_NO		     	=	SUBSTR(@[vvd],5,4)" ).append("\n");
+		query.append("AND		VPS.SKD_DIR_CD				=	SUBSTR(@[vvd],9,1)" ).append("\n");
+		query.append("AND		VPS.VPS_PORT_CD				=	DECODE(@[io_bnd_cd], 'O', @[pol_cd], @[pod_cd])" ).append("\n");
+		query.append("AND		NVL(VPS.SKD_CNG_STS_CD,' ')	<>	'S'" ).append("\n");
+		query.append("AND		(VPS.CLPT_IND_SEQ			=	'1' OR VPS.CLPT_IND_SEQ =   '2')" ).append("\n");
+		query.append("AND		VPS.VSL_CD					=	VPS2.VSL_CD(+)" ).append("\n");
+		query.append("AND		VPS.SKD_VOY_NO			    =	VPS2.SKD_VOY_NO(+)" ).append("\n");
+		query.append("AND		VPS.SKD_DIR_CD				=	VPS2.SKD_DIR_CD(+)" ).append("\n");
+		query.append("AND		VPS.CLPT_IND_SEQ			=	VPS2.CLPT_IND_SEQ(+)" ).append("\n");
+		query.append("AND		VPS.CLPT_SEQ	-	1	    =	VPS2.CLPT_SEQ(+)" ).append("\n");
+		query.append("AND		ROWNUM	=	1" ).append("\n");
+		query.append(")" ).append("\n");
+		query.append("WHERE	VSL				=	MRN.VSL_CD" ).append("\n");
+		query.append("AND		VOY				=	MRN.SKD_VOY_NO" ).append("\n");
+		query.append("AND		DIR				=	MRN.SKD_DIR_CD" ).append("\n");
+		query.append("AND		PORT			=	MRN.PORT_CD" ).append("\n");
+		query.append("AND		MRN.IO_BND_CD	=	@[io_bnd_cd]" ).append("\n");
+		query.append("AND		SUI.USR_ID		=	@[user_id]" ).append("\n");
+		query.append("AND  	VSL				=	V.VSL_CD" ).append("\n");
+		query.append("GROUP BY MRN.MRN_NO, MRN.MRN_CHK_NO, MRN.VSL_CD, MRN.SKD_VOY_NO, MRN.SKD_DIR_CD" ).append("\n");
+
+	}
+}

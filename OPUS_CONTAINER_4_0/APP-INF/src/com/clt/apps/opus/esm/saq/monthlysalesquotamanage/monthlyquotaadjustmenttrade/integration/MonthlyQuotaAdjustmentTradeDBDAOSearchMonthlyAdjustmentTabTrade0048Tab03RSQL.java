@@ -1,0 +1,894 @@
+/*=========================================================
+*Copyright(c) 2015 CyberLogitec
+*@FileName : MonthlyQuotaAdjustmentTradeDBDAOSearchMonthlyAdjustmentTabTrade0048Tab03RSQL.java
+*@FileTitle : 
+*Open Issues :
+*Change history :
+*@LastModifyDate : 2015.01.05
+*@LastModifier : 
+*@LastVersion : 1.0
+* 2015.01.05 
+* 1.0 Creation
+=========================================================*/
+package com.clt.apps.opus.esm.saq.monthlysalesquotamanage.monthlyquotaadjustmenttrade.integration;
+
+import java.util.HashMap;
+import org.apache.log4j.Logger;
+import com.clt.framework.support.db.ISQLTemplate;
+
+/**
+ *
+ * @author 
+ * @see DAO 참조
+ * @since J2EE 1.6
+ */
+
+public class MonthlyQuotaAdjustmentTradeDBDAOSearchMonthlyAdjustmentTabTrade0048Tab03RSQL implements ISQLTemplate{
+
+	private StringBuffer query = new StringBuffer();
+	
+	Logger log =Logger.getLogger(this.getClass());
+	
+	/** Parameters definition in params/param elements */
+	private HashMap<String,String[]> params = null;
+	
+	/**
+	  * <pre>
+	  * MonthlyQuotaAdjustmentTrade 상단 TAB RHQ/Lane의 데이타 모델에 해당되는 값을 불러온다.
+	  * History : 2011.02.15 김종준 [T-선사] YEARLY QTA 부분 삭제
+	  * </pre>
+	  */
+	public MonthlyQuotaAdjustmentTradeDBDAOSearchMonthlyAdjustmentTabTrade0048Tab03RSQL(){
+		setQuery();
+		params = new HashMap<String,String[]>();
+		String tmp = null;
+		String[] arrTmp = null;
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("bse_quarter",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("pfmc_to_yr_mon",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("trade",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("pfmc_to_yr_qtr",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("pfmc_fr_yr_qtr",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("glineVerNo",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("slsFcastPubNo",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("year",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("pfmc_fr_yr_mon",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("bef_yr_qtr",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("mqtaMdlVerNo",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("bound",new String[]{arrTmp[0],arrTmp[1]});
+
+		tmp = java.sql.Types.VARCHAR + ",N";
+		arrTmp = tmp.split(",");
+		if(arrTmp.length !=2){
+			throw new IllegalArgumentException();
+		}
+		params.put("mQtaVerNo",new String[]{arrTmp[0],arrTmp[1]});
+
+		query.append("/*").append("\n"); 
+		query.append("Path : com.clt.apps.opus.esm.saq.monthlysalesquotamanage.monthlyquotaadjustmenttrade.integration").append("\n"); 
+		query.append("FileName : MonthlyQuotaAdjustmentTradeDBDAOSearchMonthlyAdjustmentTabTrade0048Tab03RSQL").append("\n"); 
+		query.append("*/").append("\n"); 
+	}
+	
+	public String getSQL(){
+		return query.toString();
+	}
+	
+	public HashMap<String,String[]> getParams() {
+		return params;
+	}
+
+	/**
+	 * Query 생성
+	 */
+	public void setQuery(){
+		query.append("WITH TMP_INPUT_PARMAS AS" ).append("\n"); 
+		query.append("    (SELECT" ).append("\n"); 
+		query.append("            @[year] AS BSE_YR," ).append("\n"); 
+		query.append("            @[bse_quarter] AS BSE_QTR_CD," ).append("\n"); 
+		query.append("            @[bef_yr_qtr] AS BEF_YR_QTR," ).append("\n"); 
+		query.append("            TO_CHAR(ADD_MONTHS(TO_DATE(@[year]||DECODE(@[bse_quarter],'1Q','01','2Q','04','3Q','07','4Q','10'), 'YYYYMM'), -1), 'YYYYMM') AS BEF_YR_MON," ).append("\n"); 
+		query.append("            TO_CHAR(ADD_MONTHS(TO_DATE(@[year]||DECODE(@[bse_quarter],'1Q','01','2Q','04','3Q','07','4Q','10'), 'YYYYMM'), 1), 'YYYYMM') AS ADD1_YR_MON," ).append("\n"); 
+		query.append("            TO_CHAR(ADD_MONTHS(TO_DATE(@[year]||DECODE(@[bse_quarter],'1Q','01','2Q','04','3Q','07','4Q','10'), 'YYYYMM'), 2), 'YYYYMM') AS ADD2_YR_MON," ).append("\n"); 
+		query.append("            @[pfmc_fr_yr_mon] AS PFMC_FR_YR_MON," ).append("\n"); 
+		query.append("            @[pfmc_to_yr_mon] AS PFMC_TO_YR_MON," ).append("\n"); 
+		query.append("            @[pfmc_fr_yr_qtr] AS PFMC_FR_YR_QTR," ).append("\n"); 
+		query.append("            @[pfmc_to_yr_qtr] AS PFMC_TO_YR_QTR," ).append("\n"); 
+		query.append("            @[bound] AS DIR_CD," ).append("\n"); 
+		query.append("            @[trade] AS TRD_CD," ).append("\n"); 
+		query.append("            @[slsFcastPubNo] AS SLS_FCAST_PUB_NO," ).append("\n"); 
+		query.append("            @[mqtaMdlVerNo] AS MQTA_MDL_VER_NO," ).append("\n"); 
+		query.append("            @[glineVerNo] AS GLINE_VER_NO," ).append("\n"); 
+		query.append("            @[mQtaVerNo] AS MQTA_VER_NO" ).append("\n"); 
+		query.append("     FROM   DUAL )" ).append("\n"); 
+		query.append("SELECT" ).append("\n"); 
+		query.append("    MIN(UNI.KEY) AS KEY," ).append("\n"); 
+		query.append("    UNI.SLEVEL," ).append("\n"); 
+		query.append("    UNI.CTRT_RHQ_CD," ).append("\n"); 
+		query.append("    UNI.SUB_TRD_CD," ).append("\n"); 
+		query.append("    CASE WHEN UNI.SUB_TRD_CD = 'TOTAL' AND UNI.RLANE_CD = 'TOTAL'" ).append("\n"); 
+		query.append("        THEN ' ' ELSE DECODE(DIR.DIR_CD,'',UNI.RLANE_CD,UNI.RLANE_CD||' - '||DIR.DIR_CD) END AS RLANE_CD," ).append("\n"); 
+		query.append("    DIR.DIR_CD CONV_DIR_CD," ).append("\n"); 
+		query.append("    ITM.ROW_SEQ," ).append("\n"); 
+		query.append("    REPLACE(ITM.TEXT, '(P)', '') AS ITEM_TEXT," ).append("\n"); 
+		query.append("    DECODE( ITM.CODE," ).append("\n"); 
+		query.append("             '05', REPLACE(ITM.TEXT, '(P)', '')||'*', -- G.REV" ).append("\n"); 
+		query.append("             '07', REPLACE(ITM.TEXT, '(P)', '')||'*', -- CM" ).append("\n"); 
+		query.append("             '08', REPLACE(ITM.TEXT, '(P)', '')||'*', -- CM" ).append("\n"); 
+		query.append("             '11', REPLACE(ITM.TEXT, '(P)', '')||'*', -- OP" ).append("\n"); 
+		query.append("             '12', REPLACE(ITM.TEXT, '(P)', '')||'*', -- OP" ).append("\n"); 
+		query.append("             REPLACE(ITM.TEXT, '(P)', '') ) AS ITEM," ).append("\n"); 
+		query.append("    MIN(CASE WHEN UNI.GUBUN = 'PFMC_QTA' AND UNI.MON_SEQ = '0' THEN" ).append("\n"); 
+		query.append("        DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                 '02', UNI.TOT_VOY," ).append("\n"); 
+		query.append("                 '03', UNI.TOT_LOD," ).append("\n"); 
+		query.append("                 '05', UNI.TOT_REV/1000," ).append("\n"); 
+		query.append("                 '06', UNI.TOT_RPB," ).append("\n"); 
+		query.append("                 '07', UNI.TOT_CM/1000," ).append("\n"); 
+		query.append("                 '08', UNI.TOT_RA_CM/1000," ).append("\n"); 
+		query.append("                 '09', UNI.TOT_CMB," ).append("\n"); 
+		query.append("                 '10', UNI.TOT_RA_CMB," ).append("\n"); 
+		query.append("                 '11', UNI.TOT_OP/1000," ).append("\n"); 
+		query.append("                 '12', UNI.TOT_RA_OP/1000," ).append("\n"); 
+		query.append("                 '13', UNI.TOT_OPB," ).append("\n"); 
+		query.append("                 '14', UNI.TOT_RA_OPB )" ).append("\n"); 
+		query.append("        END) AS PFMC_QTA," ).append("\n"); 
+		query.append("    MIN(CASE WHEN UNI.GUBUN = 'PFMC_SMR' AND UNI.MON_SEQ = '0' THEN" ).append("\n"); 
+		query.append("        DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                 '02', UNI.TOT_VOY," ).append("\n"); 
+		query.append("                 '03', UNI.TOT_LOD," ).append("\n"); 
+		query.append("                 '05', UNI.TOT_REV/1000," ).append("\n"); 
+		query.append("                 '06', UNI.TOT_RPB," ).append("\n"); 
+		query.append("                 '07', UNI.TOT_CM/1000," ).append("\n"); 
+		query.append("                 '08', UNI.TOT_RA_CM/1000," ).append("\n"); 
+		query.append("                 '09', UNI.TOT_CMB," ).append("\n"); 
+		query.append("                 '10', UNI.TOT_RA_CMB," ).append("\n"); 
+		query.append("                 '11', UNI.TOT_OP/1000," ).append("\n"); 
+		query.append("                 '12', UNI.TOT_RA_OP/1000," ).append("\n"); 
+		query.append("                 '13', UNI.TOT_OPB," ).append("\n"); 
+		query.append("                 '14', UNI.TOT_RA_OPB )" ).append("\n"); 
+		query.append("        END) AS PFMC_SMR," ).append("\n"); 
+		query.append("    MIN(CASE WHEN UNI.GUBUN = 'MONTHLY' AND UNI.MON_SEQ = '0' THEN" ).append("\n"); 
+		query.append("        DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                 '02', UNI.TOT_VOY," ).append("\n"); 
+		query.append("                 '03', UNI.TOT_LOD," ).append("\n"); 
+		query.append("                 '05', UNI.TOT_REV/1000," ).append("\n"); 
+		query.append("                 '06', UNI.TOT_RPB," ).append("\n"); 
+		query.append("                 '07', UNI.TOT_CM/1000," ).append("\n"); 
+		query.append("                 '08', UNI.TOT_RA_CM/1000," ).append("\n"); 
+		query.append("                 '09', UNI.TOT_CMB," ).append("\n"); 
+		query.append("                 '10', UNI.TOT_RA_CMB," ).append("\n"); 
+		query.append("                 '11', UNI.TOT_OP/1000," ).append("\n"); 
+		query.append("                 '12', UNI.TOT_RA_OP/1000," ).append("\n"); 
+		query.append("                 '13', UNI.TOT_OPB," ).append("\n"); 
+		query.append("                 '14', UNI.TOT_RA_OPB )" ).append("\n"); 
+		query.append("        END) AS RECENT_MON," ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("      DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                '02', SUM( DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_VOY,0))," ).append("\n"); 
+		query.append("                '03', SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_LOD,0))," ).append("\n"); 
+		query.append("                '05', SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_REV,0))/1000," ).append("\n"); 
+		query.append("                '06', DECODE(SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_REV,0))/SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '07', SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_CM,0))/1000," ).append("\n"); 
+		query.append("                '08', 0," ).append("\n"); 
+		query.append("                '09', DECODE(SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_CM,0))/SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '10', 0," ).append("\n"); 
+		query.append("                '11', SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_OP,0))/1000," ).append("\n"); 
+		query.append("                '12', SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_RA_OP,0))/1000," ).append("\n"); 
+		query.append("                '13', DECODE(SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_OP,0))/SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '14', DECODE(SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_RA_OP,0))/SUM(DECODE(UNI.GUBUN , 'FORECAST',UNI.TOT_LOD,0)))" ).append("\n"); 
+		query.append("    )" ).append("\n"); 
+		query.append("    AS FORECAST_TOT," ).append("\n"); 
+		query.append("    DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                '02', SUM( DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_VOY,0))," ).append("\n"); 
+		query.append("                '03', SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_LOD,0))," ).append("\n"); 
+		query.append("                '05', SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_REV,0))/1000," ).append("\n"); 
+		query.append("                '06', DECODE(SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_REV,0))/SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '07', SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_CM,0))/1000," ).append("\n"); 
+		query.append("                '08', SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_RA_CM,0))/1000," ).append("\n"); 
+		query.append("                '09', DECODE(SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_CM,0))/SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '10', DECODE(SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_RA_CM,0))/SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '11', SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_OP,0))/1000," ).append("\n"); 
+		query.append("                '12', SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_RA_OP,0))/1000," ).append("\n"); 
+		query.append("                '13', DECODE(SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_OP,0))/SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '14', DECODE(SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_RA_OP,0))/SUM(DECODE(UNI.GUBUN , 'MODEL',UNI.TOT_LOD,0)))" ).append("\n"); 
+		query.append("    )" ).append("\n"); 
+		query.append("    AS MODEL_TOT," ).append("\n"); 
+		query.append("    DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                '02', SUM( DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_VOY,0))," ).append("\n"); 
+		query.append("                '03', SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_LOD,0))," ).append("\n"); 
+		query.append("                '05', SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_REV,0))/1000," ).append("\n"); 
+		query.append("                '06', DECODE(SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_REV,0))/SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '07', SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_CM,0))/1000," ).append("\n"); 
+		query.append("                '08', SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_RA_CM,0))/1000," ).append("\n"); 
+		query.append("                '09', DECODE(SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_CM,0))/SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '10', DECODE(SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_RA_CM,0))/SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '11', SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_OP,0))/1000," ).append("\n"); 
+		query.append("                '12', SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_RA_OP,0))/1000," ).append("\n"); 
+		query.append("                '13', DECODE(SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_OP,0))/SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '14', DECODE(SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_RA_OP,0))/SUM(DECODE(UNI.GUBUN , 'TRADE',UNI.TOT_LOD,0)))" ).append("\n"); 
+		query.append("    )" ).append("\n"); 
+		query.append("    AS TRADE_TOT," ).append("\n"); 
+		query.append("    DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                '02', SUM( DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_VOY,0))," ).append("\n"); 
+		query.append("                '03', SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_LOD,0))," ).append("\n"); 
+		query.append("                '05', SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_REV,0))/1000," ).append("\n"); 
+		query.append("                '06', DECODE(SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_REV,0))/SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '07', SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_CM,0))/1000," ).append("\n"); 
+		query.append("                '08', SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_RA_CM,0))/1000," ).append("\n"); 
+		query.append("                '09', DECODE(SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_CM,0))/SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '10', DECODE(SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_RA_CM,0))/SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '11', SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_OP,0))/1000," ).append("\n"); 
+		query.append("                '12', SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_RA_OP,0))/1000," ).append("\n"); 
+		query.append("                '13', DECODE(SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_OP,0))/SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '14', DECODE(SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_RA_OP,0))/SUM(DECODE(UNI.GUBUN , 'RHQ',UNI.TOT_LOD,0)))" ).append("\n"); 
+		query.append("    )" ).append("\n"); 
+		query.append("    AS RHQ_TOT," ).append("\n"); 
+		query.append("    DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                '02', SUM( DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_VOY,0))," ).append("\n"); 
+		query.append("                '03', SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_LOD,0))," ).append("\n"); 
+		query.append("                '05', SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_REV,0))/1000," ).append("\n"); 
+		query.append("                '06', DECODE(SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_REV,0))/SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '07', SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_CM,0))/1000," ).append("\n"); 
+		query.append("                '08', SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_RA_CM,0))/1000," ).append("\n"); 
+		query.append("                '09', DECODE(SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_CM,0))/SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '10', DECODE(SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_RA_CM,0))/SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '11', SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_OP,0))/1000," ).append("\n"); 
+		query.append("                '12', SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_RA_OP,0))/1000," ).append("\n"); 
+		query.append("                '13', DECODE(SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_OP,0))/SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '14', DECODE(SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_RA_OP,0))/SUM(DECODE(UNI.GUBUN , 'FINAL',UNI.TOT_LOD,0)))" ).append("\n"); 
+		query.append("    )" ).append("\n"); 
+		query.append("    AS FINAL_TOT," ).append("\n"); 
+		query.append("    DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                '02',  SUM( DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_VOY,0))," ).append("\n"); 
+		query.append("                '03', SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_LOD,0))," ).append("\n"); 
+		query.append("                '05', SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_REV,0))/1000," ).append("\n"); 
+		query.append("                '06', DECODE(SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_REV,0))/SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '07', SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_CM,0))/1000," ).append("\n"); 
+		query.append("                '08', SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_RA_CM,0))/1000," ).append("\n"); 
+		query.append("                '09', DECODE(SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_CM,0))/SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '10', DECODE(SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_RA_CM,0))/SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '11', SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_OP,0))/1000," ).append("\n"); 
+		query.append("                '12', SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_RA_OP,0))/1000," ).append("\n"); 
+		query.append("                '13', DECODE(SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_OP,0))/SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_LOD,0)))," ).append("\n"); 
+		query.append("                '14', DECODE(SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_LOD,0)),0,0,  SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_RA_OP,0))/SUM(DECODE(UNI.GUBUN , 'ADJUSTED',UNI.TOT_LOD,0)))" ).append("\n"); 
+		query.append("    )" ).append("\n"); 
+		query.append("    AS ADJUSTED_TOT" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("#foreach( $key in ${monthseq})" ).append("\n"); 
+		query.append("    ,MIN(CASE WHEN UNI.GUBUN = 'FORECAST' AND UNI.MON_SEQ = $key THEN" ).append("\n"); 
+		query.append("        DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                 '02', UNI.TOT_VOY," ).append("\n"); 
+		query.append("                 '03', UNI.TOT_LOD," ).append("\n"); 
+		query.append("                 '05', UNI.TOT_REV/1000," ).append("\n"); 
+		query.append("                 '06', UNI.TOT_RPB," ).append("\n"); 
+		query.append("                 '07', UNI.TOT_CM/1000," ).append("\n"); 
+		query.append("                 '08', 0," ).append("\n"); 
+		query.append("                 '09', UNI.TOT_CMB," ).append("\n"); 
+		query.append("                 '10', 0," ).append("\n"); 
+		query.append("                 '11', UNI.TOT_OP/1000," ).append("\n"); 
+		query.append("                 '12', UNI.TOT_RA_OP/1000," ).append("\n"); 
+		query.append("                 '13', UNI.TOT_OPB," ).append("\n"); 
+		query.append("                 '14', UNI.TOT_RA_OPB )" ).append("\n"); 
+		query.append("        END) AS FCAST_$key," ).append("\n"); 
+		query.append("    MIN(CASE WHEN UNI.GUBUN = 'MODEL' AND UNI.MON_SEQ = $key THEN" ).append("\n"); 
+		query.append("        DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                 '02', UNI.TOT_VOY," ).append("\n"); 
+		query.append("                 '03', UNI.TOT_LOD," ).append("\n"); 
+		query.append("                 '05', UNI.TOT_REV/1000," ).append("\n"); 
+		query.append("                 '06', UNI.TOT_RPB," ).append("\n"); 
+		query.append("                 '07', UNI.TOT_CM/1000," ).append("\n"); 
+		query.append("                 '08', UNI.TOT_RA_CM/1000," ).append("\n"); 
+		query.append("                 '09', UNI.TOT_CMB," ).append("\n"); 
+		query.append("                 '10', UNI.TOT_RA_CMB," ).append("\n"); 
+		query.append("                 '11', UNI.TOT_OP/1000," ).append("\n"); 
+		query.append("                 '12', UNI.TOT_RA_OP/1000," ).append("\n"); 
+		query.append("                 '13', UNI.TOT_OPB," ).append("\n"); 
+		query.append("                 '14', UNI.TOT_RA_OPB )" ).append("\n"); 
+		query.append("        END) AS MDL_RST_$key," ).append("\n"); 
+		query.append("    MIN(CASE WHEN UNI.GUBUN = 'TRADE' AND UNI.MON_SEQ = $key THEN" ).append("\n"); 
+		query.append("        DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                 '02', UNI.TOT_VOY," ).append("\n"); 
+		query.append("                 '03', UNI.TOT_LOD," ).append("\n"); 
+		query.append("                 '05', UNI.TOT_REV/1000," ).append("\n"); 
+		query.append("                 '06', UNI.TOT_RPB," ).append("\n"); 
+		query.append("                 '07', UNI.TOT_CM/1000," ).append("\n"); 
+		query.append("                 '08', UNI.TOT_RA_CM/1000," ).append("\n"); 
+		query.append("                 '09', UNI.TOT_CMB," ).append("\n"); 
+		query.append("                 '10', UNI.TOT_RA_CMB," ).append("\n"); 
+		query.append("                 '11', UNI.TOT_OP/1000," ).append("\n"); 
+		query.append("                 '12', UNI.TOT_RA_OP/1000," ).append("\n"); 
+		query.append("                 '13', UNI.TOT_OPB," ).append("\n"); 
+		query.append("                 '14', UNI.TOT_RA_OPB )" ).append("\n"); 
+		query.append("        END) AS TRADE_$key," ).append("\n"); 
+		query.append("    MIN(CASE WHEN UNI.GUBUN = 'RHQ' AND UNI.MON_SEQ = $key THEN" ).append("\n"); 
+		query.append("        DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                 '02', UNI.TOT_VOY," ).append("\n"); 
+		query.append("                 '03', UNI.TOT_LOD," ).append("\n"); 
+		query.append("                 '05', UNI.TOT_REV/1000," ).append("\n"); 
+		query.append("                 '06', UNI.TOT_RPB," ).append("\n"); 
+		query.append("                 '07', UNI.TOT_CM/1000," ).append("\n"); 
+		query.append("                 '08', UNI.TOT_RA_CM/1000," ).append("\n"); 
+		query.append("                 '09', UNI.TOT_CMB," ).append("\n"); 
+		query.append("                 '10', UNI.TOT_RA_CMB," ).append("\n"); 
+		query.append("                 '11', UNI.TOT_OP/1000," ).append("\n"); 
+		query.append("                 '12', UNI.TOT_RA_OP/1000," ).append("\n"); 
+		query.append("                 '13', UNI.TOT_OPB," ).append("\n"); 
+		query.append("                 '14', UNI.TOT_RA_OPB )" ).append("\n"); 
+		query.append("        END) AS RHQ_$key," ).append("\n"); 
+		query.append("    MIN(CASE WHEN UNI.GUBUN = 'FINAL' AND UNI.MON_SEQ = $key THEN" ).append("\n"); 
+		query.append("        DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                 '02', UNI.TOT_VOY," ).append("\n"); 
+		query.append("                 '03', UNI.TOT_LOD," ).append("\n"); 
+		query.append("                 '05', UNI.TOT_REV/1000," ).append("\n"); 
+		query.append("                 '06', UNI.TOT_RPB," ).append("\n"); 
+		query.append("                 '07', UNI.TOT_CM/1000," ).append("\n"); 
+		query.append("                 '08', UNI.TOT_RA_CM/1000," ).append("\n"); 
+		query.append("                 '09', UNI.TOT_CMB," ).append("\n"); 
+		query.append("                 '10', UNI.TOT_RA_CMB," ).append("\n"); 
+		query.append("                 '11', UNI.TOT_OP/1000," ).append("\n"); 
+		query.append("                 '12', UNI.TOT_RA_OP/1000," ).append("\n"); 
+		query.append("                 '13', UNI.TOT_OPB," ).append("\n"); 
+		query.append("                 '14', UNI.TOT_RA_OPB )" ).append("\n"); 
+		query.append("        END) AS FINAL_$key," ).append("\n"); 
+		query.append("    MIN(CASE WHEN UNI.GUBUN = 'ADJUSTED' AND UNI.MON_SEQ = $key THEN" ).append("\n"); 
+		query.append("        DECODE( ITM.CODE," ).append("\n"); 
+		query.append("                 '02', UNI.TOT_VOY," ).append("\n"); 
+		query.append("                 '03', UNI.TOT_LOD," ).append("\n"); 
+		query.append("                 '05', UNI.TOT_REV/1000," ).append("\n"); 
+		query.append("                 '06', UNI.TOT_RPB," ).append("\n"); 
+		query.append("                 '07', UNI.TOT_CM/1000," ).append("\n"); 
+		query.append("                 '08', UNI.TOT_RA_CM/1000," ).append("\n"); 
+		query.append("                 '09', UNI.TOT_CMB," ).append("\n"); 
+		query.append("                 '10', UNI.TOT_RA_CMB," ).append("\n"); 
+		query.append("                 '11', UNI.TOT_OP/1000," ).append("\n"); 
+		query.append("                 '12', UNI.TOT_RA_OP/1000," ).append("\n"); 
+		query.append("                 '13', UNI.TOT_OPB," ).append("\n"); 
+		query.append("                 '14', UNI.TOT_RA_OPB )" ).append("\n"); 
+		query.append("        END) AS ADJUSTED_$key" ).append("\n"); 
+		query.append("#end" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("FROM (" ).append("\n"); 
+		query.append("    SELECT  INTG_CD_VAL_CTNT AS CODE," ).append("\n"); 
+		query.append("            INTG_CD_VAL_DP_DESC AS TEXT," ).append("\n"); 
+		query.append("            INTG_CD_VAL_DP_SEQ AS ROW_SEQ" ).append("\n"); 
+		query.append("    FROM  COM_INTG_CD_DTL" ).append("\n"); 
+		query.append("    WHERE INTG_CD_ID = 'CD01389'    AND     INTG_CD_VAL_CTNT NOT IN ('01')" ).append("\n"); 
+		query.append("    ) ITM, (" ).append("\n"); 
+		query.append("    SELECT -- Performance Quota" ).append("\n"); 
+		query.append("        QTA.GUBUN," ).append("\n"); 
+		query.append("        QTA.KEY," ).append("\n"); 
+		query.append("        QTA.SLEVEL," ).append("\n"); 
+		query.append("        QTA.CTRT_RHQ_CD," ).append("\n"); 
+		query.append("        QTA.SUB_TRD_CD," ).append("\n"); 
+		query.append("        QTA.RLANE_CD," ).append("\n"); 
+		query.append("        QTA.MON_SEQ," ).append("\n"); 
+		query.append("        QTA.BSE_MON," ).append("\n"); 
+		query.append("        QTA.TOT_VOY," ).append("\n"); 
+		query.append("        QTA.TOT_LOD," ).append("\n"); 
+		query.append("        QTA.TOT_REV," ).append("\n"); 
+		query.append("        QTA.TOT_RPB," ).append("\n"); 
+		query.append("        QTA.TOT_CM," ).append("\n"); 
+		query.append("        QTA.TOT_RA_CM," ).append("\n"); 
+		query.append("        QTA.TOT_CMB," ).append("\n"); 
+		query.append("        QTA.TOT_RA_CMB," ).append("\n"); 
+		query.append("        QTA.TOT_OP ," ).append("\n"); 
+		query.append("        QTA.TOT_RA_OP," ).append("\n"); 
+		query.append("        QTA.TOT_OPB ," ).append("\n"); 
+		query.append("        QTA.TOT_RA_OPB" ).append("\n"); 
+		query.append("    FROM TMP_INPUT_PARMAS INP, (" ).append("\n"); 
+		query.append("			SELECT -- Performance Quota" ).append("\n"); 
+		query.append("        		   'PFMC_QTA' AS GUBUN," ).append("\n"); 
+		query.append("        		   NVL(DIR.CONV_DIR_CD, QTA.DIR_CD) DIR_CD," ).append("\n"); 
+		query.append("        		   MIN(QTA.RHQ_CD||VVD.SUB_TRD_CD||DECODE(QTA.RLANE_CD,'RBCCO','ZZ',SUBSTR(QTA.RLANE_CD,-2))||QTA.RLANE_CD) AS KEY," ).append("\n"); 
+		query.append("        		   DECODE(VVD.SUB_TRD_CD, '', '1'," ).append("\n"); 
+		query.append("           	   	DECODE(QTA.RLANE_CD, '', '2', '3'))" ).append("\n"); 
+		query.append("            	   	AS SLEVEL," ).append("\n"); 
+		query.append("        		   DECODE(GROUPING(QTA.RHQ_CD), 1, 'TOTAL', QTA.RHQ_CD) AS CTRT_RHQ_CD," ).append("\n"); 
+		query.append("        		   DECODE(GROUPING(VVD.SUB_TRD_CD), 1, 'TOTAL', VVD.SUB_TRD_CD) AS SUB_TRD_CD," ).append("\n"); 
+		query.append("        		   DECODE(GROUPING(QTA.RLANE_CD), 1, 'TOTAL', QTA.RLANE_CD) AS RLANE_CD," ).append("\n"); 
+		query.append("        		   '0' AS MON_SEQ," ).append("\n"); 
+		query.append("        		   '00' AS BSE_MON," ).append("\n"); 
+		query.append("        		   COUNT(DISTINCT QTA.VSL_CD||QTA.SKD_VOY_NO||QTA.SKD_DIR_CD) AS TOT_VOY," ).append("\n"); 
+		query.append("        		   SUM(QTA.LOD_QTY) AS TOT_LOD," ).append("\n"); 
+		query.append("        		   SUM(QTA.GRS_RPB_REV*QTA.LOD_QTY) AS TOT_REV," ).append("\n"); 
+		query.append("        		   SUM(QTA.GRS_RPB_REV*QTA.LOD_QTY)/SUM(QTA.LOD_QTY) AS TOT_RPB," ).append("\n"); 
+		query.append("        		   SUM((QTA.GRS_RPB_REV-QTA.CM_UC_AMT)*QTA.LOD_QTY) AS TOT_CM," ).append("\n"); 
+		query.append("        		   SUM((QTA.GRS_RPB_REV-QTA.RA_CM_UC_AMT)*QTA.LOD_QTY) AS TOT_RA_CM," ).append("\n"); 
+		query.append("        		   SUM((QTA.GRS_RPB_REV-QTA.CM_UC_AMT)*QTA.LOD_QTY)/SUM(QTA.LOD_QTY) AS TOT_CMB," ).append("\n"); 
+		query.append("        		   SUM((QTA.GRS_RPB_REV-QTA.RA_CM_UC_AMT)*QTA.LOD_QTY)" ).append("\n"); 
+		query.append("            	   	   /SUM(QTA.LOD_QTY) AS TOT_RA_CMB ," ).append("\n"); 
+		query.append("        		   SUM((QTA.GRS_RPB_REV-QTA.OPFIT_UC_AMT)*QTA.LOD_QTY    ) AS TOT_OP ," ).append("\n"); 
+		query.append("        		   SUM((QTA.GRS_RPB_REV-QTA.RA_OPFIT_UC_AMT)*QTA.LOD_QTY ) AS TOT_RA_OP," ).append("\n"); 
+		query.append("        		   SUM((QTA.GRS_RPB_REV-QTA.OPFIT_UC_AMT)*QTA.LOD_QTY    )" ).append("\n"); 
+		query.append("            	   	   /SUM(QTA.LOD_QTY) AS TOT_OPB ," ).append("\n"); 
+		query.append("        		   SUM((QTA.GRS_RPB_REV-QTA.RA_OPFIT_UC_AMT)*QTA.LOD_QTY )" ).append("\n"); 
+		query.append("            	   	   /SUM(QTA.LOD_QTY) AS TOT_RA_OPB" ).append("\n"); 
+		query.append("			FROM  (" ).append("\n"); 
+		query.append("            			SELECT DISTINCT" ).append("\n"); 
+		query.append("                   		   RLS.MQTA_RLSE_VER_NO AS MQTA_RLSE_VER_NO," ).append("\n"); 
+		query.append("                   		   RLS.BSE_QTR_CD AS BSE_QTR_CD" ).append("\n"); 
+		query.append("            			FROM   SAQ_MON_QTA_RLSE RLS," ).append("\n"); 
+		query.append("                   		   TMP_INPUT_PARMAS INP" ).append("\n"); 
+		query.append("               		WHERE  RLS.BSE_YR||RLS.BSE_QTR_CD BETWEEN INP.PFMC_FR_YR_QTR" ).append("\n"); 
+		query.append("                                                        AND     INP.PFMC_TO_YR_QTR" ).append("\n"); 
+		query.append("            	  		AND    RLS.QTA_RLSE_STS_CD = 'R'" ).append("\n"); 
+		query.append("          	  ) RLS," ).append("\n"); 
+		query.append("          	  TMP_INPUT_PARMAS    INP ," ).append("\n"); 
+		query.append("          	  SAQ_MON_DIR_CONV    DIR ," ).append("\n"); 
+		query.append("          	  SAQ_MON_CFM_QTA     QTA ," ).append("\n"); 
+		query.append("          	  SAQ_MON_CFM_TGT_VVD VVD" ).append("\n"); 
+		query.append("    		WHERE QTA.MQTA_RLSE_VER_NO = RLS.MQTA_RLSE_VER_NO" ).append("\n"); 
+		query.append("    		AND   QTA.BSE_QTR_CD = RLS.BSE_QTR_CD" ).append("\n"); 
+		query.append("    		AND   QTA.TRD_CD = INP.TRD_CD" ).append("\n"); 
+		query.append("    		AND   QTA.BSE_YR||QTA.BSE_MON BETWEEN PFMC_FR_YR_MON AND PFMC_TO_YR_MON" ).append("\n"); 
+		query.append("    		AND   QTA.LOD_QTY > 0" ).append("\n"); 
+		query.append("    		AND   QTA.QTA_TGT_CD = 'Q' -- Q : Sales Quota, T : Load Target" ).append("\n"); 
+		query.append("    		AND   QTA.BSE_YR = VVD.BSE_YR" ).append("\n"); 
+		query.append("    		AND   QTA.BSE_MON = VVD.BSE_MON" ).append("\n"); 
+		query.append("    		AND   QTA.BSE_QTR_CD = VVD.BSE_QTR_CD" ).append("\n"); 
+		query.append("    		AND   QTA.TRD_CD = VVD.TRD_CD" ).append("\n"); 
+		query.append("    		AND   QTA.DIR_CD = VVD.DIR_CD" ).append("\n"); 
+		query.append("    		AND   QTA.RLANE_CD = VVD.RLANE_CD" ).append("\n"); 
+		query.append("    		AND   QTA.VSL_CD = VVD.VSL_CD" ).append("\n"); 
+		query.append("    		AND   QTA.SKD_VOY_NO = VVD.SKD_VOY_NO" ).append("\n"); 
+		query.append("    		AND   QTA.SKD_DIR_CD = VVD.SKD_DIR_CD" ).append("\n"); 
+		query.append("    		AND   QTA.MQTA_RLSE_VER_NO = VVD.MQTA_RLSE_VER_NO" ).append("\n"); 
+		query.append("    		AND   QTA.BSE_YR = DIR.BSE_YR(+)" ).append("\n"); 
+		query.append("    		AND   DIR.BSE_QTR_CD(+) = @[bse_quarter]" ).append("\n"); 
+		query.append("    		AND   QTA.TRD_CD = DIR.TRD_CD(+)" ).append("\n"); 
+		query.append("    		AND   QTA.RLANE_CD = DIR.RLANE_CD(+)" ).append("\n"); 
+		query.append("    		AND   QTA.DIR_CD = DIR.DIR_CD(+)" ).append("\n"); 
+		query.append("    		GROUP BY ROLLUP(NVL(DIR.CONV_DIR_CD, QTA.DIR_CD), VVD.SUB_TRD_CD, QTA.RLANE_CD), QTA.RHQ_CD" ).append("\n"); 
+		query.append("    ) QTA" ).append("\n"); 
+		query.append("    WHERE NVL(QTA.DIR_CD, INP.DIR_CD) = INP.DIR_CD" ).append("\n"); 
+		query.append("    UNION ALL" ).append("\n"); 
+		query.append("    SELECT -- Performance PFMC" ).append("\n"); 
+		query.append("           'PFMC_SMR' AS GUBUN," ).append("\n"); 
+		query.append("           MIN(BPS.CTRT_RHQ_CD||BPS.SUB_TRD_CD||DECODE(BPS.RLANE_CD,'RBCCO','ZZ',SUBSTR(BPS.RLANE_CD,-2))||BPS.RLANE_CD) AS KEY," ).append("\n"); 
+		query.append("           DECODE(BPS.SUB_TRD_CD, '', '1'," ).append("\n"); 
+		query.append("              DECODE(BPS.RLANE_CD, '', '2', '3'))" ).append("\n"); 
+		query.append("                 AS SLEVEL," ).append("\n"); 
+		query.append("           DECODE(GROUPING(BPS.CTRT_RHQ_CD), 1, 'TOTAL', BPS.CTRT_RHQ_CD) AS CTRT_RHQ_CD," ).append("\n"); 
+		query.append("           DECODE(GROUPING(BPS.SUB_TRD_CD), 1, 'TOTAL', BPS.SUB_TRD_CD) AS SUB_TRD_CD," ).append("\n"); 
+		query.append("           DECODE(GROUPING(BPS.RLANE_CD), 1, 'TOTAL', BPS.RLANE_CD) AS RLANE_CD," ).append("\n"); 
+		query.append("           '0' AS MON_SEQ," ).append("\n"); 
+		query.append("           '00' AS BSE_MON," ).append("\n"); 
+		query.append("           SUM(BPS.TOT_VOY) AS TOT_VOY," ).append("\n"); 
+		query.append("           SUM(BPS.TOT_LOD) AS TOT_LOD," ).append("\n"); 
+		query.append("           SUM(BPS.TOT_REV) AS TOT_REV," ).append("\n"); 
+		query.append("           SUM(BPS.TOT_REV)/SUM(BPS.TOT_LOD) AS TOT_RPB," ).append("\n"); 
+		query.append("           SUM(BPS.TOT_CM) AS TOT_CM," ).append("\n"); 
+		query.append("           SUM(BPS.TOT_RA_CM) AS TOT_RA_CM," ).append("\n"); 
+		query.append("           SUM(BPS.TOT_CM)/SUM(BPS.TOT_LOD) AS TOT_CMB," ).append("\n"); 
+		query.append("           SUM(BPS.TOT_RA_CM)/SUM(BPS.TOT_LOD) AS TOT_RA_CMB," ).append("\n"); 
+		query.append("           SUM(BPS.TOT_OP) AS TOT_OP," ).append("\n"); 
+		query.append("           SUM(BPS.TOT_RA_OP) AS TOT_RA_OP," ).append("\n"); 
+		query.append("           SUM(BPS.TOT_OP)/SUM(BPS.TOT_LOD) AS TOT_OPB," ).append("\n"); 
+		query.append("           SUM(BPS.TOT_RA_OP)/SUM(BPS.TOT_LOD) AS TOT_RA_OPB" ).append("\n"); 
+		query.append("    FROM   TMP_INPUT_PARMAS INP, (" ).append("\n"); 
+		query.append("        	  SELECT -- Performance VOYAGE (양방향 Bound)" ).append("\n"); 
+		query.append("            		 NVL(DIR.CONV_DIR_CD, BPS.DIR_CD) AS DIR_CD," ).append("\n"); 
+		query.append("            		 BPS.CTRT_RHQ_CD AS CTRT_RHQ_CD," ).append("\n"); 
+		query.append("            		 BPS.SUB_TRD_CD AS SUB_TRD_CD," ).append("\n"); 
+		query.append("            		 BPS.RLANE_CD AS RLANE_CD," ).append("\n"); 
+		query.append("            		 MIN(PFT.VOY_KNT) AS TOT_VOY," ).append("\n"); 
+		query.append("            		 SUM(BPS.LOD_QTY) AS TOT_LOD," ).append("\n"); 
+		query.append("            		 SUM(BPS.GRS_RPB_REV*BPS.LOD_QTY) AS TOT_REV," ).append("\n"); 
+		query.append("            		 SUM((BPS.GRS_RPB_REV-BPS.CM_UC_AMT)*BPS.LOD_QTY) AS TOT_CM," ).append("\n"); 
+		query.append("            		 SUM((BPS.GRS_RPB_REV-BPS.RA_CM_UC_AMT+BPS.RA_STP_PFIT_UT_AMT)*BPS.LOD_QTY) AS TOT_RA_CM," ).append("\n"); 
+		query.append("            		 SUM((BPS.GRS_RPB_REV-BPS.OPFIT_UC_AMT)*BPS.LOD_QTY    ) AS TOT_OP," ).append("\n"); 
+		query.append("            		 SUM((BPS.GRS_RPB_REV-BPS.RA_OPFIT_UC_AMT+BPS.RA_STP_PFIT_UT_AMT)*BPS.LOD_QTY ) AS TOT_RA_OP" ).append("\n"); 
+		query.append("        	  FROM   SAQ_PERF_OFC_SMRY BPS," ).append("\n"); 
+		query.append("              	 SAQ_PERF_TGT_LANE PFT," ).append("\n"); 
+		query.append("              	 SAQ_MON_DIR_CONV  DIR," ).append("\n"); 
+		query.append("              	 ( SELECT DISTINCT ADJ.TRD_CD, ADJ.DIR_CD, ADJ.RLANE_CD" ).append("\n"); 
+		query.append("                	   FROM   SAQ_MON_TGT_VVD_ADJ ADJ, TMP_INPUT_PARMAS INP" ).append("\n"); 
+		query.append("                	   WHERE  1=1" ).append("\n"); 
+		query.append("                	   AND    ADJ.GLINE_VER_NO = INP.GLINE_VER_NO   ) ADJ," ).append("\n"); 
+		query.append("              	 TMP_INPUT_PARMAS INP" ).append("\n"); 
+		query.append("           WHERE BPS.BSE_YR||BPS.BSE_MON BETWEEN PFMC_FR_YR_MON AND PFMC_TO_YR_MON" ).append("\n"); 
+		query.append("        	  AND   BPS.TRD_CD = INP.TRD_CD" ).append("\n"); 
+		query.append("        	  AND   PFT.BSE_YR = BPS.BSE_YR" ).append("\n"); 
+		query.append("        	  AND   PFT.BSE_MON = BPS.BSE_MON" ).append("\n"); 
+		query.append("        	  AND   PFT.TRD_CD = BPS.TRD_CD" ).append("\n"); 
+		query.append("        	  AND   PFT.RLANE_CD = BPS.RLANE_CD" ).append("\n"); 
+		query.append("        	  AND   PFT.DIR_CD = BPS.DIR_CD" ).append("\n"); 
+		query.append("        	  AND   BPS.LOD_QTY > 0" ).append("\n"); 
+		query.append("        	  AND   BPS.TRD_CD = ADJ.TRD_CD" ).append("\n"); 
+		query.append("        	  AND   BPS.DIR_CD = ADJ.DIR_CD" ).append("\n"); 
+		query.append("        	  AND   BPS.RLANE_CD = ADJ.RLANE_CD" ).append("\n"); 
+		query.append("        	  AND   BPS.BSE_YR = DIR.BSE_YR(+)" ).append("\n"); 
+		query.append("        	  AND   DIR.BSE_QTR_CD(+) = @[bse_quarter]" ).append("\n"); 
+		query.append("        	  AND   BPS.TRD_CD = DIR.TRD_CD(+)" ).append("\n"); 
+		query.append("        	  AND   BPS.RLANE_CD = DIR.RLANE_CD(+)" ).append("\n"); 
+		query.append("        	  AND   BPS.DIR_CD = DIR.DIR_CD(+)" ).append("\n"); 
+		query.append("        	  GROUP BY BPS.BSE_YR, BPS.BSE_MON, NVL(DIR.CONV_DIR_CD, BPS.DIR_CD), BPS.SUB_TRD_CD, BPS.RLANE_CD, BPS.CTRT_RHQ_CD" ).append("\n"); 
+		query.append("			) BPS" ).append("\n"); 
+		query.append("    WHERE NVL(BPS.DIR_CD, INP.DIR_CD) = INP.DIR_CD" ).append("\n"); 
+		query.append("    GROUP BY ROLLUP(BPS.SUB_TRD_CD, BPS.RLANE_CD), BPS.CTRT_RHQ_CD" ).append("\n"); 
+		query.append("    UNION ALL" ).append("\n"); 
+		query.append("    SELECT -- MONTHLY Quota (Recent)" ).append("\n"); 
+		query.append("           QTA.GUBUN," ).append("\n"); 
+		query.append("           QTA.KEY," ).append("\n"); 
+		query.append("           QTA.SLEVEL," ).append("\n"); 
+		query.append("           QTA.CTRT_RHQ_CD," ).append("\n"); 
+		query.append("           QTA.SUB_TRD_CD," ).append("\n"); 
+		query.append("           QTA.RLANE_CD," ).append("\n"); 
+		query.append("           QTA.MON_SEQ," ).append("\n"); 
+		query.append("           QTA.BSE_MON," ).append("\n"); 
+		query.append("           QTA.TOT_VOY," ).append("\n"); 
+		query.append("           QTA.TOT_LOD," ).append("\n"); 
+		query.append("           QTA.TOT_REV," ).append("\n"); 
+		query.append("           QTA.TOT_RPB," ).append("\n"); 
+		query.append("           QTA.TOT_CM," ).append("\n"); 
+		query.append("           QTA.TOT_RA_CM," ).append("\n"); 
+		query.append("           QTA.TOT_CMB," ).append("\n"); 
+		query.append("           QTA.TOT_RA_CMB," ).append("\n"); 
+		query.append("           QTA.TOT_OP ," ).append("\n"); 
+		query.append("           QTA.TOT_RA_OP," ).append("\n"); 
+		query.append("           QTA.TOT_OPB ," ).append("\n"); 
+		query.append("           QTA.TOT_RA_OPB" ).append("\n"); 
+		query.append("    FROM   TMP_INPUT_PARMAS INP, (" ).append("\n"); 
+		query.append("			  SELECT -- MONTHLY Quota (Recent)" ).append("\n"); 
+		query.append("        		     'MONTHLY' AS gubun," ).append("\n"); 
+		query.append("            	     NVL(DIR.CONV_DIR_CD, QTA.DIR_CD) DIR_CD," ).append("\n"); 
+		query.append("        		     MIN(QTA.RHQ_CD||VVD.SUB_TRD_CD||DECODE(QTA.RLANE_CD,'RBCCO','ZZ',SUBSTR(QTA.RLANE_CD,-2))||QTA.RLANE_CD) AS KEY," ).append("\n"); 
+		query.append("        		     DECODE(VVD.SUB_TRD_CD, '', '1'," ).append("\n"); 
+		query.append("           	        DECODE(QTA.RLANE_CD, '', '2', '3'))" ).append("\n"); 
+		query.append("            	           AS SLEVEL," ).append("\n"); 
+		query.append("        		     DECODE(GROUPING(QTA.RHQ_CD), 1, 'TOTAL', QTA.RHQ_CD) AS CTRT_RHQ_CD," ).append("\n"); 
+		query.append("        		     DECODE(GROUPING(VVD.SUB_TRD_CD), 1, 'TOTAL', VVD.SUB_TRD_CD) AS SUB_TRD_CD," ).append("\n"); 
+		query.append("        		     DECODE(GROUPING(QTA.RLANE_CD), 1, 'TOTAL', QTA.RLANE_CD) AS RLANE_CD," ).append("\n"); 
+		query.append("        		     MIN(DECODE(QTA.BSE_YR||QTA.BSE_MON, INP.BEF_YR_MON, '0'," ).append("\n"); 
+		query.append("            		     INP.ADD1_YR_MON, '2', ADD2_YR_MON, '3', '1')) AS MON_SEQ," ).append("\n"); 
+		query.append("        		     QTA.BSE_MON," ).append("\n"); 
+		query.append("        		     COUNT(DISTINCT QTA.VSL_CD||QTA.SKD_VOY_NO||QTA.SKD_DIR_CD) AS TOT_VOY," ).append("\n"); 
+		query.append("        		     SUM(QTA.LOD_QTY) AS TOT_LOD," ).append("\n"); 
+		query.append("        		     SUM(QTA.GRS_RPB_REV*QTA.LOD_QTY) AS TOT_REV," ).append("\n"); 
+		query.append("        		     SUM(QTA.GRS_RPB_REV*QTA.LOD_QTY)/SUM(QTA.LOD_QTY) AS TOT_RPB," ).append("\n"); 
+		query.append("        		     SUM((QTA.GRS_RPB_REV-QTA.CM_UC_AMT)*QTA.LOD_QTY) AS TOT_CM," ).append("\n"); 
+		query.append("        		     SUM((QTA.GRS_RPB_REV-QTA.RA_CM_UC_AMT)*QTA.LOD_QTY) AS TOT_RA_CM," ).append("\n"); 
+		query.append("        		     SUM((QTA.GRS_RPB_REV-QTA.CM_UC_AMT)*QTA.LOD_QTY)/SUM(QTA.LOD_QTY) AS TOT_CMB," ).append("\n"); 
+		query.append("        		     SUM((QTA.GRS_RPB_REV-QTA.RA_CM_UC_AMT)*QTA.LOD_QTY)" ).append("\n"); 
+		query.append("            		     /SUM(QTA.LOD_QTY) AS TOT_RA_CMB ," ).append("\n"); 
+		query.append("        		     SUM((QTA.GRS_RPB_REV-QTA.OPFIT_UC_AMT)*QTA.LOD_QTY    ) AS TOT_OP ," ).append("\n"); 
+		query.append("        		     SUM((QTA.GRS_RPB_REV-QTA.RA_OPFIT_UC_AMT)*QTA.LOD_QTY ) AS TOT_RA_OP," ).append("\n"); 
+		query.append("        		     SUM((QTA.GRS_RPB_REV-QTA.OPFIT_UC_AMT)*QTA.LOD_QTY    )" ).append("\n"); 
+		query.append("            		     /SUM(QTA.LOD_QTY) AS TOT_OPB ," ).append("\n"); 
+		query.append("        		     SUM((QTA.GRS_RPB_REV-QTA.RA_OPFIT_UC_AMT)*QTA.LOD_QTY )" ).append("\n"); 
+		query.append("            		     /SUM(QTA.LOD_QTY) AS TOT_RA_OPB" ).append("\n"); 
+		query.append("			  FROM  (" ).append("\n"); 
+		query.append("                   SELECT DISTINCT" ).append("\n"); 
+		query.append("                          RLS.MQTA_RLSE_VER_NO AS MQTA_RLSE_VER_NO," ).append("\n"); 
+		query.append("                          RLS.BSE_YR AS BEF_YR," ).append("\n"); 
+		query.append("                          RLS.BSE_QTR_CD AS BEF_QTR_CD" ).append("\n"); 
+		query.append("                   FROM   SAQ_MON_QTA_RLSE RLS," ).append("\n"); 
+		query.append("                          TMP_INPUT_PARMAS INP" ).append("\n"); 
+		query.append("                   WHERE  RLS.BSE_YR||RLS.BSE_QTR_CD = INP.BEF_YR_QTR" ).append("\n"); 
+		query.append("                   AND    RLS.QTA_RLSE_STS_CD = 'R'" ).append("\n"); 
+		query.append("          	     ) RLS," ).append("\n"); 
+		query.append("                  SAQ_MON_DIR_CONV    DIR," ).append("\n"); 
+		query.append("          	     SAQ_MON_CFM_QTA     QTA," ).append("\n"); 
+		query.append("          	     SAQ_MON_CFM_TGT_VVD VVD," ).append("\n"); 
+		query.append("          	     TMP_INPUT_PARMAS    INP" ).append("\n"); 
+		query.append("    		   WHERE QTA.MQTA_RLSE_VER_NO = RLS.MQTA_RLSE_VER_NO" ).append("\n"); 
+		query.append("    		   AND   QTA.BSE_MON = DECODE(RLS.BEF_QTR_CD, '1Q', '03', '2Q', '06', '3Q', '09', '4Q', '12')" ).append("\n"); 
+		query.append("    		   AND   QTA.QTA_TGT_CD = 'Q'" ).append("\n"); 
+		query.append("    		   AND   QTA.TRD_CD = INP.TRD_CD" ).append("\n"); 
+		query.append("    		   AND   VVD.MQTA_RLSE_VER_NO = QTA.MQTA_RLSE_VER_NO" ).append("\n"); 
+		query.append("    		   AND   VVD.BSE_YR = QTA.BSE_YR" ).append("\n"); 
+		query.append("    		   AND   VVD.BSE_QTR_CD = QTA.BSE_QTR_CD" ).append("\n"); 
+		query.append("    		   AND   VVD.BSE_MON = QTA.BSE_MON" ).append("\n"); 
+		query.append("    		   AND   VVD.RLANE_CD = QTA.RLANE_CD" ).append("\n"); 
+		query.append("    		   AND   VVD.TRD_CD = QTA.TRD_CD" ).append("\n"); 
+		query.append("    		   AND   VVD.DIR_CD = QTA.DIR_CD" ).append("\n"); 
+		query.append("    		   AND   VVD.VSL_CD = QTA.VSL_CD" ).append("\n"); 
+		query.append("    		   AND   VVD.SKD_VOY_NO = QTA.SKD_VOY_NO" ).append("\n"); 
+		query.append("    		   AND   VVD.SKD_DIR_CD = QTA.SKD_DIR_CD" ).append("\n"); 
+		query.append("    		   AND   QTA.LOD_QTY > 0" ).append("\n"); 
+		query.append("        	   AND   QTA.BSE_YR = DIR.BSE_YR(+)" ).append("\n"); 
+		query.append("        	   AND   DIR.BSE_QTR_CD(+) = @[bse_quarter]" ).append("\n"); 
+		query.append("        	   AND   QTA.TRD_CD = DIR.TRD_CD(+)" ).append("\n"); 
+		query.append("        	   AND   QTA.RLANE_CD = DIR.RLANE_CD(+)" ).append("\n"); 
+		query.append("        	   AND   QTA.DIR_CD = DIR.DIR_CD(+)" ).append("\n"); 
+		query.append("    		   GROUP BY ROLLUP(NVL(DIR.CONV_DIR_CD, QTA.DIR_CD), VVD.SUB_TRD_CD, QTA.RLANE_CD), QTA.RHQ_CD, QTA.BSE_MON" ).append("\n"); 
+		query.append("    ) QTA" ).append("\n"); 
+		query.append("    WHERE NVL(QTA.DIR_CD, INP.DIR_CD) = INP.DIR_CD" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("    UNION ALL" ).append("\n"); 
+		query.append("" ).append("\n"); 
+		query.append("    SELECT -- MODEL RESULT" ).append("\n"); 
+		query.append("        'MODEL' AS GUBUN," ).append("\n"); 
+		query.append("        MIN(MRS.CTRT_RHQ_CD||MRS.SUB_TRD_CD||DECODE(MRS.RLANE_CD,'RBCCO','ZZ',SUBSTR(MRS.RLANE_CD,-2))||MRS.RLANE_CD) AS KEY," ).append("\n"); 
+		query.append("        DECODE(MRS.SUB_TRD_CD, '', '1'," ).append("\n"); 
+		query.append("           DECODE(MRS.RLANE_CD, '', '2', '3'))" ).append("\n"); 
+		query.append("            AS SLEVEL," ).append("\n"); 
+		query.append("        DECODE(GROUPING(MRS.CTRT_RHQ_CD), 1, 'TOTAL', MRS.CTRT_RHQ_CD) AS CTRT_RHQ_CD," ).append("\n"); 
+		query.append("        DECODE(GROUPING(MRS.SUB_TRD_CD), 1, 'TOTAL', MRS.SUB_TRD_CD) AS SUB_TRD_CD," ).append("\n"); 
+		query.append("        DECODE(GROUPING(MRS.RLANE_CD), 1, 'TOTAL', MRS.RLANE_CD) AS RLANE_CD," ).append("\n"); 
+		query.append("        MIN(DECODE(MRS.BSE_YR||MRS.BSE_MON, INP.ADD1_YR_MON, '2'," ).append("\n"); 
+		query.append("               ADD2_YR_MON, '3', '1')) AS MON_SEQ," ).append("\n"); 
+		query.append("        MRS.BSE_MON," ).append("\n"); 
+		query.append("        COUNT(DISTINCT VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD) AS TOT_VOY," ).append("\n"); 
+		query.append("        SUM(MRS.LOD_QTY) AS TOT_LOD," ).append("\n"); 
+		query.append("        SUM(MRS.GRS_RPB_REV*MRS.LOD_QTY) AS TOT_REV," ).append("\n"); 
+		query.append("        SUM(MRS.GRS_RPB_REV*MRS.LOD_QTY)/SUM(MRS.LOD_QTY) AS TOT_RPB," ).append("\n"); 
+		query.append("        SUM((MRS.GRS_RPB_REV-MRS.CM_UC_AMT)*MRS.LOD_QTY) AS TOT_CM," ).append("\n"); 
+		query.append("        SUM((MRS.GRS_RPB_REV-MRS.RA_CM_UC_AMT)*MRS.LOD_QTY) AS TOT_RA_CM," ).append("\n"); 
+		query.append("        SUM((MRS.GRS_RPB_REV-MRS.CM_UC_AMT)*MRS.LOD_QTY)/SUM(MRS.LOD_QTY) AS TOT_CMB," ).append("\n"); 
+		query.append("        SUM((MRS.GRS_RPB_REV-MRS.RA_CM_UC_AMT)*MRS.LOD_QTY)" ).append("\n"); 
+		query.append("            /SUM(MRS.LOD_QTY) AS TOT_RA_CMB ," ).append("\n"); 
+		query.append("        SUM((MRS.GRS_RPB_REV-MRS.OPFIT_UC_AMT)*MRS.LOD_QTY    ) AS TOT_OP ," ).append("\n"); 
+		query.append("        SUM((MRS.GRS_RPB_REV-MRS.RA_OPFIT_UC_AMT)*MRS.LOD_QTY ) AS TOT_RA_OP," ).append("\n"); 
+		query.append("        SUM((MRS.GRS_RPB_REV-MRS.OPFIT_UC_AMT)*MRS.LOD_QTY    )" ).append("\n"); 
+		query.append("            /SUM(MRS.LOD_QTY) AS TOT_OPB ," ).append("\n"); 
+		query.append("        SUM((MRS.GRS_RPB_REV-MRS.RA_OPFIT_UC_AMT)*MRS.LOD_QTY )" ).append("\n"); 
+		query.append("            /SUM(MRS.LOD_QTY) AS TOT_RA_OPB" ).append("\n"); 
+		query.append("    FROM  SAQ_MON_MDL_CTRT_SMRY MRS," ).append("\n"); 
+		query.append("          SAQ_MON_TGT_VVD_ADJ VVD," ).append("\n"); 
+		query.append("          TMP_INPUT_PARMAS INP" ).append("\n"); 
+		query.append("    WHERE MRS.MQTA_MDL_VER_NO = INP.MQTA_MDL_VER_NO" ).append("\n"); 
+		query.append("    AND   MRS.TRD_CD = INP.TRD_CD" ).append("\n"); 
+		query.append("    AND   MRS.DIR_CD = INP.DIR_CD" ).append("\n"); 
+		query.append("    AND   VVD.BSE_YR = INP.BSE_YR" ).append("\n"); 
+		query.append("    AND   VVD.BSE_QTR_CD = INP.BSE_QTR_CD" ).append("\n"); 
+		query.append("    AND   VVD.GLINE_VER_NO = INP.GLINE_VER_NO" ).append("\n"); 
+		query.append("    AND   VVD.BSE_MON = MRS.BSE_MON" ).append("\n"); 
+		query.append("    AND   VVD.RLANE_CD = MRS.RLANE_CD" ).append("\n"); 
+		query.append("    AND   VVD.TRD_CD = MRS.TRD_CD" ).append("\n"); 
+		query.append("    AND   VVD.DIR_CD = MRS.DIR_CD" ).append("\n"); 
+		query.append("    AND   VVD.VSL_CD = MRS.VSL_CD" ).append("\n"); 
+		query.append("    AND   VVD.SKD_VOY_NO = MRS.SKD_VOY_NO" ).append("\n"); 
+		query.append("    AND   VVD.SKD_DIR_CD = MRS.SKD_DIR_CD" ).append("\n"); 
+		query.append("    AND   MRS.LOD_QTY > 0" ).append("\n"); 
+		query.append("    GROUP BY ROLLUP(MRS.SUB_TRD_CD, MRS.RLANE_CD), MRS.CTRT_RHQ_CD, MRS.BSE_MON" ).append("\n"); 
+		query.append("    UNION ALL" ).append("\n"); 
+		query.append("    SELECT -- Trade Group, RHQ, Final" ).append("\n"); 
+		query.append("        DECODE(TRD.MQTA_STEP_CD, '01','TRADE', '02','RHQ', '03','FINAL') AS GUBUN," ).append("\n"); 
+		query.append("        MIN(TRD.CTRT_RHQ_CD||TRD.SUB_TRD_CD||DECODE(TRD.RLANE_CD,'RBCCO','ZZ',SUBSTR(TRD.RLANE_CD,-2))||TRD.RLANE_CD) AS KEY," ).append("\n"); 
+		query.append("        DECODE(TRD.SUB_TRD_CD, '', '1'," ).append("\n"); 
+		query.append("           DECODE(TRD.RLANE_CD, '', '2', '3'))" ).append("\n"); 
+		query.append("            AS SLEVEL," ).append("\n"); 
+		query.append("        DECODE(GROUPING(TRD.CTRT_RHQ_CD), 1, 'TOTAL', TRD.CTRT_RHQ_CD) AS CTRT_RHQ_CD," ).append("\n"); 
+		query.append("        DECODE(GROUPING(TRD.SUB_TRD_CD), 1, 'TOTAL', TRD.SUB_TRD_CD) AS SUB_TRD_CD," ).append("\n"); 
+		query.append("        DECODE(GROUPING(TRD.RLANE_CD), 1, 'TOTAL', TRD.RLANE_CD) AS RLANE_CD," ).append("\n"); 
+		query.append("        MIN(DECODE(TRD.BSE_YR||TRD.BSE_MON, INP.ADD1_YR_MON, '2'," ).append("\n"); 
+		query.append("               ADD2_YR_MON, '3', '1')) AS MON_SEQ," ).append("\n"); 
+		query.append("        TRD.BSE_MON AS BSE_MON," ).append("\n"); 
+		query.append("        COUNT(DISTINCT VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD) AS TOT_VOY," ).append("\n"); 
+		query.append("        SUM(TRD.LOD_QTY) AS TOT_LOD," ).append("\n"); 
+		query.append("        SUM(TRD.GRS_RPB_REV*TRD.LOD_QTY) AS TOT_REV," ).append("\n"); 
+		query.append("        DECODE(SUM(TRD.LOD_QTY), 0, 0," ).append("\n"); 
+		query.append("            SUM(TRD.GRS_RPB_REV*TRD.LOD_QTY)/SUM(TRD.LOD_QTY)" ).append("\n"); 
+		query.append("            ) AS TOT_RPB," ).append("\n"); 
+		query.append("        SUM((TRD.GRS_RPB_REV-TRD.CM_UC_AMT)*TRD.LOD_QTY)" ).append("\n"); 
+		query.append("            AS TOT_CM," ).append("\n"); 
+		query.append("        SUM((TRD.GRS_RPB_REV-TRD.RA_CM_UC_AMT)*TRD.LOD_QTY)" ).append("\n"); 
+		query.append("            AS TOT_RA_CM,     -- BKG CM" ).append("\n"); 
+		query.append("        DECODE(SUM(TRD.LOD_QTY), 0, 0," ).append("\n"); 
+		query.append("            SUM((TRD.GRS_RPB_REV-TRD.CM_UC_AMT)*TRD.LOD_QTY)/SUM(TRD.LOD_QTY)" ).append("\n"); 
+		query.append("            ) AS TOT_CMB," ).append("\n"); 
+		query.append("        DECODE(SUM(TRD.LOD_QTY), 0, 0," ).append("\n"); 
+		query.append("            SUM((TRD.GRS_RPB_REV-TRD.RA_CM_UC_AMT)*TRD.LOD_QTY)" ).append("\n"); 
+		query.append("                /SUM(TRD.LOD_QTY)" ).append("\n"); 
+		query.append("            ) AS TOT_RA_CMB,  -- BKG CMB" ).append("\n"); 
+		query.append("        SUM((TRD.GRS_RPB_REV-TRD.OPFIT_UC_AMT)*TRD.LOD_QTY)" ).append("\n"); 
+		query.append("            AS TOT_OP," ).append("\n"); 
+		query.append("        SUM((TRD.GRS_RPB_REV-TRD.RA_OPFIT_UC_AMT)*TRD.LOD_QTY)" ).append("\n"); 
+		query.append("            AS TOT_RA_OP,     -- BKG OP" ).append("\n"); 
+		query.append("        DECODE(SUM(TRD.LOD_QTY), 0, 0," ).append("\n"); 
+		query.append("            SUM((TRD.GRS_RPB_REV-TRD.OPFIT_UC_AMT)*TRD.LOD_QTY)" ).append("\n"); 
+		query.append("                /SUM(TRD.LOD_QTY)" ).append("\n"); 
+		query.append("            ) AS TOT_OPB," ).append("\n"); 
+		query.append("        DECODE(SUM(TRD.LOD_QTY), 0, 0," ).append("\n"); 
+		query.append("            SUM((TRD.GRS_RPB_REV-TRD.RA_OPFIT_UC_AMT)*TRD.LOD_QTY)" ).append("\n"); 
+		query.append("                /SUM(TRD.LOD_QTY)" ).append("\n"); 
+		query.append("            ) AS TOT_RA_OPB   -- BKG OPB" ).append("\n"); 
+		query.append("    FROM   TMP_INPUT_PARMAS INP," ).append("\n"); 
+		query.append("           SAQ_MON_TGT_VVD_ADJ VVD," ).append("\n"); 
+		query.append("           SAQ_MON_QTA_STEP_VER VER," ).append("\n"); 
+		query.append("           SAQ_MON_QTA_TRD TRD" ).append("\n"); 
+		query.append("    WHERE  VER.MQTA_STEP_CD IN ('01', '02', '03') -- Trade Group, RHQ, Final" ).append("\n"); 
+		query.append("    AND    VER.BSE_YR = INP.BSE_YR" ).append("\n"); 
+		query.append("    AND    VER.BSE_QTR_CD = INP.BSE_QTR_CD" ).append("\n"); 
+		query.append("    AND    VER.TRD_CD = INP.TRD_CD" ).append("\n"); 
+		query.append("    AND    VER.DIR_CD = INP.DIR_CD" ).append("\n"); 
+		query.append("    AND    VER.GLINE_VER_NO = INP.GLINE_VER_NO" ).append("\n"); 
+		query.append("    AND    ((VER.MQTA_STEP_CD IN ('01','03') AND VER.MQTA_VER_NO = INP.MQTA_VER_NO" ).append("\n"); 
+		query.append("                AND VER.TRD_CD = INP.TRD_CD AND VER.DIR_CD = INP.DIR_CD)" ).append("\n"); 
+		query.append("            OR (VER.MQTA_STEP_CD IN ('01','03')" ).append("\n"); 
+		query.append("                AND NOT(VER.TRD_CD = INP.TRD_CD AND VER.DIR_CD = INP.DIR_CD)" ).append("\n"); 
+		query.append("                AND VER.SAQ_STS_CD IN (SELECT A.INTG_CD_VAL_CTNT" ).append("\n"); 
+		query.append("                                  FROM COM_INTG_CD_DTL A," ).append("\n"); 
+		query.append("                                       COM_INTG_CD_DTL B" ).append("\n"); 
+		query.append("                                  WHERE A.INTG_CD_ID = 'CD00926'" ).append("\n"); 
+		query.append("                                  AND B.INTG_CD_ID = A.INTG_CD_ID" ).append("\n"); 
+		query.append("                                  AND B.INTG_CD_VAL_CTNT = 'DC'" ).append("\n"); 
+		query.append("                                  AND A.INTG_CD_VAL_DP_SEQ >= B.INTG_CD_VAL_DP_SEQ))" ).append("\n"); 
+		query.append("            OR (VER.MQTA_STEP_CD = '02' AND VER.SAQ_STS_CD IN (SELECT A.INTG_CD_VAL_CTNT" ).append("\n"); 
+		query.append("                                  FROM COM_INTG_CD_DTL A," ).append("\n"); 
+		query.append("                                       COM_INTG_CD_DTL B" ).append("\n"); 
+		query.append("                                  WHERE A.INTG_CD_ID = 'CD00926'" ).append("\n"); 
+		query.append("                                  AND B.INTG_CD_ID = A.INTG_CD_ID" ).append("\n"); 
+		query.append("                                  AND B.INTG_CD_VAL_CTNT = 'DN'" ).append("\n"); 
+		query.append("                                  AND A.INTG_CD_VAL_DP_SEQ >= B.INTG_CD_VAL_DP_SEQ)))" ).append("\n"); 
+		query.append("    AND    TRD.MQTA_STEP_CD = VER.MQTA_STEP_CD" ).append("\n"); 
+		query.append("    AND    TRD.BSE_YR = VER.BSE_YR" ).append("\n"); 
+		query.append("    AND    TRD.BSE_QTR_CD = VER.BSE_QTR_CD" ).append("\n"); 
+		query.append("    AND    TRD.TRD_CD = VER.TRD_CD" ).append("\n"); 
+		query.append("    AND    TRD.DIR_CD = VER.DIR_CD" ).append("\n"); 
+		query.append("    AND    TRD.MQTA_VER_NO = VER.MQTA_VER_NO" ).append("\n"); 
+		query.append("    AND    VVD.BSE_YR = VER.BSE_YR" ).append("\n"); 
+		query.append("    AND    VVD.BSE_QTR_CD = VER.BSE_QTR_CD" ).append("\n"); 
+		query.append("    AND    VVD.GLINE_VER_NO = VER.GLINE_VER_NO" ).append("\n"); 
+		query.append("    AND    VVD.BSE_MON = TRD.BSE_MON" ).append("\n"); 
+		query.append("    AND    VVD.TRD_CD = TRD.TRD_CD" ).append("\n"); 
+		query.append("    AND    VVD.DIR_CD = TRD.DIR_CD" ).append("\n"); 
+		query.append("    AND    VVD.SUB_TRD_CD = TRD.SUB_TRD_CD" ).append("\n"); 
+		query.append("    AND    VVD.RLANE_CD = TRD.RLANE_CD" ).append("\n"); 
+		query.append("    AND    VVD.SPRT_GRP_CD = TRD.SPRT_GRP_CD" ).append("\n"); 
+		query.append("    AND    VVD.BSA_GRP_CD = TRD.BSA_GRP_CD" ).append("\n"); 
+		query.append("    GROUP BY ROLLUP(TRD.SUB_TRD_CD, TRD.RLANE_CD), TRD.CTRT_RHQ_CD, TRD.BSE_MON, TRD.MQTA_STEP_CD" ).append("\n"); 
+		query.append("    UNION ALL" ).append("\n"); 
+		query.append("    SELECT -- Final Adjusted" ).append("\n"); 
+		query.append("        'ADJUSTED' AS GUBUN," ).append("\n"); 
+		query.append("        MIN(RHQ.CTRT_RHQ_CD||RHQ.SUB_TRD_CD||DECODE(RHQ.RLANE_CD,'RBCCO','ZZ',SUBSTR(RHQ.RLANE_CD,-2))||RHQ.RLANE_CD) AS KEY," ).append("\n"); 
+		query.append("        DECODE(RHQ.SUB_TRD_CD, '', '1'," ).append("\n"); 
+		query.append("           DECODE(RHQ.RLANE_CD, '', '2', '3'))" ).append("\n"); 
+		query.append("            AS SLEVEL," ).append("\n"); 
+		query.append("        DECODE(GROUPING(RHQ.CTRT_RHQ_CD), 1, 'TOTAL', RHQ.CTRT_RHQ_CD) AS CTRT_RHQ_CD," ).append("\n"); 
+		query.append("        DECODE(GROUPING(RHQ.SUB_TRD_CD), 1, 'TOTAL', RHQ.SUB_TRD_CD) AS SUB_TRD_CD," ).append("\n"); 
+		query.append("        DECODE(GROUPING(RHQ.RLANE_CD), 1, 'TOTAL', RHQ.RLANE_CD) AS RLANE_CD," ).append("\n"); 
+		query.append("        MIN(DECODE(RHQ.BSE_YR||RHQ.BSE_MON, INP.ADD1_YR_MON, '2'," ).append("\n"); 
+		query.append("               ADD2_YR_MON, '3', '1')) AS MON_SEQ," ).append("\n"); 
+		query.append("        RHQ.BSE_MON AS BSE_MON," ).append("\n"); 
+		query.append("        COUNT(DISTINCT VVD.VSL_CD||VVD.SKD_VOY_NO||VVD.SKD_DIR_CD) AS TOT_VOY," ).append("\n"); 
+		query.append("        SUM(RHQ.LOD_QTY) AS TOT_LOD," ).append("\n"); 
+		query.append("        SUM(RHQ.GRS_RPB_REV*RHQ.LOD_QTY) AS TOT_REV," ).append("\n"); 
+		query.append("        DECODE(SUM(RHQ.LOD_QTY), 0, 0," ).append("\n"); 
+		query.append("            SUM(RHQ.GRS_RPB_REV*RHQ.LOD_QTY)/SUM(RHQ.LOD_QTY)" ).append("\n"); 
+		query.append("            ) AS TOT_RPB," ).append("\n"); 
+		query.append("        SUM((RHQ.GRS_RPB_REV-RHQ.CM_UC_AMT)*RHQ.LOD_QTY)" ).append("\n"); 
+		query.append("            AS TOT_CM," ).append("\n"); 
+		query.append("        SUM((RHQ.GRS_RPB_REV-RHQ.RA_CM_UC_AMT)*RHQ.LOD_QTY)" ).append("\n"); 
+		query.append("            AS TOT_RA_CM," ).append("\n"); 
+		query.append("        DECODE(SUM(RHQ.LOD_QTY), 0, 0," ).append("\n"); 
+		query.append("            SUM((RHQ.GRS_RPB_REV-RHQ.CM_UC_AMT)*RHQ.LOD_QTY)/SUM(RHQ.LOD_QTY)" ).append("\n"); 
+		query.append("            ) AS TOT_CMB," ).append("\n"); 
+		query.append("        DECODE(SUM(RHQ.LOD_QTY), 0, 0," ).append("\n"); 
+		query.append("            SUM((RHQ.GRS_RPB_REV-RHQ.RA_CM_UC_AMT)*RHQ.LOD_QTY)" ).append("\n"); 
+		query.append("                /SUM(RHQ.LOD_QTY)" ).append("\n"); 
+		query.append("            ) AS TOT_RA_CMB," ).append("\n"); 
+		query.append("        SUM((RHQ.GRS_RPB_REV-RHQ.OPFIT_UC_AMT)*RHQ.LOD_QTY)" ).append("\n"); 
+		query.append("            AS TOT_OP," ).append("\n"); 
+		query.append("        SUM((RHQ.GRS_RPB_REV-RHQ.RA_OPFIT_UC_AMT)*RHQ.LOD_QTY)" ).append("\n"); 
+		query.append("            AS TOT_RA_OP," ).append("\n"); 
+		query.append("        DECODE(SUM(RHQ.LOD_QTY), 0, 0," ).append("\n"); 
+		query.append("            SUM((RHQ.GRS_RPB_REV-RHQ.OPFIT_UC_AMT)*RHQ.LOD_QTY)" ).append("\n"); 
+		query.append("                /SUM(RHQ.LOD_QTY)" ).append("\n"); 
+		query.append("            ) AS TOT_OPB," ).append("\n"); 
+		query.append("        DECODE(SUM(RHQ.LOD_QTY), 0, 0," ).append("\n"); 
+		query.append("            SUM((RHQ.GRS_RPB_REV-RHQ.RA_OPFIT_UC_AMT)*RHQ.LOD_QTY)" ).append("\n"); 
+		query.append("                /SUM(RHQ.LOD_QTY)" ).append("\n"); 
+		query.append("            ) AS TOT_RA_OPB" ).append("\n"); 
+		query.append("    FROM   TMP_INPUT_PARMAS INP," ).append("\n"); 
+		query.append("           SAQ_MON_TGT_VVD_ADJ VVD," ).append("\n"); 
+		query.append("           SAQ_MON_QTA_STEP_VER VER," ).append("\n"); 
+		query.append("           SAQ_MON_QTA_RHQ RHQ" ).append("\n"); 
+		query.append("    WHERE  VER.MQTA_STEP_CD = '04' -- Final Adjusted" ).append("\n"); 
+		query.append("    AND    VER.BSE_YR = INP.BSE_YR" ).append("\n"); 
+		query.append("    AND    VER.BSE_QTR_CD = INP.BSE_QTR_CD" ).append("\n"); 
+		query.append("    AND    VER.TRD_CD = INP.TRD_CD" ).append("\n"); 
+		query.append("    AND    VER.DIR_CD = INP.DIR_CD" ).append("\n"); 
+		query.append("    AND    VER.GLINE_VER_NO = INP.GLINE_VER_NO" ).append("\n"); 
+		query.append("    AND    VER.SAQ_STS_CD IN ('QN', 'QF')" ).append("\n"); 
+		query.append("    AND    RHQ.MQTA_STEP_CD = VER.MQTA_STEP_CD" ).append("\n"); 
+		query.append("    AND    RHQ.BSE_YR = VER.BSE_YR" ).append("\n"); 
+		query.append("    AND    RHQ.BSE_QTR_CD = VER.BSE_QTR_CD" ).append("\n"); 
+		query.append("    AND    RHQ.TRD_CD = VER.TRD_CD" ).append("\n"); 
+		query.append("    AND    RHQ.DIR_CD = VER.DIR_CD" ).append("\n"); 
+		query.append("    AND    RHQ.MQTA_VER_NO = VER.MQTA_VER_NO" ).append("\n"); 
+		query.append("    AND    VVD.BSE_YR = VER.BSE_YR" ).append("\n"); 
+		query.append("    AND    VVD.BSE_QTR_CD = VER.BSE_QTR_CD" ).append("\n"); 
+		query.append("    AND    VVD.GLINE_VER_NO = VER.GLINE_VER_NO" ).append("\n"); 
+		query.append("    AND    VVD.BSE_MON = RHQ.BSE_MON" ).append("\n"); 
+		query.append("    AND    VVD.TRD_CD = RHQ.TRD_CD" ).append("\n"); 
+		query.append("    AND    VVD.DIR_CD = RHQ.DIR_CD" ).append("\n"); 
+		query.append("    AND    VVD.SUB_TRD_CD = RHQ.SUB_TRD_CD" ).append("\n"); 
+		query.append("    AND    VVD.RLANE_CD = RHQ.RLANE_CD" ).append("\n"); 
+		query.append("    AND    VVD.SPRT_GRP_CD = RHQ.SPRT_GRP_CD" ).append("\n"); 
+		query.append("    AND    VVD.BSA_GRP_CD = RHQ.BSA_GRP_CD" ).append("\n"); 
+		query.append("    GROUP BY ROLLUP(RHQ.SUB_TRD_CD, RHQ.RLANE_CD), RHQ.CTRT_RHQ_CD, RHQ.BSE_MON, RHQ.MQTA_STEP_CD" ).append("\n"); 
+		query.append("    ) UNI" ).append("\n"); 
+		query.append("    ,     (" ).append("\n"); 
+		query.append("          SELECT" ).append("\n"); 
+		query.append("              DIR.RLANE_CD," ).append("\n"); 
+		query.append("              DIR.DIR_CD" ).append("\n"); 
+		query.append("          FROM" ).append("\n"); 
+		query.append("              SAQ_MON_DIR_CONV DIR," ).append("\n"); 
+		query.append("              TMP_INPUT_PARMAS INP" ).append("\n"); 
+		query.append("          WHERE" ).append("\n"); 
+		query.append("                   DIR.BSE_YR = INP.BSE_YR" ).append("\n"); 
+		query.append("             AND DIR.BSE_QTR_CD = INP.BSE_QTR_CD" ).append("\n"); 
+		query.append("             AND DIR.TRD_CD = INP.TRD_CD" ).append("\n"); 
+		query.append("             AND DIR.CONV_DIR_CD = INP.DIR_CD" ).append("\n"); 
+		query.append("          ) DIR" ).append("\n"); 
+		query.append("     WHERE" ).append("\n"); 
+		query.append("             DIR.RLANE_CD(+) = UNI.RLANE_CD" ).append("\n"); 
+		query.append("GROUP BY UNI.SLEVEL, UNI.CTRT_RHQ_CD, UNI.SUB_TRD_CD, UNI.RLANE_CD, DIR.DIR_CD," ).append("\n"); 
+		query.append("         ITM.CODE, ITM.TEXT, ITM.ROW_SEQ" ).append("\n"); 
+		query.append("ORDER BY KEY, SLEVEL, ROW_SEQ" ).append("\n"); 
+
+	}
+}

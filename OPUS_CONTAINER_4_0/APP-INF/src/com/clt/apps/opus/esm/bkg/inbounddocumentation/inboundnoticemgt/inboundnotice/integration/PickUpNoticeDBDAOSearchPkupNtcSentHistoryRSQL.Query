@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="PickUpNoticeDBDAOSearchPkupNtcSentHistoryRSQL">
+			<desc><![CDATA[UI-BKG-0414 Pickup Notice Sent History 조회]]></desc>
+			<sql><![CDATA[
+/* 0414 - PkupNtcSentHisListVO - BKG_NTC_HIS Index creation required for search as period  */
+SELECT NTC_KND_CD_DESC
+     , BL_NO
+     , CNTR_NO
+     , BKG_NTC_SND_RSLT_CD
+     , BKG_NTC_SND_RSLT_CTNT
+     , NTC_FAX_NO_EML
+
+     , PKUP_NO   -- Pickup Information Pickup No. 
+     , EDI_322_MVMT_CD
+     , PKUP_NTC_EVNT_DT
+     , FRT_CLT_FLG 
+     , OBL_CLT_FLG 
+     , CSTMS_CLR_FLG
+     , MNL_FLG
+
+     , CUST_TP_CD
+     , CUST_CNT_CD
+     , CUST_SEQ
+     , CUST_CD
+     , CUST_NM
+
+     , SND_RQST_DT
+     , SND_DT
+     , SND_GDT
+     , SND_OFC_CD
+     , SND_USR_ID
+     , USR_NM
+     , BKG_NO
+     , NTC_SEQ
+     , ROW_COUNT
+FROM (
+      SELECT NKCD.INTG_CD_VAL_DP_DESC AS NTC_KND_CD_DESC  -- 이와 유사하게
+           , BKGM.BL_NO
+           , NHIS.CNTR_NO
+           , NVL(DECODE (NHIS.NTC_VIA_CD
+                         , 'F', DECODE(NHIS.BKG_NTC_SND_RSLT_CD, NULL, NULL, '5', 'S', '6', 'F', 'W')
+                         , 'M', DECODE(NHIS.BKG_NTC_SND_RSLT_CD, NULL, NULL, '3', 'S', '4', 'F', 'W')
+                        )
+                , DECODE (NHIS.NTC_VIA_CD
+                          , 'F', DECODE(FXSD.FAX_PROC_STS_CD, '5', 'S', '6', 'F', 'W')
+                          , 'M', DECODE(EMSD.EML_PROC_STS_CD, '3', 'S', '4', 'F', 'W')
+                         )
+                ) AS BKG_NTC_SND_RSLT_CD
+           , DECODE (NHIS.NTC_VIA_CD , 'F', BKG_COM_INTG_CD_NM_FNC('CD00959', NVL(NHIS.BKG_NTC_SND_RSLT_CD, FXSD.FAX_PROC_STS_CD))
+                                     , 'M', BKG_COM_INTG_CD_NM_FNC('CD00960', NVL(NHIS.BKG_NTC_SND_RSLT_CD, EMSD.EML_PROC_STS_CD))
+                    ) AS BKG_NTC_SND_RSLT_CTNT
+           , DECODE(NHIS.NTC_VIA_CD, 'F', NHIS.NTC_FAX_NO, 'M', NHIS.NTC_EML) AS NTC_FAX_NO_EML
+           , TO_CHAR(NHIS.SND_RQST_DT, 'YYYY-MM-DD HH24:MI', 'NLS_DATE_LANGUAGE=ENGLISH') SND_RQST_DT  
+           , TO_CHAR( NVL(NHIS.SND_DT,DECODE(NHIS.NTC_VIA_CD, 'F',FXSD.FAX_SND_LOCL_DT
+                                                           , 'E', GLOBALDATE_PKG.TIME_CONV_FNC(COM_ConstantMgr_PKG.COM_getBaseLocationCode_FNC,EMSD.EML_DT,ORGN.LOC_CD)                         
+                                           ) 
+                        ) , 
+                      'YYYY-MM-DD HH24:MI', 'NLS_DATE_LANGUAGE=ENGLISH') AS SND_DT  -- FINAL SENT
+           , TO_CHAR(NHIS.SND_GDT, 'YYYY-MM-DD HH24:MI', 'NLS_DATE_LANGUAGE=ENGLISH') SND_GDT  -- FINAL SENT
+           , NHIS.SND_OFC_CD
+           , DECODE(NHIS.SND_USR_ID,'BAT_BKG_015','Auto',NHIS.SND_USR_ID) SND_USR_ID
+           , CUSR.USR_NM
+
+          , ( SELECT DECODE(COUNT(*),0,'',PNTC.PKUP_NO) 
+               FROM BKG_AN_DEST_OFC_STUP
+               WHERE EQ_CTRL_OFC_CD  = LOC.EQ_CTRL_OFC_CD 
+               AND   HNDL_OFC_CD     = @[usr_ofc_cd]
+               AND   DEST_OFC_CNTC_CD='I' )                AS PKUP_NO
+           , PNTC.EDI_322_MVMT_CD
+           , PNTC.PKUP_NTC_EVNT_DT
+           , PNTC.FRT_CLT_FLG 
+           , PNTC.OBL_CLT_FLG 
+           , PNTC.CSTMS_CLR_FLG
+           , PNTC.MNL_FLG
+
+           , DECODE(BCST.BKG_CUST_TP_CD,'C','CN','N','NF') AS CUST_TP_CD
+
+           , BCST.CUST_CNT_CD
+           , BCST.CUST_SEQ
+           , BCST.CUST_CNT_CD||BCST.CUST_SEQ               AS CUST_CD
+           , BCST.CUST_NM
+
+           , PNTC.BKG_NO
+           , PNTC.NTC_SEQ
+           , ROW_NUMBER() OVER (ORDER BY NHIS.SND_DT DESC ) ROW_NUM
+           , COUNT(1) OVER () ROW_COUNT
+      FROM BKG_NTC_HIS NHIS
+         , BKG_PKUP_NTC PNTC
+         , BKG_BOOKING BKGM
+         , BKG_CUSTOMER BCST
+         , COM_USER CUSR
+         , (SELECT INTG_CD_VAL_CTNT
+                 , INTG_CD_VAL_DP_DESC
+              FROM COM_INTG_CD_DTL
+             WHERE INTG_CD_ID = 'CD02539' -- PICKUP NOTICE TYPE CODE
+           ) NKCD
+         , COM_FAX_SND_INFO FXSD  -- FAX SENT HISTORY
+         , COM_EML_SND_INFO EMSD  -- EMAIL SENT HISTORY
+         , BKG_PKUP_NTC_PKUP_NO UPLD
+         , MDM_ORGANIZATION ORGN
+         , MDM_LOCATION     LOC
+      WHERE NHIS.NTC_VIA_CD IN ('F', 'M')
+        AND PNTC.BKG_NO    = UPLD.BKG_NO
+        AND PNTC.CNTR_NO   = UPLD.CNTR_NO
+        AND ORGN.OFC_CD(+) = UPLD.OFC_CD
+AND LOC.LOC_CD(+)  = SUBSTR(UPLD.PKUP_YD_CD,1,5)
+
+#if (${sch_tp} == 'D')
+        AND NHIS.SND_RQST_DT BETWEEN TO_DATE(@[snd_dt_fm], 'YYYY-MM-DD') AND TO_DATE(@[snd_dt_to], 'YYYY-MM-DD') + 1
+#elseif (${sch_tp} == 'C')
+        AND NHIS.CNTR_NO = @[cntr_no]
+#elseif (${sch_tp} == 'B')
+        AND BKGM.BL_NO = @[bl_no]
+#else
+        AND 1 = 0
+#end
+#if (${snd_usr_id} != '')
+        AND NHIS.SND_USR_ID = DECODE(@[snd_usr_id],'Auto','BAT_BKG_015',@[snd_usr_id])
+#end
+#if (${ofc_cd} != '') 
+        AND NHIS.SND_OFC_CD = @[ofc_cd]
+#end
+#if (${bkg_ntc_snd_rslt_cd} != '')
+        AND NVL(DECODE (NHIS.NTC_VIA_CD
+                         , 'F', DECODE(NHIS.BKG_NTC_SND_RSLT_CD, NULL, NULL, '5', 'S', '6', 'F', 'W')
+                         , 'M', DECODE(NHIS.BKG_NTC_SND_RSLT_CD, NULL, NULL, '3', 'S', '4', 'F', 'W')
+                        )
+                , DECODE (NHIS.NTC_VIA_CD
+                         , 'F', DECODE(FXSD.FAX_PROC_STS_CD, '5', 'S', '6', 'F', 'W')
+                         , 'M', DECODE(EMSD.EML_PROC_STS_CD, '3', 'S', '4', 'F', 'W')
+                         )
+                ) = @[bkg_ntc_snd_rslt_cd]  -- sent result
+#end
+        AND PNTC.BKG_NO     = NHIS.BKG_NO 
+        AND PNTC.NTC_SEQ    = NHIS.NTC_SEQ
+#if(${pkup_ntc_tp_cd} != '' )
+        AND PNTC.PKUP_NTC_TP_CD = @[pkup_ntc_tp_cd]
+#end
+
+#if(${mvmt_cd} != '' )
+        AND PNTC.EDI_322_MVMT_CD = @[mvmt_cd]
+#end
+        AND BKGM.BKG_NO = PNTC.BKG_NO   -- 2차 버전
+        AND CUSR.USR_ID(+) = NHIS.SND_USR_ID
+
+        AND BCST.BKG_NO              = NHIS.BKG_NO
+        AND BCST.BKG_CUST_TP_CD      = DECODE(PNTC.PKUP_NTC_TP_CD, 'TO', 'C', NHIS.BKG_CUST_TP_CD) -- Trucker 에게 보내는 건 His table에 cust_tp_cd가 안쌓이고있어서 수정 2016-08-17 
+
+        AND NKCD.INTG_CD_VAL_CTNT(+) = PNTC.pkup_ntc_tp_cd
+        AND FXSD.FAX_SND_NO(+) = DECODE(NHIS.NTC_VIA_CD, 'F', NHIS.SND_ID)
+        AND EMSD.EML_SND_NO(+) = DECODE(NHIS.NTC_VIA_CD, 'M', NHIS.SND_ID)
+      ) rslt
+#if (${excel_flg} != 'Y')
+ WHERE ROW_NUM > (TO_NUMBER(@[page_no]) -1) * TO_NUMBER(@[pagerows] )
+   AND ROW_NUM <=  TO_NUMBER(@[page_no]) * TO_NUMBER(@[pagerows] )
+#end
+ ORDER BY SND_DT DESC			]]></sql>
+			<params>
+				<param name="usr_ofc_cd" type="12" value="" out="N"/>
+				<param name="snd_dt_fm" type="12" value="" out="N"/>
+				<param name="snd_dt_to" type="12" value="" out="N"/>
+				<param name="cntr_no" type="12" value="" out="N"/>
+				<param name="bl_no" type="12" value="" out="N"/>
+				<param name="snd_usr_id" type="12" value="" out="N"/>
+				<param name="ofc_cd" type="12" value="" out="N"/>
+				<param name="bkg_ntc_snd_rslt_cd" type="12" value="" out="N"/>
+				<param name="pkup_ntc_tp_cd" type="12" value="" out="N"/>
+				<param name="mvmt_cd" type="12" value="" out="N"/>
+				<param name="page_no" type="12" value="" out="N"/>
+				<param name="pagerows" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

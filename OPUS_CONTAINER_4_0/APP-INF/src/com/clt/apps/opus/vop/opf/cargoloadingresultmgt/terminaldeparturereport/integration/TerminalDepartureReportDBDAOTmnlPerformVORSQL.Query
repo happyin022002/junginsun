@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TerminalDepartureReportDBDAOTmnlPerformVORSQL">
+			<desc><![CDATA[   ]]></desc>
+			<sql><![CDATA[
+SELECT DECODE(C2,3,'S.Total',RHQ)  AS RHQ,
+       DECODE(C2,4,'S.Total',PORT) AS PORT,
+       DECODE(C2,4,'',YARD) AS YARD,
+       DECODE(C2,4,'',3,'',LANE) AS LANE,
+       '' AS MONTH,
+       TDR_QTY,
+       TOT_MVS,
+       WORK_GROSS,
+       GANG_GROSS,
+       TMNL_PROD,
+       GANG_PROD,
+       AVG_CLAN
+FROM   (SELECT DECODE(C2,1,'Total',2,'Average per TDR',RHQ) AS RHQ, 
+              C2,
+              DECODE(PORT,'N',DECODE(C2,1,'',2,'Average per TDR',RHQ),NVL(PORT,DECODE(C2,3,'','')))  AS PORT,
+              DECODE(YARD,'N',DECODE(C2,1,'',2,'',RHQ),NVL(YARD,DECODE(C2,3,'','')))  AS YARD,
+              DECODE(LANE,'N',DECODE(C2,1,'',2,'',RHQ),NVL(LANE,DECODE(C2,3,'','')))  AS LANE,
+              DECODE(C2,2,'',TDR_QTY) AS TDR_QTY,
+              TOT_MVS,
+              WORK_GROSS,
+              GANG_GROSS,
+              TMNL_PROD,
+              GANG_PROD,
+              AVG_CLAN
+       FROM   
+       ( 
+         /* Q1 */
+         SELECT RHQ,
+                PORT,
+                YARD,
+                LANE,
+                DECODE(C3,1,3,DECODE(C4,1,4,C2)) AS C2,
+                TDR_QTY,
+                TOT_MVS,
+                WORK_GROSS,
+                GANG_GROSS,
+                DECODE(WORK_GROSS,0,0,ROUND(TOT_MVS/WORK_GROSS,2))     TMNL_PROD,
+                DECODE(GANG_GROSS,0,0,ROUND(TOT_MVS/GANG_GROSS,2))     GANG_PROD,
+                DECODE(WORK_GROSS,0,0,ROUND(GANG_GROSS/WORK_GROSS,2))  AVG_CLAN
+                --ROUND(TOT_MVS/DECODE(WORK_GROSS,0,1,WORK_GROSS),2)    TMNL_PROD,
+                --ROUND(TOT_MVS/DECODE(GANG_GROSS,0,1,GANG_GROSS),2)    GANG_PROD,
+                --ROUND(GANG_GROSS/DECODE(WORK_GROSS,0,1,WORK_GROSS),2) AVG_CLAN
+         FROM   
+         ( 
+              SELECT /*+ ORDERED */ RHQ,
+                    PORT,
+                    YARD,
+                    LANE,
+                    VVD,
+                    MAX(ATA) ATA,
+                    MAX(ATD) ATD,
+                    GROUPING(RHQ) P, GROUPING(PORT) V, GROUPING(YARD) Y, GROUPING(LANE) L,
+                    CASE
+                    WHEN GROUPING(RHQ)=0 AND GROUPING(PORT)=0 AND GROUPING(YARD)=0 AND GROUPING(LANE)=0 AND GROUPING(VVD)=0 THEN 1
+                    ELSE 0
+                    END C1,
+                    CASE
+                    WHEN GROUPING(RHQ)=0 AND GROUPING(PORT)=1 AND GROUPING(YARD)=1 AND GROUPING(LANE)=1 THEN 1
+                    ELSE 0
+                    END C3,
+                    CASE
+                    WHEN GROUPING(RHQ)=0 AND GROUPING(PORT)=0 AND GROUPING(YARD)=1 AND GROUPING(LANE)=1 THEN 1
+                    ELSE 0
+                    END C4,
+                    CASE
+                    WHEN GROUPING(RHQ)=1 AND GROUPING(PORT)=1 AND GROUPING(YARD)=1 AND GROUPING(LANE)=1 THEN 1
+                    ELSE 0
+                    END C2,
+                    NVL(COUNT(VVD),0) TDR_QTY,
+                    NVL(SUM(MVS),0) TOT_MVS,
+                    ROUND(SUM(NVL(TO_NUMBER(SUBSTR(GROSS_WORK,1,INSTR(GROSS_WORK,':')-1))+TO_NUMBER(SUBSTR(GROSS_WORK,INSTR(GROSS_WORK,':')+1)/60),0)),2) WORK_GROSS,
+                    ROUND(SUM(NVL(TO_NUMBER(SUBSTR(GROSS_GANG,1,INSTR(GROSS_GANG,':')-1))+TO_NUMBER(SUBSTR(GROSS_GANG,INSTR(GROSS_GANG,':')+1)/60),0)),2) GANG_GROSS,
+                    MAX(TML_PROD_RPT_RSN_CD) TML_PROD_RPT_RSN_CD
+                  FROM
+                    (
+                    SELECT MAX(R.POR_RHQ) RHQ,
+                            MAX(V.VPS_PORT_CD) PORT,
+                            MAX(V.YD_CD) YARD,
+                            MAX(V.SLAN_CD) LANE,
+                            MAX(T.VSL_CD||T.VOY_NO||T.DIR_CD) VVD,
+                            MAX(A.ACT_ARR_DT) ATA,
+                            MAX(A.ACT_DEP_DT) ATD,
+                            MAX(T.MVS) MVS,
+                            MAX(T.GROSS_WORK) GROSS_WORK,
+                            MAX(T.GROSS_GANG) GROSS_GANG,
+                            MAX(D.TML_PROD_RPT_RSN_CD) TML_PROD_RPT_RSN_CD
+           FROM TDR_HEADER T, VSK_VSL_PORT_SKD V, VSK_ACT_PORT_SKD A,
+                MDM_VSL_SVC_LANE L, OPF_TML_DEP_RPT_DTL D,
+--::20150428::CodeValidate Process Delete(FMS_CONTRACT, FMS_ID_VSL)
+                ( 
+                  SELECT  LOC_CD, POR_RHQ, TP, VOP_PORT_FLG
+                  FROM    
+                   ( 
+                          SELECT ML.LOC_CD,  NVL(ML.VSKD_PORT_RHQ_CD,MO.AR_HD_QTR_OFC_CD) AS POR_RHQ
+                                ,DECODE(NVL(ML.VSKD_PORT_RHQ_CD,MO.AR_HD_QTR_OFC_CD),NULL,'A','B') TP
+                                ,VOP_PORT_FLG
+                          FROM   MDM_LOCATION       ML
+                                ,MDM_ORGANIZATION   MO
+                          WHERE  1=1
+                          AND    ML.LOC_CD          = MO.LOC_CD
+                          AND    ML.CALL_PORT_FLG   = 'Y'
+                          AND    ML.DELT_FLG        = 'N'
+                          --::20150406::--AND    VSKD_PORT_RHQ_CD IS NOT NULL
+                    )
+                    WHERE   POR_RHQ = DECODE(SUBSTR(@[rhq], 1, 3), 'ALL', POR_RHQ, @[rhq]) 
+                  ) R
+                  WHERE  T.VSL_CD       = V.VSL_CD
+                  AND    T.VOY_NO       = V.SKD_VOY_NO
+                  AND    T.DIR_CD       = V.SKD_DIR_CD
+                  AND    T.PORT_CD      = V.VPS_PORT_CD
+                  AND    T.CALL_IND     = V.CLPT_IND_SEQ
+                  AND    V.VSL_CD       = A.VSL_CD
+                  AND    V.SKD_VOY_NO   = A.SKD_VOY_NO
+                  AND    V.SKD_DIR_CD   = A.SKD_DIR_CD
+                  AND    V.VPS_PORT_CD  = A.VPS_PORT_CD
+                  AND    V.CLPT_IND_SEQ = A.CLPT_IND_SEQ
+                  AND    V.SLAN_CD      = L.VSL_SLAN_CD
+                  --AND    V.VSL_CD       = C.VSL_CD(+)
+                  AND    V.VPS_PORT_CD  = R.LOC_CD
+                  AND    T.VSL_CD       = D.VSL_CD(+)
+                  AND    T.VOY_NO       = D.SKD_VOY_NO(+)
+                  AND    T.DIR_CD       = D.SKD_DIR_CD(+)
+                  AND    T.PORT_CD      = D.CLPT_CD(+)
+                  AND    T.CALL_IND     = D.CLPT_IND_SEQ(+)
+                  AND    T.COMMENCE     IS NOT NULL
+                  AND    T.MVS          > 0
+                  AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(A.ACT_DEP_DT, 'yyyymm') AND TO_CHAR(A.ACT_DEP_DT, 'yyyymm')  --:fm_dt
+                           OR REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(A.ACT_DEP_DT, 'yyyymm') AND TO_CHAR(A.ACT_DEP_DT, 'yyyymm')  --:to_dt
+                           OR ( TO_CHAR(A.ACT_DEP_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(A.ACT_DEP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+#if (${loc_cd} != '' && ${yd_cd} == 'All')
+                  AND    V.YD_CD        LIKE @[loc_cd]||'%' 
+#end
+#if (${loc_cd} != '' && ${yd_cd} != 'All')
+                  AND    V.YD_CD        LIKE @[loc_cd]||@[yd_cd]||'%' 
+#end                          
+                  AND    R.POR_RHQ      = DECODE(@[rhq], 'ALL', R.POR_RHQ, @[rhq])
+#if (${target_lanes} != 'ALL')
+                  AND    L.TML_PROD_RPT_FLG LIKE @[target_lanes]||'%'                                                --Target Lanes Only 일경우 'Y', ALL일 경우 NULL
+#end
+#if (${target_ports} != 'ALL')
+                  AND    R.TP           LIKE @[target_ports]||'%'                                                    --Target Ports Only 일경우 'B', ALL일 경우 NULL
+                  AND    R.VOP_PORT_FLG = 'Y'
+#end
+#if (${tml_prod_rpt_rsn_cd} != '')
+                  AND    DECODE(D.TML_PROD_RPT_RSN_CD,NULL,'Y','N') = DECODE(@[tml_prod_rpt_rsn_cd],'N','Y','N')       --1Exclude fm TPR이 Check되었을 경우 'Y', Check되지 않았을 경우 'N'
+#else
+                  AND    DECODE(D.TML_PROD_RPT_RSN_CD,NULL,'Y','N') = DECODE('N','N','Y','N')       --2Exclude fm TPR이 Check되었을 경우 'Y', Check되지 않았을 경우 'N'
+#end
+
+#if (${slan_cd} != 'ALL')
+                  AND    V.SLAN_CD      LIKE @[slan_cd]||'%'
+#end
+#if (${carr_cd} == 'OTH')
+                  AND    T.VSL_CD NOT IN (SELECT VSL_CD FROM MDM_VSL_CNTR WHERE CRR_CD = COM_ConstantMgr_PKG.COM_getCompanyCode_FNC())
+#end
+#if (${carr_cd} != '' && ${carr_cd} != 'OTH')
+                  AND    T.VSL_CD IN (SELECT VSL_CD FROM MDM_VSL_CNTR WHERE CRR_CD = COM_ConstantMgr_PKG.COM_getCompanyCode_FNC())
+#end     
+                       GROUP BY ( R.POR_RHQ, V.VPS_PORT_CD, V.YD_CD, V.SLAN_CD)
+                       )GROUP BY ROLLUP( RHQ, PORT, YARD, LANE, VVD) 
+                              )
+       WHERE C1 = 1 OR C2 = 1 OR C3 = 1 OR C4 = 1
+       /* Q1 */
+       UNION ALL
+       /* Q2 */
+        SELECT 'AVG' RHQ,
+                'N'   PORT,
+                'N'   LANE,
+                'N'   YARD,
+                2    C2,
+                0    TDR_QTY,
+                ROUND(TOT_MVS/TDR_QTY,2) TOT_MVS,
+                ROUND(WORK_GROSS/TDR_QTY,2) WORK_GROSS,
+                ROUND(GANG_GROSS/TDR_QTY,2) GANG_GROSS,
+                DECODE(WORK_GROSS,0,0,ROUND(TOT_MVS/WORK_GROSS,2))     TMNL_PROD,
+                DECODE(GANG_GROSS,0,0,ROUND(TOT_MVS/GANG_GROSS,2))     GANG_PROD,
+                DECODE(WORK_GROSS,0,0,ROUND(GANG_GROSS/WORK_GROSS,2))  AVG_CLAN
+         FROM   
+         ( 
+            SELECT
+              /*+ ORDERED */
+              RHQ,
+              PORT,
+              YARD,
+              LANE,
+              VVD,
+              MAX(ATA) ATA,
+              MAX(ATD) ATD,
+              CASE
+                WHEN GROUPING(RHQ)=1 AND GROUPING(PORT)=1 AND GROUPING(YARD)=1 AND GROUPING(LANE)=1 THEN 1
+                ELSE 0
+              END C2,
+              NVL(COUNT(VVD),0) TDR_QTY,
+              NVL(SUM(MVS),0) TOT_MVS,
+              ROUND(SUM(NVL(TO_NUMBER(SUBSTR(GROSS_WORK,1,INSTR(GROSS_WORK,':')-1))+TO_NUMBER(SUBSTR(GROSS_WORK,INSTR(GROSS_WORK,':')+1)/60),0)),2) WORK_GROSS,
+              ROUND(SUM(NVL(TO_NUMBER(SUBSTR(GROSS_GANG,1,INSTR(GROSS_GANG,':')-1))+TO_NUMBER(SUBSTR(GROSS_GANG,INSTR(GROSS_GANG,':')+1)/60),0)),2) GANG_GROSS,
+              MAX(TML_PROD_RPT_RSN_CD) TML_PROD_RPT_RSN_CD
+            FROM
+              (SELECT MAX(R.POR_RHQ) RHQ,
+                MAX(V.VPS_PORT_CD) PORT,
+                MAX(V.YD_CD) YARD,
+                MAX(V.SLAN_CD) LANE,
+                MAX(T.VSL_CD||T.VOY_NO||T.DIR_CD) VVD,
+                MAX(A.ACT_ARR_DT) ATA,
+                MAX(A.ACT_DEP_DT) ATD,
+                MAX(T.MVS) MVS,
+                MAX(T.GROSS_WORK) GROSS_WORK,
+                MAX(T.GROSS_GANG) GROSS_GANG,
+                MAX(D.TML_PROD_RPT_RSN_CD) TML_PROD_RPT_RSN_CD
+              FROM TDR_HEADER T,
+                VSK_VSL_PORT_SKD V,
+                VSK_ACT_PORT_SKD A,
+                MDM_VSL_SVC_LANE L,
+                OPF_TML_DEP_RPT_DTL D,
+--::20150428::CodeValidate Process Delete(FMS_CONTRACT, FMS_ID_VSL)
+         ( 
+           SELECT  LOC_CD, POR_RHQ, TP, VOP_PORT_FLG
+           FROM    (
+                          SELECT ML.LOC_CD,  NVL(ML.VSKD_PORT_RHQ_CD,MO.AR_HD_QTR_OFC_CD) AS POR_RHQ
+                                ,DECODE(NVL(ML.VSKD_PORT_RHQ_CD,MO.AR_HD_QTR_OFC_CD),NULL,'A','B') TP
+                                ,VOP_PORT_FLG
+                          FROM   MDM_LOCATION       ML
+                                ,MDM_ORGANIZATION   MO
+                          WHERE  1=1
+                          AND    ML.LOC_CD          = MO.LOC_CD
+                          AND    ML.CALL_PORT_FLG   = 'Y'
+                          AND    ML.DELT_FLG        = 'N'
+                          --::20150406::--AND    VSKD_PORT_RHQ_CD IS NOT NULL
+                    )
+           WHERE   POR_RHQ = DECODE(SUBSTR(@[rhq], 1, 3), 'ALL', POR_RHQ, @[rhq]) 
+         ) R
+         WHERE  T.VSL_CD       = V.VSL_CD
+         AND    T.VOY_NO       = V.SKD_VOY_NO
+         AND    T.DIR_CD       = V.SKD_DIR_CD
+         AND    T.PORT_CD      = V.VPS_PORT_CD
+         AND    T.CALL_IND     = V.CLPT_IND_SEQ
+         AND    V.VSL_CD       = A.VSL_CD
+         AND    V.SKD_VOY_NO   = A.SKD_VOY_NO
+         AND    V.SKD_DIR_CD   = A.SKD_DIR_CD
+         AND    V.VPS_PORT_CD  = A.VPS_PORT_CD
+         AND    V.CLPT_IND_SEQ = A.CLPT_IND_SEQ
+         AND    V.SLAN_CD      = L.VSL_SLAN_CD
+         --AND    V.VSL_CD       = C.VSL_CD(+)
+         AND    V.VPS_PORT_CD  = R.LOC_CD
+         AND    T.VSL_CD       = D.VSL_CD(+)
+         AND    T.VOY_NO       = D.SKD_VOY_NO(+)
+         AND    T.DIR_CD       = D.SKD_DIR_CD(+)
+         AND    T.PORT_CD      = D.CLPT_CD(+)
+         AND    T.CALL_IND     = D.CLPT_IND_SEQ(+)
+         AND    T.COMMENCE     IS NOT NULL
+         AND    T.MVS          > 0
+         AND    ( REPLACE(@[from_date],'-','') BETWEEN TO_CHAR(A.ACT_DEP_DT, 'yyyymm') AND TO_CHAR(A.ACT_DEP_DT, 'yyyymm')  --:fm_dt
+                  OR REPLACE(@[to_date],'-','') BETWEEN TO_CHAR(A.ACT_DEP_DT, 'yyyymm') AND TO_CHAR(A.ACT_DEP_DT, 'yyyymm')  --:to_dt
+                  OR ( TO_CHAR(A.ACT_DEP_DT,'YYYYMM') >= REPLACE(@[from_date],'-','') AND    TO_CHAR(A.ACT_DEP_DT,'YYYYMM') <= REPLACE(@[to_date],'-','') ) ) --:fm_dt, :to_dt
+#if (${loc_cd} != '' && ${yd_cd} == 'All')
+         AND    V.YD_CD        LIKE @[loc_cd]||'%' 
+#end
+#if (${loc_cd} != '' && ${yd_cd} != 'All')
+         AND    V.YD_CD        LIKE @[loc_cd]||@[yd_cd]||'%' 
+#end
+         AND    R.POR_RHQ      = DECODE(@[rhq], 'ALL', R.POR_RHQ, @[rhq])
+#if (${target_lanes} != 'ALL')
+         AND    L.TML_PROD_RPT_FLG LIKE @[target_lanes]||'%'                                                --Target Lanes Only 일경우 'Y', ALL일 경우 NULL
+#end
+#if (${target_ports} != 'ALL')
+         AND    R.TP           LIKE @[target_ports]||'%'                                                    --Target Ports Only 일경우 'B', ALL일 경우 NULL
+         AND    R.VOP_PORT_FLG = 'Y'
+#end
+#if (${tml_prod_rpt_rsn_cd} != '')
+         AND    DECODE(D.TML_PROD_RPT_RSN_CD,NULL,'Y','N') = DECODE(@[tml_prod_rpt_rsn_cd],'N','Y','N')       --Exclude fm TPR이 Check되었을 경우 'Y', Check되지 않았을 경우 'N'
+#else
+         AND    DECODE(D.TML_PROD_RPT_RSN_CD,NULL,'Y','N') = DECODE('N','N','Y','N')       --Exclude fm TPR이 Check되었을 경우 'Y', Check되지 않았을 경우 'N'
+#end
+#if (${slan_cd} != 'ALL')
+         AND    V.SLAN_CD      LIKE @[slan_cd]||'%'
+#end
+#if (${carr_cd} == 'OTH')
+         AND    T.VSL_CD NOT IN (SELECT VSL_CD FROM MDM_VSL_CNTR WHERE CRR_CD = COM_ConstantMgr_PKG.COM_getCompanyCode_FNC())
+#end
+#if (${carr_cd} != '' && ${carr_cd} != 'OTH')
+         AND    T.VSL_CD IN (SELECT VSL_CD FROM MDM_VSL_CNTR WHERE CRR_CD = COM_ConstantMgr_PKG.COM_getCompanyCode_FNC())
+#end     
+         GROUP BY ( R.POR_RHQ, V.VPS_PORT_CD, V.YD_CD, V.SLAN_CD)
+              )
+            GROUP BY ROLLUP( RHQ, PORT, YARD, LANE, VVD) ) WHERE C2 = 1
+       /* Q2 */
+     )
+     ORDER BY DECODE(C2,1,'YYYYY',2,'ZZZZZ',3,RHQ||'Z',RHQ), DECODE(C2,4,PORT||'Z',PORT), YARD, LANE
+)			]]></sql>
+			<params>
+				<param name="rhq" type="12" value="" out="N"/>
+				<param name="from_date" type="12" value="" out="N"/>
+				<param name="to_date" type="12" value="" out="N"/>
+				<param name="loc_cd" type="12" value="" out="N"/>
+				<param name="yd_cd" type="12" value="" out="N"/>
+				<param name="target_lanes" type="12" value="" out="N"/>
+				<param name="target_ports" type="12" value="" out="N"/>
+				<param name="tml_prod_rpt_rsn_cd" type="12" value="" out="N"/>
+				<param name="slan_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

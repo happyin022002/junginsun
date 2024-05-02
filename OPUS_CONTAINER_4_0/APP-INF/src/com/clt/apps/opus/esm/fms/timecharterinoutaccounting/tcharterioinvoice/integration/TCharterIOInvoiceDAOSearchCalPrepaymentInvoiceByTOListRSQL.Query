@@ -1,0 +1,560 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="TCharterIOInvoiceDAOSearchCalPrepaymentInvoiceByTOListRSQL">
+			<desc><![CDATA[Create TO]]></desc>
+			<sql><![CDATA[
+WITH V_ACCT_CD AS (
+        SELECT A.ACCT_CD
+             , A.ACCT_ITM_SEQ
+             , A.ACCT_ITM_NM
+             , B.FLET_ACCT_CATE_CD
+             , '1' AS SORT_KEY
+          FROM FMS_ACCT_ITM A
+             , FMS_ACCT_CATE B
+         WHERE A.ACCT_CD = B.ACCT_CD
+           AND A.ACCT_ITM_SEQ = B.ACCT_ITM_SEQ
+           AND B.FLET_ACCT_CATE_CD = 'TC'
+           AND ROWNUM = 1
+         UNION ALL
+        SELECT A.ACCT_CD
+             , A.ACCT_ITM_SEQ
+             , A.ACCT_ITM_NM
+             , B.FLET_ACCT_CATE_CD
+             , '3' AS SORT_KEY
+          FROM FMS_ACCT_ITM A
+             , FMS_ACCT_CATE B
+         WHERE A.ACCT_CD = B.ACCT_CD
+           AND A.ACCT_ITM_SEQ = B.ACCT_ITM_SEQ
+           AND B.FLET_ACCT_CATE_CD = 'AD'
+           AND ROWNUM = 1 
+        )
+     , V_PARAM AS (
+        SELECT @[flet_ctrt_no] AS FLET_CTRT_NO
+             , @[ori_eff_dt] AS ORI_EFF_DT
+             , @[ori_exp_dt] AS ORI_EXP_DT
+             , CASE WHEN SUBSTR(@[ori_eff_dt],1,6) = SUBSTR(@[ori_exp_dt],1,6) THEN 'Y'
+                    ELSE 'N'
+               END AS CON_EQUAL_MONTH_FLG2
+             , @[vsl_cd] AS VSL_CD
+             , @[ppay_hir_no] AS PPAY_HIR_NO
+             , @[ori_inv_usd_dys] AS ORI_INV_USD_DYS
+             , @[inv_usd_dys] AS INV_USD_DYS
+             , @[acmm_rt_amt] AS ACMM_RT_AMT
+             , @[flet_brog_rt_amt] AS FLET_BROG_RT_AMT
+             , @[months] AS MONTHS
+             , @[flet_ctrt_tp_gb] AS FLET_CTRT_TP_GB
+             , 'Hire' || ' ' || @[vsl_cd] || ' ' || @[ppay_hir_no] || DECODE(@[ppay_hir_no],'1','st','2','nd','3','rd','th') AS PRE_INV_DESC
+          FROM DUAL 
+        )
+     , V_PARAM_MONTH AS (
+        SELECT A.*
+             , CASE WHEN SUBSTR(CON_EFF_NEXT_MONTH,1,6) = SUBSTR(ORI_EXP_DT,1,6) THEN 'Y'
+                    ELSE 'N'
+               END AS CON_EQUAL_MONTH_FLG
+          FROM (
+                SELECT ROWNUM AS ITEMKEY
+                     , A.*
+                     , DECODE(DIFF,0,ORI_EFF_DT,TO_CHAR(ADD_MONTHS(TO_DATE(A.MIN_YM,'YYYYMM'), DIFF),'YYYYMMDDHH24MI')) AS CON_EFF_NEXT_MONTH
+                  FROM (SELECT A.*
+                             , TO_CHAR(ADD_MONTHS(TO_DATE(A.MIN_YM,'YYYYMM'),LEVEL-1),'YYYYMM') AS ORI_EFF_YM
+                             , LEVEL-1 AS DIFF
+                          FROM (SELECT A.*
+                                     , SUBSTR(A.ORI_EFF_DT,1,6) MIN_YM
+                                     , SUBSTR(A.ORI_EXP_DT,1,6) MAX_YM
+                                  FROM V_PARAM A 
+                                ) A 
+                        CONNECT BY LEVEL <= MONTHS_BETWEEN(ADD_MONTHS(TO_DATE(A.MAX_YM,'YYYYMM'), 1), TO_DATE(A.MIN_YM, 'YYYYMM')) 
+                        ) A 
+               ) A
+         WHERE ORI_EXP_DT <> CON_EFF_NEXT_MONTH /*Next Eff DT 와 ori_exp_dt 가 동일 하면 skip 하도록 한다.*/
+         ORDER BY A.ORI_EFF_DT 
+    )
+--SELeCT * FROM V_PARAM_MONTH;    
+    , V_PARM_HIRE AS (
+        SELECT VP.*
+             , CASE WHEN TO_DATE(VP.ORI_EFF_DT,'YYYYMMDDHH24MI') >= FH.EFF_DT THEN VP.ORI_EFF_DT 
+                    ELSE TO_CHAR(FH.EFF_DT,'YYYYMMDDHH24MI')
+               END NOW_HIRE_EFF_DT
+             , CASE WHEN TO_DATE(VP.ORI_EXP_DT,'YYYYMMDDHH24MI') >= FH.EXP_DT THEN TO_CHAR(FH.EXP_DT,'YYYYMMDDHH24MI')
+                    ELSE VP.ORI_EXP_DT 
+               END NOW_HIRE_EXP_DT
+             , FH.EFF_DT AS HIRE_EFF_DT
+             , FH.EXP_DT AS HIRE_EXP_DT
+             , FH.HIR_RT_N1ST_AMT
+             , FH.HIR_CURR_N1ST_CD
+             , FH.HIR_RT_N2ND_AMT
+             , FH.HIR_CURR_N2ND_CD
+          FROM FMS_HIRE FH
+             , V_PARAM VP
+         WHERE FH.FLET_CTRT_NO = VP.FLET_CTRT_NO
+           AND TO_DATE(VP.ORI_EFF_DT,'YYYYMMDDHH24MI') >= ( SELECT MIN(EFF_DT)
+                                                              FROM FMS_HIRE
+                                                             WHERE FLET_CTRT_NO = VP.FLET_CTRT_NO)
+           AND TO_DATE(VP.ORI_EXP_DT,'YYYYMMDDHH24MI') <= ( SELECT MAX(EXP_DT)
+                                                              FROM FMS_HIRE
+                                                             WHERE FLET_CTRT_NO = VP.FLET_CTRT_NO)
+    )
+--SELECT * FROM V_PARM_HIRE;
+   , V_PARAM_HIRE_MONTH AS (
+        SELECT A.*
+             , CASE WHEN SUBSTR(CON_EFF_NEXT_MONTH,1,6) = SUBSTR(ORI_EXP_DT,1,6) THEN 'Y'
+                    ELSE 'N'
+               END AS CON_EQUAL_MONTH_FLG
+          FROM (
+                SELECT ROWNUM AS ITEMKEY
+                     , A.*
+                     , DECODE(DIFF,0,NOW_HIRE_EFF_DT,TO_CHAR(ADD_MONTHS(TO_DATE(A.MIN_YM,'YYYYMM'), DIFF),'YYYYMMDDHH24MI')) AS CON_EFF_NEXT_MONTH
+                  FROM (SELECT A.*
+                             , TO_CHAR(ADD_MONTHS(TO_DATE(A.MIN_YM,'YYYYMM'),LEVEL-1),'YYYYMM') AS ORI_EFF_YM
+                             , LEVEL-1 AS DIFF
+                          FROM (SELECT A.*
+                                     , SUBSTR(A.NOW_HIRE_EFF_DT,1,6) MIN_YM
+                                     , SUBSTR(A.NOW_HIRE_EXP_DT,1,6) MAX_YM
+                                  FROM V_PARM_HIRE A 
+                                ) A 
+                        CONNECT BY LEVEL <= MONTHS_BETWEEN(ADD_MONTHS(TO_DATE(A.MAX_YM,'YYYYMM'), 1), TO_DATE(A.MIN_YM, 'YYYYMM')) 
+                        ) A 
+               ) A
+         WHERE ORI_EXP_DT <> CON_EFF_NEXT_MONTH /*Next Eff DT 와 ori_exp_dt 가 동일 하면 skip 하도록 한다.*/
+         ORDER BY A.ORI_EFF_DT 
+    )
+--SELECT * FROM V_PARAM_HIRE_MONTH;
+SELECT ACCT_ITM_NM
+     , ACCT_CD
+     , CURR_CD
+     , INV_AMT
+     , ORI_INV_AMT
+     , CURR_CD2
+     , INV_AMT2
+     , ORI_INV_AMT2
+     , 'N' AS SLP_TP_CD
+     , INV_DESC
+     , FLET_CTRT_NO
+     , ROWNUM INV_DTL_SEQ
+     , ACCT_ITM_SEQ
+     , EFF_DT
+     , EXP_DT
+     , INV_USD_DYS
+     , SORTKEY SORT_KEY
+  FROM (SELECT ACCT_ITM_NM
+             , ACCT_CD
+             , CURR_CD
+             , INV_AMT
+             , ORI_INV_AMT
+             , CURR_CD2
+             , INV_AMT2
+             , ORI_INV_AMT2
+             , INV_DESC
+             , FLET_CTRT_NO
+             , ACCT_ITM_SEQ
+             , EFF_DT
+             , EXP_DT
+             , SORTKEY
+             , ITEMKEY
+             , TO_DATE(EXP_DT,'YYYYMMDDHH24MI') - TO_DATE(EFF_DT,'YYYYMMDDHH24MI') AS INV_USD_DYS
+          FROM (
+                /*1.TO : Time Charter Hire start */
+                SELECT ACCT_ITM_NM
+                     , ACCT_CD
+                     , ACCT_ITM_SEQ
+                     , CURR_CD AS CURR_CD
+                     , TRIM(TO_CHAR(INV_AMT,'999,999,999,999,999,990.00')) AS INV_AMT
+                     , TRIM(TO_CHAR(INV_AMT,'999,999,999,999,999,990.00')) AS ORI_INV_AMT
+                     , CURR_CD2 AS CURR_CD2
+                     , TRIM(TO_CHAR(INV_AMT2,'999,999,999,999,999,990.00')) AS INV_AMT2
+                     , TRIM(TO_CHAR(INV_AMT2,'999,999,999,999,999,990.00')) AS ORI_INV_AMT2
+                     , INV_DESC AS INV_DESC
+                     , FLET_CTRT_NO AS FLET_CTRT_NO
+                     , EFF_DT AS EFF_DT
+                     , EXP_DT AS EXP_DT
+                     , ITEMKEY
+                     , '1' SORTKEY
+                  FROM (
+                        SELECT ACCT_ITM_NM
+                             , ACCT_CD
+                             , DECODE(FLET_CURR_CHK_CD,'F',HIR_CURR_N1ST_CD ,NULL) CURR_CD
+                             , DECODE(FLET_CURR_CHK_CD,'F',HIR_RT_N1ST_AMT  ,NULL) INV_AMT
+                             , DECODE(FLET_CURR_CHK_CD,'S',HIR_CURR_N1ST_CD ,NULL) CURR_CD2
+                             , DECODE(FLET_CURR_CHK_CD,'S',HIR_RT_N1ST_AMT  ,NULL) INV_AMT2
+                             , INV_DESC
+                             , FLET_CTRT_NO
+                             , ACCT_ITM_SEQ
+                             , EFF_DT
+                             , EXP_DT
+                             , ITEMKEY
+                          FROM (SELECT MIN(ACCT_ITM_NM) ACCT_ITM_NM
+                                     , MIN(ACCT_CD) ACCT_CD
+                                     , HIR_CURR_N1ST_CD
+                                     , SUM(HIR_RT_N1ST_AMT) AS HIR_RT_N1ST_AMT
+                                     , MIN(INV_DESC) INV_DESC
+                                     , MIN(ACCT_ITM_SEQ) ACCT_ITM_SEQ
+                                     , MIN(FLET_CURR_CHK_CD) FLET_CURR_CHK_CD
+                                     , MIN(FLET_CTRT_NO) FLET_CTRT_NO
+                                     , MIN(EFF_DT) EFF_DT
+                                     , MIN(EXP_DT) EXP_DT
+                                     , ITEMKEY
+                                  FROM (SELECT AC.ACCT_ITM_NM
+                                             , AC.ACCT_CD
+                                             , PM.HIR_CURR_N1ST_CD
+                                             , CASE WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' THEN 
+                                                         FMS_HIRCURAMT1_FNC(PM.FLET_CTRT_NO, PM.CON_EFF_NEXT_MONTH, PM.NOW_HIRE_EXP_DT)
+                                                    ELSE 
+                                                         FMS_HIRCURAMT1_FNC(PM.FLET_CTRT_NO, PM.CON_EFF_NEXT_MONTH, TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYYMMDDHH24MI'))
+                                               END HIR_RT_N1ST_AMT
+                                             , CASE WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' AND SUBSTR(PM.NOW_HIRE_EXP_DT,9,4) = '0000' THEN 
+                                                         PM.PRE_INV_DESC || ' ' || HIR_CURR_N1ST_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(TO_DATE(PM.NOW_HIRE_EXP_DT,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ')'
+                                                    WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' AND SUBSTR(PM.NOW_HIRE_EXP_DT,9,4) != '0000' THEN 
+                                                         PM.PRE_INV_DESC || ' ' || HIR_CURR_N1ST_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(TO_DATE(PM.NOW_HIRE_EXP_DT,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ')'
+                                                    ELSE 
+                                                         PM.PRE_INV_DESC || ' ' || HIR_CURR_N1ST_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYY-MM-DD HH24:MI') || ')'
+                                               END INV_DESC
+                                             , AC.ACCT_ITM_SEQ
+                                             , 'F' FLET_CURR_CHK_CD
+                                             , PM.FLET_CTRT_NO
+                                             , PM.CON_EFF_NEXT_MONTH AS EFF_DT
+                                             , DECODE(PM.CON_EQUAL_MONTH_FLG,'Y', PM.NOW_HIRE_EXP_DT, TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYYMMDDHH24MI')) AS EXP_DT
+                                             , PM.ORI_EFF_YM
+                                             , PM.ITEMKEY
+                                          FROM FMS_CONTRACT FC
+                                             , V_ACCT_CD AC
+                                             , V_PARAM_HIRE_MONTH PM
+                                         WHERE FC.FLET_CTRT_NO = PM.FLET_CTRT_NO
+                                           AND TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI') >= ( SELECT MIN(EFF_DT)
+                                                                                                      FROM FMS_HIRE
+                                                                                                     WHERE FLET_CTRT_NO = PM.FLET_CTRT_NO)
+                                           AND DECODE(PM.CON_EQUAL_MONTH_FLG,'Y', TO_DATE(PM.ORI_EXP_DT,'YYYYMMDDHH24MI'), TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI')) 
+                                                                                               <= ( SELECT MAX(EXP_DT)
+                                                                                                      FROM FMS_HIRE
+                                                                                                     WHERE FLET_CTRT_NO = PM.FLET_CTRT_NO)
+                                           AND HIR_CURR_N1ST_CD IS NOT NULL
+                                           AND AC.FLET_ACCT_CATE_CD = 'TC' 
+                                       )
+                                 WHERE HIR_RT_N1ST_AMT != 0
+                                 GROUP BY HIR_CURR_N1ST_CD
+                                     , ITEMKEY
+                                 UNION ALL
+                                SELECT MIN(ACCT_ITM_NM) ACCT_ITM_NM
+                                     , MIN(ACCT_CD) ACCT_CD
+                                     , HIR_CURR_N2ND_CD
+                                     , SUM(HIR_RT_N1ST_AMT) AS HIR_RT_N1ST_AMT
+                                     , MIN(INV_DESC) INV_DESC
+                                     , MIN(ACCT_ITM_SEQ) ACCT_ITM_SEQ
+                                     , MIN(FLET_CURR_CHK_CD) FLET_CURR_CHK_CD
+                                     , MIN(FLET_CTRT_NO) FLET_CTRT_NO
+                                     , MIN(EFF_DT) EFF_DT
+                                     , MIN(EXP_DT) EXP_DT
+                                     , ITEMKEY
+                                  FROM (SELECT AC.ACCT_ITM_NM
+                                             , AC.ACCT_CD
+                                             , HIR_CURR_N2ND_CD
+                                             , CASE WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' THEN 
+                                                         FMS_HIRCURAMT2_FNC(PM.FLET_CTRT_NO, PM.CON_EFF_NEXT_MONTH, PM.NOW_HIRE_EXP_DT)
+                                                    ELSE 
+                                                         FMS_HIRCURAMT2_FNC(PM.FLET_CTRT_NO, PM.CON_EFF_NEXT_MONTH, TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYYMMDDHH24MI'))
+                                               END HIR_RT_N1ST_AMT
+                                             , CASE WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' AND SUBSTR(PM.NOW_HIRE_EXP_DT,9,4) = '0000' THEN 
+                                                         PM.PRE_INV_DESC || ' ' || HIR_CURR_N2ND_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(TO_DATE(PM.NOW_HIRE_EXP_DT,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ')'
+                                                    WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' AND SUBSTR(PM.NOW_HIRE_EXP_DT,9,4) != '0000' THEN 
+                                                         PM.PRE_INV_DESC || ' ' || HIR_CURR_N2ND_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(TO_DATE(PM.NOW_HIRE_EXP_DT,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ')'
+                                                    ELSE 
+                                                         PM.PRE_INV_DESC || ' ' || HIR_CURR_N2ND_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYY-MM-DD HH24:MI') || ')'
+                                               END INV_DESC
+                                             , AC.ACCT_ITM_SEQ
+                                             , 'S' FLET_CURR_CHK_CD
+                                             , PM.FLET_CTRT_NO
+                                             , PM.CON_EFF_NEXT_MONTH AS EFF_DT
+                                             , DECODE(PM.CON_EQUAL_MONTH_FLG,'Y', PM.NOW_HIRE_EXP_DT, PM.CON_EFF_NEXT_MONTH) AS EXP_DT
+                                             , PM.ORI_EFF_YM
+                                             , PM.ITEMKEY
+                                          FROM FMS_CONTRACT FC
+                                             , V_ACCT_CD AC
+                                             , V_PARAM_HIRE_MONTH PM
+                                         WHERE FC.FLET_CTRT_NO = PM.FLET_CTRT_NO
+                                           AND TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI') >= ( SELECT MIN(EFF_DT)
+                                                                                                      FROM FMS_HIRE
+                                                                                                     WHERE FLET_CTRT_NO = PM.FLET_CTRT_NO)
+                                           AND DECODE(PM.CON_EQUAL_MONTH_FLG , 'Y', TO_DATE(PM.ORI_EXP_DT,'YYYYMMDDHH24MI') ,TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'))
+                                                                                               <= (SELECT MAX(EXP_DT)
+                                                                                                      FROM FMS_HIRE
+                                                                                                     WHERE FLET_CTRT_NO = PM.FLET_CTRT_NO)
+                                           AND PM.HIR_CURR_N2ND_CD IS NOT NULL
+                                           AND AC.FLET_ACCT_CATE_CD = 'TC' 
+                                       )
+                                 WHERE HIR_RT_N1ST_AMT != 0
+                                 GROUP BY HIR_CURR_N2ND_CD
+                                     , ITEMKEY 
+                               )
+                       )
+                /*1.TO : Time Charter Hire  e n d*/
+
+                /* 2. TO : C/V/E Lumpsum Cost : other start*/
+                 UNION ALL
+                SELECT ACCT_ITM_NM
+                     , ACCT_CD
+                     , ACCT_ITM_SEQ
+                     , CURR_CD AS CURR_CD
+                     , TRIM(TO_CHAR(INV_AMT,'999,999,999,999,999,990.00')) AS INV_AMT
+                     , TRIM(TO_CHAR(INV_AMT,'999,999,999,999,999,990.00')) AS ORI_INV_AMT
+                     , CURR_CD2 AS CURR_CD2
+                     , TRIM(TO_CHAR(INV_AMT2,'999,999,999,999,999,990.00')) AS INV_AMT2
+                     , TRIM(TO_CHAR(INV_AMT2,'999,999,999,999,999,990.00')) AS ORI_INV_AMT2
+                     , INV_DESC AS INV_DESC
+                     , FLET_CTRT_NO AS FLET_CTRT_NO
+                     , EFF_DT AS EFF_DT
+                     , EXP_DT AS EXP_DT
+                     , ITEMKEY
+                     , '2' SORTKEY
+                  FROM (
+                        SELECT ACCT_ITM_NM
+                             , ACCT_CD
+                             , ACCT_ITM_SEQ
+                             , HIR_CURR_N1ST_CD AS CURR_CD
+                             , HIR_RT_N1ST_AMT AS INV_AMT
+                             , NULL AS CURR_CD2
+                             , NULL AS INV_AMT2
+                             , NULL AS ORI_INV_AMT2
+                             , INV_DESC
+                             , FLET_CTRT_NO
+                             , EFF_DT
+                             , EXP_DT
+                             , ITEMKEY
+                          FROM (SELECT ACCT_ITM_NM
+                                     , ACCT_CD
+                                     , HIR_CURR_N1ST_CD
+                                     , HIR_RT_N1ST_AMT
+                                     , INV_DESC
+                                     , FLET_CTRT_NO
+                                     , ROWNUM AS INV_DTL_SEQ
+                                     , ACCT_ITM_SEQ
+                                     , EFF_DT
+                                     , EXP_DT
+                                     , ITEMKEY
+                                  FROM (SELECT ACCT_ITM_NM
+                                             , ACCT_CD
+                                             , MIN(HIR_CURR_N1ST_CD) HIR_CURR_N1ST_CD
+                                             , SUM(HIR_RT_N1ST_AMT) AS HIR_RT_N1ST_AMT
+                                             , INV_DESC
+                                             , MIN(FLET_CTRT_NO) FLET_CTRT_NO
+                                             , ACCT_ITM_SEQ
+                                             , MIN(EFF_DT) EFF_DT
+                                             , MAX(EXP_DT) EXP_DT
+                                             , ITEMKEY
+                                          FROM (SELECT (SELECT ACCT_ITM_NM
+                                                          FROM FMS_ACCT_ITM
+                                                         WHERE ACCT_CD = FO.ACCT_CD
+                                                           AND ACCT_ITM_SEQ = FO.ACCT_ITM_SEQ
+                                                           AND ROWNUM =1) ACCT_ITM_NM
+                                                     , FO.ACCT_CD
+                                                     , CASE WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' THEN 
+                                                                 FMS_OTRAMT_FNC(PM.FLET_CTRT_NO, FO.ACCT_CD, FO.ACCT_ITM_SEQ, PM.CON_EFF_NEXT_MONTH, PM.ORI_EXP_DT)
+                                                            ELSE 
+                                                                 FMS_OTRAMT_FNC(PM.FLET_CTRT_NO, FO.ACCT_CD, FO.ACCT_ITM_SEQ, PM.CON_EFF_NEXT_MONTH, TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYYMMDDHH24MI'))
+                                                       END HIR_RT_N1ST_AMT
+                                                     , FO.CURR_CD AS HIR_CURR_N1ST_CD
+                                                     , CASE WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' AND SUBSTR(PM.ORI_EXP_DT,9,4) = '0000' THEN 
+                                                                 PM.PRE_INV_DESC || ' ' || FO.CURR_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(TO_DATE(PM.ORI_EXP_DT,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ')'
+                                                            WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' AND SUBSTR(PM.ORI_EXP_DT,9,4) != '0000' THEN 
+                                                                 PM.PRE_INV_DESC || ' ' || FO.CURR_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(TO_DATE(PM.ORI_EXP_DT,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ')'
+                                                            ELSE 
+                                                                 PM.PRE_INV_DESC || ' ' || FO.CURR_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYY-MM-DD HH24:MI') || ')'
+                                                       END INV_DESC
+                                                     , FO.ACCT_ITM_SEQ
+                                                     , FO.FLET_CTRT_NO
+                                                     , PM.CON_EFF_NEXT_MONTH AS EFF_DT
+                                                     , DECODE(PM.CON_EQUAL_MONTH_FLG,'Y', PM.ORI_EXP_DT, TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYYMMDDHH24MI')) AS EXP_DT
+                                                     , PM.ORI_EFF_YM
+                                                     , PM.ITEMKEY
+                                                  FROM FMS_CONTRACT FC
+                                                     , FMS_OTR_EXPN FO
+                                                     , V_PARAM_MONTH PM
+                                                 WHERE FC.FLET_CTRT_NO = FO.FLET_CTRT_NO
+                                                   AND FC.FLET_CTRT_NO = PM.FLET_CTRT_NO
+                                                   AND TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI') >= ( SELECT MIN(EFF_DT)
+                                                                                                              FROM FMS_HIRE
+                                                                                                             WHERE FLET_CTRT_NO = PM.FLET_CTRT_NO)
+                                                   AND DECODE(PM.CON_EQUAL_MONTH_FLG,'Y', TO_DATE(PM.ORI_EXP_DT,'YYYYMMDDHH24MI'), ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1)) 
+                                                                                                       <= (SELECT CASE WHEN MAX(EXP_DT) >= DECODE(PM.CON_EQUAL_MONTH_FLG,'Y', TO_DATE(PM.ORI_EXP_DT,'YYYYMMDDHH24MI'), ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1)) 
+                                                                                                                       THEN MAX(EXP_DT)
+                                                                                                                  ELSE MAX(EXP_DT) + 1
+                                                                                                                  END EXP_DT
+                                                                                                              FROM FMS_OTR_EXPN
+                                                                                                             WHERE FLET_CTRT_NO = PM.FLET_CTRT_NO)
+                                               )
+                                         GROUP BY ACCT_ITM_NM
+                                             , ACCT_CD
+                                             , ACCT_ITM_SEQ
+                                             , INV_DESC
+                                             , ITEMKEY 
+                                       )
+                                 WHERE HIR_RT_N1ST_AMT != 0
+                                 ORDER BY ACCT_ITM_NM
+                                     , ACCT_CD
+                                     , ACCT_ITM_SEQ
+                                     , ITEMKEY 
+                               ) 
+                       )                      
+                /* 2. TO : C/V/E Lumpsum Cost : other e n d*/ 
+
+				/* 3. TO :Address Commission  start*/
+                 UNION ALL
+                SELECT ACCT_ITM_NM
+                     , ACCT_CD
+                     , ACCT_ITM_SEQ
+                     , CURR_CD AS CURR_CD
+                     , TRIM(TO_CHAR(INV_AMT,'999,999,999,999,999,990.00')) AS INV_AMT
+                     , TRIM(TO_CHAR(INV_AMT,'999,999,999,999,999,990.00')) AS ORI_INV_AMT
+                     , CURR_CD2 AS CURR_CD2
+                     , TRIM(TO_CHAR(INV_AMT2,'999,999,999,999,999,990.00')) AS INV_AMT2
+                     , TRIM(TO_CHAR(INV_AMT2,'999,999,999,999,999,990.00')) AS ORI_INV_AMT2
+                     , INV_DESC AS INV_DESC
+                     , FLET_CTRT_NO AS FLET_CTRT_NO
+                     , EFF_DT AS EFF_DT
+                     , EXP_DT AS EXP_DT
+                     , ITEMKEY
+                     , '3' SORTKEY
+                  FROM (
+                        SELECT ACCT_ITM_NM
+                             , ACCT_CD
+                             , ACCT_ITM_SEQ
+                             , DECODE(FLET_CURR_CHK_CD,'F',HIR_CURR_N1ST_CD ,NULL) CURR_CD
+                             , DECODE(FLET_CURR_CHK_CD,'F',HIR_RT_N1ST_AMT  ,NULL) INV_AMT
+                             , DECODE(FLET_CURR_CHK_CD,'S',HIR_CURR_N1ST_CD ,NULL) CURR_CD2
+                             , DECODE(FLET_CURR_CHK_CD,'S',HIR_RT_N1ST_AMT  ,NULL) INV_AMT2
+                             , INV_DESC
+                             , FLET_CTRT_NO
+                             , EFF_DT
+                             , EXP_DT
+                             , ITEMKEY
+                          FROM (SELECT MIN(ACCT_ITM_NM) ACCT_ITM_NM
+                                     , MIN(ACCT_CD) ACCT_CD
+                                     , HIR_CURR_N1ST_CD
+                                     , SUM(HIR_RT_N1ST_AMT) AS HIR_RT_N1ST_AMT
+                                     , INV_DESC
+                                     , MIN(ACCT_ITM_SEQ) ACCT_ITM_SEQ
+                                     , MIN(FLET_CURR_CHK_CD) FLET_CURR_CHK_CD
+                                     , MIN(FLET_CTRT_NO) FLET_CTRT_NO
+                                     , MIN(EFF_DT) EFF_DT
+                                     , MIN(EXP_DT) EXP_DT
+                                     , ITEMKEY
+                                  FROM (SELECT AC.ACCT_ITM_NM
+                                             , AC.ACCT_CD
+                                             , HIR_CURR_N1ST_CD
+                                             , CASE WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' THEN 
+                                                         -1 * FMS_HIRCURAMT1_FNC(PM.FLET_CTRT_NO, PM.CON_EFF_NEXT_MONTH, PM.NOW_HIRE_EXP_DT) * TO_NUMBER(PM.ACMM_RT_AMT/100)
+                                                    ELSE 
+                                                         -1 * FMS_HIRCURAMT1_FNC(PM.FLET_CTRT_NO, PM.CON_EFF_NEXT_MONTH, TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYYMMDDHH24MI')) * TO_NUMBER(PM.ACMM_RT_AMT/100)
+                                               END HIR_RT_N1ST_AMT
+                                             , CASE WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' AND SUBSTR(PM.NOW_HIRE_EXP_DT,9,4) = '0000' THEN 
+                                                         PM.PRE_INV_DESC || ' ' || HIR_CURR_N1ST_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(TO_DATE(PM.NOW_HIRE_EXP_DT,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ')'
+                                                    WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' AND SUBSTR(PM.NOW_HIRE_EXP_DT,9,4) != '0000' THEN 
+                                                         PM.PRE_INV_DESC || ' ' || HIR_CURR_N1ST_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(TO_DATE(PM.NOW_HIRE_EXP_DT,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ')'
+                                                    ELSE 
+                                                         PM.PRE_INV_DESC || ' ' || HIR_CURR_N1ST_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYY-MM-DD HH24:MI') || ')'
+                                               END INV_DESC
+                                             , AC.ACCT_ITM_SEQ
+                                             , 'F' FLET_CURR_CHK_CD
+                                             , PM.FLET_CTRT_NO
+                                             , PM.CON_EFF_NEXT_MONTH AS EFF_DT
+                                             , DECODE(PM.CON_EQUAL_MONTH_FLG,'Y', PM.NOW_HIRE_EXP_DT, TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYYMMDDHH24MI')) AS EXP_DT
+                                             , PM.ORI_EFF_YM
+                                             , PM.ITEMKEY
+                                          FROM FMS_CONTRACT FC
+                                             , V_ACCT_CD AC
+                                             , V_PARAM_HIRE_MONTH PM
+                                         WHERE FC.FLET_CTRT_NO = PM.FLET_CTRT_NO
+                                           AND TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI') >= ( SELECT MIN(EFF_DT)
+                                                                                                      FROM FMS_HIRE
+                                                                                                     WHERE FLET_CTRT_NO = PM.FLET_CTRT_NO)
+                                           AND DECODE(PM.CON_EQUAL_MONTH_FLG,'Y', TO_DATE(PM.NOW_HIRE_EXP_DT,'YYYYMMDDHH24MI'), TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI')) 
+                                                                                               <= (SELECT MAX(EXP_DT)
+                                                                                                      FROM FMS_HIRE
+                                                                                                     WHERE FLET_CTRT_NO = PM.FLET_CTRT_NO)
+                                           AND HIR_CURR_N1ST_CD IS NOT NULL
+                                           AND AC.FLET_ACCT_CATE_CD = 'AD' 
+                                       )
+                                 WHERE HIR_RT_N1ST_AMT != 0
+                                 GROUP BY HIR_CURR_N1ST_CD
+                                     , INV_DESC
+                                     , ITEMKEY
+                                 UNION ALL
+                                SELECT MIN(ACCT_ITM_NM) ACCT_ITM_NM
+                                     , MIN(ACCT_CD) ACCT_CD
+                                     , HIR_CURR_N2ND_CD
+                                     , SUM(HIR_RT_N1ST_AMT) AS HIR_RT_N1ST_AMT
+                                     , INV_DESC
+                                     , MIN(ACCT_ITM_SEQ) ACCT_ITM_SEQ
+                                     , MIN(FLET_CURR_CHK_CD) FLET_CURR_CHK_CD
+                                     , MIN(FLET_CTRT_NO) FLET_CTRT_NO
+                                     , MIN(EFF_DT) EFF_DT
+                                     , MIN(EXP_DT) EXP_DT
+                                     , ITEMKEY
+                                  FROM (SELECT AC.ACCT_ITM_NM
+                                             , AC.ACCT_CD
+                                             , HIR_CURR_N2ND_CD
+                                             , CASE WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' THEN 
+                                                         -1 * FMS_HIRCURAMT2_FNC(PM.FLET_CTRT_NO, PM.CON_EFF_NEXT_MONTH, PM.NOW_HIRE_EXP_DT) * TO_NUMBER(PM.ACMM_RT_AMT/100)
+                                                    ELSE 
+                                                         -1 * FMS_HIRCURAMT2_FNC(PM.FLET_CTRT_NO, PM.CON_EFF_NEXT_MONTH, TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYYMMDDHH24MI')) * TO_NUMBER(PM.ACMM_RT_AMT/100)
+                                               END HIR_RT_N1ST_AMT
+                                             , CASE WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' AND SUBSTR(PM.NOW_HIRE_EXP_DT,9,4) = '0000' THEN 
+                                                         PM.PRE_INV_DESC || ' ' || HIR_CURR_N2ND_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(TO_DATE(PM.NOW_HIRE_EXP_DT,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ')'
+                                                    WHEN PM.CON_EQUAL_MONTH_FLG = 'Y' AND SUBSTR(PM.NOW_HIRE_EXP_DT,9,4) != '0000' THEN 
+                                                         PM.PRE_INV_DESC || ' ' || HIR_CURR_N2ND_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(TO_DATE(PM.NOW_HIRE_EXP_DT,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ')'
+                                                    ELSE 
+                                                         PM.PRE_INV_DESC || ' ' || HIR_CURR_N2ND_CD || ' ' || '(' || TO_CHAR(TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI'),'YYYY-MM-DD HH24:MI') || ' ~ ' || TO_CHAR(ADD_MONTHS(TO_DATE(SUBSTR(PM.CON_EFF_NEXT_MONTH,1,6),'YYYYMM'),1),'YYYY-MM-DD HH24:MI') || ')'
+                                               END INV_DESC
+                                             , AC.ACCT_ITM_SEQ
+                                             , 'S' FLET_CURR_CHK_CD
+                                             , PM.FLET_CTRT_NO
+                                             , PM.CON_EFF_NEXT_MONTH AS EFF_DT
+                                             , DECODE(PM.CON_EQUAL_MONTH_FLG,'Y', PM.NOW_HIRE_EXP_DT, PM.CON_EFF_NEXT_MONTH) AS EXP_DT
+                                             , PM.ORI_EFF_YM
+                                             , PM.ITEMKEY
+                                          FROM FMS_CONTRACT FC
+                                             , V_ACCT_CD AC
+                                             , V_PARAM_HIRE_MONTH PM
+                                         WHERE FC.FLET_CTRT_NO = PM.FLET_CTRT_NO
+                                           AND TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI') >= ( SELECT MIN(EFF_DT)
+                                                                                                      FROM FMS_HIRE
+                                                                                                     WHERE FLET_CTRT_NO = PM.FLET_CTRT_NO)
+                                           AND DECODE(PM.CON_EQUAL_MONTH_FLG , 'Y', TO_DATE(PM.NOW_HIRE_EXP_DT,'YYYYMMDDHH24MI') ,TO_DATE(PM.CON_EFF_NEXT_MONTH,'YYYYMMDDHH24MI')) 
+                                                                                               <= (SELECT MAX(EXP_DT)
+                                                                                                      FROM FMS_HIRE
+                                                                                                     WHERE FLET_CTRT_NO = PM.FLET_CTRT_NO)
+                                           AND HIR_CURR_N2ND_CD IS NOT NULL
+                                           AND AC.FLET_ACCT_CATE_CD = 'AD' 
+                                       )
+                                 WHERE HIR_RT_N1ST_AMT != 0
+                                 GROUP BY HIR_CURR_N2ND_CD
+                                     , INV_DESC
+                                     , ITEMKEY 
+                               )
+                       )
+                 WHERE @[acmm_flg] = 'Y'
+				/* 3. TO :Address Commission  e n d*/
+
+                )
+         ORDER BY SORTKEY ASC
+             , ACCT_ITM_NM ASC
+             , ACCT_CD ASC
+             , ITEMKEY ASC
+             , CURR_CD ASC
+        )			]]></sql>
+			<params>
+				<param name="flet_ctrt_no" type="12" value="" out="N"/>
+				<param name="ori_eff_dt" type="12" value="" out="N"/>
+				<param name="ori_exp_dt" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="ppay_hir_no" type="12" value="" out="N"/>
+				<param name="ori_inv_usd_dys" type="12" value="" out="N"/>
+				<param name="inv_usd_dys" type="12" value="" out="N"/>
+				<param name="acmm_rt_amt" type="12" value="" out="N"/>
+				<param name="flet_brog_rt_amt" type="12" value="" out="N"/>
+				<param name="months" type="12" value="" out="N"/>
+				<param name="flet_ctrt_tp_gb" type="12" value="" out="N"/>
+				<param name="acmm_flg" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

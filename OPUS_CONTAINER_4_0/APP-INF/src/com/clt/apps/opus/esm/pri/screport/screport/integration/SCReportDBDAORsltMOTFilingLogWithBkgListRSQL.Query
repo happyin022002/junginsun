@@ -1,0 +1,503 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SCReportDBDAORsltMOTFilingLogWithBkgListRSQL">
+			<desc><![CDATA[retrieve filing log with booking number]]></desc>
+			<sql><![CDATA[
+WITH CHG_INFO AS
+ (  SELECT
+           CHG_CD, CHG_NM, CHG_CD AS CHG_CD1, CURR_FLG, XCH_RT_FLG, RMK_FLG, ORG_DEST_TP_CD
+      FROM PRI_MOT_CHG
+ ), 
+ CHG_LST AS
+ (  SELECT
+           Y.IND, Y.CHG_CD, Y.CHG_NM, Y.RMK_FLG, Y.CHG_TY, ROW_NUMBER() OVER(PARTITION BY Y.CHG_CD ORDER BY Y.CHG_TY ) AS IND_SEQ
+      FROM (SELECT 
+                   ROWNUM AS IND
+                 , X.CHG_CD
+                 , X.CHG_NM
+                 , X.RMK_FLG
+                 , CASE WHEN X.CHG_GB = 'CURR_FLG' AND X.CHG_TP = 'Y' THEN X.CHG_CD||'_CUR'
+                        WHEN X.CHG_GB = 'XCH_RT_FLG' AND X.CHG_TP = 'Y' THEN X.CHG_CD||'_EXE'
+                        ELSE X.CHG_TP
+                    END CHG_TY
+              FROM CHG_INFO
+              UNPIVOT 
+              ( 
+                CHG_TP FOR CHG_GB IN ( CHG_CD1, CURR_FLG, XCH_RT_FLG  ) 
+              ) X
+             WHERE X.CHG_TP <> 'N') Y
+    ORDER BY Y.IND),      
+CHG_RST AS      
+(  
+  SELECT DISTINCT
+         A.BAT_EXE_DT
+       , ( SELECT B.INTG_CD_VAL_DP_DESC FROM COM_INTG_CD_DTL B WHERE B.INTG_CD_ID = 'CD03281' AND B.INTG_CD_VAL_CTNT = A.BKG_SRC_TP_CD ) AS BKG_SRC_TP_CD
+       , A.BKG_NO
+       , A.CTRT_NO
+       , A.CTRT_HLD_NM                
+       , A.ACT_CUST_NM
+       , A.CNEE_NM
+       , A.OP_AGN_NM
+       , A.MOT_FILE_LANE_CD
+       , A.MOT_FILE_ORG_CD
+       , A.MOT_FILE_DEST_CD
+       , A.MOT_FILE_CNTR_TP_CD
+       , A.MOT_FILE_CMDT_TP_CD
+       , A.MOT_FILE_CNTR_SZ_CD
+       , A.MOT_FILE_RT_AMT
+       , CASE WHEN (B.CHG_CD = 'DOC' AND B.CURR_CD <> 'CNY') THEN TRUNC(
+            CASE WHEN DECODE( NVL((SELECT DISTINCT V_EX_RATE FROM TABLE( BKG_EXCH_RATE_PKG.GET_EXCH_RATE_FNC(A.BKG_NO, 'P', '') ) WHERE V_AR_CURR_CD = 'CNY' AND V_CURR_CD = B.CURR_CD), ''), '', -1,0,-1, 1) = 1 
+                      THEN (SELECT DISTINCT V_EX_RATE FROM TABLE( BKG_EXCH_RATE_PKG.GET_EXCH_RATE_FNC(A.BKG_NO, 'P', '') ) WHERE V_AR_CURR_CD = 'CNY' AND V_CURR_CD = B.CURR_CD) * B.MOT_FILE_CHG_AMT
+                 WHEN DECODE( NVL((SELECT ROUND(SAR_GET_GL_XCH_RT_FNC('1', (SELECT TO_CHAR(BT.RT_APLY_DT,'YYYYMMDD') FROM BKG_RATE WHERE BKG_NO = A.BKG_NO),B.CURR_CD,'CNY'),2) FROM DUAL), ''), '', -1,0,-1, 1) = 1 
+                      THEN (SELECT ROUND(SAR_GET_GL_XCH_RT_FNC('1', (SELECT TO_CHAR(RT_APLY_DT,'YYYYMMDD') FROM BKG_RATE WHERE BKG_NO = A.BKG_NO),B.CURR_CD,'CNY'),2) FROM DUAL) * B.MOT_FILE_CHG_AMT
+                 WHEN DECODE( NVL((SELECT ROUND(SAR_GET_GL_XCH_RT_FNC('1', (SELECT TO_CHAR(TO_DATE(SUBSTR(TO_CHAR(BT.RT_APLY_DT,'YYYYMMDD'),1,6)||'01','YYYYMMDD')-1,'YYYYMMDD') FROM BKG_RATE WHERE BKG_NO = A.BKG_NO),B.CURR_CD,'CNY'),2) FROM DUAL), ''), '', -1, 1) = 1 
+                      THEN (SELECT ROUND(SAR_GET_GL_XCH_RT_FNC('1', (SELECT TO_CHAR(TO_DATE(SUBSTR(TO_CHAR(BT.RT_APLY_DT,'YYYYMMDD'),1,6)||'01','YYYYMMDD')-1,'YYYYMMDD') FROM BKG_RATE WHERE BKG_NO = A.BKG_NO),B.CURR_CD,'CNY'),2) FROM DUAL) * B.MOT_FILE_CHG_AMT
+            ELSE B.MOT_FILE_CHG_AMT END) ELSE B.MOT_FILE_CHG_AMT
+          END MOT_FILE_CHG_AMT
+       , A.CTRT_EFF_DT
+       , A.CTRT_EXP_DT
+       , B.CHG_CD
+       , B.CURR_CD
+       --, B.MOT_FILE_CHG_AMT
+       , CHG.RMK_FLG
+       , CHG.CHG_TY
+       , CHG.IND_SEQ
+       , CHG.CHG_NM
+       , GCUR.USD_LOCL_XCH_RT
+       , A.SHPR_CNT_CD 
+       , A.SHPR_SEQ
+       , BD.SOC_FLG
+       , BT.FRT_TERM_CD
+       , A.FWRD_CNT_CD
+       , A.FWRD_CUST_SEQ
+       , CASE WHEN BD.DCGO_FLG    = 'Y' THEN 'DG'
+              WHEN BD.AWK_CGO_FLG = 'Y' THEN 'AK'
+              WHEN BD.RC_FLG      = 'Y' THEN 'RF'
+              WHEN BD.BB_CGO_FLG  = 'Y' THEN 'BB'
+              ELSE 'DR'
+         END CGO_TP_CD
+       , (SELECT VVD1.SLAN_CD AS VSL_SLAN_CD 
+            FROM BKG_VVD VVD1
+           WHERE 1=1
+             AND VVD1.BKG_NO = A.BKG_NO
+             AND VVD1.POL_CD = A.MOT_FILE_ORG_CD
+             AND VVD1.VSL_PRE_PST_CD||VVD1.VSL_SEQ = ( SELECT MIN(VSL_PRE_PST_CD||VSL_SEQ) FROM BKG_VVD VVD2 WHERE VVD2.BKG_NO = VVD1.BKG_NO)
+             AND ROWNUM =1) AS VSL_SLAN_CD
+    FROM PRI_MOT_FILE_RT_LOG A
+       , PRI_MOT_FILE_RT_LOG_DTL B
+       , GL_MON_XCH_RT GCUR
+       , CHG_LST CHG
+       , BKG_QTY_DTL BD
+       , BKG_CHG_RT  BR
+       , BKG_RATE BT
+   WHERE A.BAT_EXE_DT = B.BAT_EXE_DT
+     AND A.MOT_FILE_RT_LOG_SEQ = B.MOT_FILE_RT_LOG_SEQ
+     AND A.BAT_EXE_DT BETWEEN TO_DATE (@[fr_file_dt], 'YYYY-MM-DD' ) AND TO_DATE (@[to_file_dt], 'YYYY-MM-DD' )
+     AND B.CURR_CD = GCUR.CURR_CD
+     AND GCUR.ACCT_XCH_RT_YRMON BETWEEN SUBSTR(REPLACE(@[fr_file_dt],'-',''),1,6) AND SUBSTR(REPLACE(@[to_file_dt],'-',''),1,6)
+     AND GCUR.ACCT_XCH_RT_LVL = 1
+     AND GCUR.DELT_FLG = 'N'
+     AND B.CHG_CD = CHG.CHG_CD 
+     AND A.BKG_NO = BD.BKG_NO
+     AND A.BKG_NO = BR.BKG_NO 
+     AND B.CHG_CD = BR.CHG_CD
+     AND A.BKG_NO = BT.BKG_NO 
+     AND BR.FRT_INCL_XCLD_DIV_CD <> 'I'),      
+CHG_RST_RMK AS
+(SELECT DISTINCT
+       A.BAT_EXE_DT
+     , A.BKG_NO
+     , A.CTRT_NO
+     , A.CTRT_HLD_NM
+     , A.ACT_CUST_NM
+     , A.CNEE_NM
+     , A.MOT_FILE_LANE_CD
+     , A.MOT_FILE_ORG_CD
+     , A.MOT_FILE_DEST_CD
+     , A.MOT_FILE_CNTR_TP_CD
+     , A.MOT_FILE_CMDT_TP_CD
+     , A.MOT_FILE_CNTR_SZ_CD
+     , A.MOT_FILE_RT_AMT
+     , LISTAGG( CASE WHEN A.CHG_NM IS NOT NULL THEN ' '||A.CHG_NM||' in '||A.CURR_CD END , ',' ) WITHIN GROUP (ORDER BY A.CHG_NM) OVER (PARTITION BY A.BAT_EXE_DT
+                           , A.BKG_NO
+                           , A.CTRT_NO
+                           , A.CTRT_HLD_NM
+                           , A.ACT_CUST_NM
+                           , A.CNEE_NM
+                           , A.MOT_FILE_LANE_CD
+                           , A.MOT_FILE_ORG_CD
+                           , A.MOT_FILE_DEST_CD
+                           , A.MOT_FILE_CNTR_TP_CD
+                           , A.MOT_FILE_CMDT_TP_CD
+                           , A.MOT_FILE_CNTR_SZ_CD
+                           , A.MOT_FILE_RT_AMT) AS RMK
+FROM ( SELECT
+               A.BAT_EXE_DT
+             , A.BKG_NO
+             , A.CTRT_NO
+             , A.CTRT_HLD_NM
+             , A.ACT_CUST_NM
+             , A.CNEE_NM
+             , A.MOT_FILE_LANE_CD
+             , A.MOT_FILE_ORG_CD
+             , A.MOT_FILE_DEST_CD
+             , A.MOT_FILE_CNTR_TP_CD
+             , A.MOT_FILE_CMDT_TP_CD
+             , A.MOT_FILE_CNTR_SZ_CD
+             , A.MOT_FILE_RT_AMT
+             , CASE WHEN A.ORG_DEST_TP_CD = 'O' AND A.CURR_CD <> ORG_CURR_CD THEN A.CHG_NM
+                    WHEN A.ORG_DEST_TP_CD = 'D' AND A.CURR_CD <> DES_CURR_CD THEN A.CHG_NM
+                END CHG_NM
+             , CASE WHEN A.ORG_DEST_TP_CD = 'O' AND A.CURR_CD <> ORG_CURR_CD THEN A.CURR_CD
+                    WHEN A.ORG_DEST_TP_CD = 'D' AND A.CURR_CD <> DES_CURR_CD THEN A.CURR_CD
+                END CURR_CD
+          FROM (SELECT DISTINCT
+                      A.BAT_EXE_DT
+                    , A.BKG_NO
+                    , A.CTRT_NO
+                    , A.CTRT_HLD_NM
+                    , A.ACT_CUST_NM
+                    , A.CNEE_NM
+                    , A.MOT_FILE_LANE_CD
+                    , A.MOT_FILE_ORG_CD
+                    , A.MOT_FILE_DEST_CD
+                    , A.MOT_FILE_CNTR_TP_CD
+                    , A.MOT_FILE_CMDT_TP_CD
+                    , A.MOT_FILE_CNTR_SZ_CD
+                    , A.MOT_FILE_RT_AMT
+                    , A.CHG_NM
+                    , A.CURR_CD
+                    , B.ORG_DEST_TP_CD
+                    , ( SELECT CURR_CD FROM MDM_COUNTRY WHERE CNT_CD = SUBSTR(A.MOT_FILE_ORG_CD,1,2) ) AS ORG_CURR_CD
+                    , ( SELECT CURR_CD FROM MDM_COUNTRY WHERE CNT_CD = SUBSTR(A.MOT_FILE_DEST_CD,1,2) ) AS DES_CURR_CD
+                 FROM CHG_RST A
+                    , PRI_MOT_CHG B
+                WHERE A.CHG_CD = B.CHG_CD
+                  AND A.RMK_FLG = 'Y' 
+                  AND A.IND_SEQ = 1 
+                  AND 'CUR' <> SUBSTR(A.CHG_TY, -3, LENGTH(A.CHG_TY))
+                  AND 'EXE' <> SUBSTR(A.CHG_TY, -3, LENGTH(A.CHG_TY)) ) A ) A
+  
+)
+SELECT
+        ROW_NUMBER () OVER ( PARTITION BY T.BAT_EXE_DT ORDER BY T.BKG_NO) AS SEQ, T.*
+  FROM (
+  
+SELECT DISTINCT
+       TO_CHAR (A.BAT_EXE_DT, 'YYYY-MM-DD' ) AS BAT_EXE_DT
+     , A.BKG_SRC_TP_CD
+     , COM_ConstantMgr_PKG.COM_getCompanyCode_FNC() AS CARRIER
+     , A.BKG_NO
+     , A.CTRT_NO
+     , A.SHPR_CNT_CD 
+     , A.SHPR_SEQ 
+     , A.CTRT_HLD_NM                               --Contractor
+     , A.ACT_CUST_NM           AS BKG_SHPR_NM      --Shipper
+     , A.CNEE_NM               AS BKG_CNEE_NM      --Consingnee
+     , NULL                    AS FORE_TRA_COMP
+     , A.OP_AGN_NM             AS OPER_AGT         --Operation Agent
+     , A.MOT_FILE_LANE_CD      AS LANE
+     , NULL                    AS WAY_PORT 
+     , A.MOT_FILE_ORG_CD       AS POL_CD
+     , NULL                    AS DEPT_TSIT_PORT
+     , NULL                    AS DEST_TSIT_PORT
+     , A.MOT_FILE_DEST_CD      AS POD_CD
+     , NULL                    AS TRANS_TERM
+     , A.MOT_FILE_CNTR_TP_CD   AS CNTR_TP
+     , A.MOT_FILE_CMDT_TP_CD   AS CMDT_TP
+     , A.MOT_FILE_CNTR_SZ_CD   AS CNTR_SZ
+     , NULL                    AS CNTR_VOL1
+     , NULL                    AS CNTR_VOL2
+     , A.MOT_FILE_RT_AMT       AS OFT_RT
+     , TO_CHAR (A.CTRT_EFF_DT, 'YYYY-MM-DD' ) AS EFF_DT
+     , TO_CHAR (A.CTRT_EXP_DT, 'YYYY-MM-DD' ) AS EXP_DT
+     , ('Subject to special surcharges and other surcharges if any'||X.RMK) AS REMARK
+     , A.CHG_TY
+     --, A.SOC_FLG
+     --, A.FRT_TERM_CD
+     --, A.CURR_CD
+     , CASE WHEN SUBSTR(A.CHG_TY, -3, LENGTH(A.CHG_TY)) = 'CUR' THEN A.CURR_CD
+            WHEN SUBSTR(A.CHG_TY, -3, LENGTH(A.CHG_TY)) = 'EXE' THEN TO_CHAR( A.USD_LOCL_XCH_RT )
+            ELSE TO_CHAR( A.MOT_FILE_CHG_AMT )
+        END CHG_VAL
+
+  FROM CHG_RST A
+     , CHG_RST_RMK X
+WHERE X.BAT_EXE_DT = A.BAT_EXE_DT
+AND X.BKG_NO = A.BKG_NO
+AND X.CTRT_NO = A.CTRT_NO
+AND NVL(X.CTRT_HLD_NM,'1') = NVL(A.CTRT_HLD_NM,'1')
+AND NVL(X.ACT_CUST_NM,'1') = NVL(A.ACT_CUST_NM,'1')
+AND NVL(X.CNEE_NM,'1') = NVL(A.CNEE_NM,'1')
+AND X.MOT_FILE_LANE_CD = A.MOT_FILE_LANE_CD
+AND X.MOT_FILE_ORG_CD = A.MOT_FILE_ORG_CD
+AND X.MOT_FILE_DEST_CD = A.MOT_FILE_DEST_CD
+AND X.MOT_FILE_CNTR_TP_CD = A.MOT_FILE_CNTR_TP_CD
+AND X.MOT_FILE_CNTR_SZ_CD = A.MOT_FILE_CNTR_SZ_CD
+AND X.MOT_FILE_RT_AMT  = A.MOT_FILE_RT_AMT
+
+ UNION ALL
+SELECT
+       TO_CHAR (A.BAT_EXE_DT, 'YYYY-MM-DD' ) AS BAT_EXE_DT
+     , A.BKG_SRC_TP_CD
+     , COM_ConstantMgr_PKG.COM_getCompanyCode_FNC() AS CARRIER
+     , A.BKG_NO
+     , A.CTRT_NO
+     , A.SHPR_CNT_CD 
+     , A.SHPR_SEQ 
+     , A.CTRT_HLD_NM                               --Contractor
+     , A.ACT_CUST_NM           AS BKG_SHPR_NM      --Shipper
+     , A.CNEE_NM               AS BKG_CNEE_NM      --Consingnee
+     , NULL                    AS FORE_TRA_COMP
+     , A.OP_AGN_NM             AS OPER_AGT         --Operation Agent
+     , A.LANE
+     , NULL                    AS WAY_PORT 
+     , A.POL_CD
+     , NULL                    AS DEPT_TSIT_PORT
+     , NULL                    AS DEST_TSIT_PORT
+     , A.POD_CD
+     , NULL                    AS TRANS_TERM
+     , A.CNTR_TP
+     , A.CMDT_TP
+     , A.CNTR_SZ
+     , NULL                    AS CNTR_VOL1
+     , NULL                    AS CNTR_VOL2
+     , A.MOT_FILE_RT_AMT       AS OFT_RT
+     , TO_CHAR (A.CTRT_EFF_DT, 'YYYY-MM-DD' ) AS EFF_DT
+     , TO_CHAR (A.CTRT_EXP_DT, 'YYYY-MM-DD' ) AS EXP_DT
+     , ('Subject to special surcharges and other surcharges if any'||X.RMK) AS REMARK
+     , A.CHG_TY
+     --, A.SOC_FLG
+     --, A.FRT_TERM_CD
+     --, A.CURR_CD
+     , CASE WHEN A.CHG_TY = 'BKF' 
+                         THEN  
+                               CASE WHEN A.POL_CD = 'CNSHA' AND B.POR_CD <> 'CNTCN' AND B.BKG_OFC_CD <> 'NKGBB' THEN TO_CHAR(A.COMM_AMT)
+                                    WHEN A.POL_CD <> 'CNSHA' THEN TO_CHAR(A.COMM_AMT)
+                                    ELSE NULL
+                                END                      
+            ELSE TO_CHAR(A.COMM_AMT)
+        END CHG_VAL
+
+  FROM (SELECT DISTINCT
+               X.BAT_EXE_DT
+             , X.BKG_SRC_TP_CD
+             , X.BKG_NO
+             , X.CTRT_NO
+             , X.CTRT_HLD_NM                
+             , X.ACT_CUST_NM
+             , X.CNEE_NM
+             , X.OP_AGN_NM
+             , X.LANE
+             , X.POL_CD
+             , X.POD_CD
+             , X.CNTR_TP
+             , X.CMDT_TP
+             , X.CNTR_SZ
+             , X.MOT_FILE_RT_AMT
+             , X.CTRT_EFF_DT
+             , X.CTRT_EXP_DT
+             , X.CHG_CD
+             , X.CURR_CD
+             , X.MOT_FILE_CHG_AMT
+             , X.RMK_FLG
+             , X.CHG_TY
+             , X.IND_SEQ
+             , X.CHG_NM
+             , X.USD_LOCL_XCH_RT
+             , X.SHPR_CNT_CD 
+             , X.SHPR_SEQ 
+             --, X.SOC_FLG
+             --, X.FRT_TERM_CD
+             , CASE WHEN X.CHG_TY = 'BKF' AND X.PNT < 6001 THEN 0
+                    WHEN X.CHG_TY = 'COM' AND X.PNT < 4001 THEN 0
+                    ELSE X.COMM_AMT
+                END COMM_AMT
+             , X.PNT
+             , RANK() OVER (PARTITION BY X.BKG_NO, X.CHG_CD, X.LANE ORDER BY X.BKG_NO, X.CHG_CD, X.LANE, X.PNT DESC) AS RNK
+          FROM (SELECT
+                       X.BAT_EXE_DT
+                     , X.BKG_SRC_TP_CD
+                     , X.BKG_NO
+                     , X.CTRT_NO
+                     , X.CTRT_HLD_NM                
+                     , X.ACT_CUST_NM
+                     , X.CNEE_NM
+                     , X.OP_AGN_NM
+                     , X.LANE
+                     , X.POL_CD
+                     , X.POD_CD
+                     , X.CNTR_TP
+                     , X.CMDT_TP
+                     , X.CNTR_SZ
+                     , X.MOT_FILE_RT_AMT
+                     , X.CTRT_EFF_DT
+                     , X.CTRT_EXP_DT
+                     , X.CHG_CD
+                     , X.CURR_CD
+                     , X.MOT_FILE_CHG_AMT
+                     , X.RMK_FLG
+                     , X.CHG_TY
+                     , X.IND_SEQ
+                     , X.CHG_NM
+                     , X.USD_LOCL_XCH_RT
+                     , X.SHPR_CNT_CD 
+                     , X.SHPR_SEQ 
+                     --, X.SOC_FLG
+                     --, X.FRT_TERM_CD
+                     , Y.COMM_AMT
+                     , CASE WHEN X.CHG_CD = 'BKF' THEN
+                                DECODE(X.POL_CD             , Y.POL_CD, 6001, 0)
+                               +DECODE(X.FWRD_CNT_CD||TO_CHAR(X.FWRD_CUST_SEQ), Y.CUST_CNT_CD||TO_CHAR(Y.CUST_SEQ), 249, DECODE(Y.CUST_CNT_CD||TO_CHAR(Y.CUST_SEQ), NULL, 0, -1000))
+                               +DECODE(X.SOC_FLG            , Y.SOC_FLG, 236, DECODE(Y.SOC_FLG, NULL, 0, -1000))
+                               +DECODE(X.CGO_TP_CD          , Y.PRC_CGO_TP_CD, 225, DECODE(Y.PRC_CGO_TP_CD, NULL, 0, -1000))
+                               +DECODE(X.CNTR_TP            , Y.MOT_FILE_CNTR_TP_CD, 216, DECODE(Y.MOT_FILE_CNTR_TP_CD, NULL, 0, -1000))
+                               +DECODE(X.LANE               , Y.MOT_FILE_LANE_CD, 209, DECODE(Y.MOT_FILE_LANE_CD, NULL, 0, -1000))
+                               +DECODE(X.FRT_TERM_CD        , Y.PAY_TERM_CD, 204, DECODE(Y.PAY_TERM_CD, NULL, 0, -1000))
+                               +DECODE(X.VSL_SLAN_CD        , Y.VSL_SLAN_CD, 202, DECODE(Y.VSL_SLAN_CD, NULL, 0, -1000))
+                            WHEN X.CHG_CD = 'COM' THEN
+                                DECODE(X.POL_CD             , Y.POL_CD, 4001, 0)
+                               +DECODE(X.FWRD_CNT_CD||TO_CHAR(X.FWRD_CUST_SEQ), Y.CUST_CNT_CD||TO_CHAR(Y.CUST_SEQ), 249, DECODE(Y.CUST_CNT_CD||TO_CHAR(Y.CUST_SEQ), NULL, 0, -1000))
+                               +DECODE(X.CGO_TP_CD          , Y.PRC_CGO_TP_CD, 225, DECODE(Y.PRC_CGO_TP_CD, NULL, 0, -1000))
+                               +DECODE(X.LANE               , Y.MOT_FILE_LANE_CD, 209, DECODE(Y.MOT_FILE_LANE_CD, NULL, 0, -1000))
+                               +DECODE(X.FRT_TERM_CD        , Y.PAY_TERM_CD, 204, DECODE(Y.PAY_TERM_CD, NULL, 0, -1000))
+                                          
+                        END PNT
+                  FROM (SELECT 
+                                 A.BAT_EXE_DT
+                               , A.BKG_SRC_TP_CD
+                               , A.BKG_NO
+                               , A.CTRT_NO
+                               , A.CTRT_HLD_NM                
+                               , A.ACT_CUST_NM
+                               , A.CNEE_NM
+                               , A.OP_AGN_NM
+                               , A.MOT_FILE_LANE_CD AS LANE
+                               , A.MOT_FILE_ORG_CD AS POL_CD
+                               , A.MOT_FILE_DEST_CD AS POD_CD
+                               , A.MOT_FILE_CNTR_TP_CD AS CNTR_TP
+                               , A.MOT_FILE_CMDT_TP_CD AS CMDT_TP
+                               , A.MOT_FILE_CNTR_SZ_CD AS CNTR_SZ
+                               , A.MOT_FILE_RT_AMT
+                               , A.CTRT_EFF_DT
+                               , A.CTRT_EXP_DT
+                               , B.CHG_CD
+                               , A.CURR_CD
+                               , NULL AS MOT_FILE_CHG_AMT
+                               , NULL AS RMK_FLG
+                               , B.CHG_CD AS CHG_TY
+                               , NULL AS IND_SEQ
+                               , NULL AS CHG_NM
+                               , NULL AS USD_LOCL_XCH_RT
+                               , A.SHPR_CNT_CD 
+                               , A.SHPR_SEQ 
+                               , A.SOC_FLG
+                               , A.FRT_TERM_CD
+                               , A.FWRD_CNT_CD
+                               , A.FWRD_CUST_SEQ
+                               , A.CGO_TP_CD
+                               , A.VSL_SLAN_CD
+                            FROM (SELECT DISTINCT
+                                         A.BAT_EXE_DT
+                                       , A.BKG_SRC_TP_CD
+                                       , A.BKG_NO
+                                       , A.CTRT_NO
+                                       , A.CTRT_HLD_NM                
+                                       , A.ACT_CUST_NM
+                                       , A.CNEE_NM
+                                       , A.OP_AGN_NM
+                                       , A.MOT_FILE_LANE_CD
+                                       , A.MOT_FILE_ORG_CD
+                                       , A.MOT_FILE_DEST_CD
+                                       , A.MOT_FILE_CNTR_TP_CD
+                                       , A.MOT_FILE_CMDT_TP_CD
+                                       , A.MOT_FILE_CNTR_SZ_CD
+                                       , A.MOT_FILE_RT_AMT
+                                       , A.CTRT_EFF_DT
+                                       , A.CTRT_EXP_DT
+                                       , NULL AS CHG_CD
+                                       , NULL AS CURR_CD
+                                       , NULL AS MOT_FILE_CHG_AMT
+                                       , NULL AS RMK_FLG
+                                       , NULL AS CHG_TY
+                                       , NULL AS IND_SEQ
+                                       , NULL AS CHG_NM
+                                       , NULL AS USD_LOCL_XCH_RT
+                                       , A.SHPR_CNT_CD 
+                                       , A.SHPR_SEQ 
+                                       , A.SOC_FLG
+                                       , A.FRT_TERM_CD
+                                       , A.FWRD_CNT_CD
+                                       , A.FWRD_CUST_SEQ
+                                       , A.CGO_TP_CD
+                                       , A.VSL_SLAN_CD
+                                    FROM CHG_RST A ) A
+                               , (SELECT CHG_CD FROM MDM_CHARGE WHERE REP_CHG_CD = 'MOT') B
+                           WHERE A.BAT_EXE_DT BETWEEN TO_DATE (@[fr_file_dt], 'YYYY-MM-DD' ) AND TO_DATE (@[to_file_dt], 'YYYY-MM-DD' ) ) X
+                 
+                     , (SELECT
+                               A.CHG_CD
+                             , A.POL_CD
+                             , A.CHG_RT_SEQ
+                             , A.CUST_CNT_CD
+                             , A.CUST_SEQ
+                             , A.CUST_NM
+                             , A.CUST_NM
+                             , A.SOC_FLG AS SOC_FLG
+                             , A.PRC_CGO_TP_CD AS PRC_CGO_TP_CD
+                             , A.MOT_FILE_CNTR_TP_CD AS MOT_FILE_CNTR_TP_CD
+                             , A.MOT_FILE_LANE_CD AS MOT_FILE_LANE_CD
+                             , A.PAY_TERM_CD AS PAY_TERM_CD
+                             , A.AGN_CD
+                             , A.EFF_DT
+                             , A.EXP_DT
+                             , A.CURR_CD
+                             , A.VSL_SLAN_CD
+                             , CASE WHEN B.GB = 1 THEN 20 
+                                    WHEN B.GB = 2 THEN 40
+                                    WHEN B.GB = 3 THEN 45
+                               END CNTR_SZ
+                             , CASE WHEN B.GB = 1 THEN A.CNTR_20FT_RT_AMT
+                                    WHEN B.GB = 2 THEN A.CNTR_40FT_RT_AMT
+                                    WHEN B.GB = 3 THEN A.CNTR_45FT_RT_AMT
+                               END COMM_AMT  
+                          FROM PRI_MOT_CHG_RT A
+                             , (SELECT 1 AS GB FROM DUAL UNION ALL
+                                SELECT 2 AS GB FROM DUAL UNION ALL
+                                SELECT 3 AS GB FROM DUAL) B ) Y
+                 WHERE X.BAT_EXE_DT          BETWEEN Y.EFF_DT AND Y.EXP_DT
+                   AND X.POL_CD              = Y.POL_CD(+)
+                   AND X.CNTR_SZ             = Y.CNTR_SZ(+)
+                   AND X.CHG_CD              = Y.CHG_CD(+) ) X ) A   
+     , BKG_BOOKING B
+     , CHG_RST_RMK X
+ WHERE A.BKG_NO = B.BKG_NO
+    AND A.RNK = 1
+    AND X.BAT_EXE_DT = A.BAT_EXE_DT
+    AND X.BKG_NO = A.BKG_NO
+    AND X.CTRT_NO = A.CTRT_NO
+    AND NVL(X.CTRT_HLD_NM,'1') = NVL(A.CTRT_HLD_NM,'1')
+    AND NVL(X.ACT_CUST_NM,'1') = NVL(A.ACT_CUST_NM,'1')
+    AND NVL(X.CNEE_NM,'1') = NVL(A.CNEE_NM,'1')
+    AND X.MOT_FILE_LANE_CD = A.LANE
+    AND X.MOT_FILE_ORG_CD = A.POL_CD
+    AND X.MOT_FILE_DEST_CD = A.POD_CD
+    AND X.MOT_FILE_CNTR_TP_CD = A.CNTR_TP
+    AND X.MOT_FILE_CNTR_SZ_CD = A.CNTR_SZ
+    AND X.MOT_FILE_RT_AMT  = A.MOT_FILE_RT_AMT
+)
+PIVOT
+(
+   MAX(CHG_VAL)
+   --이 부분은 특수문자를 할당 한후 JAVA소스에서 해당 부분을 쿼리 날리기 전에 바꾸어 날리는 방식으로 할 것
+   FOR  CHG_TY IN ('AAA' )
+) T
+ORDER BY T.BAT_EXE_DT, T.BKG_NO, T.CTRT_NO, T.BKG_SHPR_NM, T.BKG_CNEE_NM			]]></sql>
+			<params>
+				<param name="fr_file_dt" type="12" value="" out="N"/>
+				<param name="to_file_dt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

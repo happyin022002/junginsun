@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SCProposalMainDBDAORequestCheckVORSQL">
+			<desc><![CDATA[Request 시 check할 Terms를 조회한다.]]></desc>
+			<sql><![CDATA[
+WITH SCP_MN AS
+     (SELECT SVC_SCP_CD
+			,PROP_SCP_STS_CD
+      FROM   PRI_SP_SCP_MN
+      WHERE  PROP_NO = @[prop_no]
+      AND    AMDT_SEQ = @[amdt_seq])
+SELECT 'Boiler Plate' TERMS
+	   ,COUNT(*) CNT
+		,'' NOTE
+FROM PRI_SP_BLPL
+WHERE PROP_NO = @[prop_no]
+AND AMDT_SEQ = @[amdt_seq]
+AND SRC_INFO_CD <> 'AD'
+AND ROWNUM = 1
+UNION ALL
+SELECT   '[' || B.SVC_SCP_CD || '] ' || 'Origin' TERMS
+        ,COUNT (A.SVC_SCP_CD) CNT
+		,'' NOTE
+FROM     PRI_SP_SCP_ROUT_PNT A
+        ,SCP_MN B                                                   
+WHERE    PROP_NO(+)   = @[prop_no]
+AND      AMDT_SEQ(+)  = @[amdt_seq]
+AND      B.SVC_SCP_CD = A.SVC_SCP_CD(+)
+AND      A.ORG_DEST_TP_CD(+) = 'O'
+AND 	 A.SRC_INFO_CD(+) <> 'AD'
+GROUP BY B.SVC_SCP_CD
+UNION ALL
+SELECT   '[' || B.SVC_SCP_CD || '] ' || 'Destination' TERMS
+        ,COUNT (A.SVC_SCP_CD) CNT
+		,'' NOTE
+FROM     PRI_SP_SCP_ROUT_PNT A
+        ,SCP_MN B                                                   
+WHERE    PROP_NO(+)   = @[prop_no]
+AND      AMDT_SEQ(+)  = @[amdt_seq]
+AND      B.SVC_SCP_CD = A.SVC_SCP_CD(+)
+AND      A.ORG_DEST_TP_CD(+) = 'D'
+AND 	 A.SRC_INFO_CD(+) <> 'AD'
+GROUP BY B.SVC_SCP_CD
+UNION ALL
+SELECT   '[' || B.SVC_SCP_CD || '] ' || 'CMDT Group' TERMS
+        ,COUNT (A.SVC_SCP_CD) CNT
+		,'' NOTE
+FROM     PRI_SP_SCP_GRP_CMDT_DTL A
+        ,SCP_MN B                                                   
+WHERE    PROP_NO(+) = @[prop_no]
+AND      AMDT_SEQ(+) = @[amdt_seq]
+AND      A.SRC_INFO_CD(+) <> 'AD'
+AND      B.SVC_SCP_CD = A.SVC_SCP_CD(+)
+GROUP BY B.SVC_SCP_CD
+UNION ALL
+SELECT   '[' || B.SVC_SCP_CD || '] ' || 'RATE' TERMS
+        ,COUNT (A.SVC_SCP_CD) CNT
+		,'' NOTE
+FROM     PRI_SP_SCP_RT A
+        ,SCP_MN B                                                   
+WHERE    PROP_NO(+) = @[prop_no]
+AND      AMDT_SEQ(+) = @[amdt_seq]
+AND 	 A.SRC_INFO_CD(+) <> 'AD'
+AND      B.SVC_SCP_CD = A.SVC_SCP_CD(+)
+GROUP BY B.SVC_SCP_CD
+UNION ALL
+SELECT '[' || SVC_SCP_CD || '] ' || 'Rate Commodity Group Detail'
+      ,DECODE (COUNT (*), 0, 1, 0)
+		,'' NOTE
+FROM   (                                         --Rate Commodity Group Detail
+        SELECT SVC_SCP_CD
+              ,GEN_SPCL_RT_TP_CD
+              ,CMDT_HDR_SEQ
+        FROM   PRI_SP_SCP_RT_CMDT
+        WHERE  PROP_NO = @[prop_no]
+        AND    AMDT_SEQ = @[amdt_seq]
+		AND SRC_INFO_CD <> 'AD'
+        MINUS
+        SELECT DISTINCT SVC_SCP_CD
+                       ,GEN_SPCL_RT_TP_CD
+                       ,CMDT_HDR_SEQ
+        FROM            PRI_SP_SCP_RT_ROUT_PNT
+        WHERE           PROP_NO = @[prop_no]
+        AND             AMDT_SEQ = @[amdt_seq]
+		AND SRC_INFO_CD <> 'AD'
+		)
+GROUP BY SVC_SCP_CD
+UNION ALL
+SELECT 'AMEND' TERMS
+	   ,SUM(CNT) CNT
+	   ,'' NOTE
+FROM(
+	SELECT COUNT(*) CNT FROM PRI_SP_AMDT_SMRY
+	WHERE PROP_NO = @[prop_no]
+	AND AMDT_SEQ = @[amdt_seq]
+	AND AMDT_FLG = 'Y'
+	AND ROWNUM = 1
+	UNION ALL
+	SELECT COUNT(*) FROM PRI_SP_SCP_AMDT_SMRY
+	WHERE PROP_NO = @[prop_no]
+	AND AMDT_SEQ = @[amdt_seq]
+	AND AMDT_FLG = 'Y'
+	AND ROWNUM = 1
+)
+UNION ALL
+SELECT 'DEMDET' TERMS
+     , CASE MAX(DECODE(TYP,'S',CNT)) WHEN 1
+            THEN CASE MAX(DECODE(TYP,'D',CNT)) WHEN 1
+                      THEN 3
+                 ELSE 1
+                 END
+       ELSE 
+            CASE MAX(DECODE(TYP,'D',CNT)) WHEN 1
+                 THEN 2
+            ELSE 3
+            END
+       END CNT
+      ,MAX(NOTE) NOTE
+FROM     (
+          SELECT   SIGN(SUM(CNT)) CNT, 'S' TYP 
+                  ,MAX(DECODE(TYP,1,DECODE(SIGN(CNT),1,TITLE)))||
+                   MAX(DECODE(TYP,2,DECODE(SIGN(CNT),1,TITLE)))||
+                   MAX(DECODE(TYP,3,DECODE(SIGN(CNT),1,TITLE))) NOTE   
+          FROM     (SELECT   COUNT( * ) CNT, '/COMMODITY NOTE' TITLE, 1 TYP
+                    FROM     PRI_SP_SCP_RT_CNOTE
+                    WHERE    PROP_NO = @[prop_no]
+                         AND AMDT_SEQ = @[amdt_seq]
+                         AND NOTE_CLSS_CD = 'D'
+						 AND SRC_INFO_CD <> 'AD'
+                         AND ROWNUM = 1
+                    UNION ALL
+                    SELECT   COUNT( * ), '/ROUTE NOTE', 2 TYP
+                    FROM     PRI_SP_SCP_RT_CMDT_RNOTE
+                    WHERE    PROP_NO = @[prop_no]
+                         AND AMDT_SEQ = @[amdt_seq]
+                         AND NOTE_CLSS_CD = 'D'
+						 AND SRC_INFO_CD <> 'AD'
+                         AND ROWNUM = 1
+                    UNION ALL
+                    SELECT   COUNT( * ), '/SPECIAL NOTE', 3 TYP
+                    FROM     PRI_SP_SCP_NOTE A
+                    WHERE    PROP_NO = @[prop_no]
+                         AND AMDT_SEQ = @[amdt_seq]
+                         AND NOTE_TP_CD = 'P'
+                         AND NOTE_CLSS_CD = 'D'
+                         AND EXISTS (SELECT 1 FROM PRI_SP_SCP_NOTE_CTNT 
+                                     WHERE A.PROP_NO    = PROP_NO 
+                                     AND   A.AMDT_SEQ   = AMDT_SEQ 
+                                     AND   A.SVC_SCP_CD = SVC_SCP_CD
+                                     AND   A.NOTE_TP_CD = NOTE_TP_CD 
+                                     AND   A.NOTE_SEQ   = NOTE_SEQ
+                                     AND   SRC_INFO_CD  <> 'AD'))
+          UNION ALL
+          SELECT   SIGN(COUNT( * )) CNT, 'D' , ''
+          FROM     DMT_SC_EXPT_VER
+          WHERE    PROP_NO = @[prop_no]
+               AND SC_EXPT_VER_SEQ = (SELECT /*+ INDEX_DESC(A XPKDMT_SC_EXPT_VER) */
+                                            SC_EXPT_VER_SEQ
+                                      FROM     DMT_SC_EXPT_VER A
+                                      WHERE    PROP_NO = @[prop_no]
+                                           AND ROWNUM = 1)
+               AND DELT_FLG = 'N'               
+               AND DMDT_EXPT_VER_STS_CD IN ('A','L','R')   
+                         )
+UNION ALL
+SELECT   'CTRT_CHK', 1 CNT, ''
+FROM     PRI_SP_CTRT_PTY
+WHERE    PROP_NO  = @[prop_no]
+     AND AMDT_SEQ = @[amdt_seq]
+     AND (CTRT_PTY_ADDR       = 'Please Input'
+       OR CTRT_PTY_SGN_NM     = 'Please Input'
+       OR CTRT_PTY_SGN_TIT_NM = 'Please Input')
+     AND ROWNUM = 1			]]></sql>
+			<params>
+				<param name="prop_no" type="12" value="" out="N"/>
+				<param name="amdt_seq" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

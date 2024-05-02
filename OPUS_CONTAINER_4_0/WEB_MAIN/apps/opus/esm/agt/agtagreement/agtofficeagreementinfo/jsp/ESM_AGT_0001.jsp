@@ -1,0 +1,216 @@
+<%--
+/*=========================================================
+*Copyright(c) 2006 CyberLogitec
+*@FileName : ESM_AGT_0001.jsp
+*@FileTitle : Agent Vendor List Inquiry (Pop-up)
+*Open Issues :
+*Change history :
+*@LastModifyDate : 
+*@LastModifier : 
+*@LastVersion : 1.0
+=========================================================*/
+--%>
+<%@ page contentType="text/html; charset=UTF-8"%>
+<%@ page import="com.clt.framework.component.util.JSPUtil"%>
+<%@ page import="com.clt.framework.component.util.DateTime"%>
+<%@ page import="com.clt.framework.component.message.ErrorHandler"%>
+<%@ page import="com.clt.framework.core.layer.event.GeneralEventResponse"%>
+<%@ page import="com.clt.framework.support.controller.html.CommonWebKeys"%>
+<%@ page import="com.clt.framework.support.view.signon.SignOnUserAccount"%>
+<%@ page import="com.clt.apps.opus.esm.agt.agtagreement.agtofficeagreementinfo.event.EsmAgt0001Event"%>
+<%@ page import="org.apache.log4j.Logger" %>
+<%
+	EsmAgt0001Event  event = null;					//PDTO(Data Transfer Object including Parameters)
+	Exception serverException   = null;				//error from server
+	String strErrMsg = "";						//error message
+	int rowCount	 = 0;							//count of DB resultSET list
+	
+	String successFlag = "";
+	String codeList  = "";
+	String pageRows  = "100";
+	
+	String strUsr_id		= "";
+	String strUsr_nm		= "";
+	Logger log = Logger.getLogger("com.clt.apps.AGTAgreement.AGTOfficeAgreementInfo");
+	
+	try {
+		SignOnUserAccount account=(SignOnUserAccount)session.getAttribute(CommonWebKeys.SIGN_ON_USER_ACCOUNT);
+		strUsr_id =	account.getUsr_id();
+		strUsr_nm = account.getUsr_nm();
+		event = (EsmAgt0001Event)request.getAttribute("Event");
+		serverException = (Exception)request.getAttribute(CommonWebKeys.EXCEPTION_OBJECT);
+
+		if (serverException != null) {
+			strErrMsg = new ErrorHandler(serverException).loadPopupMessage();
+		}
+			GeneralEventResponse eventResponse = (GeneralEventResponse)request.getAttribute("EventResponse");
+//			if (eventResponse != null) {
+//				rowSet = eventResponse.getRs();
+//				if(rowSet != null){
+//					 rowCount = rowSet.getRowCount();
+//				} // end if
+//			} // end if
+		
+	}catch(Exception e) {
+		out.println(e.toString());
+	}
+	
+%>
+<html>
+<head>
+<title>Vendor List Inquiry</title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<script language="javascript">
+	function setupPage(){
+		var errMessage = "<%=strErrMsg%>";
+		if (errMessage.length >= 1) {
+			ComShowMessage(errMessage);
+		} // end if
+		loadPage();
+	}
+
+</script>
+</head>
+<body onload="javascript:setupPage();">
+<form method="post" name="form" onSubmit="return false;">
+<input	type="hidden" name="f_cmd">
+<input type="hidden" name="iPage">
+<!-- OUTER - POPUP (S)tart -->
+<table width="780" class="popup" cellpadding="10" border="0">
+	<tr>
+		<td class="top"></td>
+	</tr>
+	<tr>
+		<td valign="top">
+			<!-- : ( Title ) (S) -->
+			<table width="100%" border="0">
+				<tr>
+					<td height="79" class="title"><img src="/opuscntr/img/icon_title_dot.gif" align="absmiddle">&nbsp; Agent Vendor List</td>
+				</tr>
+			</table>
+			<!-- : ( Title ) (E) -->
+			<!--Button_L (S) -->
+
+			<!--Button_L (E) -->
+			<!-- TABLE '#D' : ( Search Options : Speed ) (S) -->
+			<table class="search">
+				<tr>
+					<td class="bg">
+						<table class="search" border="0">
+							<tr class="h23">
+								<td width="90">Country Code</td>
+								<td>
+									<input type="text" name="vndr_cnt_cd" style="width:30;ime-mode:disabled;" class="input1" onKeyPress="ComKeyOnlyAlphabet('upper')" maxlength="2">&nbsp;<img class="cursor" src="/opuscntr/img/button/btns_search.gif" width="19" height="20" border="0" align="absmiddle" name="cnt_btn">
+								&nbsp;</td>
+								<td width="75">Office Code</td>
+								<td>
+									<input type="text" name="s_agmt_ofc_cd" style="width:50;ime-mode:disabled;" onKeyPress="ComKeyOnlyAlphabet('upper')" maxlength="5">&nbsp;<a href="javascript:openWindowOffice(document.form);" class="purple"><img class="cursor" src="/opuscntr/img/button/btns_search.gif" width="19" height="20" border="0" align="absmiddle">
+								</td>
+								<td width="100">&nbsp;&nbsp;Agreement No</td>
+								<td>
+									<input type="text" name="s_agmt_ofc_cty_cd" style="width:30;ime-mode:disabled;" onKeyPress="ComKeyOnlyAlphabet('upper')" maxlength="3">&nbsp;<input type="text" name="s_agn_agmt_seq" style="width:50;ime-mode:disabled;" onKeyPress="ComKeyOnlyAlphabet('upper')" maxlength="6">
+								&nbsp;</td>
+								<td width="120">Agreement Status</td>
+								<td width="85"><script language="javascript">ComComboObject('s_agmt_sts', 1, 107, 0, 0, 0, false);</script></td>
+								<!--
+								<td>
+									<select name="s_agmt_sts" style="width:107;" >
+                                    	<option value="0" selected>ALL</option>
+                                    	<option value="1">Currently Effective</option>
+                                    	<option value="2">Expired</option>
+                                    	<option value="3">Deleted</option>
+                                    	<option value="4">No Agreement</option>
+									</select>
+								</td>
+								-->
+							</tr>
+						</table>
+						<!-- : ( Speed ) (S) -->
+						<table width="100%" id="mainTable">
+							<tr>
+								<td><script language="javascript">ComSheetObject('sheet1');</script></td>
+							</tr>
+						</table>
+						<!-- : ( Speed ) (E) -->
+				<!--  Button_Sub (S) -->
+				<table width="100%" class="button" >
+			       	<tr><td class="btn2_bg" >
+					<table border="0" cellpadding="0" cellspacing="0" align="left">
+					<tr >
+						<!-- Repeat Pattern -->
+						<td><table width="100%" border="0" cellpadding="0" cellspacing="0" class="button">
+						<tr><td class="btn2_left"></td><td class="btn2" id="btn_retrieve" name="btn_retrieve">Retrieve</td><td class="btn2_right"></td></tr></table></td>
+						<td><table width="100%" border="0" cellpadding="0" cellspacing="0" class="button">
+						<tr><td class="btn2_left"></td><td class="btn2" id="btng_agreementcreation" name="btng_agreementcreation">Agreement Creation</td><td class="btn2_right"></td></tr></table></td>
+						<td><table width="100%" border="0" cellpadding="0" cellspacing="0" class="button">
+						<tr><td class="btn2_left"></td><td class="btn2" id="btn_delete" name="btn_delete">Delete</td><td class="btn2_right"></td></tr></table></td>
+						<td><table width="100%" border="0" cellpadding="0" cellspacing="0" >
+						<tr><td ></td><td>&nbsp;</td><td ></td></tr></table></td>
+						
+						<td><table cellspacing="6" style="border-collapse: collapse; border: #A28792 1px solid; background-color: white;  color: #252341;">
+						<td><table border="0" cellpadding="0" cellspacing="0" class="button">
+						<tr><td class="btn2_left"></td><td class="btn2" id="btng_agreementcopy" name="btng_agreementcopy">Agreement Copy</td><td class="btn2_right"></td></tr></table></td>
+
+						<td class="title_s">Copy from&nbsp;<input type="text" name="agreement_no" style="width:80;ime-mode:disabled;" onKeyPress="ComKeyOnlyAlphabet('uppernum')" maxlength="9"></td>
+
+						</table></td>
+						<!-- Repeat Pattern -->
+						
+					</tr></table>
+				</td></tr>
+				</table>
+		    	<!-- Button_Sub (E) -->
+					</td>
+				</tr>
+			</table>
+			<!-- TABLE '#D' : ( Search Options : Speed ) (E) -->
+		</td>
+	</tr>
+</table>
+<!-- OUTER - POPUP (E)nd -->
+<table class="height_5">
+	<tr>
+		<td></td>
+	</tr>
+</table>
+<!-- : ( Button : pop ) (S) -->
+<table width="100%" class="sbutton">
+	<tr>
+		<td height="71" class="popup">
+			<table width="100%" class="button" border="0" cellpadding="0" cellspacing="0" style="padding-top:5;,padding-bottom:10;">
+    	 	  	<tr>
+    	 	  		<td class="btn3_bg">
+		    			<table border="0" cellpadding="0" cellspacing="0" align="left">
+		    				<tr>
+								<!-- Repeat Pattern -->
+								<td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td>
+								<td>
+									<table width="100%" border="0" cellpadding="0" cellspacing="0" class="button">
+										<tr>
+											<td class="btn1_left"></td><td class="btn1" name="btn_ok" id="btn_ok">OK</td><td class="btn1_right"></td>
+										</tr>
+									</table>
+								</td>
+								<td class="btn1_line"></td>
+								<td>
+									<table width="100%" border="0" cellpadding="0" cellspacing="0" class="button">
+										<tr>
+											<td class="btn1_left"></td>
+											<td class="btn1" name="btn_close" id="btn_close">Close</td><td class="btn1_right"></td>
+										</tr>
+									</table>
+								</td>
+								<!-- Repeat Pattern -->
+							</tr>
+						</table>
+					</td>
+				</tr>
+			</table>
+		</td>
+	</tr>
+</table>
+<!-- : ( Button : pop ) (E) -->
+</form>
+</body>
+</html>
+<%@include file="../../../common/include/common.jsp"%>

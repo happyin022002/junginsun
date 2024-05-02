@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="AccountReceivableOutstandingDBDAOsearchPaymentRequestLetterCustomerRSQL">
+			<desc><![CDATA[searchPaymentRequestLetterCustomer]]></desc>
+			<sql><![CDATA[
+WITH CUST_LIST 
+AS (
+    SELECT A.OTS_OFC_CD,A.CUST_CNT_CD,A.CUST_SEQ,B.CNSD_CUST_CNT_CD,B.CNSD_CUST_SEQ FROM
+    (
+        SELECT OTS_OFC_CD,CUST_CNT_CD,CUST_SEQ,count(*)
+        FROM (
+            SELECT 
+                   SOH.OTS_OFC_CD AS OTS_OFC_CD,
+                   SOH.BIL_TO_CUST_CNT_CD AS CUST_CNT_CD,
+                   SOH.BIL_TO_CUST_SEQ AS CUST_SEQ
+            FROM SAR_OTS_HDR SOH, 
+                 SAR_OTS_DTL SOD
+       	    WHERE SOH.RHQ_CD            = SOD.RHQ_CD  
+            AND SOH.OTS_OFC_CD          = SOD.OTS_OFC_CD
+            AND SOH.BL_NO               = SOD.BL_NO 
+            AND SOH.INV_NO              = SOD.INV_NO 
+            AND SOH.OTS_RT_FLG = 'Y' 
+            #if (${cust_cd} != '')
+                #if (${cnsd_cust_flg} == 'N')
+                    AND SOH.BIL_TO_CUST_CNT_CD = @[cust_cnt_cd]
+                    AND SOH.BIL_TO_CUST_SEQ = TO_NUMBER(@[cust_seq])
+                #else
+                    AND EXISTS (SELECT 'X'
+                                    FROM   (SELECT CUST_CNT_CD, CUST_SEQ
+                                                FROM   MDM_CUSTOMER
+                                                WHERE  CNSD_CUST_CNT_CD = @[cust_cnt_cd]
+                                                AND    CNSD_CUST_SEQ = TO_NUMBER(@[cust_seq])
+                                                UNION ALL
+                                                SELECT CUST_CNT_CD, CUST_SEQ
+                                                FROM   MDM_CUSTOMER
+                                                WHERE  CUST_CNT_CD = @[cust_cnt_cd]
+                                                AND    CUST_SEQ = TO_NUMBER(@[cust_seq])
+                                            ) CON
+                                    WHERE  CON.CUST_CNT_CD = SOH.BIL_TO_CUST_CNT_CD
+                                    AND    CON.CUST_SEQ    = SOH.BIL_TO_CUST_SEQ
+                                )
+                #end
+            #end
+            #if (${ar_ofc_cd} != '')
+				AND SOH.OTS_OFC_CD = @[ar_ofc_cd]
+			#end
+    		#if (${colOfcs} != '')
+				AND	SOH.CLT_OFC_CD IN (
+					#foreach ($user_colOfcs IN ${colOfcs})
+						#if($velocityCount < $colOfcs.size())
+							'$user_colOfcs',
+						#else
+							'$user_colOfcs'
+						#end
+					#end			  
+				)
+			#end  
+            #if ( ${bnd} != 'ALL')
+               AND SOH.BKG_IO_BND_CD = @[bnd]
+            #end 
+            #if ( ${overdue_from} != '')
+                AND (TRUNC(SYSDATE) - TRUNC(TO_DATE(SOH.DUE_DT,'YYYYMMDD')))  >= @[overdue_from]
+            #end 
+            #if ( ${overdue_to} != '')
+                AND (TRUNC(SYSDATE) - TRUNC(TO_DATE(SOH.DUE_DT,'YYYYMMDD')))  <= @[overdue_to]
+            #end 
+            #if ( ${sail_arr_dt} != '')
+                AND SOH.SAIL_ARR_DT <= REPLACE(@[sail_arr_dt],'-','')
+            #end
+            #if ( ${vvd_cd} != '')
+                AND SOH.VSL_CD||SOH.SKD_VOY_NO ||SOH.DIR_CD = @[vvd_cd]
+            #end
+                AND EXISTS
+                        (
+                            SELECT 'X'
+                                FROM SAR_OTS_DTL SOD2
+                            WHERE SOD2.RHQ_CD = SOD.RHQ_CD
+                            AND SOD2.OTS_OFC_CD = SOD.OTS_OFC_CD
+                            AND SOD2.BL_NO = SOD.BL_NO
+                            AND SOD2.INV_NO = SOD.INV_NO           
+                            #if ( ${ots_opy} == 'OTS')
+                            HAVING SUM(SOD2.BAL_AMT) > 0
+                            #elseif ( ${ots_opy} == 'OPY')
+                            HAVING SUM(SOD2.BAL_AMT) < 0
+                            #else
+                            HAVING SUM(SOD2.BAL_AMT) <> 0
+                            #end
+                        )
+            #if (${xcld_ots_tp_cd} != '')
+                AND NVL(SOH.OTS_TP_CD,'A')    NOT   IN (${xcld_ots_tp_cd})
+            #end
+            #if (${bl_no} != '')
+                AND SOH.BL_NO      = @[bl_no]
+            #end
+            #if(${ots_smry_cd} == 'INV')
+	    		#if(${inv_no} != '')  
+	        		AND SOH.INV_NO = @[inv_no] 
+	    		#else  
+	        		AND SOH.INV_NO <> '**********' 
+	    		#end 
+			#else
+    			#if(${inv_no} != '')  
+	        		AND 1 = 2
+        		#end   
+    		#end  
+            GROUP BY SOH.RHQ_CD, SOH.OTS_OFC_CD ,SOH.BL_NO ,SOH.INV_NO, SOH.INV_CURR_CD, SOH.BIL_TO_CUST_CNT_CD, SOH.BIL_TO_CUST_SEQ, SOH.OTS_TP_CD
+#if ( ${ots_opy} != 'OTS')			
+			UNION ALL
+			SELECT 
+				  SR.RCT_OFC_CD 		  AS OTS_OFC_CD,
+		          SR.RCT_CUST_CNT_CD      AS CUST_CNT_CD,
+                  SR.RCT_CUST_SEQ 	      AS CUST_SEQ  
+		       FROM SAR_RECEIPT SR
+                 , (SELECT SRAH.RCT_SEQ,
+                                SUM(SRAD.RCT_APLY_AMT) RCT_APLY_AMT
+                           FROM SAR_RCT_APLY_HDR SRAH
+                              , SAR_RCT_APLY_DTL SRAD
+                           WHERE  SRAH.RCT_SEQ = SRAD.RCT_SEQ
+                           AND SRAH.RCT_APLY_HDR_SEQ = SRAD.RCT_APLY_HDR_SEQ
+                           AND SRAH.RVS_FLG = 'N'
+                           GROUP BY
+                           SRAH.RCT_SEQ
+                    ) APL
+                  , MDM_ORGANIZATION MO
+                  , MDM_CUSTOMER MC
+                WHERE SR.RCT_SEQ = APL.RCT_SEQ(+)
+                    AND SR.RCT_OFC_CD = MO.OFC_CD
+                    AND SR.RCT_CUST_CNT_CD = MC.CUST_CNT_CD
+                    AND SR.RCT_CUST_SEQ = MC.CUST_SEQ         
+                    AND SR.RCT_CXL_DT IS NULL
+                    AND SR.RCT_CUST_CNT_CD IS NOT NULL
+                    AND SR.RCT_CUST_SEQ IS NOT NULL
+                #if ( ${sail_arr_dt} != '')
+                    AND SR.RCT_DT <= REPLACE(@[sail_arr_dt],'-','')
+                #end
+                #if ( ${rhq_cd} != '')
+                    AND MO.AR_HD_QTR_OFC_CD = @[rhq_cd]
+                #end
+                #if (${colOfcs} != '')
+					AND	SR.RCT_OFC_CD IN (
+						#foreach ($user_colOfcs IN ${colOfcs})
+							#if($velocityCount < $colOfcs.size())
+								'$user_colOfcs',
+							#else
+								'$user_colOfcs'
+							#end
+						#end			  
+					)
+				#end
+                AND	SR.RCT_STS_CD = 'UNAPP'
+                #if (${cust_cd} != '')
+                    #if (${cnsd_cust_flg} == 'N')
+                        AND SR.RCT_CUST_CNT_CD = @[cust_cnt_cd]
+                        AND SR.RCT_CUST_SEQ = TO_NUMBER(@[cust_seq])
+                    #else
+                        AND EXISTS (SELECT 'X'
+                                        FROM   (SELECT CUST_CNT_CD, CUST_SEQ
+                                                    FROM   MDM_CUSTOMER
+                                                    WHERE  CNSD_CUST_CNT_CD = @[cust_cnt_cd]
+                                                    AND    CNSD_CUST_SEQ = TO_NUMBER(@[cust_seq])
+                                                    UNION ALL
+                                                    SELECT CUST_CNT_CD, CUST_SEQ
+                                                    FROM   MDM_CUSTOMER
+                                                    WHERE  CUST_CNT_CD = @[cust_cnt_cd]
+                                                    AND    CUST_SEQ = TO_NUMBER(@[cust_seq])
+                                                ) CON
+                                        WHERE  CON.CUST_CNT_CD = SR.RCT_CUST_CNT_CD
+                                        AND    CON.CUST_SEQ    = SR.RCT_CUST_SEQ
+                                    )
+                    #end
+                #end    
+                --Receipt Balance가 + 이면 OPY, -이면 OTS
+                #if (${ots_opy} == 'OPY')
+                AND   SR.BAL_RCT_AMT > 0 
+                #elsif (${ots_opy} == 'OTS')
+                AND   SR.BAL_RCT_AMT < 0         
+                #else
+                AND   SR.BAL_RCT_AMT <> 0
+                #end
+                #if (${bl_no} != '')
+                    AND SR.RCT_NO      = @[bl_no]
+                #end
+                #if(${ots_smry_cd} == 'INV')
+	    			#if(${inv_no} != '')  
+	        			AND SR.RCT_NO  = @[inv_no]  
+	    			#end 
+				#else
+    				#if(${inv_no} != '')  
+	        			AND 1 = 2
+        			#end   
+    			#end 
+                #if ( ${overdue_from} != '')
+                    AND (TRUNC(SYSDATE) - TRUNC(TO_DATE(SR.RCT_DT,'YYYYMMDD')))  >= @[overdue_from]
+                #end 
+                #if ( ${overdue_to} != '')
+                    AND (TRUNC(SYSDATE) - TRUNC(TO_DATE(SR.RCT_DT,'YYYYMMDD')))  <= @[overdue_to]
+                #end
+                #if ( ${vvd_cd} != '')
+	    			AND 1 = 2
+				#end 
+#end 
+        )
+        WHERE 1=1
+        GROUP BY OTS_OFC_CD,CUST_CNT_CD,CUST_SEQ
+    ) A,MDM_CUSTOMER B
+    WHERE A.CUST_CNT_CD = B.CUST_CNT_CD  
+    AND A.CUST_SEQ = B.CUST_SEQ
+)
+SELECT 
+AR_OFC_CD,CNSD_CUST_CNT_CD,CNSD_CUST_SEQ,CNSD_CUST_CD,MAX(CNSD_CUST_FLG) AS CNSD_CUST_FLG
+FROM
+(
+    SELECT 
+        OTS_OFC_CD AS AR_OFC_CD,
+        CNSD_CUST_CNT_CD, 
+        CNSD_CUST_SEQ, 
+        CNSD_CUST_CNT_CD ||LPAD(CNSD_CUST_SEQ,6,'0') AS CNSD_CUST_CD,
+        CUST_CNT_CD,
+        CUST_SEQ,
+        CUST_CNT_CD ||LPAD(CUST_SEQ,6,'0') AS CUST_CD,
+        CNSD_CUST_FLG
+    FROM
+    (
+        SELECT DISTINCT
+        A.OTS_OFC_CD,
+        NVL2(NVL(A.CNSD_CUST_CNT_CD,NVL2(B.CNSD_CUST_CNT_CD,A.CUST_CNT_CD,NULL)),'Y','N') AS CNSD_CUST_FLG,
+        NVL(NVL(A.CNSD_CUST_CNT_CD,NVL2(B.CNSD_CUST_CNT_CD,A.CUST_CNT_CD,NULL)),A.CUST_CNT_CD) AS CNSD_CUST_CNT_CD,
+        NVL(NVL(A.CNSD_CUST_SEQ,NVL2(B.CNSD_CUST_SEQ,A.CUST_SEQ,NULL)),A.CUST_SEQ) AS CNSD_CUST_SEQ,
+        A.CUST_CNT_CD,
+        A.CUST_SEQ
+        FROM
+        CUST_LIST A,CUST_LIST B
+        WHERE A.CUST_CNT_CD = B.CNSD_CUST_CNT_CD(+)  
+              AND A.CUST_SEQ = B.CNSD_CUST_SEQ(+)
+    )
+)
+GROUP BY AR_OFC_CD,CNSD_CUST_CNT_CD,CNSD_CUST_SEQ,CNSD_CUST_CD			]]></sql>
+			<params>
+				<param name="cust_cnt_cd" type="12" value="" out="N"/>
+				<param name="cust_seq" type="12" value="" out="N"/>
+				<param name="ar_ofc_cd" type="12" value="" out="N"/>
+				<param name="bnd" type="12" value="" out="N"/>
+				<param name="overdue_from" type="12" value="" out="N"/>
+				<param name="overdue_to" type="12" value="" out="N"/>
+				<param name="sail_arr_dt" type="12" value="" out="N"/>
+				<param name="vvd_cd" type="12" value="" out="N"/>
+				<param name="bl_no" type="12" value="" out="N"/>
+				<param name="inv_no" type="12" value="" out="N"/>
+				<param name="rhq_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

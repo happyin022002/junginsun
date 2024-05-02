@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="RenewalConsultationDBDAOSearchActualPayerReceiverListRSQL">
+			<desc><![CDATA[Select Actual payer or receiver Search]]></desc>
+			<sql><![CDATA[
+WITH V_JOO_STL_TGT AS (
+    SELECT STL.VSL_CD
+         , STL.SKD_VOY_NO
+         , STL.SKD_DIR_CD
+         , STL.REV_DIR_CD
+         , STL.REV_YRMON
+         , STL.STL_VVD_SEQ
+         , STL.JO_CRR_CD
+         , STL.RE_DIVR_CD
+         , STL.LOCL_CURR_CD
+         , STL.ACT_AMT
+         , STL.STL_TGT_FLG
+      FROM JOO_STL_TGT STL
+     WHERE 1=1
+       --AND STL.STL_TGT_FLG  = 'Y'
+       AND STL.REV_YRMON    BETWEEN REPLACE(@[fr_rev_yrmon],'-','') AND REPLACE(@[to_rev_yrmon],'-','') /* Condition Target Revenue Month*/
+
+#if (${jo_crr_cd}!='')
+       AND STL.JO_CRR_CD    = @[jo_crr_cd]     /* Condition Carrier */
+#end
+#if (${trd_cd}!='')
+       /* Condition Trade */
+       AND EXISTS   (   SELECT 'X'
+                          FROM JOO_CARRIER CRR
+                         WHERE 1=1
+                           AND CRR.DELT_FLG         = 'N'
+                           AND CRR.JO_CRR_CD        = STL.JO_CRR_CD
+                           AND CRR.RLANE_CD         = STL.RLANE_CD
+                           AND CRR.TRD_CD           = @[trd_cd]
+                     )
+#end
+#if (${rlane_cd}!='')
+       AND STL.RLANE_CD     = @[rlane_cd]   /* Condition Lane */
+#end
+#if (${auth_ofc_cd}!='')
+       /* Condition Auth Office Cd */
+       AND EXISTS   (   SELECT 'X'
+                          FROM JOO_CRR_AUTH CA
+                         WHERE 1=1
+                           AND CA.DELT_FLG         = 'N'
+                           AND CA.JO_CRR_CD        = STL.JO_CRR_CD
+                           AND CA.RLANE_CD         = STL.RLANE_CD
+                           AND CA.AUTH_OFC_CD      = @[auth_ofc_cd]
+                         )
+#end
+#if (${re_divr_cd}!='')
+       AND STL.RE_DIVR_CD   = @[re_divr_cd]        /* Condition ALL, Revenue : R , Expense : E */
+#end
+#if (${rev_vvd}!='')
+       AND STL.VSL_CD||STL.SKD_VOY_NO||STL.SKD_DIR_CD||STL.REV_DIR_CD LIKE @[rev_vvd]||'%'        /* Condition VVD */
+#end
+#if (${jo_stl_itm_cds} != '' && ${jo_stl_itm_cds} != 'ALL')
+       /* Condition Items */
+       AND STL.JO_STL_ITM_CD IN ( #foreach($key IN ${jo_stl_itm_cds})#if($velocityCount < $jo_stl_itm_cds.size()) '$key', #else '$key' #end #end)
+#end
+    )
+--SELECT * FROM V_JOO_STL_TGT;
+    , V_JOO_INVOICE AS (
+        SELECT INV.JO_CRR_CD
+             , INV.RE_DIVR_CD
+             , INV.LOCL_CURR_CD
+             , SUM(DTL.ACT_AMT) AS ACT_AMT
+          FROM V_JOO_STL_TGT STL
+             , JOO_INV_DTL DTL
+             , JOO_INVOICE INV
+         WHERE 1=1
+           AND STL.VSL_CD        = DTL.VSL_CD
+           AND STL.SKD_VOY_NO    = DTL.SKD_VOY_NO
+           AND STL.SKD_DIR_CD    = DTL.SKD_DIR_CD
+           AND STL.REV_DIR_CD    = DTL.REV_DIR_CD
+           AND STL.REV_YRMON     = DTL.REV_YRMON
+           AND STL.STL_VVD_SEQ   = DTL.STL_VVD_SEQ
+           AND DTL.ACCT_YRMON    = INV.ACCT_YRMON
+           AND DTL.JO_CRR_CD     = INV.JO_CRR_CD
+           AND DTL.INV_NO        = INV.INV_NO
+           AND DTL.RE_DIVR_CD    = INV.RE_DIVR_CD
+         GROUP BY INV.JO_CRR_CD
+             , INV.RE_DIVR_CD
+             , INV.LOCL_CURR_CD
+    )
+--SELECT * FROM V_JOO_INVOICE;
+SELECT STL.JO_CRR_CD
+     , STL.LOCL_CURR_CD
+     , TO_CHAR(SYSDATE,'YYYYMM') AS ACCT_YRMON
+     , STL.STL_REV_ACT_AMT
+     , STL.STL_EXP_ACT_AMT
+     , STL.INV_REV_ACT_AMT
+     , STL.INV_EXP_ACT_AMT
+     , ( SELECT MIN(CR.JO_CRR_CD||'^'||CR.CUST_CNT_CD||CUST_SEQ||'^'||CR.VNDR_SEQ)
+           FROM JOO_CARRIER CR
+          WHERE CR.DELT_FLG     = 'N'
+            AND CR.JO_CRR_CD    = STL.JO_CRR_CD
+        ) AS ACCTG_CRR_CD
+  FROM (
+        SELECT STL.JO_CRR_CD
+             , STL.LOCL_CURR_CD
+             , SUM(STL.STL_REV_ACT_AMT) AS STL_REV_ACT_AMT
+             , SUM(STL.STL_EXP_ACT_AMT) AS STL_EXP_ACT_AMT
+             , SUM(STL.INV_REV_ACT_AMT) AS INV_REV_ACT_AMT
+             , SUM(STL.INV_EXP_ACT_AMT) AS INV_EXP_ACT_AMT
+             , STL.JO_CRR_CD AS ACCTG_CRR_CD
+          FROM (
+                SELECT STL.JO_CRR_CD
+                     , STL.LOCL_CURR_CD
+                     , DECODE('R', STL.RE_DIVR_CD, STL.STL_ACT_AMT, 0) AS STL_REV_ACT_AMT
+                     , DECODE('E', STL.RE_DIVR_CD, STL.STL_ACT_AMT, 0) AS STL_EXP_ACT_AMT
+                     , DECODE('R', STL.RE_DIVR_CD, STL.INV_ACT_AMT, 0) AS INV_REV_ACT_AMT
+                     , DECODE('E', STL.RE_DIVR_CD, STL.INV_ACT_AMT, 0) AS INV_EXP_ACT_AMT
+                  FROM (
+                        SELECT STL.JO_CRR_CD
+                             , STL.LOCL_CURR_CD
+                             , STL.RE_DIVR_CD
+                             , NVL(STL.ACT_AMT,0) AS STL_ACT_AMT
+                             , NVL(INV.ACT_AMT,0) AS INV_ACT_AMT
+                          FROM (SELECT STL.JO_CRR_CD
+                                     , STL.RE_DIVR_CD
+                                     , STL.LOCL_CURR_CD
+                                     , SUM(STL.ACT_AMT) AS ACT_AMT
+                                  FROM V_JOO_STL_TGT STL
+                                 WHERE NVL(STL.ACT_AMT, 0) <> 0
+                                   AND STL.STL_TGT_FLG      = 'Y'
+                                 GROUP BY STL.JO_CRR_CD
+                                     , STL.RE_DIVR_CD
+                                     , STL.LOCL_CURR_CD
+                               ) STL
+                             , V_JOO_INVOICE INV
+                        WHERE 1=1
+                          AND STL.JO_CRR_CD     = INV.JO_CRR_CD     (+)
+                          AND STL.LOCL_CURR_CD  = INV.LOCL_CURR_CD  (+)
+                          AND STL.RE_DIVR_CD    = INV.RE_DIVR_CD    (+)
+                    ) STL
+               ) STL
+         GROUP BY STL.JO_CRR_CD
+             , STL.LOCL_CURR_CD
+       ) STL
+ ORDER BY STL.JO_CRR_CD
+     , STL.LOCL_CURR_CD			]]></sql>
+			<params>
+				<param name="fr_rev_yrmon" type="12" value="" out="N"/>
+				<param name="to_rev_yrmon" type="12" value="" out="N"/>
+				<param name="jo_crr_cd" type="12" value="" out="N"/>
+				<param name="trd_cd" type="12" value="" out="N"/>
+				<param name="rlane_cd" type="12" value="" out="N"/>
+				<param name="auth_ofc_cd" type="12" value="" out="N"/>
+				<param name="re_divr_cd" type="12" value="" out="N"/>
+				<param name="rev_vvd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

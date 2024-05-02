@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SCReportDBDAORsltSearchSCPerformanceSummaryListRSQL">
+			<desc><![CDATA[s/c performance summary - non by scope]]></desc>
+			<sql><![CDATA[
+SELECT  RHQ_CD                ,
+        PROP_APRO_OFC_CD      ,
+        CTRT_CUST_SLS_OFC_CD  ,
+        KEY_ACCT_FLG          ,
+        SC_NO                 ,
+        CTRT_PTY_NM           ,
+        CTRT_CUST_SREP_CD     ,
+        PRC_CTRT_CUST_TP_CD   ,
+        FNL_MQC_QTY           ,
+        TO_CHAR(CTRT_EFF_DT,'YYYY-MM-DD') CTRT_EFF_DT ,
+        TO_CHAR(CTRT_EXP_DT,'YYYY-MM-DD') CTRT_EXP_DT ,
+        OP_CNTR_QTY           ,
+        DECODE(FNL_MQC_QTY, 0, 0, OP_CNTR_QTY * 100 / FNL_MQC_QTY)  MQC_PERF    ,
+        DECODE(FNL_MQC_QTY, 0, 0, OP_CNTR_QTY * 100 / ( FNL_MQC_QTY * FLOOR(LEAST(SYSDATE, CTRT_EXP_DT) - CTRT_EFF_DT + 1) / FLOOR(CTRT_EXP_DT - CTRT_EFF_DT + 1) ) )    PRO_RT_MQC_PERF
+FROM    (
+        SELECT  SC.*    ,
+                (
+                SELECT  SUM( BQ.OP_CNTR_QTY * ( SELECT PRI_SC_FEU_CONV(BK.SVC_SCP_CD, BQ.CNTR_TPSZ_CD) FROM DUAL) )
+                FROM    BKG_BOOKING       BK  ,
+                        BKG_QUANTITY      BQ  ,
+                        BKG_VVD           BV  ,
+                        VSK_VSL_PORT_SKD  PS
+                WHERE   BQ.BKG_NO       = BK.BKG_NO
+                AND     BV.BKG_NO       = BK.BKG_NO
+                AND     NOT EXISTS  (
+                                    SELECT  'X'
+                                    FROM    BKG_VVD A
+                                    WHERE   A.BKG_NO = BV.BKG_NO
+                                    AND     A.VSL_PRE_PST_CD||A.VSL_SEQ < BV.VSL_PRE_PST_CD||BV.VSL_SEQ
+                                    )                AND     PS.VSL_CD       = BV.VSL_CD
+                AND     PS.SKD_VOY_NO   = BV.SKD_VOY_NO
+                AND     PS.SKD_DIR_CD   = BV.SKD_DIR_CD
+                AND     PS.VPS_PORT_CD  = BV.POL_CD
+                AND     PS.CLPT_IND_SEQ = BV.POL_CLPT_IND_SEQ
+                AND     BK.SC_NO        = SC.SC_NO
+                AND     BK.BKG_STS_CD   = 'F'
+                AND     PS.VPS_ETD_DT   <= TO_DATE(GLOBALDATE_PKG.TIME_CONV_FNC(COM_ConstantMgr_PKG.COM_getBaseLocationCode_FNC, SYSDATE, BK.POL_CD))
+                #if (${bl_obrd_dt_from} != '')
+                AND     PS.VPS_ETD_DT   >= TO_DATE(@[bl_obrd_dt_from], 'YYYY-MM-DD')
+                #end
+                #if (${bl_obrd_dt_to} != '')
+                AND     PS.VPS_ETD_DT   <= TO_DATE (@[bl_obrd_dt_to], 'YYYY-MM-DD') + 0.99999 /* 0.99999 는 23시 59분 59초를 의미 */  -- Period
+                #end
+                AND     BQ.CNTR_TPSZ_CD NOT LIKE 'Q%'
+                )   OP_CNTR_QTY
+        FROM    (
+                SELECT  SH.SC_NO    ,
+                        SM.AMDT_SEQ ,
+                        ( SELECT A.OFC_CD FROM MDM_ORGANIZATION A WHERE A.OFC_TP_CD = 'HQ' START WITH A.OFC_CD = SM.RESPB_SLS_OFC_CD CONNECT BY PRIOR A.PRNT_OFC_CD = A.OFC_CD ) RHQ_CD ,
+                        SM.PROP_APRO_OFC_CD     , -- 추가
+                        SM.RESPB_SLS_OFC_CD     CTRT_CUST_SLS_OFC_CD  ,
+                        ( SELECT A.KEY_ACCT_FLG FROM MDM_CUSTOMER A WHERE A.CUST_CNT_CD = NVL2(SM.REAL_CUST_CNT_CD, SM.REAL_CUST_CNT_CD, CP.CUST_CNT_CD) AND A.CUST_SEQ = NVL2(SM.REAL_CUST_CNT_CD, SM.REAL_CUST_SEQ, CP.CUST_SEQ) AND CNTR_DIV_FLG = 'Y' ) KEY_ACCT_FLG    ,
+                        NVL2(SM.REAL_CUST_CNT_CD, (SELECT A.CUST_LGL_ENG_NM FROM MDM_CUSTOMER A WHERE A.CUST_CNT_CD = SM.REAL_CUST_CNT_CD AND A.CUST_SEQ = SM.REAL_CUST_SEQ), CP.CTRT_PTY_NM) CTRT_PTY_NM ,
+                        SM.RESPB_SREP_CD        CTRT_CUST_SREP_CD     ,
+                        NVL2(SM.REAL_CUST_CNT_CD, SM.REAL_CUST_TP_CD, CT.PRC_CTRT_CUST_TP_CD) PRC_CTRT_CUST_TP_CD ,
+                        DECODE(MQ.CNTR_LOD_UT_CD, 'T', MQ.FNL_MQC_QTY / 2, MQ.FNL_MQC_QTY)    FNL_MQC_QTY         ,
+                        DU.CTRT_EFF_DT          ,
+                        DU.CTRT_EXP_DT          ,
+                        ROW_NUMBER() OVER ( PARTITION BY SH.SC_NO ORDER BY SM.AMDT_SEQ DESC ) ROW_NUMBER
+                FROM    PRI_SP_HDR          SH  ,
+                        PRI_SP_MN           SM  ,
+                        PRI_SP_CTRT_PTY     CP  ,
+                        PRI_SP_CTRT_CUST_TP CT  ,
+                        PRI_SP_DUR          DU  ,
+                        PRI_SP_MQC          MQ
+                WHERE   SM.PROP_NO            = SH.PROP_NO
+                AND     SM.PROP_STS_CD        = 'F'
+                AND     CP.PROP_NO            = SM.PROP_NO
+                AND     CP.AMDT_SEQ           = SM.AMDT_SEQ
+                AND     CP.PRC_CTRT_PTY_TP_CD = 'C'
+                AND     CT.PROP_NO            = CP.PROP_NO
+                AND     CT.AMDT_SEQ           = CP.AMDT_SEQ
+                AND     CT.PRC_CTRT_PTY_TP_CD = CP.PRC_CTRT_PTY_TP_CD
+                AND     DU.PROP_NO            = SM.PROP_NO
+                AND     DU.AMDT_SEQ           = SM.AMDT_SEQ
+                AND     MQ.PROP_NO            = SM.PROP_NO
+                AND     MQ.AMDT_SEQ           = SM.AMDT_SEQ
+                /* 조회 조건 */
+                #if (${sc_no} != '')
+                AND     SH.SC_NO LIKE @[sc_no] || '%'         -- S/C No
+                #end
+                #if (${rf_flg} != '')
+                AND     SM.RF_FLG = @[rf_flg]               -- S/C Type
+                #end
+                #if (${gamt_flg} != '')
+                AND     SM.GAMT_FLG = @[gamt_flg]               -- S/C Type
+                #end
+                #if (${prc_ctrt_cust_tp_cd} != '')
+                AND     NVL2(SM.REAL_CUST_CNT_CD, SM.REAL_CUST_TP_CD, CT.PRC_CTRT_CUST_TP_CD) = @[prc_ctrt_cust_tp_cd]     -- Customer Type
+                #end
+                #if (${rhq} != '')
+                AND     ( SELECT A.OFC_CD FROM MDM_ORGANIZATION A WHERE A.OFC_TP_CD = 'HQ' START WITH A.OFC_CD = SM.RESPB_SLS_OFC_CD CONNECT BY PRIOR A.PRNT_OFC_CD = A.OFC_CD ) = @[rhq]  -- RHQ
+                #end
+                #if (${prop_apro_ofc_cd} != '')
+                AND     SM.PROP_APRO_OFC_CD   = @[prop_apro_ofc_cd]        -- Approval Office 추가
+                #end
+                #if (${ctrt_cust_sls_ofc_cd} != '')
+                AND     SM.RESPB_SLS_OFC_CD   = @[ctrt_cust_sls_ofc_cd]    -- Contract Office
+                #end
+                #if (${exp_dt} != '')
+                AND     SM.EFF_DT <= TO_DATE(@[exp_dt], 'YYYY-MM-DD')      -- S/C Effective Date (To)
+                #end
+                #if (${eff_dt} != '')
+                AND     SM.EXP_DT >= TO_DATE(@[eff_dt], 'YYYY-MM-DD')      -- S/C Effective Date (From)
+                #end
+                ) SC
+        WHERE   ROW_NUMBER  = 1
+        )
+ORDER BY
+        RHQ_CD               ,
+        CTRT_CUST_SLS_OFC_CD ,
+        KEY_ACCT_FLG         ,
+        SC_NO			]]></sql>
+			<params>
+				<param name="bl_obrd_dt_from" type="12" value="" out="N"/>
+				<param name="bl_obrd_dt_to" type="12" value="" out="N"/>
+				<param name="sc_no" type="12" value="" out="N"/>
+				<param name="rf_flg" type="12" value="" out="N"/>
+				<param name="gamt_flg" type="12" value="" out="N"/>
+				<param name="prc_ctrt_cust_tp_cd" type="12" value="" out="N"/>
+				<param name="rhq" type="12" value="" out="N"/>
+				<param name="prop_apro_ofc_cd" type="12" value="" out="N"/>
+				<param name="ctrt_cust_sls_ofc_cd" type="12" value="" out="N"/>
+				<param name="exp_dt" type="12" value="" out="N"/>
+				<param name="eff_dt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

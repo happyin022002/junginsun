@@ -1,0 +1,550 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="SCReportDBDAORsltSearchSCPerformanceDetailListRSQL">
+			<desc><![CDATA[sc performance detail]]></desc>
+			<sql><![CDATA[
+WITH
+CH AS
+(
+SELECT  CH.PROP_NO            ,
+        CH.AMDT_SEQ           ,
+        CH.SVC_SCP_CD         ,
+        CH.GEN_SPCL_RT_TP_CD  ,
+        CH.CMDT_HDR_SEQ       ,
+        DECODE( ( SELECT COUNT(1) FROM PRI_SP_SCP_MN SM WHERE SM.PROP_NO = CH.PROP_NO AND SM.AMDT_SEQ = CH.AMDT_SEQ ), 1, 'Y', 'N' ) SGL_SCP_FLG
+FROM    PRI_SP_SCP_MN           SS  ,
+        PRI_SP_SCP_RT_CMDT_HDR  CH
+/* 조회 조건 */
+WHERE   CH.PROP_NO            = SS.PROP_NO
+AND     CH.AMDT_SEQ           = SS.AMDT_SEQ
+AND     CH.SVC_SCP_CD         = SS.SVC_SCP_CD
+AND     SS.PROP_NO            = ( SELECT PROP_NO FROM PRI_SP_HDR WHERE SC_NO = @[sc_no] )   -- S/C NO
+AND     SS.AMDT_SEQ           = (
+                                  SELECT  MAX(A.AMDT_SEQ)   /* 최신 AMDT_SEQ 를 대상으로 함 */
+                                  FROM    PRI_SP_MN A
+                                  WHERE   A.PROP_NO     = CH.PROP_NO
+                                  AND     A.PROP_STS_CD = 'F'
+                                  )
+#if (${svc_scp_cd} != '')
+AND     CH.SVC_SCP_CD         = @[svc_scp_cd]   -- SVC SCOPE CODE
+#end
+#if (${gen_spcl_rt_tp_cd} != '')
+AND     CH.GEN_SPCL_RT_TP_CD  = @[gen_spcl_rt_tp_cd]     -- RATE TYPE
+#end
+AND     CH.CMDT_HDR_SEQ       = NVL(@[cmdt_hdr_seq], CH.CMDT_HDR_SEQ)  -- Commodity Group & Actual Customer
+) ,
+BU AS
+(
+SELECT  CH.PROP_NO            ,
+        CH.AMDT_SEQ           ,
+        CH.SVC_SCP_CD         ,
+        CH.GEN_SPCL_RT_TP_CD  ,
+        CH.CMDT_HDR_SEQ       ,
+        RC.CMDT_NM            ,
+        RC.PRC_CMDT_DEF_CD    ,
+        NVL(REPLACE(AC.ACT_CUST_NM, '^|^', ' / '), 'N/A')  ACT_CUST_NM ,
+        NVL(AC.ACT_CUST_CD, 'N/A')  ACT_CUST_CD ,
+        CH.SGL_SCP_FLG
+FROM    CH    ,
+       (
+        SELECT  PROP_NO             ,
+                AMDT_SEQ            ,
+                SVC_SCP_CD          ,
+                GEN_SPCL_RT_TP_CD   ,
+                CMDT_HDR_SEQ        ,
+                LTRIM(SYS_CONNECT_BY_PATH(CMDT_NM,' / '),' / ') CMDT_NM ,
+                LTRIM(SYS_CONNECT_BY_PATH(PRC_CMDT_DEF_CD,' / '),' / ') PRC_CMDT_DEF_CD
+        FROM   (
+                SELECT  /*+ ORDERED */
+                        CH.PROP_NO            ,
+                        CH.AMDT_SEQ           ,
+                        CH.SVC_SCP_CD         ,
+                        CH.GEN_SPCL_RT_TP_CD  ,
+                        CH.CMDT_HDR_SEQ       ,
+                        ROW_NUMBER() OVER ( PARTITION BY CH.PROP_NO, CH.AMDT_SEQ, CH.SVC_SCP_CD, CH.GEN_SPCL_RT_TP_CD, CH.CMDT_HDR_SEQ ORDER BY RC.CMDT_SEQ ) ROW_NUMBER  ,
+                        COUNT(1) OVER ( PARTITION BY CH.PROP_NO, CH.AMDT_SEQ, CH.SVC_SCP_CD, CH.GEN_SPCL_RT_TP_CD, CH.CMDT_HDR_SEQ ) CNT  ,
+                        RC.PRC_CMDT_DEF_CD    ,
+                        DECODE(RC.PRC_CMDT_TP_CD, 'C', MC.CMDT_NM, 'G', GC.PRC_GRP_CMDT_DESC) CMDT_NM
+                FROM    CH                      ,
+                        PRI_SP_SCP_RT_CMDT  RC  ,
+                        MDM_COMMODITY       MC  ,
+                        PRI_SP_SCP_GRP_CMDT GC
+                WHERE   MC.CMDT_CD(+)         = RC.PRC_CMDT_DEF_CD
+                AND     GC.PROP_NO(+)         = RC.PROP_NO
+                AND     GC.AMDT_SEQ(+)        = RC.AMDT_SEQ
+                AND     GC.SVC_SCP_CD(+)      = RC.SVC_SCP_CD
+                AND     GC.PRC_GRP_CMDT_CD(+) = RC.PRC_CMDT_DEF_CD
+                AND     RC.PROP_NO            = CH.PROP_NO
+                AND     RC.AMDT_SEQ           = CH.AMDT_SEQ
+                AND     RC.SVC_SCP_CD         = CH.SVC_SCP_CD
+                AND     RC.GEN_SPCL_RT_TP_CD  = CH.GEN_SPCL_RT_TP_CD
+                AND     RC.CMDT_HDR_SEQ       = CH.CMDT_HDR_SEQ
+                AND     RC.SRC_INFO_CD       <> 'AD'
+                )
+        WHERE   LEVEL = CNT
+        START WITH ROW_NUMBER = 1
+        CONNECT BY
+                PROP_NO           = PRIOR PROP_NO
+        AND     AMDT_SEQ          = PRIOR AMDT_SEQ
+        AND     SVC_SCP_CD        = PRIOR SVC_SCP_CD
+        AND     GEN_SPCL_RT_TP_CD = PRIOR GEN_SPCL_RT_TP_CD
+        AND     CMDT_HDR_SEQ      = PRIOR CMDT_HDR_SEQ
+        AND     ROW_NUMBER        = PRIOR ROW_NUMBER + 1
+        ) RC  ,
+        (
+        SELECT  PROP_NO             ,
+                AMDT_SEQ            ,
+                SVC_SCP_CD          ,
+                GEN_SPCL_RT_TP_CD   ,
+                CMDT_HDR_SEQ        ,
+                LTRIM(SYS_CONNECT_BY_PATH(ACT_CUST_CD,' / '),' / ') ACT_CUST_CD ,
+                LTRIM(SYS_CONNECT_BY_PATH(ACT_CUST_NM,'^|^'),'^|^') ACT_CUST_NM
+        FROM    (
+                SELECT  /*+ ORDERED */
+                        CH.PROP_NO            ,
+                        CH.AMDT_SEQ           ,
+                        CH.SVC_SCP_CD         ,
+                        CH.GEN_SPCL_RT_TP_CD  ,
+                        CH.CMDT_HDR_SEQ       ,
+                        ROW_NUMBER() OVER ( PARTITION BY CH.PROP_NO, CH.AMDT_SEQ, CH.SVC_SCP_CD, CH.GEN_SPCL_RT_TP_CD, CH.CMDT_HDR_SEQ ORDER BY AC.ACT_CUST_SEQ ) ROW_NUMBER  ,
+                        COUNT(1) OVER ( PARTITION BY CH.PROP_NO, CH.AMDT_SEQ, CH.SVC_SCP_CD, CH.GEN_SPCL_RT_TP_CD, CH.CMDT_HDR_SEQ ) CNT  ,
+                        AC.CUST_CNT_CD||LPAD(AC.CUST_SEQ, 6, '0') ACT_CUST_CD ,
+                        MC.CUST_LGL_ENG_NM  ACT_CUST_NM
+                FROM    CH                          ,
+                        PRI_SP_SCP_RT_ACT_CUST  AC  ,
+                        MDM_CUSTOMER            MC
+                WHERE   MC.CUST_CNT_CD(+)     = AC.CUST_CNT_CD
+                AND     MC.CUST_SEQ(+)        = AC.CUST_SEQ
+                AND     MC.CNTR_DIV_FLG       = 'Y'
+                AND     AC.PROP_NO            = CH.PROP_NO
+                AND     AC.AMDT_SEQ           = CH.AMDT_SEQ
+                AND     AC.SVC_SCP_CD         = CH.SVC_SCP_CD
+                AND     AC.GEN_SPCL_RT_TP_CD  = CH.GEN_SPCL_RT_TP_CD
+                AND     AC.CMDT_HDR_SEQ       = CH.CMDT_HDR_SEQ
+                AND     AC.SRC_INFO_CD       <> 'AD'
+                )
+        WHERE   LEVEL   = CNT
+        START WITH ROW_NUMBER = 1
+        CONNECT BY
+                PROP_NO           = PRIOR PROP_NO
+        AND     AMDT_SEQ          = PRIOR AMDT_SEQ
+        AND     SVC_SCP_CD        = PRIOR SVC_SCP_CD
+        AND     GEN_SPCL_RT_TP_CD = PRIOR GEN_SPCL_RT_TP_CD
+        AND     CMDT_HDR_SEQ      = PRIOR CMDT_HDR_SEQ
+        AND     ROW_NUMBER        = PRIOR ROW_NUMBER + 1
+        ) AC
+WHERE   RC.PROP_NO(+)           = CH.PROP_NO
+AND     RC.AMDT_SEQ(+)          = CH.AMDT_SEQ
+AND     RC.SVC_SCP_CD(+)        = CH.SVC_SCP_CD
+AND     RC.GEN_SPCL_RT_TP_CD(+) = CH.GEN_SPCL_RT_TP_CD
+AND     RC.CMDT_HDR_SEQ(+)      = CH.CMDT_HDR_SEQ
+AND     AC.PROP_NO(+)           = CH.PROP_NO
+AND     AC.AMDT_SEQ(+)          = CH.AMDT_SEQ
+AND     AC.SVC_SCP_CD(+)        = CH.SVC_SCP_CD
+AND     AC.GEN_SPCL_RT_TP_CD(+) = CH.GEN_SPCL_RT_TP_CD
+AND     AC.CMDT_HDR_SEQ(+)      = CH.CMDT_HDR_SEQ
+) ,
+TR AS
+(
+/* PK : SLAN_CD, DIR_CD, FM_CONTI, TO_CONTI */
+SELECT  VSL_SLAN_CD, VSL_SLAN_DIR_CD, FM_CONTI_CD, TO_CONTI_CD, TRD_CD, SUB_TRD_CD, RLANE_CD
+FROM    (
+        SELECT  RL.VSL_SLAN_CD, DL.VSL_SLAN_DIR_CD, DL.FM_CONTI_CD, DL.TO_CONTI_CD, DL.TRD_CD, DL.SUB_TRD_CD, DL.RLANE_CD,
+        /* DELETE 되지 않고, I/O 가 정상적인 것이 우선 적용됨 */
+                ROW_NUMBER() OVER ( PARTITION BY RL.VSL_SLAN_CD, DL.VSL_SLAN_DIR_CD, DL.FM_CONTI_CD, DL.TO_CONTI_CD ORDER BY DL.DELT_FLG, DECODE(FM_CONTI_CD, TO_CONTI_CD, DECODE(IOC_CD, 'I', 1, 2), DECODE(IOC_CD, 'O', 1 ,2)) ) ROW_NUMBER
+        FROM    MDM_REV_LANE      RL  ,
+                MDM_DTL_REV_LANE  DL
+        WHERE   DL.RLANE_CD   = RL.RLANE_CD
+        AND     RL.VSL_TP_CD  = 'C'
+        AND     DL.TRD_CD     LIKE @[trd_cd]      || '%' -- trade
+        AND     DL.SUB_TRD_CD LIKE @[sub_trd_cd]  || '%' -- sub trade
+        )
+WHERE   ROW_NUMBER  = 1
+) ,
+BK AS
+(
+SELECT  ROWNUM  BK_UQ_SEQ ,
+        TRD_CD            ,
+        SKD_DIR_CD        ,
+        SUB_TRD_CD        ,
+        SLAN_CD           ,
+        VVD               ,
+        SVC_SCP_CD        ,
+        CMDT_CD           ,
+        AGMT_ACT_CNT_CD   ,
+        AGMT_ACT_CUST_SEQ ,
+        USA_SVC_MOD_CD    ,
+        POR_CD            ,
+        POL_CD            ,
+        POD_CD            ,
+        DEL_CD            ,
+        OP_CNTR_QTY       ,
+        PRC_GEN_SPCL_RT_TP_CD ,
+        PRC_CMDT_HDR_SEQ
+FROM    (
+        SELECT  BK.SVC_SCP_CD         ,
+                BK.CMDT_CD            ,
+                BK.AGMT_ACT_CNT_CD    ,
+                DECODE(BK.AGMT_ACT_CNT_CD, NULL, 0, BK.AGMT_ACT_CUST_SEQ) AGMT_ACT_CUST_SEQ ,
+                TR.TRD_CD             ,
+                BK.SKD_DIR_CD         ,
+                TR.SUB_TRD_CD         ,
+                BK.SLAN_CD            ,
+                BK.VSL_CD||BK.SKD_VOY_NO||BK.SKD_DIR_CD VVD ,
+                CASE
+                WHEN  L3.CNT_CD IN ( 'US', 'CA' ) AND BK.POD_CD = BK.DEL_CD AND BK.DE_TERM_CD NOT IN ( 'D', 'H' ) THEN 'PO'
+                WHEN  L3.CNT_CD IN ( 'US', 'CA' ) THEN NVL(( SELECT SUBSTR(SVC_MOD_CD, 2, 2) FROM COA_USA_SVC_MOD A WHERE A.ORG_RGN_CD = L3.RGN_CD AND A.DEST_RGN_CD = L4.RGN_CD ), 'OT' )
+                WHEN  L2.CNT_CD IN ( 'US', 'CA' ) AND BK.POL_CD = BK.POR_CD AND BK.RCV_TERM_CD NOT IN ( 'D', 'H' ) THEN 'PO'
+                WHEN  L2.CNT_CD IN ( 'US', 'CA' ) THEN NVL(( SELECT SUBSTR(SVC_MOD_CD, 2, 2) FROM COA_USA_SVC_MOD A WHERE A.ORG_RGN_CD = L2.RGN_CD AND A.DEST_RGN_CD = L1.RGN_CD ), 'OT' )
+                END   USA_SVC_MOD_CD  , /* PO, LO, IP, ML, OT */
+                BK.POR_CD             ,
+                BK.POL_CD             ,
+                BK.POD_CD             ,
+                BK.DEL_CD             ,
+                (
+                SELECT  SUM( BQ.OP_CNTR_QTY * ( SELECT PRI_SC_FEU_CONV(BK.SVC_SCP_CD, BQ.CNTR_TPSZ_CD) FROM DUAL) )
+                FROM    BKG_QUANTITY  BQ
+                WHERE   BQ.BKG_NO       = BK.BKG_NO
+                AND     BQ.CNTR_TPSZ_CD NOT LIKE 'Q%'
+                ) OP_CNTR_QTY         ,
+                BR.PRC_GEN_SPCL_RT_TP_CD  ,
+                BR.PRC_CMDT_HDR_SEQ
+        FROM    BKG_BOOKING       BK  ,
+                BKG_RATE          BR  ,
+                BKG_VVD           BV  ,
+                VSK_VSL_PORT_SKD  PS  ,
+                MDM_LOCATION      L1  ,
+                MDM_LOCATION      L2  ,
+                MDM_LOCATION      L3  ,
+                MDM_LOCATION      L4  ,
+                TR
+        WHERE   BR.BKG_NO           = BK.BKG_NO
+        AND     BV.BKG_NO           = BK.BKG_NO
+        AND     NOT EXISTS  (
+                            SELECT  'X'
+                            FROM    BKG_VVD A
+                            WHERE   A.BKG_NO = BV.BKG_NO
+                            AND     A.VSL_PRE_PST_CD||A.VSL_SEQ < BV.VSL_PRE_PST_CD||BV.VSL_SEQ
+                            )
+        AND     PS.VSL_CD           = BV.VSL_CD
+        AND     PS.SKD_VOY_NO       = BV.SKD_VOY_NO
+        AND     PS.SKD_DIR_CD       = BV.SKD_DIR_CD
+        AND     PS.VPS_PORT_CD      = BV.POL_CD
+        AND     PS.CLPT_IND_SEQ     = BV.POL_CLPT_IND_SEQ
+        AND     L1.LOC_CD           = BK.POR_CD
+        AND     L2.LOC_CD           = BK.POL_CD
+        AND     L3.LOC_CD           = BK.POD_CD
+        AND     L4.LOC_CD           = BK.DEL_CD
+        AND     TR.VSL_SLAN_CD      = BK.SLAN_CD
+        AND     TR.VSL_SLAN_DIR_CD  = BK.SKD_DIR_CD
+        AND     TR.FM_CONTI_CD      = L2.CONTI_CD
+        AND     TR.TO_CONTI_CD      = L3.CONTI_CD
+        AND     BK.BKG_STS_CD       = 'F'
+
+        /* 조회 조건 */
+        AND     BK.SC_NO        = @[sc_no]      -- sc_no
+        #if (${skd_dir_cd} != '')
+        AND     BK.SKD_DIR_CD   = @[skd_dir_cd] -- direction
+        #end
+        #if (${slan_cd} != '')
+        AND     BK.SLAN_CD      = @[slan_cd]    -- lane
+        #end
+        #if (${vsl_cd} != '')
+        AND     BK.VSL_CD       = @[vsl_cd]     -- vvd 1
+        #end
+        #if (${skd_voy_no} != '')
+        AND     BK.SKD_VOY_NO   = @[skd_voy_no] -- vvd 2
+        #end
+        #if (${skd_dir_cd_txt} != '')
+        AND     BK.SKD_DIR_CD   = @[skd_dir_cd_txt] -- vvd3
+        #end
+        #if (${por_cd} != '')
+        AND     BK.POR_CD       = @[por_cd]     -- por
+        #end
+        #if (${pol_cd} != '')
+        AND     BK.POL_CD       =  @[pol_cd]     -- pol
+        #end
+        #if (${pod_cd} != '')
+        AND     BK.POD_CD       = @[pod_cd]     -- pod
+        #end
+        #if (${del_cd} != '')
+        AND     BK.DEL_CD       = @[del_cd]     -- del
+        #end
+        AND     PS.VPS_ETD_DT <= TO_DATE(GLOBALDATE_PKG.TIME_CONV_FNC(COM_ConstantMgr_PKG.COM_getBaseLocationCode_FNC, SYSDATE, BK.POL_CD))
+        #if (${bl_obrd_dt_from} != '')
+        AND     PS.VPS_ETD_DT >= TO_DATE(@[bl_obrd_dt_from], 'YYYY-MM-DD')
+        #end
+        #if (${bl_obrd_dt_to} != '')
+        AND     PS.VPS_ETD_DT <= TO_DATE (@[bl_obrd_dt_to], 'YYYY-MM-DD') + 0.99999 /* 0.99999 는 23시 59분 59초를 의미 */  -- Period
+        #end
+        )
+#if (${usa_svc_mod_cd} != '')
+WHERE   NVL(USA_SVC_MOD_CD, ' ') LIKE @[usa_svc_mod_cd] || '%' -- us mode
+#end
+) ,
+R1 AS
+(
+SELECT  BK_UQ_SEQ          ,
+        TRD_CD             ,
+        SKD_DIR_CD         ,
+        SUB_TRD_CD         ,
+        SLAN_CD            ,
+        VVD                ,
+        CMDT_CD            ,
+        USA_SVC_MOD_CD     ,
+        POR_CD             ,
+        POL_CD             ,
+        POD_CD             ,
+        DEL_CD             ,
+        OP_CNTR_QTY        ,
+        SVC_SCP_CD         ,
+        GEN_SPCL_RT_TP_CD  ,
+        CMDT_NM            ,
+        ACT_CUST_NM
+FROM    (
+        SELECT  BK.BK_UQ_SEQ          ,
+                BK.TRD_CD             ,
+                BK.SKD_DIR_CD         ,
+                BK.SUB_TRD_CD         ,
+                BK.SLAN_CD            ,
+                BK.VVD                ,
+                BK.CMDT_CD            ,
+                BK.USA_SVC_MOD_CD     ,
+                BK.POR_CD             ,
+                BK.POL_CD             ,
+                BK.POD_CD             ,
+                BK.DEL_CD             ,
+                BK.OP_CNTR_QTY        ,
+                BU.SVC_SCP_CD         ,
+                BU.GEN_SPCL_RT_TP_CD  ,
+                BU.CMDT_NM            ,
+                BU.ACT_CUST_NM        ,
+                ROW_NUMBER() OVER ( PARTITION BY BK.BK_UQ_SEQ
+                                    ORDER BY
+                                      DECODE(BU.GEN_SPCL_RT_TP_CD, BK.PRC_GEN_SPCL_RT_TP_CD, 1, 2)  ,
+                                      DECODE(BU.CMDT_HDR_SEQ, BK.PRC_CMDT_HDR_SEQ, 1, 2)            ,
+                                      DECODE(BU.ACT_CUST_CD, 'N/A', 2, 1)                           ,
+                                      BU.GEN_SPCL_RT_TP_CD  ,
+                                      BU.CMDT_HDR_SEQ
+                                  ) ROW_NUMBER
+        FROM    BK  ,
+                BU
+        WHERE   (   BU.SGL_SCP_FLG  = 'Y'
+                OR  BU.SVC_SCP_CD   = BK.SVC_SCP_CD
+                )
+        AND     EXISTS  (
+                        SELECT  'X'
+                        FROM    PRI_SP_SCP_RT_CMDT  RC
+                        WHERE   RC.PROP_NO            = BU.PROP_NO
+                        AND     RC.AMDT_SEQ           = BU.AMDT_SEQ
+                        AND     RC.SVC_SCP_CD         = BU.SVC_SCP_CD
+                        AND     RC.GEN_SPCL_RT_TP_CD  = BU.GEN_SPCL_RT_TP_CD
+                        AND     RC.CMDT_HDR_SEQ       = BU.CMDT_HDR_SEQ
+                        AND     RC.PRC_CMDT_TP_CD     = 'C'
+                        AND     RC.SRC_INFO_CD        <> 'AD'
+                        AND     RC.PRC_CMDT_DEF_CD    = BK.CMDT_CD
+                        UNION ALL
+                        SELECT  'X'
+                        FROM    PRI_SP_SCP_RT_CMDT  RC
+                        WHERE   RC.PROP_NO            = BU.PROP_NO
+                        AND     RC.AMDT_SEQ           = BU.AMDT_SEQ
+                        AND     RC.SVC_SCP_CD         = BU.SVC_SCP_CD
+                        AND     RC.GEN_SPCL_RT_TP_CD  = BU.GEN_SPCL_RT_TP_CD
+                        AND     RC.CMDT_HDR_SEQ       = BU.CMDT_HDR_SEQ
+                        AND     RC.PRC_CMDT_TP_CD     = 'G'
+                        AND     RC.SRC_INFO_CD        <> 'AD'
+                        AND     EXISTS  (
+                                        SELECT  'X'
+                                        FROM    PRI_SP_SCP_GRP_CMDT     G ,
+                                                PRI_SP_SCP_GRP_CMDT_DTL D
+                                        WHERE   D.PROP_NO         = G.PROP_NO
+                                        AND     D.AMDT_SEQ        = G.AMDT_SEQ
+                                        AND     D.SVC_SCP_CD      = G.SVC_SCP_CD
+                                        AND     D.GRP_CMDT_SEQ    = G.GRP_CMDT_SEQ
+                                        AND     G.PROP_NO         = RC.PROP_NO
+                                        AND     G.AMDT_SEQ        = RC.AMDT_SEQ
+                                        AND     G.SVC_SCP_CD      = RC.SVC_SCP_CD
+                                        AND     G.PRC_GRP_CMDT_CD = RC.PRC_CMDT_DEF_CD
+                                        AND     D.PRC_CMDT_TP_CD  = 'C'
+                                        AND     D.SRC_INFO_CD     <> 'AD'
+                                        AND     D.PRC_CMDT_DEF_CD = BK.CMDT_CD
+                                        )
+                        )
+        AND     EXISTS  (
+                        SELECT  'X'
+                        FROM    DUAL
+                        WHERE   NOT EXISTS  (
+                                            SELECT  'X'
+                                            FROM    PRI_SP_SCP_RT_ACT_CUST  AC
+                                            WHERE   AC.PROP_NO            = BU.PROP_NO
+                                            AND     AC.AMDT_SEQ           = BU.AMDT_SEQ
+                                            AND     AC.SVC_SCP_CD         = BU.SVC_SCP_CD
+                                            AND     AC.GEN_SPCL_RT_TP_CD  = BU.GEN_SPCL_RT_TP_CD
+                                            AND     AC.CMDT_HDR_SEQ       = BU.CMDT_HDR_SEQ
+                                            AND     AC.SRC_INFO_CD        <> 'AD'
+                                            )
+                        UNION ALL
+                        SELECT  'X'
+                        FROM    PRI_SP_SCP_RT_ACT_CUST  AC
+                        WHERE   AC.PROP_NO            = BU.PROP_NO
+                        AND     AC.AMDT_SEQ           = BU.AMDT_SEQ
+                        AND     AC.SVC_SCP_CD         = BU.SVC_SCP_CD
+                        AND     AC.GEN_SPCL_RT_TP_CD  = BU.GEN_SPCL_RT_TP_CD
+                        AND     AC.CMDT_HDR_SEQ       = BU.CMDT_HDR_SEQ
+                        AND     AC.CUST_CNT_CD        = BK.AGMT_ACT_CNT_CD
+                        AND     AC.CUST_SEQ           = BK.AGMT_ACT_CUST_SEQ
+                        AND     AC.SRC_INFO_CD       <> 'AD'
+                        )
+        )
+WHERE   ROW_NUMBER  = 1
+)
+SELECT  TRD_CD            ,
+        SKD_DIR_CD        ,
+        SUB_TRD_CD        ,
+        #if (${chk_slan_cd} != '')
+        SLAN_CD           ,
+        #end
+        #if (${chk_vvd} != '')
+        VVD               ,
+        #end
+        #if (${chk_gen_spcl_rt_tp_cd} != '')
+        GEN_SPCL_RT_TP_CD ,
+        #end
+        #if (${chk_cmdt_nm} != '')
+        CMDT_NM           ,
+        #end
+        #if (${chk_act_cust_nm} != '')
+        ACT_CUST_NM       ,
+        #end
+        #if (${chk_usa_svc_mod_cd} != '')
+        USA_SVC_MOD_CD    ,
+        #end
+        #if (${chk_por_cd} != '')
+        POR_CD            ,
+        #end
+        #if (${chk_pol_cd} != '')
+        POL_CD            ,
+        #end
+        #if (${chk_pod_cd} != '')
+        POD_CD            ,
+        #end
+        #if (${chk_del_cd} != '')
+        DEL_CD            ,
+        #end
+        SVC_SCP_CD        ,
+        SUM(OP_CNTR_QTY)  OP_CNTR_QTY ,
+        /* param */
+        '' AS SC_NO                 ,
+        '' AS VSL_CD                ,
+        '' AS SKD_VOY_NO            ,
+        '' AS BL_OBRD_DT_FROM       ,
+        '' AS BL_OBRD_DT_TO         ,
+        '' AS SKD_DIR_CD_TXT        ,
+        '' AS CMDT_HDR_SEQ          ,
+        '' AS CHK_SLAN_CD           ,
+        '' AS CHK_VVD               ,
+        '' AS CHK_GEN_SPCL_RT_TP_CD ,
+        '' AS CHK_CMDT_NM           ,
+        '' AS CHK_ACT_CUST_NM       ,
+        '' AS CHK_USA_SVC_MOD_CD    ,
+        '' AS CHK_POR_CD            ,
+        '' AS CHK_POL_CD            ,
+        '' AS CHK_POD_CD            ,
+        '' AS CHK_DEL_CD
+FROM    (
+        SELECT  TRD_CD            ,
+                SKD_DIR_CD        ,
+                SUB_TRD_CD        ,
+                SLAN_CD           ,
+                VVD               ,
+                CMDT_CD           ,
+                USA_SVC_MOD_CD    ,
+                POR_CD            ,
+                POL_CD            ,
+                POD_CD            ,
+                DEL_CD            ,
+                OP_CNTR_QTY       ,
+                SVC_SCP_CD        ,
+                GEN_SPCL_RT_TP_CD ,
+                CMDT_NM           ,
+                ACT_CUST_NM
+        FROM    R1
+        UNION ALL
+        SELECT  TRD_CD            ,
+                SKD_DIR_CD        ,
+                SUB_TRD_CD        ,
+                SLAN_CD           ,
+                VVD               ,
+                CMDT_CD           ,
+                USA_SVC_MOD_CD    ,
+                POR_CD            ,
+                POL_CD            ,
+                POD_CD            ,
+                DEL_CD            ,
+                OP_CNTR_QTY       ,
+                NULL  SVC_SCP_CD        ,
+                NULL  GEN_SPCL_RT_TP_CD ,
+                NULL  CMDT_NM           ,
+                NULL  ACT_CUST_NM
+        FROM    BK
+        WHERE   BK_UQ_SEQ NOT IN ( SELECT BK_UQ_SEQ FROM R1 )
+        )
+GROUP BY
+        TRD_CD            ,
+        SKD_DIR_CD        ,
+        SUB_TRD_CD        ,
+        #if (${chk_slan_cd} != '')
+        SLAN_CD           ,
+        #end
+        #if (${chk_vvd} != '')
+        VVD               ,
+        #end
+        #if (${chk_gen_spcl_rt_tp_cd} != '')
+        GEN_SPCL_RT_TP_CD ,
+        #end
+        #if (${chk_cmdt_nm} != '')
+        CMDT_NM           ,
+        #end
+        #if (${chk_act_cust_nm} != '')
+        ACT_CUST_NM       ,
+        #end
+        #if (${chk_usa_svc_mod_cd} != '')
+        USA_SVC_MOD_CD    ,
+        #end
+        #if (${chk_por_cd} != '')
+        POR_CD            ,
+        #end
+        #if (${chk_pol_cd} != '')
+        POL_CD            ,
+        #end
+        #if (${chk_pod_cd} != '')
+        POD_CD            ,
+        #end
+        #if (${chk_del_cd} != '')
+        DEL_CD            ,
+        #end
+        SVC_SCP_CD			]]></sql>
+			<params>
+				<param name="sc_no" type="12" value="" out="N"/>
+				<param name="svc_scp_cd" type="12" value="" out="N"/>
+				<param name="gen_spcl_rt_tp_cd" type="12" value="" out="N"/>
+				<param name="cmdt_hdr_seq" type="12" value="" out="N"/>
+				<param name="trd_cd" type="12" value="" out="N"/>
+				<param name="sub_trd_cd" type="12" value="" out="N"/>
+				<param name="skd_dir_cd" type="12" value="" out="N"/>
+				<param name="slan_cd" type="12" value="" out="N"/>
+				<param name="vsl_cd" type="12" value="" out="N"/>
+				<param name="skd_voy_no" type="12" value="" out="N"/>
+				<param name="skd_dir_cd_txt" type="12" value="" out="N"/>
+				<param name="por_cd" type="12" value="" out="N"/>
+				<param name="pol_cd" type="12" value="" out="N"/>
+				<param name="pod_cd" type="12" value="" out="N"/>
+				<param name="del_cd" type="12" value="" out="N"/>
+				<param name="bl_obrd_dt_from" type="12" value="" out="N"/>
+				<param name="bl_obrd_dt_to" type="12" value="" out="N"/>
+				<param name="usa_svc_mod_cd" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>

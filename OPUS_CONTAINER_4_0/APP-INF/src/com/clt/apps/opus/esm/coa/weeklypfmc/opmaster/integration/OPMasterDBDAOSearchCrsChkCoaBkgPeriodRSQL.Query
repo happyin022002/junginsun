@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sqls>
+	<querys>
+		<query name="OPMasterDBDAOSearchCrsChkCoaBkgPeriodRSQL">
+			<desc><![CDATA[]]></desc>
+			<sql><![CDATA[
+SELECT  a1.bkg_no
+       ,a1.bkg_flg
+       ,a1.coa_flg
+       ,a1.reason_mt
+       ,a1.reason_tt
+       ,a1.reason_cmdt
+       ,DECODE(a1.reason_vvd||a1.reason_vvd2,'NN','N','Y') reason_vvd
+       ,(CASE WHEN a1.reason_mt='N' AND a1.reason_tt = 'N' AND a1.reason_cmdt='N' AND a1.reason_vvd='N' AND a1.reason_vvd2='N' AND a1.reason_st='N'  
+            THEN 'Y'
+        ELSE 'N'
+        END ) reason_oth
+       ,(CASE WHEN a1.reason_mt='N' AND a1.reason_tt = 'N' AND a1.reason_cmdt='N' AND a1.reason_vvd='N' AND a1.reason_vvd2='N' AND a1.reason_st='N' 
+                THEN (
+                CASE WHEN a1.bkg_flg='Y' AND a1.coa_flg='Y' AND a1.bkg_teu <> a1.coa_teu  THEN 'BKG quantity is different'
+     
+                ELSE 'Please contact CLT'
+                END
+                )  
+        ELSE ''
+        END ) remark
+       ,a1.reason_st
+       ,a1.cost_yrmon
+       ,a1.sls_yrmon
+       ,a1.cost_wk
+       ,a1.trunk_vvd
+       ,(SELECT VSL_CD||SKD_VOY_NO||DIR_CD FROM COA_RGST_BKG R WHERE R.BKG_NO = A1.BKG_NO) rev_vvd
+       ,a1.svc_scp_cd
+       ,a1.trd_cd
+       ,a1.sub_trd_cd
+       ,a1.rlane_cd
+       ,a1.ioc_cd
+       ,a1.bkg_teu
+       ,a1.coa_teu
+  FROM 
+  (
+    
+    SELECT  a1.bkg_no
+           ,a1.bkg_flg
+           ,a1.coa_flg
+           -- 1. MTY PICKUP YARD            
+           ,DECODE (  a1.bkg_por_cd, NULL,'N',
+            DECODE (
+               ( SELECT COUNT(1)
+                  FROM mdm_location m1
+                 WHERE m1.loc_cd = a1.bkg_por_cd
+                   AND m1.delt_flg = 'N'
+                   AND m1.MTY_PKUP_YD_CD IS NOT NULL
+                 ) , 0, 'Y','N'))   reason_mt
+           -- 2. T/T FULL CARGO DAYS ZERO
+           , CASE 
+             WHEN a1.coa_flg ='N' AND  
+                  NVL(
+                  (
+                   select 
+                         (SUBSTR(sce_cop_tot_tran_time_fnc(MIN(h1.cop_no) ,h1.bkg_no ) 
+                            ,INSTR(sce_cop_tot_tran_time_fnc(MIN(h1.cop_no) ,h1.bkg_no), '#')+1 --# 표시 이후 부터 
+                            ,INSTR(sce_cop_tot_tran_time_fnc(MIN(h1.cop_no) ,h1.bkg_no), 'D', 8) --두 번째 D가 나온 위치 
+                            -INSTR(sce_cop_tot_tran_time_fnc(MIN(h1.cop_no) ,h1.bkg_no), '#')-1) 
+                             ) --Full cargo days 
+                         + (SUBSTR(sce_cop_tot_tran_time_fnc(MIN(h1.cop_no) ,h1.bkg_no) 
+                                  ,INSTR(sce_cop_tot_tran_time_fnc(MIN(h1.cop_no) ,h1.bkg_no ), 'D', 8)+2 --두 번째 D가 나온 위치 + 공백 감안 
+                                  ,INSTR(sce_cop_tot_tran_time_fnc(MIN(h1.cop_no) ,h1.bkg_no ), 'H', 10)   --두 번째 H가 나온 위치 
+                                  -(INSTR(sce_cop_tot_tran_time_fnc(MIN(h1.cop_no) ,h1.bkg_no ),'D', 8)+2) 
+                                  ) /24 ) fcgo_tz_dys
+                    from sce_cop_hdr h1
+                   where h1.bkg_no = a1.bkg_no 
+                   group by h1.bkg_no
+                   ) ,0) = 0
+                 THEN 'Y'  
+             ELSE 'N'
+             END  reason_tt
+                    
+           -- 3. CMDT DELETE
+           ,DECODE (NVL((
+                SELECT 1
+                 FROM mdm_commodity a6
+                WHERE a6.delt_flg = 'N'
+                  AND a6.cmdt_cd = a1.cmdt_cd
+               ), 0), 0, 'Y','N') reason_cmdt
+            -- 4. VVD NOT EXISTS
+           ,DECODE (  
+              (
+                SELECT COUNT(*)
+                FROM BKG_VVD a, mdm_dtl_rev_lane b , mdm_location c, mdm_location d, COA_MON_VVD E
+                WHERE  1=1 
+                AND  A.bkg_no = A1.BKG_NO
+                and a.VSL_PRE_PST_CD = 'T'
+                and b.rlane_cd like a.slan_cd||'%'
+                and a.pol_cd = c.loc_cd
+                and a.pod_cd = d.loc_cd
+                and b.fm_conti_cd = c.conti_cd
+                and b.to_conti_cd = d.conti_cd
+                and b.vsl_slan_dir_cd = a.skd_dir_cd 
+                and b.ioc_cd = decode(c.conti_cd,d.conti_cd,'I','O')
+                AND E.VSL_CD        = A.VSL_CD
+                AND E.SKD_VOY_NO    = A.SKD_VOY_NO
+                AND E.DIR_CD        = A.SKD_DIR_CD
+                AND E.RLANE_CD      = B.RLANE_CD
+                AND E.TRD_CD        = B.TRD_CD
+                AND E.IOC_CD        = B.IOC_CD
+                AND E.DELT_FLG      = 'N'       
+               ) , 0, 'Y', 'N')  reason_vvd
+           -- 4. VVD NOT EXISTS
+           ,DECODE (  
+              (
+                SELECT COUNT(*) 
+                FROM COA_MON_VVD C1
+                    ,COA_RGST_BKG C2
+                WHERE C2.BKG_NO        = A1.BKG_NO
+                  AND C1.VSL_CD        = C2.VSL_CD
+                  AND C1.SKD_VOY_NO    = C2.SKD_VOY_NO
+                  AND C1.DIR_CD        = C2.DIR_CD
+                  AND C1.RLANE_CD      = C2.RLANE_CD
+                  AND C1.TRD_CD        = C2.TRD_CD
+                  AND C1.IOC_CD        = C2.IOC_CD
+                  AND C1.DELT_FLG      = 'N'
+                  AND C2.BKG_STS_CD    IN('F', 'S', 'W')
+                  AND C2.BL_NO_TP      IN('M', '0')
+                  AND C2.BKG_CGO_TP_CD <> 'P'    
+               ) + (SELECT COUNT(0) FROM COA_RGST_BKG C3 WHERE C3.BKG_NO = A1.BKG_NO)
+               
+               , 1, 'Y', 'N')  reason_vvd2
+           -- 5. OTHER REASON
+           ,'Y'  reason_oth
+           -- 6. STATUS DIFFERENT
+           ,DECODE(a1.bkg_sts_cd , NVL(a1.coa_bkg_sts_cd, a1.bkg_sts_cd), 'N', 'Y') reason_st
+           
+           ,a1.cost_yrmon
+           ,a1.sls_yrmon
+           ,a1.cost_wk
+           ,a1.trunk_vvd
+           ,a1.rev_vvd
+           ,a1.svc_scp_cd
+           ,a1.trd_cd
+           ,a1.sub_trd_cd
+           ,a1.rlane_cd
+           ,a1.ioc_cd
+           ,a1.bkg_teu
+           ,a1.coa_teu
+
+      FROM
+       (
+        
+        SELECT  a1.bkg_no
+                ,'Y' bkg_flg 
+               ,DECODE(NVL(MIN(c1.bkg_no),'X'),'X','N','Y') coa_flg
+               ,MIN(a1.bkg_sts_cd) bkg_sts_cd
+               ,MIN(c1.bkg_sts_cd) coa_bkg_sts_cd 
+               ,MIN(a1.cmdt_cd) cmdt_cd
+               ,MIN(c1.cost_yrmon) cost_yrmon
+               ,MIN(c1.sls_yrmon)  sls_yrmon
+               ,MIN(c1.cost_wk) cost_wk
+               ,MIN(a1.trunk_vvd)  trunk_vvd
+               ,MIN(c1.vsl_cd||c1.skd_voy_no||c1.dir_cd)  rev_vvd
+               ,MIN(a1.svc_scp_cd) svc_scp_cd       
+               ,MIN(c1.trd_cd)  trd_cd
+               ,MIN(c1.sub_trd_cd) sub_trd_cd
+               ,MIN(c1.rlane_cd) rlane_cd
+               ,MIN(c1.ioc_cd)  ioc_cd
+               ,MIN(a1.bkg_teu) bkg_teu
+               ,MIN(c1.bkg_por_cd) bkg_por_cd
+               ,MIN(c1.bkg_del_cd) bkg_del_cd
+               
+               ,SUM(DECODE(SUBSTR(c1.cntr_tpsz_cd,-1), '2',1,2) * c1.bkg_qty) coa_teu
+               
+          FROM        
+            (
+            
+            SELECT  a1.bkg_no
+                   ,MIN(a1.vsl_cd||a1.skd_voy_no||a1.skd_dir_cd)  trunk_vvd
+                   ,MIN(a1.svc_scp_cd) svc_scp_cd
+                   ,MIN(a1.bkg_sts_cd) bkg_sts_cd
+                   ,MIN(a1.cmdt_cd) cmdt_cd               
+                   ,SUM(DECODE(SUBSTR(a2.cntr_tpsz_cd,-1), '2',1,2) * a2.op_cntr_qty) bkg_teu
+              FROM  bkg_booking a1
+                   ,bkg_quantity a2
+             WHERE  1=1
+               AND  a1.bkg_no = a2.bkg_no
+               AND  a1.bkg_sts_cd    IN ('F','S','W') 
+               AND  a1.bkg_cgo_tp_cd <> 'P'
+               AND  a1.bl_no_tp      IN ('M','0')
+               AND  a1.bkg_cre_gdt BETWEEN to_date(@[f_fm_dt],'yyyy/mm/dd') 
+                                   AND to_date(@[f_to_dt],'yyyy/mm/dd') + 0.99999
+    --           AND  a1.bkg_no = 'TYO500169400' -- 'HKG500123200' 
+               AND  NOT EXISTS (
+               
+                   SELECT 1
+                     FROM coa_bkg_expn_dtl c1
+                    WHERE 1=1
+                      AND c1.bkg_no = a1.bkg_no
+--                      AND c1.cntr_tpsz_cd = (--a2.cntr_tpsz_cd
+--                                            CASE WHEN SUBSTR(a2.cntr_tpsz_cd,0,1)='R' AND c1.soc_flg='Y' THEN
+--                                                     'RD' || SUBSTR(a2.cntr_tpsz_cd, -1)
+--                                                WHEN SUBSTR(a2.cntr_tpsz_cd,0,1)='R' AND c1.rd_flg='Y' THEN 
+--                                                     'RD' || SUBSTR(a2.cntr_tpsz_cd, -1)
+--                                                ELSE
+--                                                     a2.cntr_tpsz_cd
+--                                            END )
+                      
+                      AND c1.bkg_sts_cd    IN ('F','S','W')
+                      AND c1.bkg_cgo_tp_cd <> 'P'
+                      AND c1.bl_no_tp      IN ('M','0')
+               )
+            GROUP BY a1.bkg_no
+            
+            ) a1,
+          coa_bkg_expn_dtl c1
+            
+        WHERE 1=1
+          AND a1.bkg_no = c1.bkg_no(+)
+        GROUP BY a1.bkg_no 
+        
+       ) a1
+    WHERE 1=1   
+    
+  ) a1			]]></sql>
+			<params>
+				<param name="f_fm_dt" type="12" value="" out="N"/>
+				<param name="f_to_dt" type="12" value="" out="N"/>
+			</params>
+		</query>
+	</querys>
+</sqls>
